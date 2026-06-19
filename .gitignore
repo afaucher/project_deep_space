@@ -1,0 +1,19 @@
+# Godot-specific ignores
+.godot/
+!/.godot/extension_list.cfg
+!/.godot/global_script_class_cache.cfg
+!/.godot/uid_cache.bin
+
+# Build output
+build/
+export_presets.cfg
+*.tmp
+*.bak
+*.sav
+*.log
+
+# Windows specific
+desktop.ini
+Thumbs.db
+*.exe
+*.zip
