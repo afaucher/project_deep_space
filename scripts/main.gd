@@ -5,9 +5,11 @@ extends Node2D
 @onready var menu = $CanvasLayer/Menu
 
 const Ship = preload("res://scripts/ship.gd")
+const Asteroid = preload("res://scripts/asteroid.gd")
 
 var is_host: bool = false
 var players = {}
+var asteroids = []
 
 func _ready() -> void:
 	# Check for automated tests
@@ -70,9 +72,21 @@ func _on_connection_established(hosting: bool) -> void:
 	
 	if is_host:
 		print("I am the authoritative host.")
+		_spawn_asteroids()
 		_spawn_ship(multiplayer.get_unique_id())
 	else:
 		print("I am a client terminal.")
+
+func _spawn_asteroids() -> void:
+	for i in range(10):
+		var ast = Asteroid.new()
+		ast.name = "Asteroid_" + str(i)
+		# Spread them out far
+		ast.position = Vector2(randf_range(-10000, 10000), randf_range(-10000, 10000))
+		# Give them some drift
+		ast.linear_velocity = Vector2(randf_range(-50, 50), randf_range(-50, 50))
+		add_child(ast)
+		asteroids.append(ast)
 
 func _on_peer_connected(id: int) -> void:
 	print("Peer connected: ", id)
@@ -110,7 +124,9 @@ func _distribute_state() -> void:
 			"pos": ship.position,
 			"rot": ship.rotation,
 			"vel": ship.linear_velocity,
-			"throttle": ship.actual_throttle
+			"throttle": ship.actual_throttle,
+			"sensors": ship.active_sensor_sweeps.duplicate(true),
+			"contacts": ship.active_contacts.duplicate(true)
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal
