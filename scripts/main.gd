@@ -73,6 +73,7 @@ func _on_connection_established(hosting: bool) -> void:
 	if is_host:
 		print("I am the authoritative host.")
 		_spawn_asteroids()
+		_spawn_bouys()
 		_spawn_ship(multiplayer.get_unique_id())
 	else:
 		print("I am a client terminal.")
@@ -87,6 +88,16 @@ func _spawn_asteroids() -> void:
 		ast.linear_velocity = Vector2(randf_range(-50, 50), randf_range(-50, 50))
 		add_child(ast)
 		asteroids.append(ast)
+
+func _spawn_bouys() -> void:
+	var BouyClass = load("res://scripts/bouy.gd")
+	for i in range(5):
+		var b = BouyClass.new()
+		b.name = "Bouy_" + str(i)
+		# Spawn them somewhat close so they are within sensor range (40km)
+		b.position = Vector2(randf_range(-15000, 15000), randf_range(-15000, 15000))
+		b.linear_velocity = Vector2(randf_range(-10, 10), randf_range(-10, 10))
+		add_child(b)
 
 func _on_peer_connected(id: int) -> void:
 	print("Peer connected: ", id)
@@ -126,7 +137,8 @@ func _distribute_state() -> void:
 			"vel": ship.linear_velocity,
 			"throttle": ship.actual_throttle,
 			"sensors": ship.active_sensor_sweeps.duplicate(true),
-			"contacts": ship.active_contacts.duplicate(true)
+			"contacts": ship.active_contacts.duplicate(true),
+			"weapons": ship.weapons.duplicate(true)
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal

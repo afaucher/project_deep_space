@@ -5,7 +5,7 @@ class_name Asteroid
 var cross_section: float = 300.0 # Huge size
 var base_heat: float = 0.0       # Cold rock
 var em_noise: float = 0.0        # No reactor
-var density: float = 100.0       # Solid rock
+var density: float = 500.0       # Solid rock
 
 func get_signature() -> Dictionary:
 	return {

@@ -124,8 +124,28 @@ func _draw() -> void:
 	var forward = Vector2.RIGHT.rotated(rot) * 40.0
 	draw_line(pos, pos + forward, Color.CYAN, 2.0 / map_zoom)
 	
-	# Draw ship blip
+	# Draw ship blip and physical bounds
 	draw_circle(pos, 8.0 / map_zoom, Color.GREEN)
+	draw_arc(pos, 50.0, 0, TAU, 32, Color(0.0, 1.0, 0.0, 0.5), 2.0 / map_zoom)
+	
+	# Draw Contacts
+	var contacts = current_state.get("contacts", {})
+	for c_id in contacts.keys():
+		var c = contacts[c_id]
+		var c_pos = c.get("pos", Vector2.ZERO)
+		var is_enemy = (c.get("classification") == "UNIDENTIFIED VESSEL")
+		var color = Color.RED if is_enemy else Color.WHITE
+		draw_circle(c_pos, 8.0 / map_zoom, color)
+		
+		# Draw physical bounds (estimated from radar cross section)
+		var cross_section = c.get("signature", {}).get("cross_section", 0.0)
+		if cross_section > 0:
+			draw_arc(c_pos, cross_section, 0, TAU, 32, Color(color.r, color.g, color.b, 0.3), 2.0 / map_zoom)
+			
+		# Draw a small velocity vector
+		var c_vel = c.get("vel", Vector2.ZERO)
+		if c_vel.length() > 0:
+			draw_line(c_pos, c_pos + c_vel * 2.0, color, 1.0 / map_zoom)
 	
 	# Reset transform to draw absolute overlays (UI, Compass)
 	draw_set_transform_matrix(Transform2D())
@@ -169,3 +189,45 @@ func _draw() -> void:
 	var default_font_size = 16
 	draw_string(font, Vector2(10, size.y - 40), "X: %.2f Y: %.2f" % [pos.x, pos.y], HORIZONTAL_ALIGNMENT_LEFT, -1, default_font_size, Color.GREEN)
 	draw_string(font, Vector2(10, size.y - 20), "SPD: %.2f HDG: %.2f" % [vel.length(), wrapf(rad_to_deg(rot) + 90.0, 0.0, 360.0)], HORIZONTAL_ALIGNMENT_LEFT, -1, default_font_size, Color.GREEN)
+
+	# Draw Pinned Contact Off-screen Indicators
+	var pinned_contacts = current_state.get("pinned_contacts", [])
+	var rect = Rect2(Vector2.ZERO, size)
+	var margin = 30.0
+	var safe_rect = rect.grow(-margin)
+	
+	for c_id in pinned_contacts:
+		if not contacts.has(c_id): continue
+		var c = contacts[c_id]
+		var c_pos = c.get("pos", Vector2.ZERO)
+		
+		# Transform world pos to screen pos manually
+		var screen_pos = t.basis_xform(c_pos) + t.origin
+		
+		if not safe_rect.has_point(screen_pos):
+			# It's off screen, calculate edge intersection
+			var offset = screen_pos - center
+			var x_ratio = abs(offset.x) / (size.x/2.0 - margin)
+			var y_ratio = abs(offset.y) / (size.y/2.0 - margin)
+			var max_ratio = max(x_ratio, y_ratio)
+			
+			var edge_pos = center + offset / max_ratio
+			
+			var dir_to_contact = offset.normalized()
+			
+			# Draw an arrow at edge_pos pointing outward
+			var p_tip = edge_pos + dir_to_contact * 10.0
+			var p_left = edge_pos + dir_to_contact.rotated(PI * 0.8) * 10.0
+			var p_right = edge_pos + dir_to_contact.rotated(-PI * 0.8) * 10.0
+			
+			var is_enemy = (c.get("classification") == "UNIDENTIFIED VESSEL")
+			var color = Color.RED if is_enemy else Color.WHITE
+			
+			var pts = PackedVector2Array([p_tip, p_left, p_right])
+			draw_colored_polygon(pts, color)
+			draw_polyline(PackedVector2Array([p_tip, p_left, p_right, p_tip]), color, 2.0)
+			
+			# Draw label
+			var text_size = font.get_string_size(c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+			var label_pos = edge_pos - dir_to_contact * 15.0 - Vector2(text_size.x/2.0, -text_size.y/3.0)
+			draw_string(font, label_pos, c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)

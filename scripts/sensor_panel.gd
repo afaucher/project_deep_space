@@ -1,7 +1,11 @@
 extends Control
 
+signal contact_pin_toggled(c_id: String, is_pinned: bool)
+signal selection_changed(c_id: String)
+
 var current_state: Dictionary = {}
 var sensor_modules: Dictionary = {}
+var contact_panels: Dictionary = {}
 
 var main_hbox: HBoxContainer
 var main_vbox: VBoxContainer
@@ -11,6 +15,8 @@ var contact_filter_dropdown: OptionButton
 
 var selected_contact_id: String = ""
 
+func get_selected_contact_id() -> String:
+	return selected_contact_id
 const SensorModuleUI = preload("res://scripts/sensor_module_ui.gd")
 const SensorUnionUI = preload("res://scripts/sensor_union_ui.gd")
 
@@ -79,9 +85,15 @@ func _on_filter_selected(idx: int) -> void:
 		_update_contact_list(current_state["contacts"])
 
 func _on_contact_selected(c_id: String) -> void:
-	selected_contact_id = c_id
+	if selected_contact_id == c_id:
+		selected_contact_id = ""
+	else:
+		selected_contact_id = c_id
+		
 	if current_state.has("contacts"):
 		_update_contact_list(current_state["contacts"])
+		
+	emit_signal("selection_changed", selected_contact_id)
 	
 	# Force an immediate redraw on modules
 	for sensor_id in sensor_modules.keys():
@@ -117,10 +129,6 @@ func update_data(packet: Dictionary) -> void:
 		_update_contact_list(current_state["contacts"])
 
 func _update_contact_list(contacts: Dictionary) -> void:
-	# Clear old contacts
-	for child in contact_list_vbox.get_children():
-		child.queue_free()
-	
 	var my_pos = current_state.get("pos", Vector2.ZERO)
 	var filter_idx = 0
 	if is_instance_valid(contact_filter_dropdown):
@@ -129,25 +137,84 @@ func _update_contact_list(contacts: Dictionary) -> void:
 	var sorted_contacts = []
 	for c_id in contacts.keys():
 		var c = contacts[c_id].duplicate(true)
+		var classification = c.get("classification", "UNKNOWN")
+		
+		# Filtering
+		if filter_idx == 1 and classification == "ASTEROID": continue # All Ships
+		if filter_idx == 2 and classification != "UNIDENTIFIED VESSEL": continue # Enemies Only
+		
 		c["_id"] = c_id
 		c["_dist"] = my_pos.distance_to(c.get("pos", Vector2.ZERO))
 		sorted_contacts.append(c)
 		
 	sorted_contacts.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
 	
+	# Keep track of which IDs are currently valid
+	var active_ids = []
+	for c in sorted_contacts:
+		active_ids.append(c["_id"])
+		
+	# Remove old panels
+	for c_id in contact_panels.keys():
+		if not c_id in active_ids:
+			if is_instance_valid(contact_panels[c_id]):
+				contact_panels[c_id].queue_free()
+			contact_panels.erase(c_id)
+			
+	var pinned_list = current_state.get("pinned_contacts", [])
+			
+	# Update or create panels
+	var idx = 0
 	for c in sorted_contacts:
 		var c_id = c["_id"]
-		var classification = c.get("classification", "UNKNOWN")
+		var panel: PanelContainer
+		var header: Label
+		var pin_btn: CheckButton
+		var info: Label
+		var p_style: StyleBoxFlat
 		
-		# Filtering
-		if filter_idx == 1: # All Ships
-			if classification == "ASTEROID": continue
-		elif filter_idx == 2: # Enemies Only
-			if classification != "UNIDENTIFIED VESSEL": continue
+		if contact_panels.has(c_id):
+			panel = contact_panels[c_id]
+			p_style = panel.get_theme_stylebox("panel")
+			var vbox = panel.get_child(0)
+			var header_hbox = vbox.get_child(0)
+			header = header_hbox.get_child(0)
+			pin_btn = header_hbox.get_child(1)
+			info = vbox.get_child(1)
+		else:
+			panel = PanelContainer.new()
+			p_style = StyleBoxFlat.new()
+			p_style.border_width_left = 4
+			panel.add_theme_stylebox_override("panel", p_style)
+			panel.gui_input.connect(_on_contact_panel_gui_input.bind(c_id))
+			
+			var vbox = VBoxContainer.new()
+			panel.add_child(vbox)
+			
+			var header_hbox = HBoxContainer.new()
+			vbox.add_child(header_hbox)
+			
+			header = Label.new()
+			header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			header_hbox.add_child(header)
+			
+			pin_btn = CheckButton.new()
+			pin_btn.text = "Pin"
+			pin_btn.toggled.connect(func(pressed): emit_signal("contact_pin_toggled", c_id, pressed))
+			header_hbox.add_child(pin_btn)
+			
+			info = Label.new()
+			info.add_theme_font_size_override("font_size", 12)
+			vbox.add_child(info)
+			
+			contact_list_vbox.add_child(panel)
+			contact_panels[c_id] = panel
+			
+		# Reorder to keep sorted
+		panel.get_parent().move_child(panel, idx)
+		idx += 1
 		
-		var panel = PanelContainer.new()
-		var p_style = StyleBoxFlat.new()
-		
+		# Update visual properties
 		if c_id == selected_contact_id:
 			p_style.bg_color = Color(0.2, 0.4, 0.2, 0.8)
 			p_style.border_color = Color.WHITE
@@ -158,31 +225,19 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			else:
 				p_style.border_color = Color.GRAY
 				
-		p_style.border_width_left = 4
-		panel.add_theme_stylebox_override("panel", p_style)
-		panel.gui_input.connect(_on_contact_panel_gui_input.bind(c_id))
-		
-		var vbox = VBoxContainer.new()
-		panel.add_child(vbox)
-		
-		var header = Label.new()
 		header.text = c_id + " [" + c.get("classification", "UNKNOWN") + "]"
 		if c.get("classification") == "UNIDENTIFIED VESSEL":
 			header.add_theme_color_override("font_color", Color.RED)
 		else:
 			header.add_theme_color_override("font_color", Color.GRAY)
-		vbox.add_child(header)
+			
+		# Update state without emitting signal
+		pin_btn.set_pressed_no_signal(pinned_list.has(c_id))
 		
 		var dist = c["_dist"]
 		var vel = c.get("vel", Vector2.ZERO)
 		var speed = vel.length()
-		
-		var info = Label.new()
 		info.text = "Dist: %.1f m\nSpeed: %.1f m/s\nHeat: %.1f | EM: %.1f" % [dist, speed, c["signature"]["heat"], c["signature"]["em_noise"]]
-		info.add_theme_font_size_override("font_size", 12)
-		vbox.add_child(info)
-		
-		contact_list_vbox.add_child(panel)
 
 func _draw() -> void:
 	pass

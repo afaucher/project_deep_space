@@ -63,19 +63,20 @@ func _draw() -> void:
 		var p1 = center + Vector2(radius, 0).rotated(a)
 		var p2 = center + Vector2(radius + 5, 0).rotated(a)
 		var tick_color = Color(0.1, 0.3, 0.1, 0.5)
-		if i % 9 == 0:
+		if i % 3 == 0:
 			tick_color = Color(0.2, 0.5, 0.2, 0.8)
 			p2 = center + Vector2(radius + 8, 0).rotated(a)
 			
 			var label = ""
-			if i == 0: label = "090"
-			elif i == 9: label = "180"
-			elif i == 18: label = "270"
-			elif i == 27: label = "000"
+			if i == 0: label = "E"
+			elif i == 9: label = "S"
+			elif i == 18: label = "W"
+			elif i == 27: label = "N"
+			else: label = str(i * 10)
 			
 			var text_pos = center + Vector2(radius + 20, 0).rotated(a)
 			text_pos.y += 4
-			text_pos.x -= 12
+			text_pos.x -= 8
 			draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.2, 0.5, 0.2, 0.8))
 		draw_line(p1, p2, tick_color, 1.0)
 		
@@ -146,6 +147,41 @@ func _draw() -> void:
 			var ui_pos = center + Vector2(dot_radius, 0).rotated(angle)
 			draw_circle(ui_pos, 10.0, Color(1, 1, 1, 0.5))
 			draw_arc(ui_pos, 15.0, 0, TAU, 16, Color.WHITE, 2.0)
+			
+	# 6. Draw Correlated Contacts
+	for c_id in contacts.keys():
+		var c = contacts[c_id]
+		var dist = my_pos.distance_to(c["pos"])
+		if dist <= MASTER_RANGE:
+			var angle = my_pos.angle_to_point(c["pos"])
+			var dist_ratio = clampf(dist / MASTER_RANGE, 0.0, 1.0)
+			var dot_radius = radius * dist_ratio
+			var ui_pos = center + Vector2(dot_radius, 0).rotated(angle)
+			
+			var alpha = 1.0
+			if c.has("last_seen_timer"):
+				alpha = max(0.2, 1.0 - (c["last_seen_timer"] / 20.0))
+				
+			var color = Color(1.0, 1.0, 0.0, alpha) # Yellow/Asteroid
+			if c.get("classification") == "UNIDENTIFIED VESSEL":
+				color = Color(1.0, 0.2, 0.2, alpha) # Red
+			elif c.get("classification") == "FRIENDLY ORDNANCE":
+				color = Color(0.2, 0.8, 1.0, alpha) # Cyan
+			elif c.get("classification") == "WRECKAGE":
+				color = Color(0.5, 0.5, 0.5, alpha) # Grey
+				
+			# Draw diamond for ships/ordnance/wreckage, circle for asteroids
+			if c.get("classification") == "UNIDENTIFIED VESSEL" or c.get("classification") == "FRIENDLY ORDNANCE" or c.get("classification") == "WRECKAGE":
+				var pts = PackedVector2Array()
+				pts.append(ui_pos + Vector2(0, -6))
+				pts.append(ui_pos + Vector2(6, 0))
+				pts.append(ui_pos + Vector2(0, 6))
+				pts.append(ui_pos + Vector2(-6, 0))
+				draw_polygon(pts, PackedColorArray([color]))
+			else:
+				draw_circle(ui_pos, 4.0, color)
+				
+			draw_string(font, ui_pos + Vector2(6, 6), c_id, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, color)
 			
 	# Name label
 	draw_string(font, Vector2(10, 20), "UNION SENSOR VIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)

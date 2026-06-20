@@ -96,19 +96,20 @@ func _draw() -> void:
 			var p1 = center + Vector2(radius, 0).rotated(a)
 			var p2 = center + Vector2(radius + 5, 0).rotated(a)
 			var tick_color = Color(0.1, 0.3, 0.1, 0.5)
-			if i % 9 == 0:
+			if i % 3 == 0:
 				tick_color = Color(0.2, 0.5, 0.2, 0.8)
 				p2 = center + Vector2(radius + 8, 0).rotated(a)
 				
 				var label = ""
-				if i == 0: label = "090"  # East
-				elif i == 9: label = "180" # South
-				elif i == 18: label = "270" # West
-				elif i == 27: label = "000" # North
+				if i == 0: label = "E"
+				elif i == 9: label = "S"
+				elif i == 18: label = "W"
+				elif i == 27: label = "N"
+				else: label = str(i * 10)
 				
 				var text_pos = center + Vector2(radius + 20, 0).rotated(a)
 				text_pos.y += 4
-				text_pos.x -= 12
+				text_pos.x -= 8
 				draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.2, 0.5, 0.2, 0.8))
 			draw_line(p1, p2, tick_color, 1.0)
 			
