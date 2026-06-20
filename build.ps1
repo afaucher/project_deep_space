@@ -1,4 +1,7 @@
 # build.ps1 - Build and package Project Deep Space
+Write-Host "Stopping any running instances of the game..." -ForegroundColor Yellow
+Stop-Process -Name "ProjectDeepSpace" -ErrorAction SilentlyContinue
+
 $godotPath = "$PSScriptRoot\Godot_v4.4.1-stable_win64.exe"
 $buildDir = "$PSScriptRoot\build"
 $windowsBuildDir = "$buildDir\windows"

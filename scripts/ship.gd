@@ -1,6 +1,8 @@
 extends RigidBody2D
 class_name Ship
 
+var owner_id: int = -1
+var is_relay: bool = false
 var target_thrust: float = 0.0
 var target_velocity: float = 0.0
 var target_heading: float = 0.0
@@ -84,6 +86,36 @@ func get_sys_health(sys_type: String) -> float:
 			h += max(0.0, c["health"])
 	return h
 
+static func classify_contact(signature: Dictionary, observer_owner_id: int) -> String:
+	var contact_owner = signature.get("owner_id", -1)
+	var cs = signature.get("cross_section", 0.0)
+	var heat = signature.get("heat", 0.0)
+	var em = signature.get("em_noise", 0.0)
+	var density = signature.get("density", 500.0)
+	
+	# 1. Size check (Ordnance)
+	if cs < 10.0 and (em > 5.0 or heat > 5.0):
+		if contact_owner == observer_owner_id:
+			return "FRIENDLY ORDNANCE"
+		else:
+			return "INCOMING ORDNANCE"
+			
+	# 2. Emission check (Vessels)
+	if cs >= 10.0 and (em > 5.0 or heat > 10.0):
+		if contact_owner == observer_owner_id:
+			return "FRIENDLY VESSEL"
+		else:
+			return "UNIDENTIFIED VESSEL"
+			
+	# 3. Density check (Dead objects / Cold ships)
+	if em <= 5.0 and heat <= 10.0:
+		if density > 250.0 and cs > 50.0:
+			return "ASTEROID"
+		elif density <= 250.0:
+			return "WRECKAGE"
+			
+	return "UNKNOWN ANOMALY"
+
 func get_sys_max_health(sys_type: String) -> float:
 	var h = 0.0
 	for c in ship_components:
@@ -98,6 +130,9 @@ var health: float:
 
 var base_heat: float:
 	get: return current_heat
+	
+var reactor_power_rating: float = 100.0
+var engine_power_rating: float = 100.0
 
 var em_noise: float:
 	get: 
@@ -117,16 +152,20 @@ var sfx_rcs: AudioStreamPlayer
 var sfx_laser: AudioStreamPlayer
 var sfx_missile: AudioStreamPlayer
 
-func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO) -> void:
+func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic") -> void:
 	if is_dead: return
 	
-	if global_pos == Vector2.ZERO and global_dir == Vector2.ZERO:
-		# Fallback for untracked damage
+	print("[Damage] ", name, " taking ", amount, " ", damage_type, " damage at ", global_pos, " dir ", global_dir)
+	
+	if global_pos == Vector2.ZERO or global_dir == Vector2.ZERO:
+		print("[Damage] No position provided, applying fallback hull damage.")
+		# Fallback: Just subtract health from first hull component
 		for c in ship_components:
 			if c["type"] == "hull":
-				c["health"] -= amount / 4.0
+				c["health"] -= amount
+				break
 	else:
-		# Volumetric Raycast Damage
+		# Raymarch through components starting from local collision pos
 		var local_pos = to_local(global_pos)
 		var local_dir = global_dir.rotated(-rotation)
 		
@@ -135,32 +174,49 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 		var max_steps = 100
 		var current_pos = local_pos
 		
+		var hit_something = false
 		for i in range(max_steps):
 			if remaining_damage <= 0: break
 			
 			for comp in ship_components:
 				if comp["health"] <= 0: continue
 				if comp["rect"].has_point(current_pos):
+					hit_something = true
 					# Damping/Ablation based on density
 					var dmg_absorbed = min(remaining_damage, comp["density"] * step_size * 50.0)
 					if dmg_absorbed > 0:
 						comp["health"] -= dmg_absorbed
-						var heat_generated = dmg_absorbed * 0.1
+						
+						# Laser hits add significantly more heat to the component
+						var heat_modifier = 0.5 if damage_type == "laser" else 0.05
+						var heat_generated = dmg_absorbed * heat_modifier
+						
 						comp["heat"] = comp.get("heat", 0.0) + heat_generated
 						current_heat += heat_generated
 						remaining_damage -= dmg_absorbed
+						print("[Damage] Hit component ", comp["id"], " for ", dmg_absorbed, " (Health remaining: ", comp["health"], ")")
 			
 			current_pos += local_dir * step_size
 			
+		if not hit_something:
+			print("[Damage] Raycast completely missed all internal components!")
+			
 	# Check death condition (reactor dead)
 	if get_sys_health("reactor") <= 0.0 or get_sys_health("hull") <= 0.0:
+		print("[Damage] ", name, " suffers catastrophic failure and dies.")
 		hulk()
 
 func hulk() -> void:
 	is_dead = true
-	current_heat = 0.0
-	# Broadcast a neutral ID so allies don't see it as friendly anymore?
-	# Or keep owner_id but with zero emissions so it's clearly wreckage
+	# Shut down subsystems to stop heat/EM generation
+	subsystems["reactor"]["power"] = 0.0
+	subsystems["engines"]["power"] = 0.0
+	subsystems["weapons"]["power"] = 0.0
+	subsystems["sensors"]["power"] = 0.0
+	for s in sensor_hardware:
+		s["active"] = false
+	target_thrust = 0.0
+	actual_throttle = 0.0
 
 func get_signature() -> Dictionary:
 	return {
@@ -168,7 +224,7 @@ func get_signature() -> Dictionary:
 		"heat": current_heat,
 		"em_noise": em_signature,
 		"density": density,
-		"owner_id": int(name.replace("Ship_", "")),
+		"owner_id": owner_id,
 		"pos": position,
 		"rot": rotation,
 		"vel": linear_velocity,
@@ -178,6 +234,11 @@ func get_signature() -> Dictionary:
 	}
 
 func _ready() -> void:
+	if owner_id == -1:
+		owner_id = int(name.replace("Ship_", ""))
+		
+	add_to_group("ships")
+		
 	mass = 100.0
 	inertia = 1000.0
 	gravity_scale = 0.0
@@ -298,7 +359,7 @@ var manual_sensor_target: String = ""
 func set_sensor_state(sensor_id: String, is_active: bool) -> void:
 	if not is_multiplayer_authority():
 		return
-	if multiplayer.get_remote_sender_id() != int(name.replace("Ship_", "")) and multiplayer.get_remote_sender_id() != 1:
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
 		if multiplayer.get_remote_sender_id() != 0:
 			pass
 	for s in sensor_hardware:
@@ -310,7 +371,7 @@ func set_sensor_state(sensor_id: String, is_active: bool) -> void:
 func set_all_sensors_state(is_active: bool) -> void:
 	if not is_multiplayer_authority():
 		return
-	if multiplayer.get_remote_sender_id() != int(name.replace("Ship_", "")) and multiplayer.get_remote_sender_id() != 1:
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
 		if multiplayer.get_remote_sender_id() != 0:
 			pass
 	for s in sensor_hardware:
@@ -319,20 +380,17 @@ func set_all_sensors_state(is_active: bool) -> void:
 @rpc("any_peer", "call_local")
 func set_sensor_target(target_id: String) -> void:
 	if not is_multiplayer_authority(): return
-	if multiplayer.get_remote_sender_id() != int(name.replace("Ship_", "")) and multiplayer.get_remote_sender_id() != 1:
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
 		if multiplayer.get_remote_sender_id() != 0: pass
 	manual_sensor_target = target_id
 
 func _physics_process(delta: float) -> void:
-	if is_dead:
-		return
-		
 	if is_multiplayer_authority():
 		for w in weapons.keys():
 			if weapons[w]["cooldown"] > 0:
 				weapons[w]["cooldown"] -= delta
 		
-		if point_defense_active:
+		if point_defense_active and not is_dead:
 			_process_point_defense()
 			
 	var forward = Vector2.RIGHT.rotated(rotation)
@@ -347,9 +405,14 @@ func _physics_process(delta: float) -> void:
 		var required_accel = v_error * 2.0 # P gain
 		var required_force = required_accel * mass
 		actual_throttle = required_force / max_thrust
+		
+	# Apply limits based on steering mode
+	if steering_mode == 0:
+		actual_throttle = clampf(actual_throttle, -0.5, 0.5)
+	else:
 		actual_throttle = clampf(actual_throttle, -1.0, 1.0)
 	
-	var is_my_ship = (multiplayer.get_unique_id() == int(name.replace("Ship_", "")))
+	var is_my_ship = (multiplayer.get_unique_id() == owner_id)
 	
 	if actual_throttle != 0.0:
 		apply_central_force(forward * actual_throttle * max_thrust)
@@ -418,7 +481,7 @@ func _physics_process(delta: float) -> void:
 	var bins_this_frame = []
 
 	# --- Heat & Engineering Logic ---
-	if is_multiplayer_authority() and not is_dead:
+	if is_multiplayer_authority():
 		var heat_gen = 0.0
 		var reactor_heat = 2.0 * subsystems["reactor"]["power"]
 		var engine_heat = abs(actual_throttle) * 10.0 * subsystems["engines"]["power"]
@@ -437,21 +500,22 @@ func _physics_process(delta: float) -> void:
 					c["health"] -= 10.0 * delta
 					
 		# Update Component EM & Heat
-		var current_em = 100.0 + (abs(actual_throttle) * 100.0)
+		var base_em = reactor_power_rating * subsystems["reactor"]["power"]
+		var current_em = base_em + (abs(actual_throttle) * engine_power_rating)
 		var sensor_em = 0.0
 		for s in sensor_hardware:
 			if s.get("active", true):
 				sensor_em += s.get("em_emission", 0.0)
 		
-		em_signature = current_em
+		em_signature = current_em + sensor_em
 		
 		for comp in ship_components:
 			if comp["type"] == "reactor":
 				comp["heat"] = 10.0 + reactor_heat
-				comp["em_emission"] = 100.0
+				comp["em_emission"] = reactor_power_rating
 			elif comp["type"] == "engines":
 				comp["heat"] = engine_heat
-				comp["em_emission"] = abs(actual_throttle) * 100.0
+				comp["em_emission"] = abs(actual_throttle) * engine_power_rating
 			elif comp["type"] == "sensors":
 				comp["heat"] = 5.0
 				comp["em_emission"] = sensor_em
@@ -485,6 +549,7 @@ func _physics_process(delta: float) -> void:
 		
 		if bin_instance_id != -1:
 			new_id = "TRK-%03d" % (abs(bin_instance_id) % 1000)
+			bin["contact_id"] = new_id
 			if active_contacts.has(new_id):
 				closest_contact_id = new_id
 		else:
@@ -508,43 +573,22 @@ func _physics_process(delta: float) -> void:
 				c["resolution"] = bin_angle
 				c["pos_timer"] = 0.0
 				
-				c["signature"] = {
-					"cross_section": bin.get("cross_section", 0.0),
-					"heat": bin.get("heat", 0.0),
-					"em_noise": bin.get("em_noise", 0.0),
-					"density": bin.get("density", 0.0),
-					"owner_id": bin.get("owner_id", -1)
-				}
+				if bin.has("cross_section"): c["signature"]["cross_section"] = lerp(c["signature"].get("cross_section", 0.0), bin.get("cross_section", 0.0), 0.8)
+				if bin.has("heat"): c["signature"]["heat"] = lerp(c["signature"].get("heat", 0.0), bin.get("heat", 0.0), 0.8)
+				if bin.has("em_noise"): c["signature"]["em_noise"] = lerp(c["signature"].get("em_noise", 0.0), bin.get("em_noise", 0.0), 0.8)
+				if bin.has("owner_id"): c["signature"]["owner_id"] = bin["owner_id"]
 				
-				if c["signature"]["heat"] > 5.0 or c["signature"]["em_noise"] > 5.0:
-					if c["signature"].get("owner_id", -1) == int(name.replace("Ship_", "")):
-						c["classification"] = "FRIENDLY ORDNANCE"
-					else:
-						c["classification"] = "UNIDENTIFIED VESSEL"
-				else:
-					# TODO: Revisit classification matrix when we have a richer body of objects
-					if c["signature"].get("density", 500.0) <= 150.0:
-						c["classification"] = "WRECKAGE"
-					else:
-						c["classification"] = "ASTEROID"
+				c["classification"] = Ship.classify_contact(c["signature"], self.owner_id)
 						
 			c["last_seen_timer"] = 0.0
 		else:
+			# New contact
+			new_id = bin.get("contact_id", "")
 			if new_id == "":
 				new_id = "TRK-%03d" % next_contact_id
 				next_contact_id += 1
 			
-			var owner_id = bin.get("owner_id", -1)
-			var classification = "ASTEROID"
-			if bin.get("heat", 0.0) > 5.0 or bin.get("em_noise", 0.0) > 5.0:
-				if owner_id == int(name.replace("Ship_", "")):
-					classification = "FRIENDLY ORDNANCE"
-				else:
-					classification = "UNIDENTIFIED VESSEL"
-			else:
-				# TODO: Revisit classification matrix when we have a richer body of objects
-				if bin.get("density", 500.0) <= 150.0:
-					classification = "WRECKAGE"
+			var classification = Ship.classify_contact(bin, self.owner_id)
 				
 			active_contacts[new_id] = {
 				"id": new_id,
@@ -562,6 +606,30 @@ func _physics_process(delta: float) -> void:
 				"last_seen_timer": 0.0,
 				"classification": classification
 			}
+			
+	for c_id in active_contacts.keys():
+		var c = active_contacts[c_id]
+		c["last_seen_timer"] += delta
+		c["pos_timer"] += delta
+		
+		# Drop old contacts
+		if c["last_seen_timer"] > 10.0:
+			active_contacts.erase(c_id)
+				
+	# Datalink Relay (Temporarily Disabled as requested)
+	#for s in get_tree().get_nodes_in_group("ships"):
+	#	if s == self or s.is_dead or s.owner_id != owner_id or not s.is_relay: continue
+	#	for c_id in s.active_contacts:
+	#		var external_contact = s.active_contacts[c_id]
+	#		if not active_contacts.has(c_id):
+	#			active_contacts[c_id] = external_contact.duplicate(true)
+	#		else:
+	#			var c = active_contacts[c_id]
+	#			if external_contact["last_seen_timer"] < c["last_seen_timer"]:
+	#				c["pos"] = external_contact["pos"]
+	#				c["vel"] = external_contact["vel"]
+	#				c["last_seen_timer"] = external_contact["last_seen_timer"]
+	#				c["resolution"] = min(c["resolution"], external_contact["resolution"])
 
 func _run_sensor_sweep(sensor: Dictionary) -> Array:
 	var space_state = get_world_2d().direct_space_state
@@ -638,6 +706,15 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 				sig["_raw_pos"] = collider.position
 				sig["_raw_dist"] = dist
 				sig["instance_id"] = collider.get_instance_id()
+				if sensor.get("type", "active") == "passive_em":
+					sig.erase("cross_section")
+					sig.erase("heat")
+					sig.erase("density")
+					# em_power calculation was applied above, but it's out of scope here.
+					# Let's apply it directly to sig["em_noise"] in the first block, or we can just use sig["em_noise"] since we don't have rear aspect here... wait!
+					# I'll just use the raw signature em_noise for the bin data. Rear bias isn't saved in the bin? Actually, it shouldn't be.
+					sig["em_noise"] = sig.get("em_noise", 0.0)
+					
 				bins[bin_idx].append(sig)
 	
 	var sweep_output = []
@@ -646,14 +723,12 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 	for bin_idx in bins.keys():
 		var objects = bins[bin_idx]
 		var merged = {
-			"cross_section": 0.0,
-			"heat": 0.0,
-			"em_noise": 0.0,
-			"density": 0.0,
 			"count": objects.size()
 		}
 		
 		var total_cs = 0.0
+		var max_heat = -1.0
+		var max_em = -1.0
 		var weighted_dist = 0.0
 		var weighted_vel = Vector2.ZERO
 		var bin_owner = -1
@@ -661,10 +736,13 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 		var primary_instance_id = -1
 		
 		for obj in objects:
-			var cs = obj.get("cross_section", 1.0)
-			merged["cross_section"] += cs
-			merged["heat"] += obj.get("heat", 0.0)
-			merged["em_noise"] += obj.get("em_noise", 0.0)
+			var cs = obj.get("cross_section", 0.0)
+			
+			if obj.has("heat"):
+				max_heat = max(max_heat, obj.get("heat", 0.0))
+			if obj.has("em_noise"):
+				max_em = max(max_em, obj.get("em_noise", 0.0))
+				
 			if obj.has("owner_id"):
 				bin_owner = obj["owner_id"]
 				
@@ -673,8 +751,8 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 				primary_instance_id = obj.get("instance_id", -1)
 			
 			total_cs += cs
-			weighted_dist += obj["_raw_dist"] * cs
-			weighted_vel += obj.get("vel", Vector2.ZERO) * cs
+			weighted_dist += obj["_raw_dist"] * max(cs, 1.0)
+			weighted_vel += obj.get("vel", Vector2.ZERO) * max(cs, 1.0)
 		
 		if total_cs > 0:
 			weighted_dist /= total_cs
@@ -685,7 +763,15 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 			merged["density"] = total_density / total_cs
 		else:
 			weighted_dist = objects[0]["_raw_dist"]
-			merged["density"] = objects[0].get("density", 0.0)
+			if objects[0].has("density"):
+				merged["density"] = objects[0].get("density", 0.0)
+				
+		if total_cs > 0.0:
+			merged["cross_section"] = total_cs
+		if max_heat >= 0.0:
+			merged["heat"] = max_heat
+		if max_em >= 0.0:
+			merged["em_noise"] = max_em
 			
 		var bin_center_angle = SENSOR_HEADING - (ARC_WIDTH / 2.0) + (bin_idx * BIN_ANGLE) + (BIN_ANGLE / 2.0)
 		merged["distance"] = weighted_dist
@@ -711,17 +797,23 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 
 @rpc("any_peer", "call_local")
 func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: String) -> void:
-	if not is_multiplayer_authority():
+	if not is_multiplayer_authority() or is_dead:
 		return # Only host executes this
 		
 	# Verify client owns this ship
-	if multiplayer.get_remote_sender_id() != int(name.replace("Ship_", "")) and multiplayer.get_remote_sender_id() != 1:
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
 		if multiplayer.get_remote_sender_id() != 0:
 			pass
 			
-	if not weapons.has(weapon_id): return
-	if weapons[weapon_id]["ammo"] <= 0: return
-	if weapons[weapon_id]["cooldown"] > 0: return
+	if not weapons.has(weapon_id):
+		print("fire_weapon failed: unknown weapon ", weapon_id)
+		return
+	if weapons[weapon_id]["ammo"] <= 0:
+		print("fire_weapon failed: no ammo for ", weapon_id)
+		return
+	if weapons[weapon_id]["cooldown"] > 0:
+		print("fire_weapon failed: cooldown active for ", weapon_id)
+		return
 	
 	# Verify hardpoint health
 	var component_health = 0.0
@@ -729,7 +821,9 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 		if comp["id"] == weapon_id:
 			component_health = comp["health"]
 			break
-	if component_health <= 0.0: return # Hardpoint destroyed!
+	if component_health <= 0.0:
+		print("fire_weapon failed: hardpoint destroyed ", weapon_id)
+		return # Hardpoint destroyed!
 	
 	var weapon_data = weapons[weapon_id]
 	var w_type = weapon_data["type"]
@@ -741,7 +835,9 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 		# Hitscan weapons also check range
 		if w_type == "laser":
 			var dist = position.distance_to(real_target_pos)
-			if dist > weapon_data["range"]: return
+			if dist > weapon_data["range"]:
+				print("fire_weapon failed: laser out of range")
+				return
 			
 		var angle_to = position.angle_to_point(real_target_pos)
 		
@@ -749,8 +845,11 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 		var weapon_global_heading = rotation + weapon_data["heading"]
 		var rel_angle = wrapf(angle_to - weapon_global_heading, -PI, PI)
 		
-		if abs(rel_angle) > weapon_data["arc_width"] / 2.0: return
+		if abs(rel_angle) > weapon_data["arc_width"] / 2.0:
+			print("fire_weapon failed: outside arc. Target at ", rad_to_deg(angle_to), " weapon at ", rad_to_deg(weapon_global_heading), " diff ", rad_to_deg(rel_angle), " max arc ", rad_to_deg(weapon_data["arc_width"]/2.0))
+			return
 	elif w_type == "laser":
+		print("fire_weapon failed: laser requires target lock")
 		return # Lasers require target lock for hitscan logic currently
 
 	# Consume ammo and set cooldown
@@ -761,7 +860,7 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 	var weapon_launch_angle = rotation + weapon_data["heading"]
 	
 	if w_type == "laser":
-		if multiplayer.get_unique_id() == int(name.replace("Ship_", "")):
+		if multiplayer.get_unique_id() == owner_id:
 			sfx_laser.play()
 			
 		var real_target_pos = active_contacts[target_contact_id]["pos"]
@@ -781,30 +880,87 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 			if body.has_method("take_damage"):
 				# Ray hits target - simulate from global_mount_pos to real_target_pos
 				var hit_dir = (real_target_pos - global_mount_pos).normalized()
-				body.take_damage(weapon_data["damage"], real_target_pos, hit_dir)
+				body.take_damage(weapon_data["damage"], real_target_pos, hit_dir, weapon_data["type"])
 			elif body.has_method("get_signature"):
 				body.queue_free()
 				
 	elif w_type == "missile":
-		if multiplayer.get_unique_id() == int(name.replace("Ship_", "")):
+		if multiplayer.get_unique_id() == owner_id:
 			sfx_missile.play()
 			
 		var main_node = get_tree().current_scene
 		if not is_instance_valid(main_node): return
 		
-		var Projectile = load("res://scripts/projectile.gd")
-		var proj = Projectile.new()
+		var Missile = load("res://scripts/missile.gd")
+		var proj = Missile.new()
 		
-		var target_profile = {}
-		if active_contacts.has(target_contact_id):
-			target_profile = active_contacts[target_contact_id]["signature"]
-			
-		proj.setup(int(name.replace("Ship_", "")), global_mount_pos, linear_velocity, weapon_launch_angle)
-		proj.target_profile = target_profile
+		# Add controller
+		var MissileController = load("res://scripts/missile_controller.gd")
+		var controller = MissileController.new()
+		controller.target_id = target_contact_id
+		proj.add_child(controller)
+		
+		proj.setup(owner_id, global_mount_pos, linear_velocity, weapon_launch_angle)
+		proj.add_collision_exception_with(self)
 		main_node.add_child(proj, true)
 
 func _process_point_defense() -> void:
-	pass # Disabled until hardpoint-based point defense is implemented
+	if not point_defense_active: return
+	var main_node = get_tree().current_scene
+	if not is_instance_valid(main_node): return
+	
+	var ready_lasers = []
+	for w_id in weapons:
+		if weapons[w_id]["type"] == "laser" and weapons[w_id]["ammo"] > 0 and weapons[w_id]["cooldown"] <= 0.0:
+			var is_alive = false
+			for comp in ship_components:
+				if comp["id"] == w_id and comp["health"] > 0.0:
+					is_alive = true
+					break
+			if is_alive:
+				ready_lasers.append(w_id)
+				
+	if ready_lasers.is_empty(): return
+	
+	var pd_range = 3500.0
+	var space_state = get_world_2d().direct_space_state
+	var query = PhysicsShapeQueryParameters2D.new()
+	var shape = CircleShape2D.new()
+	shape.radius = pd_range
+	query.shape = shape
+	query.transform = Transform2D(0, position)
+	
+	var results = space_state.intersect_shape(query, 32)
+	for res in results:
+		if ready_lasers.is_empty(): break
+		
+		var body = res["collider"]
+		if body == self: continue
+		if "owner_id" in body and body.owner_id != owner_id:
+			if body.name.begins_with("Missile_"): # It's a missile
+				var rel_pos = body.position - position
+				
+				for w_id in ready_lasers:
+					var weapon = ship_components.filter(func(c): return c["id"] == w_id)[0]
+					
+					var aim_angle = (position + weapon["rect"].position.rotated(rotation)).angle_to_point(body.position)
+					if multiplayer.get_unique_id() == owner_id:
+						if main_node and main_node.has_method("draw_laser"):
+							main_node.draw_laser.rpc(position + weapon["rect"].position.rotated(rotation), body.position)
+					
+					var weapon_data = weapons[w_id]
+					var w_global_heading = rotation + weapon_data["heading"]
+					var rel_angle = wrapf(aim_angle - w_global_heading, -PI, PI)
+					
+					if abs(rel_angle) <= weapon_data["arc_width"] / 2.0:
+						weapons[w_id]["cooldown"] = weapon_data["cooldown_max"]
+						weapons[w_id]["ammo"] -= 1
+						if multiplayer.get_unique_id() == owner_id:
+							sfx_laser.play()
+						var hit_dir = (body.position - (position + weapon["rect"].position.rotated(rotation))).normalized()
+						body.take_damage(100.0, body.position, hit_dir, "laser")
+						ready_lasers.erase(w_id)
+						break
 
 
 

@@ -73,7 +73,7 @@ func _on_connection_established(hosting: bool) -> void:
 	if is_host:
 		print("I am the authoritative host.")
 		_spawn_asteroids()
-		_spawn_bouys()
+		#_spawn_bouys() # Temporarily disabled
 		_spawn_ship(multiplayer.get_unique_id())
 	else:
 		print("I am a client terminal.")
@@ -117,6 +117,28 @@ func _on_peer_disconnected(id: int) -> void:
 		players[id].queue_free()
 		players.erase(id)
 
+func _unhandled_input(event: InputEvent) -> void:
+	if is_host and event is InputEventKey and event.pressed and event.keycode == KEY_F3:
+		_spawn_drone()
+
+func _spawn_drone() -> void:
+	var drone_id = 900 + players.size()
+	var ship = Ship.new()
+	ship.name = "Ship_" + str(drone_id)
+	
+	var player_pos = Vector2.ZERO
+	if players.has(1): player_pos = players[1].position
+	
+	var angle = randf() * TAU
+	ship.position = player_pos + Vector2(cos(angle), sin(angle)) * 15000.0
+	
+	add_child(ship)
+	players[drone_id] = ship
+	
+	var ai = AIDroneController.new()
+	ship.add_child(ai)
+	print("Spawned AI Drone ", drone_id, " at ", ship.position)
+
 # ----------------------------------------------------
 # Host Simulation Loop
 # ----------------------------------------------------
@@ -154,7 +176,7 @@ func _distribute_state() -> void:
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal
 			_update_terminal(packet)
-		else:
+		elif client_id in multiplayer.get_peers():
 			# Send targeted RPC to client
 			rpc_id(client_id, "receive_perceived_state", packet)
 
