@@ -64,16 +64,25 @@ func get_signature() -> Dictionary:
 	if not is_dead:
 		current_heat += (abs(actual_throttle) * 100.0)
 		
+	var current_em = em_noise
+	if not is_dead:
+		for s in sensor_hardware:
+			if s.get("active", true):
+				if s["id"] == "omni_main": current_em += 20.0
+				elif s["id"] == "dir_high_res": current_em += 40.0
+				elif s["id"] == "omni_short_hi_res": current_em += 10.0
+		
 	return {
 		"cross_section": cross_section,
 		"heat": current_heat,
-		"em_noise": em_noise,
+		"em_noise": current_em,
 		"density": density,
 		"owner_id": int(name.replace("Ship_", "")),
 		"pos": position,
 		"rot": rotation,
 		"vel": linear_velocity,
 		"sensors": active_sensor_sweeps,
+		"sensor_config": sensor_hardware,
 		"contacts": active_contacts
 	}
 
@@ -116,6 +125,8 @@ func _ready() -> void:
 var sensor_hardware = [
 	{
 		"id": "omni_main",
+		"type": "active",
+		"active": true,
 		"range": 40000.0,
 		"arc_width": TAU,
 		"num_bins": 36,
@@ -127,6 +138,8 @@ var sensor_hardware = [
 	},
 	{
 		"id": "dir_high_res",
+		"type": "active",
+		"active": true,
 		"range": 40000.0,
 		"arc_width": PI / 6.0, # 30 deg cone
 		"num_bins": 30, # 1 deg bins
@@ -138,11 +151,39 @@ var sensor_hardware = [
 	},
 	{
 		"id": "omni_short_hi_res",
+		"type": "active",
+		"active": true,
 		"range": 5000.0,
 		"arc_width": TAU,
 		"num_bins": 180, # 2 degree bins
 		"interval": 0.25,
 		"refresh_interval": 0.25,
+		"timer": 0.0,
+		"heading": 0.0,
+		"health": 100.0
+	},
+	{
+		"id": "passive_em",
+		"type": "passive_em",
+		"active": true,
+		"range": 80000.0,
+		"arc_width": TAU,
+		"num_bins": 360,
+		"interval": 1.0,
+		"refresh_interval": 1.0,
+		"timer": 0.0,
+		"heading": 0.0,
+		"health": 100.0
+	},
+	{
+		"id": "omni_collision",
+		"type": "active",
+		"active": true,
+		"range": 1500.0,
+		"arc_width": TAU,
+		"num_bins": 8,
+		"interval": 0.5,
+		"refresh_interval": 0.5,
 		"timer": 0.0,
 		"heading": 0.0,
 		"health": 100.0
@@ -157,6 +198,28 @@ var _high_res_target_idx: int = 0
 var _high_res_target_timer: float = 0.0
 
 var manual_sensor_target: String = ""
+
+@rpc("any_peer", "call_local")
+func set_sensor_state(sensor_id: String, is_active: bool) -> void:
+	if not is_multiplayer_authority():
+		return
+	if multiplayer.get_remote_sender_id() != int(name.replace("Ship_", "")) and multiplayer.get_remote_sender_id() != 1:
+		if multiplayer.get_remote_sender_id() != 0:
+			pass
+	for s in sensor_hardware:
+		if s["id"] == sensor_id:
+			s["active"] = is_active
+			break
+
+@rpc("any_peer", "call_local")
+func set_all_sensors_state(is_active: bool) -> void:
+	if not is_multiplayer_authority():
+		return
+	if multiplayer.get_remote_sender_id() != int(name.replace("Ship_", "")) and multiplayer.get_remote_sender_id() != 1:
+		if multiplayer.get_remote_sender_id() != 0:
+			pass
+	for s in sensor_hardware:
+		s["active"] = is_active
 
 @rpc("any_peer", "call_local")
 func set_sensor_target(target_id: String) -> void:
@@ -280,6 +343,9 @@ func _physics_process(delta: float) -> void:
 	for sensor in sensor_hardware:
 		if sensor["health"] <= 0.0:
 			continue
+		if not sensor.get("active", true):
+			active_sensor_sweeps[sensor["id"]] = []
+			continue
 			
 		sensor["timer"] -= delta
 		if sensor["timer"] <= 0.0:
@@ -291,15 +357,22 @@ func _physics_process(delta: float) -> void:
 	# Correlate tracks
 	for bin in bins_this_frame:
 		var closest_contact_id = ""
-		var closest_dist = 2000.0 # 2km correlation threshold
 		var bin_pos = bin.get("pos", Vector2.ZERO)
+		var bin_instance_id = bin.get("instance_id", -1)
+		var new_id = ""
 		
-		for c_id in active_contacts:
-			var c = active_contacts[c_id]
-			var dist = c["pos"].distance_to(bin_pos)
-			if dist < closest_dist:
-				closest_dist = dist
-				closest_contact_id = c_id
+		if bin_instance_id != -1:
+			new_id = "TRK-%03d" % (abs(bin_instance_id) % 1000)
+			if active_contacts.has(new_id):
+				closest_contact_id = new_id
+		else:
+			var closest_dist = 2000.0 # 2km correlation threshold
+			for c_id in active_contacts:
+				var c = active_contacts[c_id]
+				var dist = c["pos"].distance_to(bin_pos)
+				if dist < closest_dist:
+					closest_dist = dist
+					closest_contact_id = c_id
 				
 		if closest_contact_id != "":
 			var c = active_contacts[closest_contact_id]
@@ -327,8 +400,9 @@ func _physics_process(delta: float) -> void:
 				else:
 					c["classification"] = "ASTEROID"
 		else:
-			var new_id = "TRK-%03d" % next_contact_id
-			next_contact_id += 1
+			if new_id == "":
+				new_id = "TRK-%03d" % next_contact_id
+				next_contact_id += 1
 			
 			var owner_id = bin.get("owner_id", -1)
 			var classification = "ASTEROID"
@@ -381,6 +455,18 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 		
 		if collider.has_method("get_signature"):
 			var sig = collider.get_signature()
+			
+			if sensor.get("type", "active") == "passive_em":
+				if sig.get("em_noise", 0.0) < 15.0:
+					continue # Passive EM only detects noisy targets
+			else:
+				# Active sensors check line of sight
+				var ray_query = PhysicsRayQueryParameters2D.create(position, collider.position)
+				ray_query.exclude = [self]
+				var ray_res = space_state.intersect_ray(ray_query)
+				if ray_res and ray_res.collider != collider:
+					continue # Blocked by obstacle
+			
 			var dist = position.distance_to(collider.position)
 			var angle = position.angle_to_point(collider.position)
 			
@@ -398,6 +484,7 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 				
 				sig["_raw_pos"] = collider.position
 				sig["_raw_dist"] = dist
+				sig["instance_id"] = collider.get_instance_id()
 				bins[bin_idx].append(sig)
 	
 	var sweep_output = []
@@ -417,6 +504,8 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 		var weighted_dist = 0.0
 		var weighted_vel = Vector2.ZERO
 		var bin_owner = -1
+		var max_cs = -1.0
+		var primary_instance_id = -1
 		
 		for obj in objects:
 			var cs = obj.get("cross_section", 1.0)
@@ -425,6 +514,10 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 			merged["em_noise"] += obj.get("em_noise", 0.0)
 			if obj.has("owner_id"):
 				bin_owner = obj["owner_id"]
+				
+			if cs > max_cs:
+				max_cs = cs
+				primary_instance_id = obj.get("instance_id", -1)
 			
 			total_cs += cs
 			weighted_dist += obj["_raw_dist"] * cs
@@ -457,6 +550,7 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 		merged["sensor_range"] = sensor["range"]
 		merged["sensor_id"] = sensor["id"]
 		merged["owner_id"] = bin_owner
+		merged["instance_id"] = primary_instance_id
 		
 		sweep_output.append(merged)
 		

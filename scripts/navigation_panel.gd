@@ -8,9 +8,11 @@ var current_state: Dictionary = {
 
 var map_zoom: float = 1.0
 var is_ship_oriented: bool = false
+var zoom_slider: HSlider
 
 func _ready() -> void:
 	clip_contents = true # Ensure drawings don't bleed out of panel
+	mouse_filter = Control.MOUSE_FILTER_STOP
 	
 	# Top overlay container for controls
 	var overlay = HBoxContainer.new()
@@ -30,7 +32,7 @@ func _ready() -> void:
 	zoom_label.text = "Zoom:"
 	overlay.add_child(zoom_label)
 	
-	var zoom_slider = HSlider.new()
+	zoom_slider = HSlider.new()
 	zoom_slider.min_value = 0.01
 	zoom_slider.max_value = 2.0
 	zoom_slider.step = 0.01
@@ -41,6 +43,15 @@ func _ready() -> void:
 		queue_redraw()
 	)
 	overlay.add_child(zoom_slider)
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			zoom_slider.value += 0.05
+			accept_event()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			zoom_slider.value -= 0.05
+			accept_event()
 
 func update_data(packet: Dictionary) -> void:
 	current_state = packet

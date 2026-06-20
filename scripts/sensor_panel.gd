@@ -2,6 +2,8 @@ extends Control
 
 signal contact_pin_toggled(c_id: String, is_pinned: bool)
 signal selection_changed(c_id: String)
+signal sensor_state_changed(sensor_id: String, is_active: bool)
+signal all_sensors_state_changed(is_active: bool)
 
 var current_state: Dictionary = {}
 var sensor_modules: Dictionary = {}
@@ -12,6 +14,7 @@ var main_vbox: VBoxContainer
 var modules_container: HFlowContainer
 var contact_list_vbox: VBoxContainer
 var contact_filter_dropdown: OptionButton
+var master_sensor_dropdown: OptionButton
 
 var selected_contact_id: String = ""
 
@@ -34,6 +37,20 @@ func _ready() -> void:
 	union_view.size_flags_stretch_ratio = 1.0 # 50%
 	union_view.contact_selected.connect(_on_contact_selected)
 	main_vbox.add_child(union_view)
+	
+	var master_hbox = HBoxContainer.new()
+	master_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	var master_lbl = Label.new()
+	master_lbl.text = "MASTER SENSOR MODE: "
+	master_hbox.add_child(master_lbl)
+	master_sensor_dropdown = OptionButton.new()
+	master_sensor_dropdown.add_item("ALL ON")
+	master_sensor_dropdown.add_item("ALL OFF")
+	master_sensor_dropdown.add_item("MIXED")
+	master_sensor_dropdown.set_item_disabled(2, true)
+	master_sensor_dropdown.item_selected.connect(_on_master_mode_selected)
+	master_hbox.add_child(master_sensor_dropdown)
+	main_vbox.add_child(master_hbox)
 	
 	main_hbox = HBoxContainer.new()
 	main_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -116,14 +133,31 @@ func update_data(packet: Dictionary) -> void:
 		if is_instance_valid(union_view):
 			union_view.update_data(sensors_dict, my_pos, c_dict, selected_contact_id)
 		
-		for sensor_id in sensors_dict.keys():
-			if not sensor_modules.has(sensor_id):
-				var mod = SensorModuleUI.new()
-				mod.contact_selected.connect(_on_contact_selected)
-				modules_container.add_child(mod)
-				sensor_modules[sensor_id] = mod
+		if current_state.has("sensor_config"):
+			var cfg = current_state["sensor_config"]
+			var all_on = true
+			var all_off = true
+			for c in cfg:
+				var sensor_id = c["id"]
+				if not sensor_modules.has(sensor_id):
+					var mod = SensorModuleUI.new()
+					mod.contact_selected.connect(_on_contact_selected)
+					mod.toggle_changed.connect(_on_sensor_module_toggled)
+					modules_container.add_child(mod)
+					sensor_modules[sensor_id] = mod
+				
+				sensor_modules[sensor_id].set_active(c.get("active", true))
+				
+				if c.get("active", true): all_off = false
+				else: all_on = false
+					
+			if all_on: master_sensor_dropdown.selected = 0
+			elif all_off: master_sensor_dropdown.selected = 1
+			else: master_sensor_dropdown.selected = 2
 			
-			sensor_modules[sensor_id].update_data(sensor_id, sensors_dict[sensor_id], my_pos, current_state.get("contacts", {}), selected_contact_id)
+		for sensor_id in sensor_modules.keys():
+			var bins = sensors_dict.get(sensor_id, [])
+			sensor_modules[sensor_id].update_data(sensor_id, bins, my_pos, current_state.get("contacts", {}), selected_contact_id)
 			
 	if current_state.has("contacts"):
 		_update_contact_list(current_state["contacts"])
@@ -237,7 +271,19 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var dist = c["_dist"]
 		var vel = c.get("vel", Vector2.ZERO)
 		var speed = vel.length()
-		info.text = "Dist: %.1f m\nSpeed: %.1f m/s\nHeat: %.1f | EM: %.1f" % [dist, speed, c["signature"]["heat"], c["signature"]["em_noise"]]
+		var sig = c.get("signature", {})
+		info.text = "Dist: %.1f m | Spd: %.1f m/s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
+			dist, speed, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
+		]
 
 func _draw() -> void:
 	pass
+
+func _on_master_mode_selected(idx: int) -> void:
+	if idx == 0:
+		all_sensors_state_changed.emit(true)
+	elif idx == 1:
+		all_sensors_state_changed.emit(false)
+
+func _on_sensor_module_toggled(s_id: String, is_active: bool) -> void:
+	sensor_state_changed.emit(s_id, is_active)

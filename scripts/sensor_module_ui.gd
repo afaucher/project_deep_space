@@ -1,6 +1,7 @@
 extends Control
 
 signal contact_selected(c_id: String)
+signal toggle_changed(s_id: String, is_active: bool)
 
 var sensor_id: String = ""
 var current_bins: Array = []
@@ -14,9 +15,30 @@ var my_pos: Vector2 = Vector2.ZERO
 var contacts: Dictionary = {}
 var selected_contact_id: String = ""
 
+var active_toggle: CheckButton
+
 func _ready() -> void:
 	custom_minimum_size = Vector2(300, 300)
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
+	
+	active_toggle = CheckButton.new()
+	active_toggle.text = "ON"
+	active_toggle.anchor_top = 1.0
+	active_toggle.anchor_bottom = 1.0
+	active_toggle.offset_top = -40
+	active_toggle.offset_bottom = -10
+	active_toggle.offset_left = 10
+	active_toggle.toggled.connect(_on_toggle)
+	add_child(active_toggle)
+
+func _on_toggle(pressed: bool) -> void:
+	active_toggle.text = "ON" if pressed else "OFF"
+	toggle_changed.emit(sensor_id, pressed)
+
+func set_active(is_active: bool) -> void:
+	if is_instance_valid(active_toggle):
+		active_toggle.set_pressed_no_signal(is_active)
+		active_toggle.text = "ON" if is_active else "OFF"
 
 func update_data(id: String, bins: Array, p_pos: Vector2, c_dict: Dictionary, sel_id: String) -> void:
 	sensor_id = id
@@ -101,11 +123,12 @@ func _draw() -> void:
 				p2 = center + Vector2(radius + 8, 0).rotated(a)
 				
 				var label = ""
-				if i == 0: label = "E"
-				elif i == 9: label = "S"
-				elif i == 18: label = "W"
-				elif i == 27: label = "N"
-				else: label = str(i * 10)
+				var display_angle = int(wrapf(i * 10 + 90, 0, 360))
+				if display_angle == 0: label = "N"
+				elif display_angle == 90: label = "E"
+				elif display_angle == 180: label = "S"
+				elif display_angle == 270: label = "W"
+				else: label = str(display_angle)
 				
 				var text_pos = center + Vector2(radius + 20, 0).rotated(a)
 				text_pos.y += 4

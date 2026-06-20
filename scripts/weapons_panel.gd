@@ -5,8 +5,9 @@ signal fire_weapon_requested(weapon_id: String)
 
 var current_state: Dictionary = {}
 var selected_contact_id: String = ""
-
 var weapon_buttons: Dictionary = {}
+var target_info_label: Label
+var spider_chart: Control
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(300, 200)
@@ -43,6 +44,18 @@ func _ready() -> void:
 	target_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	target_label.add_theme_color_override("font_color", Color.ORANGE)
 	vbox.add_child(target_label)
+	
+	target_info_label = Label.new()
+	target_info_label.text = "NO TARGET LOCKED"
+	target_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	target_info_label.add_theme_font_size_override("font_size", 12)
+	vbox.add_child(target_info_label)
+	
+	spider_chart = load("res://scripts/spider_chart.gd").new()
+	spider_chart.custom_minimum_size = Vector2(160, 160)
+	spider_chart.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	vbox.add_child(spider_chart)
+	spider_chart.hide()
 
 func _create_weapon_ui(grid: GridContainer, w_id: String, w_name: String) -> void:
 	var info_vbox = VBoxContainer.new()
@@ -93,3 +106,22 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 					btn.text = "NO LOCK"
 				else:
 					btn.text = "FIRE"
+					
+	if selected_contact_id == "":
+		target_info_label.text = "NO TARGET LOCKED"
+		if is_instance_valid(spider_chart): spider_chart.hide()
+	else:
+		if current_state.has("contacts") and current_state["contacts"].has(selected_contact_id):
+			var c = current_state["contacts"][selected_contact_id]
+			var sig = c.get("signature", {"heat": 0.0, "em_noise": 0.0, "cross_section": 1.0, "density": 0.0})
+			var speed = c.get("vel", Vector2.ZERO).length()
+			var dist = current_state["pos"].distance_to(c["pos"]) if current_state.has("pos") and c.has("pos") else 0.0
+			target_info_label.text = "Target: %s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nDist: %.1f m | Spd: %.1f m/s" % [
+				selected_contact_id, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0), dist, speed
+			]
+			if is_instance_valid(spider_chart):
+				spider_chart.set_values(sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0))
+				spider_chart.show()
+		else:
+			target_info_label.text = "TARGET LOST"
+			if is_instance_valid(spider_chart): spider_chart.hide()

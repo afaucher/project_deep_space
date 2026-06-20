@@ -80,6 +80,8 @@ func _ready() -> void:
 	sensor_panel = SensorPanel.new()
 	sensor_panel.contact_pin_toggled.connect(_on_contact_pin_toggled)
 	sensor_panel.selection_changed.connect(_on_selection_changed)
+	sensor_panel.sensor_state_changed.connect(_on_sensor_state_changed)
+	sensor_panel.all_sensors_state_changed.connect(_on_all_sensors_state_changed)
 	sensor_container.add_child(sensor_panel)
 	content_hbox.add_child(sensor_container)
 	
@@ -160,3 +162,17 @@ func _on_selection_changed(c_id: String) -> void:
 	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
 	if ship_node:
 		ship_node.rpc_id(1, "set_sensor_target", c_id)
+
+func _on_sensor_state_changed(sensor_id: String, is_active: bool) -> void:
+	var my_id = multiplayer.get_unique_id()
+	var ship_node_name = "Ship_" + str(my_id)
+	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	if ship_node:
+		ship_node.rpc_id(1, "set_sensor_state", sensor_id, is_active)
+
+func _on_all_sensors_state_changed(is_active: bool) -> void:
+	var my_id = multiplayer.get_unique_id()
+	var ship_node_name = "Ship_" + str(my_id)
+	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	if ship_node:
+		ship_node.rpc_id(1, "set_all_sensors_state", is_active)

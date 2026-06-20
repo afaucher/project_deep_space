@@ -137,6 +137,7 @@ func _distribute_state() -> void:
 			"vel": ship.linear_velocity,
 			"throttle": ship.actual_throttle,
 			"sensors": ship.active_sensor_sweeps.duplicate(true),
+			"sensor_config": ship.sensor_hardware.duplicate(true),
 			"contacts": ship.active_contacts.duplicate(true),
 			"weapons": ship.weapons.duplicate(true)
 		}

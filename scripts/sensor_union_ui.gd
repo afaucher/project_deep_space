@@ -68,11 +68,12 @@ func _draw() -> void:
 			p2 = center + Vector2(radius + 8, 0).rotated(a)
 			
 			var label = ""
-			if i == 0: label = "E"
-			elif i == 9: label = "S"
-			elif i == 18: label = "W"
-			elif i == 27: label = "N"
-			else: label = str(i * 10)
+			var display_angle = int(wrapf(i * 10 + 90, 0, 360))
+			if display_angle == 0: label = "N"
+			elif display_angle == 90: label = "E"
+			elif display_angle == 180: label = "S"
+			elif display_angle == 270: label = "W"
+			else: label = str(display_angle)
 			
 			var text_pos = center + Vector2(radius + 20, 0).rotated(a)
 			text_pos.y += 4
