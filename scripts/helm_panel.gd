@@ -21,6 +21,7 @@ class HeadingDial extends Control:
 	signal target_angle_changed(angle: float)
 	var target_angle: float = 0.0
 	var actual_angle: float = 0.0
+	var is_ship_oriented: bool = false
 	
 	func _ready() -> void:
 		custom_minimum_size = Vector2(200, 200)
@@ -29,7 +30,10 @@ class HeadingDial extends Control:
 		if event is InputEventMouseMotion or event is InputEventMouseButton:
 			if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 				var center = size / 2.0
-				target_angle = center.angle_to_point(get_local_mouse_position())
+				var clicked_angle = center.angle_to_point(get_local_mouse_position())
+				if is_ship_oriented:
+					clicked_angle += actual_angle + PI/2.0
+				target_angle = wrapf(clicked_angle, -PI, PI)
 				target_angle_changed.emit(target_angle)
 				queue_redraw()
 				
@@ -44,9 +48,14 @@ class HeadingDial extends Control:
 		# Draw markings
 		var font = ThemeDB.fallback_font
 		var font_size = 12
+		var map_rot = 0.0
+		if is_ship_oriented:
+			map_rot = -actual_angle - PI/2.0
+			
 		for i in range(0, 360, 30):
 			var godot_angle = deg_to_rad(i - 90.0)
-			var dir = Vector2.RIGHT.rotated(godot_angle)
+			var draw_angle = godot_angle + map_rot
+			var dir = Vector2.RIGHT.rotated(draw_angle)
 			
 			var is_cardinal = (i % 90 == 0)
 			var tick_color = Color.GREEN if is_cardinal else Color(0.0, 0.8, 0.0, 0.6)
@@ -67,11 +76,13 @@ class HeadingDial extends Control:
 			draw_string(font, text_pos - text_size / 2.0 + Vector2(0, font_size / 3.0), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, tick_color)
 			
 		# Draw ghost needle (Target)
-		var ghost_end = center + Vector2.RIGHT.rotated(target_angle) * radius
+		var draw_target = target_angle + map_rot
+		var ghost_end = center + Vector2.RIGHT.rotated(draw_target) * radius
 		draw_line(center, ghost_end, Color(0.5, 0.5, 0.5, 0.5), 6.0)
 		
 		# Draw actual needle
-		var actual_end = center + Vector2.RIGHT.rotated(actual_angle) * radius
+		var draw_actual = actual_angle + map_rot
+		var actual_end = center + Vector2.RIGHT.rotated(draw_actual) * radius
 		draw_line(center, actual_end, Color.CYAN, 3.0)
 		draw_circle(actual_end, 5.0, Color.CYAN)
 
@@ -243,6 +254,7 @@ func update_data(packet: Dictionary) -> void:
 	# Update dial
 	var rot = current_state.get("rot", 0.0)
 	heading_dial.actual_angle = rot
+	heading_dial.is_ship_oriented = current_state.get("is_ship_oriented", false)
 	heading_dial.queue_redraw()
 	
 	# Update Engine Controls

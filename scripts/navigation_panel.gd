@@ -9,7 +9,7 @@ var current_state: Dictionary = {
 }
 
 var map_zoom: float = 1.0
-var is_ship_oriented: bool = false
+
 var zoom_slider: HSlider
 
 # Toggles
@@ -29,13 +29,7 @@ func _ready() -> void:
 	overlay.size = Vector2(300, 40)
 	add_child(overlay)
 	
-	var orient_btn = CheckButton.new()
-	orient_btn.text = "Ship Oriented"
-	orient_btn.toggled.connect(func(pressed: bool): 
-		is_ship_oriented = pressed
-		queue_redraw()
-	)
-	overlay.add_child(orient_btn)
+
 	
 	var zoom_label = Label.new()
 	zoom_label.text = "Zoom:"
@@ -85,6 +79,7 @@ func _ready() -> void:
 	overlay.add_child(cb_grid)
 
 func _gui_input(event: InputEvent) -> void:
+	var is_ship_oriented = current_state.get("is_ship_oriented", false)
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			zoom_slider.value *= 1.25
@@ -100,6 +95,7 @@ func _handle_click(click_pos: Vector2) -> void:
 	var rot = current_state.get("rot", 0.0)
 	var camera_pos = pos
 	
+	var is_ship_oriented = current_state.get("is_ship_oriented", false)
 	if not is_ship_oriented:
 		var grid_size = 200000.0
 		var visible_half = (size / 2.0) / map_zoom
@@ -141,6 +137,7 @@ func update_data(packet: Dictionary) -> void:
 	queue_redraw()
 
 func _draw() -> void:
+	var is_ship_oriented = current_state.get("is_ship_oriented", false)
 	var center = size / 2.0
 	var pos = current_state.get("pos", Vector2.ZERO)
 	var rot = current_state.get("rot", 0.0)
@@ -228,15 +225,19 @@ func _draw() -> void:
 		var weapons = current_state.get("weapons", {})
 		for w_id in weapons:
 			var w = weapons[w_id]
-			if w.has("range") and w.has("arc_width"):
+			if w.has("range") and w.has("arc_width") and w.has("heading"):
 				var r = w["range"]
 				var arc_w = w["arc_width"]
-				var start_angle = rot - arc_w / 2.0
-				var end_angle = rot + arc_w / 2.0
-				var arc_color = Color(1.0, 0.3, 0.0, 0.4)
-				draw_arc(pos, r, start_angle, end_angle, 32, arc_color, 2.0 / map_zoom)
-				draw_line(pos, pos + Vector2(r, 0).rotated(start_angle), arc_color, 1.0 / map_zoom)
-				draw_line(pos, pos + Vector2(r, 0).rotated(end_angle), arc_color, 1.0 / map_zoom)
+				var w_heading = w["heading"]
+				var mount_pos = w.get("mount_pos", Vector2.ZERO)
+				var global_mount = pos + mount_pos.rotated(rot)
+				
+				var start_angle = rot + w_heading - arc_w / 2.0
+				var end_angle = rot + w_heading + arc_w / 2.0
+				var arc_color = Color(1.0, 0.3, 0.0, 0.2) # slightly more transparent
+				draw_arc(global_mount, r, start_angle, end_angle, 32, arc_color, 2.0 / map_zoom)
+				draw_line(global_mount, global_mount + Vector2(r, 0).rotated(start_angle), arc_color, 1.0 / map_zoom)
+				draw_line(global_mount, global_mount + Vector2(r, 0).rotated(end_angle), arc_color, 1.0 / map_zoom)
 				
 	# Draw sensor arcs and wedges
 	if show_sensor_arcs:
@@ -251,7 +252,7 @@ func _draw() -> void:
 			var bin_angle = bins[0].get("bin_angle", TAU/36.0)
 			
 			if s_arc_width >= TAU - 0.01:
-				draw_arc(pos, s_range, 0, TAU, 64, Color(0.2, 0.5, 0.2, 0.4), 2.0 / map_zoom)
+				draw_arc(pos, s_range, 0, TAU, 64, Color(0.2, 0.8, 0.8, 0.4), 2.0 / map_zoom)
 			else:
 				var s_start = s_heading - (s_arc_width / 2.0)
 				var s_end = s_heading + (s_arc_width / 2.0)
@@ -335,7 +336,7 @@ func _draw() -> void:
 	
 	# Scale Reference
 	if show_grid:
-		var scale_text = "Grid: %dm" % int(grid_step)
+		var scale_text = "Grid: %s" % Utils.format_dist(grid_step)
 		var scale_font = ThemeDB.fallback_font
 		var scale_text_size = scale_font.get_string_size(scale_text, HORIZONTAL_ALIGNMENT_RIGHT, -1, 14)
 		

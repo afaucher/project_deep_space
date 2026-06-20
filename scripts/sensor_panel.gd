@@ -152,7 +152,7 @@ func update_data(packet: Dictionary) -> void:
 			
 		for sensor_id in sensor_modules.keys():
 			var bins = sensors_dict.get(sensor_id, [])
-			sensor_modules[sensor_id].update_data(sensor_id, bins, my_pos, current_state.get("contacts", {}), selected_contact_id)
+			sensor_modules[sensor_id].update_data(sensor_id, bins, my_pos, current_state.get("contacts", {}), selected_contact_id, current_state)
 			
 	if current_state.has("contacts"):
 		_update_contact_list(current_state["contacts"])
@@ -267,8 +267,8 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var vel = c.get("vel", Vector2.ZERO)
 		var speed = vel.length()
 		var sig = c.get("signature", {})
-		info.text = "Dist: %.1f m | Spd: %.1f m/s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
-			dist, speed, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
+		info.text = "Dist: %s | Spd: %.1f m/s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
+			Utils.format_dist(dist), speed, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
 		]
 
 func _draw() -> void:

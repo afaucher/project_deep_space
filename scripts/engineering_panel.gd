@@ -4,6 +4,7 @@ var current_state: Dictionary = {}
 
 var top_hbox: HBoxContainer
 var heat_bar: ProgressBar
+var heat_gen_bar: ProgressBar
 var em_chart: EMPolarChart
 var spatial_view: ComponentSpatialView
 var components_vbox: VBoxContainer
@@ -15,6 +16,8 @@ var lbl_det_dist: Label
 class EMPolarChart extends Control:
 	var em_value: float = 0.0
 	var sensor_config: Array = []
+	var is_ship_oriented: bool = false
+	var ship_rot: float = 0.0
 	
 	func _process(delta: float) -> void:
 		queue_redraw()
@@ -40,19 +43,25 @@ class EMPolarChart extends Control:
 		
 		for i in range(32):
 			var a = (i / 32.0) * TAU
-			var local_r = base_radius
+			
+			var rear_angle = ship_rot + PI
+			if is_ship_oriented:
+				rear_angle = PI / 2.0
+				
+			var rear_bias = 1.0 + 0.5 * max(0.0, cos(a - rear_angle))
+			var local_r = base_radius * rear_bias
 			
 			for s in sensor_config:
 				if s.get("type", "") == "active" and s.get("active", true):
 					var s_arc = s.get("arc_width", TAU)
-					var s_heading = s.get("heading", 0.0) - PI/2.0 # Ship Forward is -PI/2 in UI space
+					var s_heading = s.get("heading", 0.0)
+					if is_ship_oriented:
+						s_heading = (s_heading - ship_rot) - PI/2.0
+					# else: s_heading is already absolute world heading
+						
 					var diff = abs(wrapf(a - s_heading, -PI, PI))
 					if diff <= s_arc / 2.0:
-						var s_power = 0.0
-						if s.get("id") == "omni_main": s_power = 20.0
-						elif s.get("id") == "dir_high_res": s_power = 100.0 # Emphasize directional spike
-						elif s.get("id") == "omni_short_hi_res": s_power = 10.0
-						
+						var s_power = s.get("em_emission", 0.0)
 						local_r += (s_power / 200.0) * max_radius * (1.0 - diff/(s_arc/2.0))
 			
 			var noise = random.randf_range(0.9, 1.1)
@@ -150,13 +159,22 @@ func _ready() -> void:
 	heat_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_hbox.add_child(heat_vbox)
 	var heat_lbl = Label.new()
-	heat_lbl.text = "Overall Heat"
+	heat_lbl.text = "Accumulated Heat"
 	heat_vbox.add_child(heat_lbl)
 	heat_bar = ProgressBar.new()
 	heat_bar.max_value = 200.0
-	heat_bar.custom_minimum_size.y = 20
+	heat_bar.custom_minimum_size.y = 15
 	heat_bar.modulate = Color(1.0, 0.3, 0.1)
 	heat_vbox.add_child(heat_bar)
+	
+	var heat_gen_lbl = Label.new()
+	heat_gen_lbl.text = "Heat Sink Capacity"
+	heat_vbox.add_child(heat_gen_lbl)
+	heat_gen_bar = ProgressBar.new()
+	heat_gen_bar.max_value = 5.0
+	heat_gen_bar.custom_minimum_size.y = 15
+	heat_gen_bar.modulate = Color(0.2, 0.8, 0.2)
+	heat_vbox.add_child(heat_gen_bar)
 	
 	var em_vbox = VBoxContainer.new()
 	em_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -239,7 +257,19 @@ func update_data(state: Dictionary) -> void:
 		heat_bar.value = eng.get("current_heat", 0.0)
 		heat_bar.max_value = max(1.0, eng.get("max_heat", 200.0))
 		
+		var h_gen = eng.get("heat_gen", 0.0)
+		var h_cap = eng.get("heat_dissipation_rate", 5.0)
+		heat_gen_bar.max_value = max(1.0, h_cap)
+		heat_gen_bar.value = h_gen
+		if h_gen > h_cap:
+			heat_gen_bar.modulate = Color(1.0, 0.2, 0.2) # Over capacity (Red)
+		else:
+			heat_gen_bar.modulate = Color(0.2, 0.8, 0.2) # Within capacity (Green)
+		
 		var em_sig = eng.get("em_signature", 0.0)
+		var is_ship_oriented = current_state.get("is_ship_oriented", false)
+		em_chart.is_ship_oriented = is_ship_oriented
+		em_chart.ship_rot = current_state.get("rot", 0.0)
 		em_chart.em_value = em_sig
 		em_chart.sensor_config = current_state.get("sensor_config", [])
 		em_chart.queue_redraw()
@@ -253,7 +283,7 @@ func update_data(state: Dictionary) -> void:
 		if lbl_peak_em: lbl_peak_em.text = "Peak: %.0f EM" % peak_em
 		if lbl_det_dist:
 			var det_dist = (peak_em * 10000.0) / 15.0
-			lbl_det_dist.text = "Det. Range: %d km" % int(det_dist / 1000.0)
+			lbl_det_dist.text = "Det. Range: %s" % Utils.format_dist(det_dist)
 		
 		spatial_view.eng_state = eng
 		spatial_view.queue_redraw()

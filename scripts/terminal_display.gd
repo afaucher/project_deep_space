@@ -13,6 +13,7 @@ var weapons_panel: Control
 var eng_panel: Control
 
 var pinned_contacts: Array = []
+var current_ship_oriented: bool = false
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -56,6 +57,16 @@ func _ready() -> void:
 	eng_toggle.text = "Engineering"
 	eng_toggle.button_pressed = true
 	top_bar.add_child(eng_toggle)
+	
+	var spacer = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(spacer)
+	
+	var ship_oriented_toggle = CheckButton.new()
+	ship_oriented_toggle.text = "Ship Oriented"
+	ship_oriented_toggle.button_pressed = false
+	ship_oriented_toggle.toggled.connect(func(pressed): current_ship_oriented = pressed)
+	top_bar.add_child(ship_oriented_toggle)
 	
 	# --- Main Content Area ---
 	var content_hbox = HBoxContainer.new()
@@ -154,6 +165,7 @@ func _ready() -> void:
 func update_data(packet: Dictionary) -> void:
 	# Inject local UI state into the packet so sub-panels can read it
 	packet["pinned_contacts"] = pinned_contacts
+	packet["is_ship_oriented"] = current_ship_oriented
 	
 	var selected_target = sensor_panel.get_selected_contact_id() if sensor_panel.has_method("get_selected_contact_id") else ""
 	packet["selected_contact_id"] = selected_target
@@ -188,6 +200,9 @@ func _on_contact_pin_toggled(c_id: String, is_pinned: bool) -> void:
 		pinned_contacts.erase(c_id)
 
 func _on_selection_changed(c_id: String) -> void:
+	if sensor_panel and sensor_panel.has_method("set_selected_contact_id"):
+		sensor_panel.set_selected_contact_id(c_id)
+	
 	var my_id = multiplayer.get_unique_id()
 	var ship_node_name = "Ship_" + str(my_id)
 	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)

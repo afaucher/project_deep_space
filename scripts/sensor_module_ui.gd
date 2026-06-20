@@ -5,6 +5,7 @@ signal toggle_changed(s_id: String, is_active: bool)
 
 var sensor_id: String = ""
 var current_bins: Array = []
+var current_state: Dictionary = {}
 var sensor_heading: float = 0.0
 var sensor_arc_width: float = TAU
 var sensor_range: float = 40000.0
@@ -40,12 +41,13 @@ func set_active(is_active: bool) -> void:
 		active_toggle.set_pressed_no_signal(is_active)
 		active_toggle.text = "ON" if is_active else "OFF"
 
-func update_data(id: String, bins: Array, p_pos: Vector2, c_dict: Dictionary, sel_id: String) -> void:
+func update_data(id: String, bins: Array, p_pos: Vector2, c_dict: Dictionary, sel_id: String, state: Dictionary = {}) -> void:
 	sensor_id = id
 	current_bins = bins
 	my_pos = p_pos
 	contacts = c_dict
 	selected_contact_id = sel_id
+	current_state = state
 	
 	if bins.size() > 0:
 		sensor_heading = bins[0].get("sensor_heading", 0.0)
@@ -75,7 +77,14 @@ func _gui_input(event: InputEvent) -> void:
 			if rel_angle >= -half_arc and rel_angle <= half_arc:
 				var dist_ratio = clampf(dist / sensor_range, 0.0, 1.0)
 				var dot_radius = radius * dist_ratio
-				var ui_pos = center + Vector2(dot_radius, 0).rotated(angle)
+				
+				var is_ship_oriented = current_state.get("is_ship_oriented", false)
+				var ship_rot = current_state.get("rot", 0.0)
+				var map_rot = 0.0
+				if is_ship_oriented:
+					map_rot = -ship_rot - PI/2.0
+					
+				var ui_pos = center + Vector2(dot_radius, 0).rotated(angle + map_rot)
 				
 				var click_dist = event.position.distance_to(ui_pos)
 				if click_dist < best_dist:
@@ -89,8 +98,14 @@ func _draw() -> void:
 	var center = size / 2.0
 	var radius = min(size.x, size.y) / 2.0 - 20.0
 	
-	var start_angle = sensor_heading - (sensor_arc_width / 2.0)
-	var end_angle = sensor_heading + (sensor_arc_width / 2.0)
+	var is_ship_oriented = current_state.get("is_ship_oriented", false)
+	var ship_rot = current_state.get("rot", 0.0)
+	var map_rot = 0.0
+	if is_ship_oriented:
+		map_rot = -ship_rot - PI/2.0
+		
+	var start_angle = sensor_heading - (sensor_arc_width / 2.0) + map_rot
+	var end_angle = sensor_heading + (sensor_arc_width / 2.0) + map_rot
 	
 	# Draw background arc
 	if sensor_arc_width >= TAU - 0.01:
@@ -180,6 +195,11 @@ func _draw() -> void:
 			if rel_angle >= -half_arc and rel_angle <= half_arc:
 				var dist_ratio = clampf(dist / sensor_range, 0.0, 1.0)
 				var dot_radius = radius * dist_ratio
-				var ui_pos = center + Vector2(dot_radius, 0).rotated(angle)
+				
+				var ui_pos = center + Vector2(dot_radius, 0).rotated(angle + map_rot)
 				draw_circle(ui_pos, 10.0, Color(1, 1, 1, 0.5))
 				draw_arc(ui_pos, 15.0, 0, TAU, 16, Color.WHITE, 2.0)
+
+	var text = "Range: %s" % Utils.format_dist(sensor_range)
+	var text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_RIGHT, -1, 12)
+	draw_string(font, size - Vector2(text_size.x + 10, 10), text, HORIZONTAL_ALIGNMENT_RIGHT, -1, 14, Color.GRAY)
