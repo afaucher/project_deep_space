@@ -4,11 +4,13 @@ const NavigationPanel = preload("res://scripts/navigation_panel.gd")
 const HelmPanel = preload("res://scripts/helm_panel.gd")
 const SensorPanel = preload("res://scripts/sensor_panel.gd")
 const WeaponsPanel = preload("res://scripts/weapons_panel.gd")
+const EngineeringPanel = preload("res://scripts/engineering_panel.gd")
 
 var nav_panel: Control
 var helm_panel: Control
 var sensor_panel: Control
 var weapons_panel: Control
+var eng_panel: Control
 
 var pinned_contacts: Array = []
 
@@ -50,6 +52,11 @@ func _ready() -> void:
 	weapons_toggle.button_pressed = true
 	top_bar.add_child(weapons_toggle)
 	
+	var eng_toggle = CheckButton.new()
+	eng_toggle.text = "Engineering"
+	eng_toggle.button_pressed = true
+	top_bar.add_child(eng_toggle)
+	
 	# --- Main Content Area ---
 	var content_hbox = HBoxContainer.new()
 	content_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -58,6 +65,7 @@ func _ready() -> void:
 	# --- Navigation Panel ---
 	var nav_container = PanelContainer.new()
 	nav_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nav_container.size_flags_stretch_ratio = 2.0
 	var nav_style = StyleBoxFlat.new()
 	nav_style.bg_color = Color(0.05, 0.05, 0.1)
 	nav_style.border_width_right = 2
@@ -65,12 +73,14 @@ func _ready() -> void:
 	nav_container.add_theme_stylebox_override("panel", nav_style)
 	
 	nav_panel = NavigationPanel.new()
+	nav_panel.contact_selected.connect(_on_selection_changed)
 	nav_container.add_child(nav_panel)
 	content_hbox.add_child(nav_container)
 	
 	# --- Sensor Panel ---
 	var sensor_container = PanelContainer.new()
 	sensor_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sensor_container.size_flags_stretch_ratio = 1.0
 	var sensor_style = StyleBoxFlat.new()
 	sensor_style.bg_color = Color(0.02, 0.05, 0.02)
 	sensor_style.border_width_right = 2
@@ -88,6 +98,7 @@ func _ready() -> void:
 	# --- Right Panel Stack (Helm + Weapons) ---
 	var right_vbox = VBoxContainer.new()
 	right_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_vbox.size_flags_stretch_ratio = 1.0
 	content_hbox.add_child(right_vbox)
 	
 	# --- Helm Panel ---
@@ -118,15 +129,34 @@ func _ready() -> void:
 	weapons_container.add_child(weapons_panel)
 	right_vbox.add_child(weapons_container)
 	
+	# --- Engineering Panel ---
+	var eng_container = PanelContainer.new()
+	eng_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	eng_container.size_flags_stretch_ratio = 1.0
+	var eng_style = StyleBoxFlat.new()
+	eng_style.bg_color = Color(0.05, 0.05, 0.05)
+	eng_style.border_width_left = 2
+	eng_style.border_color = Color(0.6, 0.4, 0.1)
+	eng_container.add_theme_stylebox_override("panel", eng_style)
+	
+	eng_panel = EngineeringPanel.new()
+	eng_container.add_child(eng_panel)
+	content_hbox.add_child(eng_container)
+	eng_container.visible = true
+	
 	# Connect toggles
 	nav_toggle.toggled.connect(func(pressed): nav_container.visible = pressed)
 	sensor_toggle.toggled.connect(func(pressed): sensor_container.visible = pressed)
 	helm_toggle.toggled.connect(func(pressed): helm_container.visible = pressed)
 	weapons_toggle.toggled.connect(func(pressed): weapons_container.visible = pressed)
+	eng_toggle.toggled.connect(func(pressed): eng_container.visible = pressed)
 
 func update_data(packet: Dictionary) -> void:
 	# Inject local UI state into the packet so sub-panels can read it
 	packet["pinned_contacts"] = pinned_contacts
+	
+	var selected_target = sensor_panel.get_selected_contact_id() if sensor_panel.has_method("get_selected_contact_id") else ""
+	packet["selected_contact_id"] = selected_target
 	
 	if nav_panel and nav_panel.has_method("update_data"):
 		nav_panel.update_data(packet)
@@ -135,8 +165,9 @@ func update_data(packet: Dictionary) -> void:
 	if sensor_panel and sensor_panel.has_method("update_data"):
 		sensor_panel.update_data(packet)
 	if weapons_panel and weapons_panel.has_method("update_data"):
-		var selected_target = sensor_panel.get_selected_contact_id() if sensor_panel.has_method("get_selected_contact_id") else ""
 		weapons_panel.update_data(packet, selected_target)
+	if eng_panel and eng_panel.has_method("update_data"):
+		eng_panel.update_data(packet)
 
 func _on_fire_weapon_requested(weapon_id: String) -> void:
 	var target_id = sensor_panel.get_selected_contact_id() if sensor_panel.has_method("get_selected_contact_id") else ""

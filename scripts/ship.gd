@@ -17,7 +17,9 @@ var weapons = {
 	"laser_head": {
 		"ammo": 10,
 		"cooldown": 0.0,
-		"cooldown_max": 5.0
+		"cooldown_max": 5.0,
+		"range": 28000.0,
+		"arc_width": PI / 3.0 # 60 degree forward arc (matches missile seeker)
 	},
 	"ship_laser": {
 		"ammo": 999,
@@ -31,51 +33,125 @@ var weapons = {
 
 var point_defense_active: bool = true
 
+# Engineering / Subsystems
+var subsystems: Dictionary = {
+	"reactor": {"power": 1.0},
+	"engines": {"power": 1.0},
+	"weapons": {"power": 1.0},
+	"sensors": {"power": 1.0}
+}
+
+var ship_components: Array = [
+	# Layout relative to center (0,0). Forward +X, Right +Y
+	{"id": "hull_fwd", "type": "hull", "rect": Rect2(10, -20, 10, 40), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0},
+	{"id": "hull_port", "type": "hull", "rect": Rect2(-10, -20, 20, 10), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0},
+	{"id": "hull_stbd", "type": "hull", "rect": Rect2(-10, 10, 20, 10), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0},
+	{"id": "hull_aft", "type": "hull", "rect": Rect2(-20, -20, 10, 40), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0},
+	
+	{"id": "reactor_core", "type": "reactor", "rect": Rect2(-5, -5, 10, 10), "health": 200.0, "max_health": 200.0, "density": 0.9, "heat": 0.0, "em_emission": 0.0},
+	{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 0.7, "heat": 0.0, "em_emission": 0.0},
+	
+	{"id": "sensor_array", "type": "sensors", "rect": Rect2(15, -5, 5, 10), "health": 100.0, "max_health": 100.0, "density": 0.4, "heat": 0.0, "em_emission": 0.0},
+	{"id": "weapon_sys", "type": "weapons", "rect": Rect2(5, -10, 10, 20), "health": 400.0, "max_health": 400.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0}
+]
+
+var current_heat: float = 10.0
+var max_heat: float = 200.0
+var heat_dissipation_rate: float = 5.0
+var silent_running: bool = false
+var is_dead: bool = false
+var em_signature: float = 0.0
+
+func get_sys_health(sys_type: String) -> float:
+	var h = 0.0
+	for c in ship_components:
+		if c["type"] == sys_type:
+			h += max(0.0, c["health"])
+	return h
+
+func get_sys_max_health(sys_type: String) -> float:
+	var h = 0.0
+	for c in ship_components:
+		if c["type"] == sys_type:
+			h += c["max_health"]
+	return h
+
+# Legacy getters
+var health: float:
+	get: return get_sys_health("hull")
+	set(value): pass # Obsolete, damage uses volumetric now
+
+var base_heat: float:
+	get: return current_heat
+
+var em_noise: float:
+	get: 
+		if silent_running: return 1.0
+		var noise = 5.0 * subsystems["reactor"]["power"]
+		if point_defense_active: noise += 15.0
+		for s in sensor_hardware:
+			if s.get("active", true): noise += 5.0
+		return noise
+
 # Sensor Signature Profile
 var cross_section: float = 50.0  # Medium size
-var base_heat: float = 10.0      # Idle systems
-var em_noise: float = 5.0        # Comms/Reactor hum
 var density: float = 90.0        # Solid armor
-
-var health: float = 5000.0
-var is_dead: bool = false
 
 var sfx_engine: AudioStreamPlayer
 var sfx_rcs: AudioStreamPlayer
 var sfx_laser: AudioStreamPlayer
 var sfx_missile: AudioStreamPlayer
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO) -> void:
 	if is_dead: return
-	health -= amount
-	if health <= 0:
+	
+	if global_pos == Vector2.ZERO and global_dir == Vector2.ZERO:
+		# Fallback for untracked damage
+		for c in ship_components:
+			if c["type"] == "hull":
+				c["health"] -= amount / 4.0
+	else:
+		# Volumetric Raycast Damage
+		var local_pos = to_local(global_pos)
+		var local_dir = global_dir.rotated(-rotation)
+		
+		var remaining_damage = amount
+		var step_size = 2.0
+		var max_steps = 100
+		var current_pos = local_pos
+		
+		for i in range(max_steps):
+			if remaining_damage <= 0: break
+			
+			for comp in ship_components:
+				if comp["health"] <= 0: continue
+				if comp["rect"].has_point(current_pos):
+					# Damping/Ablation based on density
+					var dmg_absorbed = min(remaining_damage, comp["density"] * step_size * 50.0)
+					if dmg_absorbed > 0:
+						comp["health"] -= dmg_absorbed
+						var heat_generated = dmg_absorbed * 0.1
+						comp["heat"] = comp.get("heat", 0.0) + heat_generated
+						current_heat += heat_generated
+						remaining_damage -= dmg_absorbed
+			
+			current_pos += local_dir * step_size
+			
+	# Check death condition (reactor dead)
+	if get_sys_health("reactor") <= 0.0 or get_sys_health("hull") <= 0.0:
 		hulk()
 
 func hulk() -> void:
 	is_dead = true
-	base_heat = 0.0
-	em_noise = 0.0
+	current_heat = 0.0
 	# Broadcast a neutral ID so allies don't see it as friendly anymore?
 	# Or keep owner_id but with zero emissions so it's clearly wreckage
 
 func get_signature() -> Dictionary:
-	# Heat spikes when thrusting
-	var current_heat = base_heat
-	if not is_dead:
-		current_heat += (abs(actual_throttle) * 100.0)
-		
-	var current_em = em_noise
-	if not is_dead:
-		for s in sensor_hardware:
-			if s.get("active", true):
-				if s["id"] == "omni_main": current_em += 20.0
-				elif s["id"] == "dir_high_res": current_em += 40.0
-				elif s["id"] == "omni_short_hi_res": current_em += 10.0
-		
 	return {
 		"cross_section": cross_section,
 		"heat": current_heat,
-		"em_noise": current_em,
+		"em_noise": em_signature,
 		"density": density,
 		"owner_id": int(name.replace("Ship_", "")),
 		"pos": position,
@@ -268,11 +344,16 @@ func _physics_process(delta: float) -> void:
 	if linear_velocity.length() > max_speed:
 		linear_velocity = linear_velocity.normalized() * max_speed
 	
+	# Enforce absolute speed limit (Reactor Safety Governor)
+	if linear_velocity.length() > max_speed:
+		linear_velocity = linear_velocity.normalized() * max_speed
+	
 	# Time-Optimal Rotational Controller (Square-root curve braking)
 	var angle_diff = wrapf(target_heading - rotation, -PI, PI)
 	
-	var active_max_torque = 10000.0 if steering_mode == 1 else 2000.0
-	var active_max_omega = 2.0 if steering_mode == 1 else 0.5
+	var active_engine_efficiency = (get_sys_health("engines") / max(1.0, get_sys_max_health("engines"))) * subsystems["engines"]["power"]
+	var active_max_torque = (10000.0 if steering_mode == 1 else 2000.0) * active_engine_efficiency
+	var active_max_omega = (2.0 if steering_mode == 1 else 0.5) * active_engine_efficiency
 	
 	var alpha_max = active_max_torque / inertia
 	
@@ -294,39 +375,17 @@ func _physics_process(delta: float) -> void:
 		if sfx_rcs.playing:
 			sfx_rcs.stop()
 	
-	# Auto-steer dir_high_res scanner based on omni_main contacts
-	var target_heading_val = rotation # Default to forward
-	
-	if manual_sensor_target != "" and active_contacts.has(manual_sensor_target):
-		target_heading_val = position.angle_to_point(active_contacts[manual_sensor_target]["pos"])
-	elif active_sensor_sweeps.has("omni_main"):
-		var omni_bins = active_sensor_sweeps["omni_main"]
-		var enemy_bearings = []
-		for bin in omni_bins:
-			if bin.get("heat", 0.0) > 5.0 or bin.get("em_noise", 0.0) > 5.0:
-				var angle = position.angle_to_point(bin["pos"])
-				enemy_bearings.append(angle)
-		
-		if enemy_bearings.size() > 0:
-			_high_res_target_timer += delta
-			if _high_res_target_timer > 3.0: # dwell time
-				_high_res_target_timer -= 3.0
-				_high_res_target_idx += 1
-				
-			if _high_res_target_idx >= enemy_bearings.size():
-				_high_res_target_idx = 0
-			
-			target_heading_val = enemy_bearings[_high_res_target_idx]
-			
-		for s in sensor_hardware:
-			if s["id"] == "dir_high_res":
-				s["heading"] = target_heading_val
+	# Pin dir_high_res scanner to forward
+	for s in sensor_hardware:
+		if s["id"] == "dir_high_res":
+			s["heading"] = rotation
 	
 	# Decay and dead-reckon contacts
 	var to_remove = []
 	for c_id in active_contacts:
 		var c = active_contacts[c_id]
 		c["last_seen_timer"] += delta
+		c["pos_timer"] += delta
 		
 		# Dead-reckon their position based on velocity
 		if c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2:
@@ -339,9 +398,54 @@ func _physics_process(delta: float) -> void:
 	
 	var bins_this_frame = []
 
+	# --- Heat & Engineering Logic ---
+	if is_multiplayer_authority() and not is_dead:
+		var heat_gen = 0.0
+		var reactor_heat = 2.0 * subsystems["reactor"]["power"]
+		var engine_heat = abs(actual_throttle) * 10.0 * subsystems["engines"]["power"]
+		engine_heat += (abs(torque) / max(1.0, active_max_torque)) * 5.0 * subsystems["engines"]["power"]
+		
+		heat_gen = reactor_heat + engine_heat
+		
+		current_heat += heat_gen * delta
+		current_heat -= heat_dissipation_rate * delta
+		current_heat = clampf(current_heat, 0.0, max_heat)
+		
+		if current_heat >= max_heat:
+			for c in ship_components:
+				if c["id"] == "reactor":
+					c["health"] -= 10.0 * delta
+					
+		# Update Component EM & Heat
+		var current_em = 100.0 + (abs(actual_throttle) * 100.0)
+		var sensor_em = 0.0
+		for s in sensor_hardware:
+			if s.get("active", true):
+				if s["id"] == "omni_main": sensor_em += 20.0
+				elif s["id"] == "dir_high_res": sensor_em += 40.0
+				elif s["id"] == "omni_short_hi_res": sensor_em += 10.0
+		current_em += sensor_em
+		em_signature = current_em
+		
+		for comp in ship_components:
+			if comp["type"] == "reactor":
+				comp["heat"] = 10.0 + reactor_heat
+				comp["em_emission"] = 100.0
+			elif comp["type"] == "engines":
+				comp["heat"] = engine_heat
+				comp["em_emission"] = abs(actual_throttle) * 100.0
+			elif comp["type"] == "sensors":
+				comp["heat"] = 5.0
+				comp["em_emission"] = sensor_em
+			else:
+				comp["heat"] = 0.0
+				comp["em_emission"] = 0.0
+
 	# Sensor Sweeps
+	var active_sensor_efficiency = (get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))) * subsystems["sensors"]["power"]
+	
 	for sensor in sensor_hardware:
-		if sensor["health"] <= 0.0:
+		if sensor["health"] <= 0.0 or active_sensor_efficiency <= 0.1:
 			continue
 		if not sensor.get("active", true):
 			active_sensor_sweeps[sensor["id"]] = []
@@ -376,29 +480,37 @@ func _physics_process(delta: float) -> void:
 				
 		if closest_contact_id != "":
 			var c = active_contacts[closest_contact_id]
-			c["pos"] = c["pos"].lerp(bin_pos, 0.8)
-			c["vel"] = c["vel"].lerp(bin.get("vel", Vector2.ZERO), 0.8)
-				
-			c["signature"] = {
-				"cross_section": bin.get("cross_section", 0.0),
-				"heat": bin.get("heat", 0.0),
-				"em_noise": bin.get("em_noise", 0.0),
-				"density": bin.get("density", 0.0),
-				"owner_id": bin.get("owner_id", -1)
-			}
-			c["last_seen_timer"] = 0.0
+			var bin_angle = bin.get("bin_angle", TAU)
+			var current_res = c.get("resolution", TAU)
+			var time_since_pos = c.get("pos_timer", 0.0)
 			
-			if c["signature"]["heat"] > 5.0 or c["signature"]["em_noise"] > 5.0:
-				if c["signature"].get("owner_id", -1) == int(name.replace("Ship_", "")):
-					c["classification"] = "FRIENDLY ORDNANCE"
+			if bin_angle <= current_res or time_since_pos > 0.3:
+				c["pos"] = c["pos"].lerp(bin_pos, 0.8)
+				c["vel"] = c["vel"].lerp(bin.get("vel", Vector2.ZERO), 0.8)
+				c["resolution"] = bin_angle
+				c["pos_timer"] = 0.0
+				
+				c["signature"] = {
+					"cross_section": bin.get("cross_section", 0.0),
+					"heat": bin.get("heat", 0.0),
+					"em_noise": bin.get("em_noise", 0.0),
+					"density": bin.get("density", 0.0),
+					"owner_id": bin.get("owner_id", -1)
+				}
+				
+				if c["signature"]["heat"] > 5.0 or c["signature"]["em_noise"] > 5.0:
+					if c["signature"].get("owner_id", -1) == int(name.replace("Ship_", "")):
+						c["classification"] = "FRIENDLY ORDNANCE"
+					else:
+						c["classification"] = "UNIDENTIFIED VESSEL"
 				else:
-					c["classification"] = "UNIDENTIFIED VESSEL"
-			else:
-				# TODO: Revisit classification matrix when we have a richer body of objects
-				if c["signature"].get("density", 500.0) <= 150.0:
-					c["classification"] = "WRECKAGE"
-				else:
-					c["classification"] = "ASTEROID"
+					# TODO: Revisit classification matrix when we have a richer body of objects
+					if c["signature"].get("density", 500.0) <= 150.0:
+						c["classification"] = "WRECKAGE"
+					else:
+						c["classification"] = "ASTEROID"
+						
+			c["last_seen_timer"] = 0.0
 		else:
 			if new_id == "":
 				new_id = "TRK-%03d" % next_contact_id
@@ -420,6 +532,8 @@ func _physics_process(delta: float) -> void:
 				"id": new_id,
 				"pos": bin_pos,
 				"vel": bin.get("vel", Vector2.ZERO),
+				"resolution": bin.get("bin_angle", TAU),
+				"pos_timer": 0.0,
 				"signature": {
 					"cross_section": bin.get("cross_section", 0.0),
 					"heat": bin.get("heat", 0.0),
@@ -456,9 +570,13 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 		if collider.has_method("get_signature"):
 			var sig = collider.get_signature()
 			
+			var dist = position.distance_to(collider.position)
+			
 			if sensor.get("type", "active") == "passive_em":
-				if sig.get("em_noise", 0.0) < 15.0:
-					continue # Passive EM only detects noisy targets
+				var em_power = sig.get("em_noise", 0.0)
+				var received_em = em_power * (10000.0 / max(10000.0, dist))
+				if received_em < 15.0:
+					continue # Passive EM only detects targets above noise floor (after falloff)
 			else:
 				# Active sensors check line of sight
 				var ray_query = PhysicsRayQueryParameters2D.create(position, collider.position)
@@ -467,7 +585,6 @@ func _run_sensor_sweep(sensor: Dictionary) -> Array:
 				if ray_res and ray_res.collider != collider:
 					continue # Blocked by obstacle
 			
-			var dist = position.distance_to(collider.position)
 			var angle = position.angle_to_point(collider.position)
 			
 			var rel_angle = wrapf(angle - SENSOR_HEADING, -PI, PI)
@@ -606,6 +723,13 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 				body.queue_free()
 	
 	elif weapon_id == "laser_head":
+		# Enforce launch arc if tracking a target
+		if active_contacts.has(target_contact_id):
+			var real_target_pos = active_contacts[target_contact_id]["pos"]
+			var angle_to = position.angle_to_point(real_target_pos)
+			var rel_angle = wrapf(angle_to - rotation, -PI, PI)
+			if abs(rel_angle) > weapons["laser_head"]["arc_width"] / 2.0: return
+			
 		weapons[weapon_id]["ammo"] -= 1
 		weapons[weapon_id]["cooldown"] = weapons[weapon_id]["cooldown_max"]
 		
@@ -622,11 +746,10 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 		var initial_vel = linear_velocity
 		
 		var target_profile = {}
-		var launch_angle = rotation
+		var launch_angle = rotation # Missiles shoot forward from tubes
+		
 		if active_contacts.has(target_contact_id):
 			target_profile = active_contacts[target_contact_id]["signature"]
-			launch_angle = position.angle_to_point(active_contacts[target_contact_id]["pos"])
-		
 		proj.setup(int(name.replace("Ship_", "")), spawn_pos, initial_vel, launch_angle)
 		proj.target_profile = target_profile
 		main_node.add_child(proj)

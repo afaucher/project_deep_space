@@ -1,5 +1,7 @@
 extends Control
 
+signal contact_selected(c_id: String)
+
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
 	"rot": 0.0,
@@ -9,6 +11,13 @@ var current_state: Dictionary = {
 var map_zoom: float = 1.0
 var is_ship_oriented: bool = false
 var zoom_slider: HSlider
+
+# Toggles
+var show_weapon_arcs: bool = true
+var show_sensor_arcs: bool = false
+var show_contact_labels: bool = true
+var show_velocity_vectors: bool = true
+var show_grid: bool = true
 
 func _ready() -> void:
 	clip_contents = true # Ensure drawings don't bleed out of panel
@@ -35,7 +44,8 @@ func _ready() -> void:
 	zoom_slider = HSlider.new()
 	zoom_slider.min_value = 0.01
 	zoom_slider.max_value = 2.0
-	zoom_slider.step = 0.01
+	zoom_slider.step = 0.001
+	zoom_slider.exp_edit = true
 	zoom_slider.value = 0.5
 	zoom_slider.custom_minimum_size = Vector2(100, 20)
 	zoom_slider.value_changed.connect(func(val: float):
@@ -43,15 +53,88 @@ func _ready() -> void:
 		queue_redraw()
 	)
 	overlay.add_child(zoom_slider)
+	
+	var cb_wep = CheckButton.new()
+	cb_wep.text = "Weapon Arcs"
+	cb_wep.button_pressed = show_weapon_arcs
+	cb_wep.toggled.connect(func(pressed: bool): show_weapon_arcs = pressed; queue_redraw())
+	overlay.add_child(cb_wep)
+	
+	var cb_sens = CheckButton.new()
+	cb_sens.text = "Sensor Arcs"
+	cb_sens.button_pressed = show_sensor_arcs
+	cb_sens.toggled.connect(func(pressed: bool): show_sensor_arcs = pressed; queue_redraw())
+	overlay.add_child(cb_sens)
+	
+	var cb_labels = CheckButton.new()
+	cb_labels.text = "Contact Labels"
+	cb_labels.button_pressed = show_contact_labels
+	cb_labels.toggled.connect(func(pressed: bool): show_contact_labels = pressed; queue_redraw())
+	overlay.add_child(cb_labels)
+	
+	var cb_vel = CheckButton.new()
+	cb_vel.text = "Velocity Vectors"
+	cb_vel.button_pressed = show_velocity_vectors
+	cb_vel.toggled.connect(func(pressed: bool): show_velocity_vectors = pressed; queue_redraw())
+	overlay.add_child(cb_vel)
+	
+	var cb_grid = CheckButton.new()
+	cb_grid.text = "Grid"
+	cb_grid.button_pressed = show_grid
+	cb_grid.toggled.connect(func(pressed: bool): show_grid = pressed; queue_redraw())
+	overlay.add_child(cb_grid)
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom_slider.value += 0.05
+			zoom_slider.value *= 1.25
 			accept_event()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom_slider.value -= 0.05
+			zoom_slider.value /= 1.25
 			accept_event()
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			_handle_click(event.position)
+
+func _handle_click(click_pos: Vector2) -> void:
+	var pos = current_state.get("pos", Vector2.ZERO)
+	var rot = current_state.get("rot", 0.0)
+	var camera_pos = pos
+	
+	if not is_ship_oriented:
+		var grid_size = 200000.0
+		var visible_half = (size / 2.0) / map_zoom
+		if visible_half.x < grid_size:
+			camera_pos.x = clampf(camera_pos.x, -grid_size + visible_half.x, grid_size - visible_half.x)
+		else:
+			camera_pos.x = 0.0
+		if visible_half.y < grid_size:
+			camera_pos.y = clampf(camera_pos.y, -grid_size + visible_half.y, grid_size - visible_half.y)
+		else:
+			camera_pos.y = 0.0
+
+	var t = Transform2D()
+	t = t.translated(-camera_pos)
+	if is_ship_oriented:
+		t = t.rotated(-rot - PI/2.0)
+	t = t.scaled(Vector2(map_zoom, map_zoom))
+	t.origin += size / 2.0
+	
+	var best_dist = 20.0 # Pixel radius for clicking
+	var best_id = ""
+	
+	var contacts = current_state.get("contacts", {})
+	for c_id in contacts.keys():
+		var c = contacts[c_id]
+		var c_pos = c.get("pos", Vector2.ZERO)
+		var screen_pos = t.basis_xform(c_pos) + t.origin
+		
+		var dist = screen_pos.distance_to(click_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best_id = c_id
+			
+	if best_id != "":
+		emit_signal("contact_selected", best_id)
 
 func update_data(packet: Dictionary) -> void:
 	current_state = packet
@@ -103,32 +186,33 @@ func _draw() -> void:
 	
 	grid_step = max(100.0, grid_step)
 	
-	# Calculate visible bounds (using diagonal to account for rotation)
-	var visible_radius = (size.length() / 2.0) / map_zoom
-	# Pad the bounding box heavily so the square bounds never rotate into the visible screen
-	visible_radius += grid_step * 3.0 
-	
-	var min_x = max(-grid_size, camera_pos.x - visible_radius)
-	var max_x = min(grid_size, camera_pos.x + visible_radius)
-	var min_y = max(-grid_size, camera_pos.y - visible_radius)
-	var max_y = min(grid_size, camera_pos.y + visible_radius)
-	
-	var start_x = floor(min_x / grid_step) * grid_step
-	var start_y = floor(min_y / grid_step) * grid_step
-	
-	for x in range(start_x, max_x + grid_step, grid_step):
-		if x >= -grid_size and x <= grid_size:
-			draw_line(Vector2(x, min_y), Vector2(x, max_y), Color(0.1, 0.2, 0.1), 1.0 / map_zoom)
-			
-	for y in range(start_y, max_y + grid_step, grid_step):
-		if y >= -grid_size and y <= grid_size:
-			draw_line(Vector2(min_x, y), Vector2(max_x, y), Color(0.1, 0.2, 0.1), 1.0 / map_zoom)
+	if show_grid:
+		# Calculate visible bounds (using diagonal to account for rotation)
+		var visible_radius = (size.length() / 2.0) / map_zoom
+		# Pad the bounding box heavily so the square bounds never rotate into the visible screen
+		visible_radius += grid_step * 3.0 
+		
+		var min_x = max(-grid_size, camera_pos.x - visible_radius)
+		var max_x = min(grid_size, camera_pos.x + visible_radius)
+		var min_y = max(-grid_size, camera_pos.y - visible_radius)
+		var max_y = min(grid_size, camera_pos.y + visible_radius)
+		
+		var start_x = floor(min_x / grid_step) * grid_step
+		var start_y = floor(min_y / grid_step) * grid_step
+		
+		for x in range(start_x, max_x + grid_step, grid_step):
+			if x >= -grid_size and x <= grid_size:
+				draw_line(Vector2(x, min_y), Vector2(x, max_y), Color(0.1, 0.2, 0.1), 1.0 / map_zoom)
+				
+		for y in range(start_y, max_y + grid_step, grid_step):
+			if y >= -grid_size and y <= grid_size:
+				draw_line(Vector2(min_x, y), Vector2(max_x, y), Color(0.1, 0.2, 0.1), 1.0 / map_zoom)
 		
 	# Draw origin reference
 	draw_circle(Vector2.ZERO, 10.0, Color(0.2, 0.2, 0.5))
 		
 	# Draw velocity vector
-	if vel.length() > 0:
+	if show_velocity_vectors and vel.length() > 0:
 		draw_line(pos, pos + vel * 2.0, Color(0.5, 0.5, 0.0), 2.0 / map_zoom)
 		
 	# Draw ship rotation indicator
@@ -138,6 +222,57 @@ func _draw() -> void:
 	# Draw ship blip and physical bounds
 	draw_circle(pos, 8.0 / map_zoom, Color.GREEN)
 	draw_arc(pos, 50.0, 0, TAU, 32, Color(0.0, 1.0, 0.0, 0.5), 2.0 / map_zoom)
+	
+	# Draw weapon firing arcs
+	if show_weapon_arcs:
+		var weapons = current_state.get("weapons", {})
+		for w_id in weapons:
+			var w = weapons[w_id]
+			if w.has("range") and w.has("arc_width"):
+				var r = w["range"]
+				var arc_w = w["arc_width"]
+				var start_angle = rot - arc_w / 2.0
+				var end_angle = rot + arc_w / 2.0
+				var arc_color = Color(1.0, 0.3, 0.0, 0.4)
+				draw_arc(pos, r, start_angle, end_angle, 32, arc_color, 2.0 / map_zoom)
+				draw_line(pos, pos + Vector2(r, 0).rotated(start_angle), arc_color, 1.0 / map_zoom)
+				draw_line(pos, pos + Vector2(r, 0).rotated(end_angle), arc_color, 1.0 / map_zoom)
+				
+	# Draw sensor arcs and wedges
+	if show_sensor_arcs:
+		var sensors_dict = current_state.get("sensors", {})
+		for sensor_id in sensors_dict.keys():
+			var bins = sensors_dict[sensor_id]
+			if bins.size() == 0: continue
+			
+			var s_heading = bins[0].get("sensor_heading", 0.0)
+			var s_arc_width = bins[0].get("sensor_arc_width", TAU)
+			var s_range = bins[0].get("sensor_range", 40000.0)
+			var bin_angle = bins[0].get("bin_angle", TAU/36.0)
+			
+			if s_arc_width >= TAU - 0.01:
+				draw_arc(pos, s_range, 0, TAU, 64, Color(0.2, 0.5, 0.2, 0.4), 2.0 / map_zoom)
+			else:
+				var s_start = s_heading - (s_arc_width / 2.0)
+				var s_end = s_heading + (s_arc_width / 2.0)
+				draw_arc(pos, s_range, s_start, s_end, 32, Color(0.2, 0.8, 0.8, 0.4), 2.0 / map_zoom)
+				draw_line(pos, pos + Vector2(s_range, 0).rotated(s_start), Color(0.2, 0.8, 0.8, 0.4), 2.0 / map_zoom)
+				draw_line(pos, pos + Vector2(s_range, 0).rotated(s_end), Color(0.2, 0.8, 0.8, 0.4), 2.0 / map_zoom)
+				
+			var s_start_angle = s_heading - (s_arc_width / 2.0)
+			for sig in bins:
+				var b_idx = sig["bin_idx"]
+				var b_start = s_start_angle + (b_idx * bin_angle)
+				var b_end = b_start + bin_angle
+				
+				var dist = sig.get("distance", 0.0)
+				var b_center = (b_start + b_end) / 2.0
+				var dot_pos = pos + Vector2(dist, 0).rotated(b_center)
+				
+				var color = Color.YELLOW
+				if sensor_id == "dir_high_res": color = Color.CYAN
+				elif sensor_id == "omni_short_hi_res": color = Color.ORANGE
+				draw_circle(dot_pos, 4.0 / map_zoom, color)
 	
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
@@ -151,12 +286,72 @@ func _draw() -> void:
 		# Draw physical bounds (estimated from radar cross section)
 		var cross_section = c.get("signature", {}).get("cross_section", 0.0)
 		if cross_section > 0:
-			draw_arc(c_pos, cross_section, 0, TAU, 32, Color(color.r, color.g, color.b, 0.3), 2.0 / map_zoom)
+			var estimated_radius = sqrt(cross_section) * 10.0 # arbitrary visual scaling
+			draw_arc(c_pos, estimated_radius, 0, TAU, 16, color, 1.0 / map_zoom)
 			
-		# Draw a small velocity vector
-		var c_vel = c.get("vel", Vector2.ZERO)
-		if c_vel.length() > 0:
-			draw_line(c_pos, c_pos + c_vel * 2.0, color, 1.0 / map_zoom)
+		# Draw velocity vector
+		if show_velocity_vectors and c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2 and c["vel"].length() > 0:
+			draw_line(c_pos, c_pos + c["vel"] * 2.0, color, 1.0 / map_zoom)
+			
+		# Draw Contact Label
+		if show_contact_labels:
+			var font = ThemeDB.fallback_font
+			# Draw label unscaled? We can't use font in world scale easily if it's too large or small.
+			# But we are drawing it with current map_zoom. The font scaling needs a transform reset,
+			# but we can just let it scale for now, or we draw it later when transform is reset.
+			pass
+
+	# Draw HUD overlay (Reset Transform)
+	draw_set_transform_matrix(Transform2D())
+	
+	var selected_id = current_state.get("selected_contact_id", "")
+	
+	if show_contact_labels or selected_id != "":
+		var font = ThemeDB.fallback_font
+		for c_id in contacts.keys():
+			var c = contacts[c_id]
+			var c_pos = c.get("pos", Vector2.ZERO)
+			var screen_pos = t.basis_xform(c_pos) + t.origin
+			var is_enemy = (c.get("classification") == "UNIDENTIFIED VESSEL")
+			var color = Color.RED if is_enemy else Color.WHITE
+			
+			if show_contact_labels:
+				draw_string(font, screen_pos + Vector2(10, 10), c_id, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, color)
+				
+			if c_id == selected_id:
+				# Draw bracket
+				var b_size = 15.0
+				draw_line(screen_pos + Vector2(-b_size, -b_size), screen_pos + Vector2(-b_size/2, -b_size), Color.WHITE, 2.0)
+				draw_line(screen_pos + Vector2(-b_size, -b_size), screen_pos + Vector2(-b_size, -b_size/2), Color.WHITE, 2.0)
+				
+				draw_line(screen_pos + Vector2(b_size, -b_size), screen_pos + Vector2(b_size/2, -b_size), Color.WHITE, 2.0)
+				draw_line(screen_pos + Vector2(b_size, -b_size), screen_pos + Vector2(b_size, -b_size/2), Color.WHITE, 2.0)
+				
+				draw_line(screen_pos + Vector2(-b_size, b_size), screen_pos + Vector2(-b_size/2, b_size), Color.WHITE, 2.0)
+				draw_line(screen_pos + Vector2(-b_size, b_size), screen_pos + Vector2(-b_size, b_size/2), Color.WHITE, 2.0)
+				
+				draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size/2, b_size), Color.WHITE, 2.0)
+				draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size, b_size/2), Color.WHITE, 2.0)
+	
+	# Scale Reference
+	if show_grid:
+		var scale_text = "Grid: %dm" % int(grid_step)
+		var scale_font = ThemeDB.fallback_font
+		var scale_text_size = scale_font.get_string_size(scale_text, HORIZONTAL_ALIGNMENT_RIGHT, -1, 14)
+		
+		var ref_len = grid_step * map_zoom
+		var bottom_right = size - Vector2(20, 20)
+		
+		# Draw line
+		draw_line(bottom_right - Vector2(ref_len, 0), bottom_right, Color.WHITE, 2.0)
+		# Draw tick marks
+		draw_line(bottom_right - Vector2(ref_len, 5), bottom_right - Vector2(ref_len, -5), Color.WHITE, 2.0)
+		draw_line(bottom_right - Vector2(0, 5), bottom_right - Vector2(0, -5), Color.WHITE, 2.0)
+		
+		# Draw text centered above the line
+		var scale_text_pos = bottom_right - Vector2(ref_len / 2.0 + scale_text_size.x / 2.0, 10)
+		draw_string(scale_font, scale_text_pos, scale_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+
 	
 	# Reset transform to draw absolute overlays (UI, Compass)
 	draw_set_transform_matrix(Transform2D())

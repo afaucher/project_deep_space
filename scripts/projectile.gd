@@ -242,7 +242,10 @@ func _on_body_entered(body: Node) -> void:
 			return
 	
 	if body.has_method("take_damage"):
-		body.take_damage(damage)
+		var hit_dir = Vector2.RIGHT
+		if linear_velocity.length() > 0:
+			hit_dir = linear_velocity.normalized()
+		body.take_damage(damage, global_position, hit_dir)
 	else:
 		body.queue_free()
 		

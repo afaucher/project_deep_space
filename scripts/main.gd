@@ -139,7 +139,15 @@ func _distribute_state() -> void:
 			"sensors": ship.active_sensor_sweeps.duplicate(true),
 			"sensor_config": ship.sensor_hardware.duplicate(true),
 			"contacts": ship.active_contacts.duplicate(true),
-			"weapons": ship.weapons.duplicate(true)
+			"weapons": ship.weapons.duplicate(true),
+			"engineering": {
+				"subsystems": ship.subsystems.duplicate(true),
+				"ship_components": ship.ship_components.duplicate(true),
+				"current_heat": ship.current_heat,
+				"max_heat": ship.max_heat,
+				"silent_running": ship.silent_running,
+				"em_signature": ship.em_signature
+			}
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal

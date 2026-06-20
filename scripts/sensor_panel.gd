@@ -20,10 +20,13 @@ var selected_contact_id: String = ""
 
 func get_selected_contact_id() -> String:
 	return selected_contact_id
-const SensorModuleUI = preload("res://scripts/sensor_module_ui.gd")
-const SensorUnionUI = preload("res://scripts/sensor_union_ui.gd")
 
-var union_view: SensorUnionUI
+func set_selected_contact_id(c_id: String) -> void:
+	if selected_contact_id != c_id:
+		selected_contact_id = c_id
+		selection_changed.emit(c_id)
+		queue_redraw()
+const SensorModuleUI = preload("res://scripts/sensor_module_ui.gd")
 
 func _ready() -> void:
 	clip_contents = true
@@ -31,12 +34,6 @@ func _ready() -> void:
 	main_vbox = VBoxContainer.new()
 	main_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(main_vbox)
-	
-	union_view = SensorUnionUI.new()
-	union_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	union_view.size_flags_stretch_ratio = 1.0 # 50%
-	union_view.contact_selected.connect(_on_contact_selected)
-	main_vbox.add_child(union_view)
 	
 	var master_hbox = HBoxContainer.new()
 	master_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -82,6 +79,7 @@ func _ready() -> void:
 	contact_filter_dropdown.add_item("All Contacts")
 	contact_filter_dropdown.add_item("All Ships")
 	contact_filter_dropdown.add_item("Enemies Only")
+	contact_filter_dropdown.select(1) # Default to All Ships
 	contact_filter_dropdown.item_selected.connect(_on_filter_selected)
 	right_vbox.add_child(contact_filter_dropdown)
 	
@@ -129,9 +127,6 @@ func update_data(packet: Dictionary) -> void:
 		var sensors_dict = current_state["sensors"]
 		var my_pos = current_state.get("pos", Vector2.ZERO)
 		var c_dict = current_state.get("contacts", {})
-		
-		if is_instance_valid(union_view):
-			union_view.update_data(sensors_dict, my_pos, c_dict, selected_contact_id)
 		
 		if current_state.has("sensor_config"):
 			var cfg = current_state["sensor_config"]
