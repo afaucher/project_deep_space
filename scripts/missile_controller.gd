@@ -21,9 +21,34 @@ func _physics_process(delta: float) -> void:
 		ship.hulk()
 		return
 		
-	if target_id == "" or not ship.active_contacts.has(target_id):
-		# No target, fly straight
-		ship.apply_control_input(1.0, 0.0, ship.rotation, 0, 0)
+	# Find closest hostile target in own sensors
+	var best_dist = 999999.0
+	target_id = ""
+	
+	var debug_str = ""
+	if Engine.get_physics_frames() % 60 == 0:
+		debug_str = "[Missile] Contacts: " + str(ship.active_contacts.size()) + " | "
+		
+	for c_id in ship.active_contacts:
+		var contact = ship.active_contacts[c_id]
+		var classification = contact.get("classification", "")
+		if debug_str != "":
+			debug_str += c_id + " (" + classification + ") "
+			
+		if classification != "UNIDENTIFIED VESSEL" and classification != "INCOMING ORDNANCE":
+			continue
+		var dist_to = ship.position.distance_to(contact["pos"])
+		if dist_to < best_dist:
+			best_dist = dist_to
+			target_id = c_id
+			
+			
+	if debug_str != "":
+		print(debug_str, " -> TARGET: ", target_id)
+			
+	if target_id == "":
+		# No target and no fallback, fly straight
+		ship.apply_control_input(1.0, 0.0, ship.rotation, 1, 0)
 		return
 		
 	var target = ship.active_contacts[target_id]
@@ -36,13 +61,13 @@ func _physics_process(delta: float) -> void:
 	var time_to_impact = max(dist / max(ship.linear_velocity.length(), 1.0), 0.1)
 	var intercept_point = target_pos + (target_vel * time_to_impact)
 	
-	var desired_heading = ship.position.angle_to_point(intercept_point)
+	var desired_heading = (intercept_point - ship.position).angle()
 	
 	# Full thrust, steer towards intercept point
-	ship.apply_control_input(1.0, 0.0, desired_heading, 0, 0)
+	ship.apply_control_input(1.0, 0.0, desired_heading, 1, 0)
 	
 	# Warhead detonate logic
-	if dist < 300.0:
+	if dist < 400.0:
 		detonate()
 
 func detonate() -> void:
@@ -59,10 +84,12 @@ func detonate() -> void:
 		if main_node and main_node.has_method("draw_laser"):
 			main_node.draw_laser(ship.position, target_pos)
 			
+		print("[Missile] Firing laser warhead at target: ", target_id, " from ", ship.position, " to ", target_pos)
+			
 		if result and result.collider.has_method("take_damage") and result.collider != ship:
 			var hit_dir = (result.collider.position - ship.position).normalized()
 			# Missiles are laser-heads, so they deal laser damage (which applies extreme heat)
-			result.collider.take_damage(250.0, ship.position, hit_dir, "laser")
+			result.collider.take_damage(250.0, result.position, hit_dir, "laser")
 			
 	# Destroy missile
 	ship.hulk()

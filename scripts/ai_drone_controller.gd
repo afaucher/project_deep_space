@@ -21,8 +21,10 @@ func _physics_process(delta: float) -> void:
 	
 	for c_id in ship.active_contacts:
 		var contact = ship.active_contacts[c_id]
-		# Don't target bouys if we can avoid it, prioritize ships
-		# Just target the closest thing for now
+		# Only target hostile vessels
+		if contact.get("classification", "") != "UNIDENTIFIED VESSEL":
+			continue
+			
 		var dist = ship.position.distance_to(contact["pos"])
 		if dist < best_dist:
 			best_dist = dist
@@ -35,11 +37,25 @@ func _physics_process(delta: float) -> void:
 		
 	var target = ship.active_contacts[target_id]
 	var target_pos = target["pos"]
-	var angle_to_target = ship.position.angle_to_point(target_pos)
+	var angle_to_target = (target_pos - ship.position).angle()
 	var dist_to_target = ship.position.distance_to(target_pos)
 	
 	# Point sensor at target
 	ship.set_sensor_target(target_id)
+	
+	var has_ammo = ship.weapons.has("hp_fwd_missile") and ship.weapons["hp_fwd_missile"]["ammo"] > 0
+	
+	if not has_ammo:
+		# Evasive maneuvers
+		var time_sec = float(Time.get_ticks_msec()) / 1000.0
+		# Steer generally away (angle + PI) with a 45-degree sine wave wobble
+		var evasion_angle = wrapf(angle_to_target + PI + sin(time_sec * 2.0) * (PI / 4.0), -PI, PI)
+		
+		ship.apply_control_input(1.0, 800.0, evasion_angle, 1, 1)
+		
+		if Engine.get_process_frames() % 120 == 0:
+			print("[Drone AI] Target: ", target_id, " | Out of ammo! Evading!")
+		return
 	
 	# Maneuver
 	var thrust = 0.0
@@ -67,7 +83,7 @@ func _physics_process(delta: float) -> void:
 				# Fire a missile
 				print("[Drone AI] Firing missile at ", target_id, " (Dist: ", round(dist_to_target), "m)")
 				ship.fire_weapon("hp_fwd_missile", target_pos, target_id)
-				fire_timer = 5.0 # Wait 5 seconds before firing another
+				fire_timer = 10.0 # Wait 10 seconds before firing another
 	
 	# Debug Logging (every 2 seconds to avoid spam)
 	if Engine.get_process_frames() % 120 == 0:

@@ -19,7 +19,7 @@ func get_signature() -> Dictionary:
 		"owner_id": 999 # Hostile/Neutral IFF
 	}
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic") -> void:
 	if is_dead: return
 	health -= amount
 	if health <= 0:

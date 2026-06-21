@@ -15,6 +15,7 @@ func _init() -> void:
 	
 	max_thrust = 10000.0 # Very fast
 	max_torque = 50000.0 # Very agile
+	max_omega = 10.0 # High turn rate for missiles
 	max_speed = 3000.0
 	
 	ship_components = [
@@ -28,6 +29,7 @@ func _init() -> void:
 		{
 			"id": "seeker",
 			"type": "active",
+			"parent": "sensor_nose",
 			"heading": 0.0,
 			"arc_width": PI / 3.0, # 60 degree forward cone
 			"range": 30000.0,

@@ -151,6 +151,7 @@ func _ready() -> void:
 	eng_container.add_theme_stylebox_override("panel", eng_style)
 	
 	eng_panel = EngineeringPanel.new()
+	eng_panel.component_power_toggled.connect(_on_component_power_toggled)
 	eng_container.add_child(eng_panel)
 	content_hbox.add_child(eng_container)
 	eng_container.visible = true
@@ -222,3 +223,10 @@ func _on_all_sensors_state_changed(is_active: bool) -> void:
 	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
 	if ship_node:
 		ship_node.rpc_id(1, "set_all_sensors_state", is_active)
+
+func _on_component_power_toggled(component_id: String, is_active: bool) -> void:
+	var my_id = multiplayer.get_unique_id()
+	var ship_node_name = "Ship_" + str(my_id)
+	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	if ship_node:
+		ship_node.rpc_id(1, "set_component_power", component_id, is_active)

@@ -107,6 +107,8 @@ func _on_peer_connected(id: int) -> void:
 func _spawn_ship(id: int) -> void:
 	var ship = Ship.new()
 	ship.name = "Ship_" + str(id)
+	ship.owner_id = id
+	ship.iff_tags = ["TEAM_PLAYER"]
 	ship.position = Vector2(randf_range(-100, 100), randf_range(-100, 100))
 	add_child(ship)
 	players[id] = ship
@@ -125,6 +127,8 @@ func _spawn_drone() -> void:
 	var drone_id = 900 + players.size()
 	var ship = Ship.new()
 	ship.name = "Ship_" + str(drone_id)
+	ship.owner_id = drone_id
+	ship.iff_tags = ["TEAM_ENEMY"]
 	
 	var player_pos = Vector2.ZERO
 	if players.has(1): player_pos = players[1].position
@@ -170,7 +174,8 @@ func _distribute_state() -> void:
 				"heat_gen": ship.current_heat_gen,
 				"heat_dissipation_rate": ship.heat_dissipation_rate,
 				"silent_running": ship.silent_running,
-				"em_signature": ship.em_signature
+				"em_signature": ship.em_signature,
+				"point_defense_active": ship.point_defense_active
 			}
 		}
 		if client_id == multiplayer.get_unique_id():

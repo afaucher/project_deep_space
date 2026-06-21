@@ -26,6 +26,7 @@ func setup(main) -> void:
 	observer = Ship.new()
 	observer.name = "Observer"
 	observer.owner_id = 1
+	observer.iff_tags = ["TEAM_A"]
 	observer.position = Vector2.ZERO
 	main_node.add_child(observer)
 	
@@ -33,6 +34,7 @@ func setup(main) -> void:
 	var friendly = Ship.new()
 	friendly.name = "FriendlyShip"
 	friendly.owner_id = 1
+	friendly.iff_tags = ["TEAM_A"]
 	friendly.position = Vector2(0, -1000)
 	main_node.add_child(friendly)
 	
@@ -40,6 +42,7 @@ func setup(main) -> void:
 	var enemy = Ship.new()
 	enemy.name = "EnemyShip"
 	enemy.owner_id = 2
+	enemy.iff_tags = ["TEAM_B"]
 	enemy.position = Vector2(1000, 0)
 	main_node.add_child(enemy)
 	
@@ -61,12 +64,14 @@ func setup(main) -> void:
 	var f_missile = Missile.new()
 	f_missile.name = "FriendlyMissile"
 	f_missile.setup(1, Vector2(-1000, -1000), Vector2.ZERO, 0)
+	f_missile.iff_tags = ["TEAM_A"]
 	main_node.add_child(f_missile)
 	
 	# 7. Incoming Ordnance
 	var e_missile = Missile.new()
 	e_missile.name = "EnemyMissile"
 	e_missile.setup(2, Vector2(1000, 1000), Vector2.ZERO, 0)
+	e_missile.iff_tags = ["TEAM_B"]
 	main_node.add_child(e_missile)
 
 func _physics_process(delta: float) -> void:

@@ -108,6 +108,15 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 				var is_in_range = false
 				var has_target = false
 				
+				var is_powered = true
+				var is_alive = true
+				if current_state.has("engineering") and current_state["engineering"].has("ship_components"):
+					for comp in current_state["engineering"]["ship_components"]:
+						if comp["id"] == w_id:
+							is_alive = comp.get("health", 0.0) > 0.0
+							is_powered = comp.get("powered_on", true)
+							break
+				
 				if selected_contact_id != "" and current_state.has("contacts") and current_state["contacts"].has(selected_contact_id):
 					has_target = true
 					var c = current_state["contacts"][selected_contact_id]
@@ -122,19 +131,23 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 					var dist = s_pos.distance_to(c_pos)
 					is_in_range = (dist <= w_range)
 					
-					var angle_to = s_pos.angle_to_point(c_pos)
+					var angle_to = (c_pos - s_pos).angle()
 					var weapon_global_heading = s_rot + w_heading
 					var rel_angle = wrapf(angle_to - weapon_global_heading, -PI, PI)
 					
 					is_in_arc = (abs(rel_angle) <= arc_w / 2.0)
 					
-				var can_fire = (ammo > 0 and cd <= 0.0 and has_target and is_in_arc)
+				var can_fire = (ammo > 0 and cd <= 0.0 and has_target and is_in_arc and is_alive and is_powered)
 				if w_info.get("type", "") == "laser":
 					can_fire = can_fire and is_in_range
 					
 				btn.disabled = not can_fire
 				
-				if not has_target:
+				if not is_alive:
+					btn.text = "DESTROYED"
+				elif not is_powered:
+					btn.text = "OFFLINE"
+				elif not has_target:
 					btn.text = "NO LOCK"
 				elif ammo <= 0:
 					btn.text = "EMPTY"

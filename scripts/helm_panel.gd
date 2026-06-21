@@ -30,7 +30,7 @@ class HeadingDial extends Control:
 		if event is InputEventMouseMotion or event is InputEventMouseButton:
 			if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 				var center = size / 2.0
-				var clicked_angle = center.angle_to_point(get_local_mouse_position())
+				var clicked_angle = (get_local_mouse_position() - center).angle()
 				if is_ship_oriented:
 					clicked_angle += actual_angle + PI/2.0
 				target_angle = wrapf(clicked_angle, -PI, PI)

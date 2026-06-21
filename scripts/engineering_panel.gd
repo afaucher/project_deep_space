@@ -1,5 +1,7 @@
 extends Control
 
+signal component_power_toggled(component_id: String, is_active: bool)
+
 var current_state: Dictionary = {}
 
 var top_hbox: HBoxContainer
@@ -230,10 +232,11 @@ func _ready() -> void:
 	# Component List Header
 	var header_hbox = HBoxContainer.new()
 	var h1 = Label.new(); h1.text = "Component"; h1.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h1.size_flags_stretch_ratio = 2.0
+	var h_pwr = Label.new(); h_pwr.text = "PWR"
 	var h2 = Label.new(); h2.text = "Integrity"; h2.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h2.size_flags_stretch_ratio = 2.0
 	var h3 = Label.new(); h3.text = "Heat"; h3.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h3.size_flags_stretch_ratio = 1.0
 	var h4 = Label.new(); h4.text = "EM"; h4.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h4.size_flags_stretch_ratio = 1.0
-	header_hbox.add_child(h1); header_hbox.add_child(h2); header_hbox.add_child(h3); header_hbox.add_child(h4)
+	header_hbox.add_child(h1); header_hbox.add_child(h_pwr); header_hbox.add_child(h2); header_hbox.add_child(h3); header_hbox.add_child(h4)
 	list_vbox.add_child(header_hbox)
 	
 	var sep3 = HSeparator.new()
@@ -250,11 +253,11 @@ func _ready() -> void:
 func update_data(state: Dictionary) -> void:
 	current_state = state
 	
-	if current_state.has("engineering"):
-		var eng = current_state["engineering"]
+	if state.has("engineering"):
+		var eng = state["engineering"]
 		
-		# Update gauges
-		heat_bar.value = eng.get("current_heat", 0.0)
+		if eng.has("current_heat") and heat_bar:
+			heat_bar.value = eng.get("current_heat", 0.0)
 		heat_bar.max_value = max(1.0, eng.get("max_heat", 200.0))
 		
 		var h_gen = eng.get("heat_gen", 0.0)
@@ -298,6 +301,7 @@ func update_data(state: Dictionary) -> void:
 				
 				var row: HBoxContainer
 				var lbl_name: Label
+				var power_btn: CheckButton
 				var prog_health: ProgressBar
 				var lbl_heat: Label
 				var lbl_em: Label
@@ -305,14 +309,22 @@ func update_data(state: Dictionary) -> void:
 				if comp_rows.has(c_id):
 					row = comp_rows[c_id]
 					lbl_name = row.get_child(0)
-					prog_health = row.get_child(1)
-					lbl_heat = row.get_child(2)
-					lbl_em = row.get_child(3)
+					power_btn = row.get_child(1)
+					prog_health = row.get_child(2)
+					lbl_heat = row.get_child(3)
+					lbl_em = row.get_child(4)
 				else:
 					row = HBoxContainer.new()
 					lbl_name = Label.new()
 					lbl_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 					lbl_name.size_flags_stretch_ratio = 2.0
+					
+					power_btn = CheckButton.new()
+					var c_id_copy = c_id # Capture for closure
+					power_btn.toggled.connect(func(pressed): 
+						power_btn.set_meta("pending_toggle", Time.get_ticks_msec())
+						emit_signal("component_power_toggled", c_id_copy, pressed)
+					)
 					
 					prog_health = ProgressBar.new()
 					prog_health.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -328,6 +340,7 @@ func update_data(state: Dictionary) -> void:
 					lbl_em.size_flags_stretch_ratio = 1.0
 					
 					row.add_child(lbl_name)
+					row.add_child(power_btn)
 					row.add_child(prog_health)
 					row.add_child(lbl_heat)
 					row.add_child(lbl_em)
@@ -337,6 +350,21 @@ func update_data(state: Dictionary) -> void:
 					
 				# Update values
 				lbl_name.text = c_id
+				
+				var is_switchable = c.get("switchable", false)
+				if is_switchable:
+					power_btn.disabled = false
+					power_btn.modulate = Color(1, 1, 1, 1)
+				else:
+					power_btn.disabled = true
+					power_btn.modulate = Color(0, 0, 0, 0)
+					
+				var is_powered = c.get("powered_on", true)
+				var last_toggle_time = power_btn.get_meta("pending_toggle", 0)
+				if Time.get_ticks_msec() - last_toggle_time > 500: # Wait 500ms after a click before allowing server to override
+					if power_btn.button_pressed != is_powered:
+						power_btn.set_pressed_no_signal(is_powered)
+					
 				var hp = max(0.0, c.get("health", 0.0))
 				var mhp = max(1.0, c.get("max_health", 1.0))
 				prog_health.value = hp

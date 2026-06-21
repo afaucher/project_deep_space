@@ -70,7 +70,7 @@ func _gui_input(event: InputEvent) -> void:
 			var dist = my_pos.distance_to(c["pos"])
 			if dist > sensor_range: continue
 			
-			var angle = my_pos.angle_to_point(c["pos"])
+			var angle = (c["pos"] - my_pos).angle()
 			var rel_angle = wrapf(angle - sensor_heading, -PI, PI)
 			
 			var half_arc = sensor_arc_width / 2.0
@@ -189,7 +189,7 @@ func _draw() -> void:
 		var c = contacts[selected_contact_id]
 		var dist = my_pos.distance_to(c["pos"])
 		if dist <= sensor_range:
-			var angle = my_pos.angle_to_point(c["pos"])
+			var angle = (c["pos"] - my_pos).angle()
 			var rel_angle = wrapf(angle - sensor_heading, -PI, PI)
 			var half_arc = sensor_arc_width / 2.0
 			if rel_angle >= -half_arc and rel_angle <= half_arc:
