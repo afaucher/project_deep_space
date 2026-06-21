@@ -88,7 +88,7 @@ var current_heat: float = 10.0
 var max_heat: float = 200.0
 var heat_dissipation_rate = 10.0
 var current_heat_gen: float = 0.0
-var silent_running: bool = false
+
 var is_dead: bool = false
 var em_signature: float = 0.0
 
@@ -167,7 +167,6 @@ var engine_power_rating: float = 100.0
 
 var em_noise: float:
 	get: 
-		if silent_running: return 1.0
 		var noise = 5.0 * subsystems["reactor"]["power"]
 		if point_defense_active: noise += 15.0
 		for s in sensor_hardware:
@@ -259,8 +258,11 @@ func hulk() -> void:
 	subsystems["engines"]["power"] = 0.0
 	subsystems["weapons"]["power"] = 0.0
 	subsystems["sensors"]["power"] = 0.0
-	for s in sensor_hardware:
-		s["active"] = false
+	# Shut down all individual components
+	for c in ship_components:
+		c["powered_on"] = false
+		if c["type"] == "reactor":
+			c["power_draw"] = 0.0
 	target_thrust = 0.0
 	actual_throttle = 0.0
 
@@ -774,18 +776,24 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 						if diff <= s_arc / 2.0:
 							var s_power = s.get("em_emission", 0.0)
 							em_power += s_power * (1.0 - diff/(s_arc/2.0))
+			
+			var ray_query = PhysicsRayQueryParameters2D.create(position, collider.position)
+			ray_query.exclude = [self]
+			var ray_res = space_state.intersect_ray(ray_query)
+			if ray_res and ray_res.collider != collider:
+				continue # Blocked by obstacle
+
+			if sensor.get("type", "active") == "passive_em":
+				var em_power = sig.get("em_noise", 0.0)
+				# Rear-aspect EM bias
+				var angle_from_target = (position - collider.position).angle()
+				var relative_angle = angle_from_target - collider.rotation
+				var rear_bias = 1.0 + 0.5 * max(0.0, cos(relative_angle + PI))
+				em_power *= rear_bias
 				
 				var received_em = em_power * (10000.0 / max(10000.0, dist))
 				if received_em < 15.0:
 					continue # Passive EM only detects targets above noise floor (after falloff)
-			else:
-				# Active sensors check line of sight
-				var ray_query = PhysicsRayQueryParameters2D.create(position, collider.position)
-				ray_query.exclude = [self]
-				var ray_res = space_state.intersect_ray(ray_query)
-				if ray_res and ray_res.collider != collider:
-					#print("[Radar] Blocked by ", ray_res.collider.name, " when looking for ", collider.name)
-					continue # Blocked by obstacle
 			
 			var angle = (collider.position - position).angle()
 			

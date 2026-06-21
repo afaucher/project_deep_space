@@ -173,7 +173,6 @@ func _distribute_state() -> void:
 				"max_heat": ship.max_heat,
 				"heat_gen": ship.current_heat_gen,
 				"heat_dissipation_rate": ship.heat_dissipation_rate,
-				"silent_running": ship.silent_running,
 				"em_signature": ship.em_signature,
 				"point_defense_active": ship.point_defense_active
 			}

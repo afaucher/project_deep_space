@@ -24,15 +24,15 @@ func _physics_process(delta: float) -> void:
 	
 	if test_phase == 0:
 		# Apply forward thrust
-		ship.apply_control_input(1.0, 0.0, 0) # Full thrust forward, 0 heading, smooth mode
+		ship.apply_control_input(1.0, 100.0, 0.0, 1, 0)
 		if time_elapsed > 2.0:
-			test_phase = 1
-			ship.apply_control_input(0.0, 0.0, 0) # Cut engines
+			ship.apply_control_input(0.0, 100.0, 0.0, 1, 0) # Cut engines
 			velocity_at_cutoff = ship.linear_velocity.length()
 			print("Engines cut. Velocity at cutoff: ", velocity_at_cutoff)
 			if velocity_at_cutoff < 10.0:
 				printerr("[TEST FAILED] Ship did not gain significant velocity from thrust.")
 				get_tree().quit(1)
+			test_phase = 1
 	
 	elif test_phase == 1:
 		# Wait for drifting

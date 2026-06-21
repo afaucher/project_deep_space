@@ -24,7 +24,7 @@ func _physics_process(delta: float) -> void:
 		if time_elapsed > 0.5:
 			# Simulate sending helm input
 			# Thrust 1.0, Heading 90 degrees (PI/2), Combat Mode (1)
-			main_node.receive_helm_input(1.0, PI/2.0, 1)
+			main_node.receive_helm_input(1.0, 100.0, PI/2.0, 1, 0)
 			print("Sent helm input: thrust 1.0, heading 90deg, combat mode")
 			test_phase = 1
 			

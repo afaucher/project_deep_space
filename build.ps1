@@ -13,7 +13,27 @@ if (-not (Test-Path $godotPath)) {
     exit 1
 }
 
-# 2. Check and Install Export Templates
+# 2. Run Automated Tests
+Write-Host "Running automated test suite..." -ForegroundColor Cyan
+$testFiles = Get-ChildItem -Path "$PSScriptRoot\scripts\tests\*.gd" -Exclude "test_asteroid.gd"
+$testsPassed = $true
+
+foreach ($file in $testFiles) {
+    Write-Host "Running $($file.BaseName)..."
+    $testProcess = Start-Process -FilePath powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\test_runner.ps1`" -TestName $($file.BaseName)" -Wait -PassThru -NoNewWindow
+    if ($testProcess.ExitCode -ne 0) {
+        Write-Host "Test $($file.BaseName) FAILED!" -ForegroundColor Red
+        $testsPassed = $false
+    }
+}
+
+if (-not $testsPassed) {
+    Write-Host "BUILD ABORTED: One or more tests failed." -ForegroundColor Red
+    exit 1
+}
+Write-Host "All tests passed successfully." -ForegroundColor Green
+
+# 3. Check and Install Export Templates
 $templateDir = "$env:APPDATA\Godot\export_templates\4.4.1.stable"
 if (-not (Test-Path "$templateDir\windows_release_x86_64.exe")) {
     Write-Host "Export templates for 4.4.1.stable not found. Downloading..." -ForegroundColor Cyan
