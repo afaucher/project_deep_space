@@ -250,7 +250,9 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		else:
 			p_style.bg_color = Color(0.15, 0.15, 0.15, 0.8)
 			var classification = c.get("classification", "UNKNOWN")
-			if classification == "UNIDENTIFIED VESSEL" or classification == "INCOMING ORDNANCE":
+			if classification == "INCOMING ORDNANCE":
+				p_style.border_color = Color.YELLOW
+			elif classification == "UNIDENTIFIED VESSEL":
 				p_style.border_color = Color.RED
 			elif classification == "FRIENDLY VESSEL":
 				p_style.border_color = Color.GREEN
@@ -261,7 +263,9 @@ func _update_contact_list(contacts: Dictionary) -> void:
 				
 		var classification_str = c.get("classification", "UNKNOWN")
 		header.text = c_id + " [" + classification_str + "]"
-		if classification_str == "UNIDENTIFIED VESSEL" or classification_str == "INCOMING ORDNANCE":
+		if classification_str == "INCOMING ORDNANCE":
+			header.add_theme_color_override("font_color", Color.YELLOW)
+		elif classification_str == "UNIDENTIFIED VESSEL":
 			header.add_theme_color_override("font_color", Color.RED)
 		elif classification_str == "FRIENDLY VESSEL":
 			header.add_theme_color_override("font_color", Color.GREEN)

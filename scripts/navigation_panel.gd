@@ -294,8 +294,7 @@ func _draw() -> void:
 	for c_id in contacts.keys():
 		var c = contacts[c_id]
 		var c_pos = c.get("pos", Vector2.ZERO)
-		var is_enemy = (c.get("classification") == "UNIDENTIFIED VESSEL")
-		var color = Color.RED if is_enemy else Color.WHITE
+		var color = _get_contact_color(c)
 		draw_circle(c_pos, 8.0 / map_zoom, color)
 		
 		# Draw physical bounds (estimated from radar cross section)
@@ -332,8 +331,7 @@ func _draw() -> void:
 			var c = contacts[c_id]
 			var c_pos = c.get("pos", Vector2.ZERO)
 			var screen_pos = t.basis_xform(c_pos) + t.origin
-			var is_enemy = (c.get("classification") == "UNIDENTIFIED VESSEL")
-			var color = Color.RED if is_enemy else Color.WHITE
+			var color = _get_contact_color(c)
 			
 			if show_contact_labels:
 				draw_string(font, screen_pos + Vector2(10, 10), c_id, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, color)
@@ -447,14 +445,24 @@ func _draw() -> void:
 			var p_left = edge_pos + dir_to_contact.rotated(PI * 0.8) * 10.0
 			var p_right = edge_pos + dir_to_contact.rotated(-PI * 0.8) * 10.0
 			
-			var is_enemy = (c.get("classification") == "UNIDENTIFIED VESSEL")
-			var color = Color.RED if is_enemy else Color.WHITE
+			var color = _get_contact_color(c)
 			
 			var pts = PackedVector2Array([p_tip, p_left, p_right])
 			draw_colored_polygon(pts, color)
 			draw_polyline(PackedVector2Array([p_tip, p_left, p_right, p_tip]), color, 2.0)
 			
+			
 			# Draw label
 			var text_size = font.get_string_size(c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
 			var label_pos = edge_pos - dir_to_contact * 15.0 - Vector2(text_size.x/2.0, -text_size.y/3.0)
 			draw_string(font, label_pos, c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
+
+func _get_contact_color(c: Dictionary) -> Color:
+	match c.get("classification", ""):
+		"INCOMING ORDNANCE": return Color.YELLOW
+		"UNIDENTIFIED VESSEL": return Color.RED
+		"FRIENDLY VESSEL": return Color.GREEN
+		"FRIENDLY ORDNANCE": return Color.DARK_GREEN
+		"ASTEROID": return Color.GRAY
+		_: return Color.WHITE
+
