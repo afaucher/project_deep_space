@@ -287,3 +287,4 @@ func _on_component_power_toggled(component_id: String, is_active: bool) -> void:
 
 
 
+

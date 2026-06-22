@@ -170,6 +170,24 @@ func _spawn_drone(is_friendly: bool = false) -> void:
 	ship.add_child(ai)
 	print("Spawned AI Drone ", drone_id, " at ", ship.position)
 
+func _spawn_sensor_drone() -> void:
+	var drone_id = 1000 + players.size()
+	var ship = SensorDrone.new()
+	ship.name = "SensorDrone_" + str(drone_id)
+	ship.owner_id = drone_id
+	ship.iff_tags = ["TEAM_PLAYER"]
+	
+	var player_pos = Vector2.ZERO
+	if players.has(1): player_pos = players[1].position
+	
+	var angle = randf() * TAU
+	ship.position = player_pos + Vector2(cos(angle), sin(angle)) * 5000.0
+	
+	add_child(ship)
+	players[drone_id] = ship
+	
+	print("Spawned Sensor Drone ", drone_id, " at ", ship.position)
+
 func _spawn_buoy() -> void:
 	var buoy_id = 800 + players.size()
 	var ship = Ship.new()
@@ -273,3 +291,4 @@ func receive_helm_input(thrust: float, target_velocity: float, heading: float, s
 		var ship = players[sender_id]
 		# Apply control inputs
 		ship.apply_control_input(clamp(thrust, -1.0, 1.0), target_velocity, heading, steering_mode, linear_mode)
+

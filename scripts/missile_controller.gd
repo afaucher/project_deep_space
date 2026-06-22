@@ -18,6 +18,7 @@ func _physics_process(delta: float) -> void:
 	age += delta
 	if age > 15.0:
 		# Run out of fuel, self-destruct or go inert
+		print("[Missile] Out of fuel looking for target")
 		ship.hulk()
 		return
 		
@@ -40,6 +41,7 @@ func _physics_process(delta: float) -> void:
 			
 	if target_id == "":
 		# No target and no fallback, fly straight
+		print("[Missile] Lost lock on target")
 		ship.apply_control_input(1.0, 0.0, ship.rotation, 1, 0)
 		return
 		
@@ -82,6 +84,8 @@ func _physics_process(delta: float) -> void:
 	var lead_angle_diff = wrapf(desired_heading - angle_to_target, -PI, PI)
 	lead_angle_diff = clampf(lead_angle_diff, -max_lead, max_lead)
 	desired_heading = angle_to_target + lead_angle_diff
+
+	print("[Missile] time_to_impact: ", time_to_impact, " desired_heading: ", desired_heading)
 	
 	# Full thrust, steer in the drift-compensated direction
 	ship.apply_control_input(1.0, 0.0, desired_heading, 1, 0)
