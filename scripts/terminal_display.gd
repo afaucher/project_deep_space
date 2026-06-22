@@ -286,3 +286,4 @@ func _on_component_power_toggled(component_id: String, is_active: bool) -> void:
 		ship_node.rpc_id(1, "set_component_power", component_id, is_active)
 
 
+

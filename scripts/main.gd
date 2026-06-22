@@ -146,12 +146,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_F4:
 			_spawn_buoy()
 
-func _spawn_drone() -> void:
+func _spawn_drone(is_friendly: bool = false) -> void:
 	var drone_id = 900 + players.size()
 	var ship = Ship.new()
 	ship.name = "Ship_" + str(drone_id)
 	ship.owner_id = drone_id
-	ship.iff_tags = ["TEAM_ENEMY"]
+	
+	if is_friendly:
+		ship.iff_tags = ["TEAM_PLAYER"]
+	else:
+		ship.iff_tags = ["TEAM_ENEMY"]
 	
 	var player_pos = Vector2.ZERO
 	if players.has(1): player_pos = players[1].position

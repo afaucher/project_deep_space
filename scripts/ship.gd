@@ -464,6 +464,8 @@ func request_spawn(type: String) -> void:
 		main._spawn_asteroids()
 	elif type == "drone":
 		main._spawn_drone()
+	elif type == "friendly_drone":
+		main._spawn_drone(true)
 	elif type == "buoy":
 		main._spawn_buoy()
 
