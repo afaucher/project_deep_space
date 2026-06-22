@@ -22,26 +22,41 @@ func _physics_process(delta: float) -> void:
 		ship.hulk()
 		return
 		
-	# Find closest hostile target in own sensors
-	var best_dist = 999999.0
-	target_id = ""
-	
-	for c_id in ship.active_contacts:
-		var contact = ship.active_contacts[c_id]
-		var classification = contact.get("classification", "")
-		if classification != "UNIDENTIFIED VESSEL" and classification != "INCOMING ORDNANCE":
-			continue
-		if contact.get("pos_timer", 0.0) > 1.0:
-			continue # Lost lock
+	# Check if current target is valid
+	var current_target_valid = false
+	if target_id != "" and ship.active_contacts.has(target_id):
+		var contact = ship.active_contacts[target_id]
+		if contact.get("pos_timer", 0.0) <= 5.0:
+			current_target_valid = true
 			
-		var dist_to = ship.position.distance_to(contact["pos"])
-		if dist_to < best_dist:
-			best_dist = dist_to
-			target_id = c_id
+	if not current_target_valid:
+		if target_id != "":
+			print("[Missile] Lost lock on target cid: ", target_id)
+			target_id = ""
+			
+		# Find closest hostile target in own sensors
+		var best_dist = 999999.0
+		var new_target = ""
+		
+		for c_id in ship.active_contacts:
+			var contact = ship.active_contacts[c_id]
+			var classification = contact.get("classification", "")
+			if classification != "UNIDENTIFIED VESSEL" and classification != "INCOMING ORDNANCE":
+				continue
+			if contact.get("pos_timer", 0.0) > 1.0:
+				continue # Need a fresh contact to acquire lock
+				
+			var dist_to = ship.position.distance_to(contact["pos"])
+			if dist_to < best_dist:
+				best_dist = dist_to
+				new_target = c_id
+				
+		if new_target != "":
+			target_id = new_target
+			print("[Missile] Acquired new target cid: ", target_id)
 			
 	if target_id == "":
 		# No target and no fallback, fly straight
-		print("[Missile] Lost lock on target")
 		ship.apply_control_input(1.0, 0.0, ship.rotation, 1, 0)
 		return
 		
@@ -84,8 +99,6 @@ func _physics_process(delta: float) -> void:
 	var lead_angle_diff = wrapf(desired_heading - angle_to_target, -PI, PI)
 	lead_angle_diff = clampf(lead_angle_diff, -max_lead, max_lead)
 	desired_heading = angle_to_target + lead_angle_diff
-
-	print("[Missile] time_to_impact: ", time_to_impact, " desired_heading: ", desired_heading)
 	
 	# Full thrust, steer in the drift-compensated direction
 	ship.apply_control_input(1.0, 0.0, desired_heading, 1, 0)
