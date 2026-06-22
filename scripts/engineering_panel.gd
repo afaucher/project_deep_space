@@ -139,6 +139,37 @@ class ComponentSpatialView extends Control:
 					var text_pos = Vector2(draw_x + (draw_w - text_size.x) / 2.0, draw_y + (draw_h + text_size.y) / 2.0)
 					draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
 
+		if eng_state.has("hit_traces"):
+			for trace in eng_state["hit_traces"]:
+				var alpha = clamp(trace.get("time_remaining", 3.0) / 3.0, 0.0, 1.0)
+				
+				var prev_pos = trace.get("start_local", Vector2.ZERO)
+				var prev_ui_x = center.x + ((prev_pos.y - offset_x) * scale_factor)
+				var prev_ui_y = center.y - ((prev_pos.x - offset_y) * scale_factor)
+				
+				var max_dmg = 0.0
+				if trace.get("segments", []).size() > 0:
+					max_dmg = trace["segments"][0].get("dmg_remaining", 1.0)
+				
+				for seg in trace.get("segments", []):
+					var p = seg["pos"]
+					var ui_x = center.x + ((p.y - offset_x) * scale_factor)
+					var ui_y = center.y - ((p.x - offset_y) * scale_factor)
+					
+					var dmg = seg.get("dmg_remaining", 1.0)
+					var dmg_ratio = dmg / max(1.0, max_dmg)
+					var thickness = clamp(dmg_ratio * 5.0, 1.0, 5.0)
+					
+					var c = Color(1.0, 0.2, 0.2, alpha)
+					if seg.get("hit", false):
+						c = Color(1.0, 0.8, 0.2, alpha)
+						draw_circle(Vector2(ui_x, ui_y), thickness * 1.5, Color(1.0, 0.8, 0.2, alpha * 0.5))
+						
+					draw_line(Vector2(prev_ui_x, prev_ui_y), Vector2(ui_x, ui_y), c, thickness)
+					
+					prev_ui_x = ui_x
+					prev_ui_y = ui_y
+
 func _ready() -> void:
 	custom_minimum_size = Vector2(400, 400)
 	

@@ -101,8 +101,7 @@ func _register_tests() -> void:
 			for s in ship_a.sensor_hardware:
 				if s["type"] == "active":
 					s["active"] = false
-			ship_b.subsystems["reactor"]["power"] = 1.0
-			ship_b.point_defense_active = true, # Pushes EM noise +15 above 15.0 threshold
+			ship_b.subsystems["reactor"]["power"] = 4.0,
 		"check": func():
 			var has_sweep_hit = false
 			for arr in ship_a.active_sensor_sweeps.values():

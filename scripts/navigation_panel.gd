@@ -12,6 +12,8 @@ var map_zoom: float = 1.0
 
 var zoom_slider: HSlider
 
+var active_lasers: Array = []
+
 # Toggles
 var show_weapon_arcs: bool = true
 var show_sensor_arcs: bool = false
@@ -134,7 +136,19 @@ func _handle_click(click_pos: Vector2) -> void:
 
 func update_data(packet: Dictionary) -> void:
 	current_state = packet
+	if packet.has("transient_events"):
+		for ev in packet["transient_events"]:
+			if ev["type"] == "laser":
+				active_lasers.append({"start": ev["start_pos"], "end": ev["end_pos"], "age": 0.0})
 	queue_redraw()
+
+func _process(delta: float) -> void:
+	if active_lasers.size() > 0:
+		for i in range(active_lasers.size() - 1, -1, -1):
+			active_lasers[i]["age"] += delta
+			if active_lasers[i]["age"] > 0.1:
+				active_lasers.remove_at(i)
+		queue_redraw()
 
 func _draw() -> void:
 	var is_ship_oriented = current_state.get("is_ship_oriented", false)
@@ -302,6 +316,11 @@ func _draw() -> void:
 			# but we can just let it scale for now, or we draw it later when transform is reset.
 			pass
 
+	# Draw active lasers
+	for laser in active_lasers:
+		var alpha = max(0.0, 1.0 - (laser["age"] / 0.1))
+		draw_line(laser["start"], laser["end"], Color(1.0, 0.2, 0.2, alpha), 2.0 / map_zoom)
+
 	# Draw HUD overlay (Reset Transform)
 	draw_set_transform_matrix(Transform2D())
 	
@@ -353,7 +372,8 @@ func _draw() -> void:
 		var scale_text_pos = bottom_right - Vector2(ref_len / 2.0 + scale_text_size.x / 2.0, 10)
 		draw_string(scale_font, scale_text_pos, scale_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
 
-	
+
+
 	# Reset transform to draw absolute overlays (UI, Compass)
 	draw_set_transform_matrix(Transform2D())
 	

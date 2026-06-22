@@ -152,7 +152,10 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 				elif ammo <= 0:
 					btn.text = "EMPTY"
 				elif cd > 0.0:
-					btn.text = "COOLDOWN"
+					if cd > w_info.get("cooldown_max", 1.0) - 0.2:
+						btn.text = "* FIRING *"
+					else:
+						btn.text = "COOLDOWN"
 				elif not is_in_arc:
 					btn.text = "OUT OF ARC"
 				elif w_info.get("type", "") == "laser" and not is_in_range:

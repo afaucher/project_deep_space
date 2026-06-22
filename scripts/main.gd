@@ -18,6 +18,9 @@ func _ready() -> void:
 		if args[i] == "--run-test" and i + 1 < args.size():
 			_run_test(args[i+1])
 			return
+		elif args[i] == "--run-tactical-sim" and i + 1 < args.size():
+			_run_tactical_sim(args[i+1])
+			return
 			
 	SteamManager.connection_established.connect(_on_connection_established)
 	
@@ -44,6 +47,23 @@ func _run_test(test_name: String) -> void:
 		test_node.setup(self)
 	else:
 		printerr("[TEST FAILED] Test script not found: ", test_script_path)
+		get_tree().quit(1)
+
+func _run_tactical_sim(sim_name: String) -> void:
+	print("Starting tactical simulation: ", sim_name)
+	is_host = true
+	menu.hide()
+	
+	var sim_script_path = "res://tactical_analysis/sim_runners/" + sim_name + ".gd"
+	if ResourceLoader.exists(sim_script_path):
+		var sim_script = load(sim_script_path)
+		var sim_node = Node.new()
+		sim_node.set_script(sim_script)
+		add_child(sim_node)
+		if sim_node.has_method("setup"):
+			sim_node.setup(self)
+	else:
+		printerr("[SIM FAILED] Tactical sim script not found: ", sim_script_path)
 		get_tree().quit(1)
 
 func _on_host_pressed() -> void:
@@ -120,8 +140,11 @@ func _on_peer_disconnected(id: int) -> void:
 		players.erase(id)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if is_host and event is InputEventKey and event.pressed and event.keycode == KEY_F3:
-		_spawn_drone()
+	if is_host and event is InputEventKey and event.pressed:
+		if event.keycode == KEY_F3:
+			_spawn_drone()
+		elif event.keycode == KEY_F4:
+			_spawn_buoy()
 
 func _spawn_drone() -> void:
 	var drone_id = 900 + players.size()
@@ -142,6 +165,25 @@ func _spawn_drone() -> void:
 	var ai = AIDroneController.new()
 	ship.add_child(ai)
 	print("Spawned AI Drone ", drone_id, " at ", ship.position)
+
+func _spawn_buoy() -> void:
+	var buoy_id = 800 + players.size()
+	var ship = Ship.new()
+	ship.name = "Buoy_" + str(buoy_id)
+	ship.owner_id = buoy_id
+	ship.iff_tags = ["TEAM_ENEMY"]
+	
+	var player_pos = Vector2.ZERO
+	if players.has(1): player_pos = players[1].position
+	
+	# Spawn buoy randomly around player
+	var angle = randf() * TAU
+	ship.position = player_pos + Vector2(cos(angle), sin(angle)) * 8000.0
+	
+	add_child(ship)
+	players[buoy_id] = ship
+	
+	print("Spawned Target Buoy ", buoy_id, " at ", ship.position)
 
 # ----------------------------------------------------
 # Host Simulation Loop
@@ -174,8 +216,9 @@ func _distribute_state() -> void:
 				"heat_gen": ship.current_heat_gen,
 				"heat_dissipation_rate": ship.heat_dissipation_rate,
 				"em_signature": ship.em_signature,
-				"point_defense_active": ship.point_defense_active
-			}
+				"hit_traces": ship.hit_traces.duplicate(true)
+			},
+			"transient_events": ship.transient_events.duplicate(true)
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal
@@ -183,6 +226,8 @@ func _distribute_state() -> void:
 		elif client_id in multiplayer.get_peers():
 			# Send targeted RPC to client
 			rpc_id(client_id, "receive_perceived_state", packet)
+			
+		ship.transient_events.clear()
 
 # ----------------------------------------------------
 # Client Terminal / RPC Pipeline

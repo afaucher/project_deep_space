@@ -249,14 +249,24 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			p_style.border_color = Color.WHITE
 		else:
 			p_style.bg_color = Color(0.15, 0.15, 0.15, 0.8)
-			if c.get("classification") == "UNIDENTIFIED VESSEL":
+			var classification = c.get("classification", "UNKNOWN")
+			if classification == "UNIDENTIFIED VESSEL" or classification == "INCOMING ORDNANCE":
 				p_style.border_color = Color.RED
+			elif classification == "FRIENDLY VESSEL":
+				p_style.border_color = Color.GREEN
+			elif classification == "FRIENDLY ORDNANCE":
+				p_style.border_color = Color.DARK_GREEN
 			else:
 				p_style.border_color = Color.GRAY
 				
-		header.text = c_id + " [" + c.get("classification", "UNKNOWN") + "]"
-		if c.get("classification") == "UNIDENTIFIED VESSEL":
+		var classification_str = c.get("classification", "UNKNOWN")
+		header.text = c_id + " [" + classification_str + "]"
+		if classification_str == "UNIDENTIFIED VESSEL" or classification_str == "INCOMING ORDNANCE":
 			header.add_theme_color_override("font_color", Color.RED)
+		elif classification_str == "FRIENDLY VESSEL":
+			header.add_theme_color_override("font_color", Color.GREEN)
+		elif classification_str == "FRIENDLY ORDNANCE":
+			header.add_theme_color_override("font_color", Color.DARK_GREEN)
 		else:
 			header.add_theme_color_override("font_color", Color.GRAY)
 			

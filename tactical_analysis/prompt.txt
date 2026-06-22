@@ -1,0 +1,33 @@
+Our next /goal is to build a tactical analysis engine that considers multiple factors to determine the best course of action for a ship.
+
+There should be multiple artifacts:
+* A tactical analysis of the ship combat performance using parameter sweeps, multiple runs and jitter to chart how combat performance changes as various parameters change.
+* A template for that analysis, that given a rerun, can be used to generate that analysis
+  - This should look at multiple different characteristics like
+    * Missile hit probability against point defence
+      * How # missles in a broadside vs # point defence
+      * Engagement range
+      * Axis of engagement - ex - 'up the kilt' (rear, no PD coverage), bow on (front, heavy coverage) etc.
+    * Total damage dealt vs received
+    * Time to kill for both ships
+      * Laser heads
+      * Lasers
+      * Axis of engagement
+      * Range
+      * Sensor resolution
+* A suite of test setups that can be used to test the tactical analysis engine
+  * Ex - the missle ai test we just wrote has multiple scenarios
+  * Each run should run N-cases, with jitter and take the mean & stdev.
+  * Each should grade the result and tolerate 'bad' results like failure to intercept when trying to measure damage.
+* A suite of analysis scripts that can be used to run this analysis for any given scenario. 
+  * These should be purely determinsitic and produce clean datasets that can be used for charting.
+  * We should be able to run the script, get ALL the stats, and chart them with the template into the final report.
+  * We should look at the best way to collect data deterministically, Ex - should we have dedicated logging conventions that we can just grep for? Or use dedicated data collection methods like writing CSV?
+* A SKILL file used to combine the template, the datasets into the final report
+
+Lets create everything under a dedicated subfolder like /tactical_analysis, and use subfolders under that to split scripts, input scenarios, templates and the final report.
+
+A successful outcome MUST be able to:
+* Easily add new analysis dimensions, scenarios to test
+* Allow for altering performance parameters to measure A/B performance (ex: what if missles 2x their accel, what if PD fires at 5km instead of 3.5km)
+* Run automated tests that collect data, produce clean datasets and chart them with the template into the final report.

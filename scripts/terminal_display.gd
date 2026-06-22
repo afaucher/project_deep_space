@@ -15,7 +15,13 @@ var eng_panel: Control
 var pinned_contacts: Array = []
 var current_ship_oriented: bool = false
 
+var sfx_laser: AudioStreamPlayer
+
 func _ready() -> void:
+	sfx_laser = AudioStreamPlayer.new()
+	sfx_laser.stream = preload("res://assets/audio/laser.wav")
+	add_child(sfx_laser)
+	
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	
 	var main_vbox = VBoxContainer.new()
@@ -181,6 +187,11 @@ func update_data(packet: Dictionary) -> void:
 		weapons_panel.update_data(packet, selected_target)
 	if eng_panel and eng_panel.has_method("update_data"):
 		eng_panel.update_data(packet)
+
+	if packet.has("transient_events"):
+		for ev in packet["transient_events"]:
+			if ev["type"] == "laser":
+				sfx_laser.play()
 
 func _on_fire_weapon_requested(weapon_id: String) -> void:
 	var target_id = sensor_panel.get_selected_contact_id() if sensor_panel.has_method("get_selected_contact_id") else ""

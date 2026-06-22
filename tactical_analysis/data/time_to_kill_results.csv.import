@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://4rpnusjl74qd"
+
+[deps]
+
+files=["res://tactical_analysis/data/time_to_kill_results.engagement.translation", "res://tactical_analysis/data/time_to_kill_results.axis.translation", "res://tactical_analysis/data/time_to_kill_results.ttk.translation", "res://tactical_analysis/data/time_to_kill_results.winner.translation", "res://tactical_analysis/data/time_to_kill_results.loser.translation"]
+
+source_file="res://tactical_analysis/data/time_to_kill_results.csv"
+dest_files=["res://tactical_analysis/data/time_to_kill_results.engagement.translation", "res://tactical_analysis/data/time_to_kill_results.axis.translation", "res://tactical_analysis/data/time_to_kill_results.ttk.translation", "res://tactical_analysis/data/time_to_kill_results.winner.translation", "res://tactical_analysis/data/time_to_kill_results.loser.translation"]
+
+[params]
+
+compress=true
+delimiter=0

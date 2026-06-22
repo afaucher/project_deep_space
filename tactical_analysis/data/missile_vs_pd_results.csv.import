@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://by5vee7ngu48j"
+
+[deps]
+
+files=["res://tactical_analysis/data/missile_vs_pd_results.num.translation", "res://tactical_analysis/data/missile_vs_pd_results.engagement.translation", "res://tactical_analysis/data/missile_vs_pd_results.axis.translation", "res://tactical_analysis/data/missile_vs_pd_results.hits.translation", "res://tactical_analysis/data/missile_vs_pd_results.destroyed.translation", "res://tactical_analysis/data/missile_vs_pd_results.timeouts.translation", "res://tactical_analysis/data/missile_vs_pd_results.ship.translation", "res://tactical_analysis/data/missile_vs_pd_results.hits.translation"]
+
+source_file="res://tactical_analysis/data/missile_vs_pd_results.csv"
+dest_files=["res://tactical_analysis/data/missile_vs_pd_results.num.translation", "res://tactical_analysis/data/missile_vs_pd_results.engagement.translation", "res://tactical_analysis/data/missile_vs_pd_results.axis.translation", "res://tactical_analysis/data/missile_vs_pd_results.hits.translation", "res://tactical_analysis/data/missile_vs_pd_results.destroyed.translation", "res://tactical_analysis/data/missile_vs_pd_results.timeouts.translation", "res://tactical_analysis/data/missile_vs_pd_results.ship.translation", "res://tactical_analysis/data/missile_vs_pd_results.hits.translation"]
+
+[params]
+
+compress=true
+delimiter=0

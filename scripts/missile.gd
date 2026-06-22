@@ -14,7 +14,7 @@ func _init() -> void:
 	weapons = {}
 	
 	max_thrust = 10000.0 # Very fast
-	max_torque = 50000.0 # Very agile
+	max_torque = 2500.0 # Prevent overcorrection/spinning
 	max_omega = 10.0 # High turn rate for missiles
 	max_speed = 3000.0
 	
@@ -31,7 +31,7 @@ func _init() -> void:
 			"type": "active",
 			"parent": "sensor_nose",
 			"heading": 0.0,
-			"arc_width": PI / 3.0, # 60 degree forward cone
+			"arc_width": PI / 1.5, # 120 degree forward cone
 			"range": 30000.0,
 			"resolution": 5.0,
 			"health": 10.0,
@@ -39,7 +39,7 @@ func _init() -> void:
 			"em_emission": 10.0,
 			"timer": 0.0,
 			"refresh_interval": 0.1,
-			"num_bins": 12
+			"num_bins": 60
 		}
 	]
 
@@ -66,10 +66,22 @@ func _ready() -> void:
 	
 	# We DO NOT call super() because Ship._ready() sets mass=1000 and adds huge colliders
 	# Wait, actually Ship._ready() doesn't add huge colliders, it adds one based on max component extents.
-	# Let's call super._ready() first, then overwrite mass and inertia.
+	# Let's call super._ready() first, then overwrite mass, inertia, and damping.
 	super._ready()
+	
+	# Clean up any duplicate or inherited collision shapes from Ship._ready()
+	for child in get_children():
+		if child is CollisionShape2D and child != collision:
+			child.queue_free()
+			remove_child(child)
+			
 	mass = 20.0
 	inertia = 50.0
+	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
+	linear_damp = 0.0
+	angular_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
+	angular_damp = 5.0
+	gravity_scale = 0.0
 
 func setup(p_owner_id: int, p_pos: Vector2, p_vel: Vector2, initial_heading: float) -> void:
 	name = "Missile_" + str(p_owner_id) + "_" + str(randi())

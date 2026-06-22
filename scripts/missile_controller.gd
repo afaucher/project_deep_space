@@ -25,26 +25,18 @@ func _physics_process(delta: float) -> void:
 	var best_dist = 999999.0
 	target_id = ""
 	
-	var debug_str = ""
-	if Engine.get_physics_frames() % 60 == 0:
-		debug_str = "[Missile] Contacts: " + str(ship.active_contacts.size()) + " | "
-		
 	for c_id in ship.active_contacts:
 		var contact = ship.active_contacts[c_id]
 		var classification = contact.get("classification", "")
-		if debug_str != "":
-			debug_str += c_id + " (" + classification + ") "
-			
 		if classification != "UNIDENTIFIED VESSEL" and classification != "INCOMING ORDNANCE":
 			continue
+		if contact.get("pos_timer", 0.0) > 1.0:
+			continue # Lost lock
+			
 		var dist_to = ship.position.distance_to(contact["pos"])
 		if dist_to < best_dist:
 			best_dist = dist_to
 			target_id = c_id
-			
-			
-	if debug_str != "":
-		print(debug_str, " -> TARGET: ", target_id)
 			
 	if target_id == "":
 		# No target and no fallback, fly straight
@@ -57,17 +49,45 @@ func _physics_process(delta: float) -> void:
 	
 	# Proportional Navigation (simplified lead pursuit)
 	var rel_pos = target_pos - ship.position
-	var dist = rel_pos.length()
-	var time_to_impact = max(dist / max(ship.linear_velocity.length(), 1.0), 0.1)
-	var intercept_point = target_pos + (target_vel * time_to_impact)
+	var rel_vel = target_vel - ship.linear_velocity
+	var closing_vel = -rel_pos.normalized().dot(rel_vel)
 	
-	var desired_heading = (intercept_point - ship.position).angle()
+	var time_to_impact = 0.0
+	if closing_vel > 0.0:
+		time_to_impact = rel_pos.length() / closing_vel
+	else:
+		time_to_impact = rel_pos.length() / max(1.0, ship.linear_velocity.length())
+		
+	# Cap the lead time so the missile doesn't aim too far ahead and cross the target's path
+	time_to_impact = min(time_to_impact, 0.7)
+		
+	var intercept_pos = target_pos + (target_vel * time_to_impact)
 	
-	# Full thrust, steer towards intercept point
+	var desired_vel = (intercept_pos - ship.position).normalized() * ship.max_speed
+	var vel_error = desired_vel - ship.linear_velocity
+	var desired_heading = ship.rotation
+	if vel_error.length() > 10.0:
+		desired_heading = vel_error.angle()
+	else:
+		desired_heading = (intercept_pos - ship.position).angle()
+	
+	# Clamp heading to keep target within seeker cone
+	var angle_to_target = rel_pos.angle()
+	var seeker_half_arc = PI / 3.0
+	for s in ship.sensor_hardware:
+		if s["id"] == "seeker":
+			seeker_half_arc = s["arc_width"] / 2.0
+			break
+	var max_lead = max(0.1, seeker_half_arc - deg_to_rad(10.0))
+	var lead_angle_diff = wrapf(desired_heading - angle_to_target, -PI, PI)
+	lead_angle_diff = clampf(lead_angle_diff, -max_lead, max_lead)
+	desired_heading = angle_to_target + lead_angle_diff
+	
+	# Full thrust, steer in the drift-compensated direction
 	ship.apply_control_input(1.0, 0.0, desired_heading, 1, 0)
 	
 	# Warhead detonate logic
-	if dist < 400.0:
+	if rel_pos.length() < 100.0:
 		detonate()
 
 func detonate() -> void:
@@ -76,7 +96,9 @@ func detonate() -> void:
 	if target_id != "" and ship.active_contacts.has(target_id):
 		var target_pos = ship.active_contacts[target_id]["pos"]
 		var space_state = ship.get_world_2d().direct_space_state
-		var query = PhysicsRayQueryParameters2D.create(ship.position, target_pos)
+		var dir = (target_pos - ship.position).normalized()
+		var end_pos = ship.position + dir * 2000.0 # Extend ray well past the target
+		var query = PhysicsRayQueryParameters2D.create(ship.position, end_pos)
 		var result = space_state.intersect_ray(query)
 		
 		# Draw the laser beam (fire and forget visual)

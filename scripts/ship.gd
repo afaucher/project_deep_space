@@ -43,8 +43,6 @@ var weapons = {
 	"hp_stbd_laser_2": { "type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 500.0, "heading": PI / 2.0, "arc_width": PI / 2.0, "mount_pos": Vector2(-22.5, 15) }
 }
 
-var point_defense_active: bool = true
-
 # Engineering / Subsystems
 var subsystems: Dictionary = {
 	"reactor": {"power": 1.0},
@@ -54,34 +52,36 @@ var subsystems: Dictionary = {
 }
 
 var _cached_max_steps: int = 0
+var _cached_bbox_min: Vector2 = Vector2(-INF, -INF)
+var _cached_bbox_max: Vector2 = Vector2(INF, INF)
 
 var ship_components: Array = [
 	# Layout relative to center (0,0). Forward +X, Right +Y
-	{"id": "hull_fwd", "type": "hull", "rect": Rect2(15, -15, 15, 30), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-	{"id": "hull_port", "type": "hull", "rect": Rect2(-15, -15, 30, 10), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-	{"id": "hull_stbd", "type": "hull", "rect": Rect2(-15, 5, 30, 10), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-	{"id": "hull_aft", "type": "hull", "rect": Rect2(-30, -15, 15, 30), "health": 1000.0, "max_health": 1000.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+	{"id": "hull_fwd", "type": "hull", "rect": Rect2(15, -15, 15, 30), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+	{"id": "hull_port", "type": "hull", "rect": Rect2(-15, -15, 30, 10), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+	{"id": "hull_stbd", "type": "hull", "rect": Rect2(-15, 5, 30, 10), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+	{"id": "hull_aft", "type": "hull", "rect": Rect2(-30, -15, 15, 30), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 	
-	{"id": "reactor_core", "type": "reactor", "rect": Rect2(-15, -5, 10, 10), "health": 200.0, "max_health": 200.0, "density": 0.9, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-	{"id": "engine_main", "type": "engines", "rect": Rect2(-35, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 0.7, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "reactor_core", "type": "reactor", "rect": Rect2(-15, -5, 10, 10), "health": 200.0, "max_health": 200.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+	{"id": "engine_main", "type": "engines", "rect": Rect2(-35, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
 	
-	{"id": "hp_sensor_fwd", "type": "sensors", "rect": Rect2(30, -2.5, 5, 5), "health": 50.0, "max_health": 50.0, "density": 0.4, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_sensor_omni", "type": "sensors", "rect": Rect2(-5, -5, 10, 10), "health": 100.0, "max_health": 100.0, "density": 0.4, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_sensor_fwd", "type": "sensors", "rect": Rect2(30, -2.5, 5, 5), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_sensor_omni", "type": "sensors", "rect": Rect2(-5, -5, 10, 10), "health": 100.0, "max_health": 100.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
 
-	{"id": "hp_fwd_laser", "type": "weapons", "rect": Rect2(30, -7.5, 5, 5), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_fwd_missile", "type": "weapons", "rect": Rect2(30, 2.5, 15, 5), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_fwd_laser", "type": "weapons", "rect": Rect2(30, -7.5, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_fwd_missile", "type": "weapons", "rect": Rect2(30, 2.5, 15, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
 
-	{"id": "hp_port_laser_1", "type": "weapons", "rect": Rect2(17.5, -20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_port_tube_1", "type": "weapons", "rect": Rect2(7.5, -30, 5, 15), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_port_tube_2", "type": "weapons", "rect": Rect2(-2.5, -30, 5, 15), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_port_tube_3", "type": "weapons", "rect": Rect2(-12.5, -30, 5, 15), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_port_laser_2", "type": "weapons", "rect": Rect2(-22.5, -20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_port_laser_1", "type": "weapons", "rect": Rect2(17.5, -20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_port_tube_1", "type": "weapons", "rect": Rect2(7.5, -30, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_port_tube_2", "type": "weapons", "rect": Rect2(-2.5, -30, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_port_tube_3", "type": "weapons", "rect": Rect2(-12.5, -30, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_port_laser_2", "type": "weapons", "rect": Rect2(-22.5, -20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
 
-	{"id": "hp_stbd_laser_1", "type": "weapons", "rect": Rect2(17.5, 15, 5, 5), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_stbd_tube_1", "type": "weapons", "rect": Rect2(7.5, 15, 5, 15), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_stbd_tube_2", "type": "weapons", "rect": Rect2(-2.5, 15, 5, 15), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_stbd_tube_3", "type": "weapons", "rect": Rect2(-12.5, 15, 5, 15), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
-	{"id": "hp_stbd_laser_2", "type": "weapons", "rect": Rect2(-22.5, 15, 5, 5), "health": 150.0, "max_health": 150.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true}
+	{"id": "hp_stbd_laser_1", "type": "weapons", "rect": Rect2(17.5, 15, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_stbd_tube_1", "type": "weapons", "rect": Rect2(7.5, 15, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_stbd_tube_2", "type": "weapons", "rect": Rect2(-2.5, 15, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_stbd_tube_3", "type": "weapons", "rect": Rect2(-12.5, 15, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "hp_stbd_laser_2", "type": "weapons", "rect": Rect2(-22.5, 15, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true}
 ]
 
 var current_heat: float = 10.0
@@ -91,6 +91,9 @@ var current_heat_gen: float = 0.0
 
 var is_dead: bool = false
 var em_signature: float = 0.0
+
+var transient_events: Array = []
+var hit_traces: Array = []
 
 func get_sys_health(sys_type: String) -> float:
 	var h = 0.0
@@ -168,7 +171,6 @@ var engine_power_rating: float = 100.0
 var em_noise: float:
 	get: 
 		var noise = 5.0 * subsystems["reactor"]["power"]
-		if point_defense_active: noise += 15.0
 		for s in sensor_hardware:
 			if s.get("active", true): noise += 5.0
 		return noise
@@ -204,9 +206,9 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 		
 		if _cached_max_steps == 0:
 			var max_dist = 200.0
+			var min_x = INF; var max_x = -INF
+			var min_y = INF; var max_y = -INF
 			if not ship_components.is_empty():
-				var min_x = INF; var max_x = -INF
-				var min_y = INF; var max_y = -INF
 				for c in ship_components:
 					var r: Rect2 = c["rect"]
 					min_x = min(min_x, r.position.x)
@@ -214,21 +216,61 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 					min_y = min(min_y, r.position.y)
 					max_y = max(max_y, r.position.y + r.size.y)
 				max_dist = Vector2(max_x - min_x, max_y - min_y).length()
+				_cached_bbox_min = Vector2(min_x, min_y)
+				_cached_bbox_max = Vector2(max_x, max_y)
+			else:
+				_cached_bbox_min = Vector2(-100, -100)
+				_cached_bbox_max = Vector2(100, 100)
 			_cached_max_steps = int(ceil(max_dist / step_size))
+			
+		var tmin = -INF
+		var tmax = INF
+		var hit_box = true
+		for axis in [Vector2.AXIS_X, Vector2.AXIS_Y]:
+			if abs(local_dir[axis]) < 0.0001:
+				if local_pos[axis] < _cached_bbox_min[axis] or local_pos[axis] > _cached_bbox_max[axis]:
+					hit_box = false
+			else:
+				var t1 = (_cached_bbox_min[axis] - local_pos[axis]) / local_dir[axis]
+				var t2 = (_cached_bbox_max[axis] - local_pos[axis]) / local_dir[axis]
+				if t1 > t2:
+					var temp = t1
+					t1 = t2
+					t2 = temp
+				tmin = max(tmin, t1)
+				tmax = min(tmax, t2)
+				
+		if tmax >= tmin and tmax >= 0 and hit_box:
+			local_pos = local_pos + local_dir * max(0.0, tmin)
 			
 		var max_steps = _cached_max_steps
 		var current_pos = local_pos
+		
+		var trace = {
+			"start_local": local_pos,
+			"end_local": local_pos,
+			"dir_local": local_dir,
+			"segments": [],
+			"time_remaining": 3.0 # Persist for 3 seconds
+		}
 		
 		var hit_something = false
 		for i in range(max_steps):
 			if remaining_damage <= 0: break
 			
+			var segment_hit = false
+			
 			for comp in ship_components:
 				if comp["health"] <= 0: continue
 				if comp["rect"].has_point(current_pos):
 					hit_something = true
-					# Damping/Ablation based on density
-					var dmg_absorbed = min(remaining_damage, comp["density"] * step_size * 50.0)
+					segment_hit = true
+					
+					# Ablation: Effective density drops as component loses health
+					var health_ratio = max(0.0, comp["health"] / comp.get("max_health", 1000.0))
+					var effective_density = max(0.05, comp["density"] * health_ratio)
+					
+					var dmg_absorbed = min(remaining_damage, effective_density * step_size * 50.0)
 					if dmg_absorbed > 0:
 						comp["health"] -= dmg_absorbed
 						
@@ -239,9 +281,17 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 						comp["heat"] = comp.get("heat", 0.0) + heat_generated
 						current_heat += heat_generated
 						remaining_damage -= dmg_absorbed
-						print("[Damage] Hit component ", comp["id"], " for ", dmg_absorbed, " (Health remaining: ", comp["health"], ")")
+			
+			trace["segments"].append({
+				"pos": current_pos,
+				"dmg_remaining": remaining_damage,
+				"hit": segment_hit
+			})
 			
 			current_pos += local_dir * step_size
+			trace["end_local"] = current_pos
+			
+		hit_traces.append(trace)
 			
 		if not hit_something:
 			print("[Damage] Raycast completely missed all internal components!")
@@ -442,10 +492,10 @@ func _physics_process(delta: float) -> void:
 				if ratio > 0.0:
 					cooldown_rate = ratio
 				weapons[w]["cooldown"] -= delta * cooldown_rate
-		
-		if point_defense_active and not is_dead:
+				
+		if not is_dead:
 			_process_point_defense()
-			
+		
 	var forward = Vector2.RIGHT.rotated(rotation)
 	var current_forward_speed = linear_velocity.dot(forward)
 	
@@ -534,8 +584,8 @@ func _physics_process(delta: float) -> void:
 	var to_remove = []
 	for c_id in active_contacts:
 		var c = active_contacts[c_id]
-		c["last_seen_timer"] += delta
-		c["pos_timer"] += delta
+		c["last_seen_timer"] = c.get("last_seen_timer", 0.0) + delta
+		c["pos_timer"] = c.get("pos_timer", 0.0) + delta
 		
 		# Dead-reckon their position based on velocity
 		if c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2:
@@ -675,6 +725,7 @@ func _physics_process(delta: float) -> void:
 				if bin.has("em_noise"): c["signature"]["em_noise"] = lerp(c["signature"].get("em_noise", 0.0), bin.get("em_noise", 0.0), 0.8)
 				if bin.has("owner_id"): c["signature"]["owner_id"] = bin["owner_id"]
 				if bin.has("iff_tags"): c["signature"]["iff_tags"] = bin["iff_tags"]
+				if bin.has("instance_id"): c["instance_id"] = bin["instance_id"]
 				
 				c["classification"] = Ship.classify_contact(c["signature"], self.iff_tags)
 						
@@ -690,6 +741,7 @@ func _physics_process(delta: float) -> void:
 				
 			active_contacts[new_id] = {
 				"id": new_id,
+				"instance_id": bin.get("instance_id", -1),
 				"pos": bin_pos,
 				"vel": bin.get("vel", Vector2.ZERO),
 				"resolution": bin.get("bin_angle", TAU),
@@ -707,8 +759,8 @@ func _physics_process(delta: float) -> void:
 			
 	for c_id in active_contacts.keys():
 		var c = active_contacts[c_id]
-		c["last_seen_timer"] += delta
-		c["pos_timer"] += delta
+		c["last_seen_timer"] = c.get("last_seen_timer", 0.0) + delta
+		c["pos_timer"] = c.get("pos_timer", 0.0) + delta
 		
 		# Drop old contacts
 		if c["last_seen_timer"] > 10.0:
@@ -728,6 +780,14 @@ func _physics_process(delta: float) -> void:
 	#				c["vel"] = external_contact["vel"]
 	#				c["last_seen_timer"] = external_contact["last_seen_timer"]
 	#				c["resolution"] = min(c["resolution"], external_contact["resolution"])
+
+	if is_multiplayer_authority():
+		var i = hit_traces.size() - 1
+		while i >= 0:
+			hit_traces[i]["time_remaining"] -= delta
+			if hit_traces[i]["time_remaining"] <= 0.0:
+				hit_traces.remove_at(i)
+			i -= 1
 
 func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 	var use_range = active_range if active_range > 0.0 else sensor["range"]
@@ -904,15 +964,6 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 	return sweep_output
 
 @rpc("any_peer", "call_local")
-func set_point_defense_active(active: bool) -> void:
-	if not is_multiplayer_authority() or is_dead:
-		return
-	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
-		if multiplayer.get_remote_sender_id() != 0:
-			return
-	point_defense_active = active
-
-@rpc("any_peer", "call_local")
 func set_component_power(component_id: String, active: bool) -> void:
 	if not is_multiplayer_authority() or is_dead:
 		return
@@ -1007,7 +1058,7 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 				# Ray hits target - simulate from global_mount_pos to real_target_pos
 				var hit_dir = (real_target_pos - global_mount_pos).normalized()
 				var actual_damage = weapon_data["damage"] * component_health_ratio
-				body.take_damage(actual_damage, real_target_pos, hit_dir, weapon_data["type"])
+				body.take_damage(actual_damage, global_mount_pos, hit_dir, weapon_data["type"])
 			elif body.has_method("get_signature"):
 				body.queue_free()
 				
@@ -1027,19 +1078,38 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 		proj.add_child(controller)
 		controller.target_id = target_contact_id
 		
-		proj.position = global_mount_pos
+		var launch_dir = Vector2.RIGHT.rotated(weapon_launch_angle)
+		var rel_mount = weapon_data["mount_pos"]
+		var spawn_rel = rel_mount
+		if spawn_rel.length() < 55.0:
+			# Push along launch_dir until the distance from ship center is at least 55.0px
+			var A = 1.0
+			var B = 2.0 * rel_mount.dot(launch_dir)
+			var C = rel_mount.length_squared() - 3025.0 # 55.0^2
+			var discriminant = B * B - 4.0 * A * C
+			if discriminant >= 0.0:
+				var d = (-B + sqrt(discriminant)) / 2.0
+				if d > 0.0:
+					spawn_rel += launch_dir * d
+				else:
+					spawn_rel += launch_dir * 25.0
+			else:
+				spawn_rel += launch_dir * 25.0
+				
+		proj.position = position + spawn_rel.rotated(rotation)
+		
 		# Orient nose toward target so seeker can acquire, but kick velocity
 		# out the tube direction to clear the parent ship hull
-		var target_dir = (target_pos - global_mount_pos).angle()
+		var target_dir = (target_pos - proj.position).angle()
 		proj.rotation = target_dir
+		proj.name = "Missile_" + str(owner_id) + "_" + str(randi())
 		proj.owner_id = owner_id
 		proj.iff_tags = iff_tags.duplicate()
 		proj.linear_velocity = linear_velocity + (Vector2.RIGHT.rotated(weapon_launch_angle) * 200.0)
-		main_node.add_child(proj, true)
 		proj.add_collision_exception_with(self)
+		main_node.add_child(proj, true)
 
 func _process_point_defense() -> void:
-	if not point_defense_active: return
 	var main_node = get_tree().current_scene
 	if not is_instance_valid(main_node): return
 	
@@ -1049,47 +1119,52 @@ func _process_point_defense() -> void:
 			if is_component_powered(w_id):
 				ready_lasers.append(w_id)
 				
-	if ready_lasers.is_empty(): return
+	var debug_log = Engine.get_physics_frames() % 60 == 0
+	if ready_lasers.is_empty(): 
+		return
 	
 	var pd_range = 3500.0
-	var space_state = get_world_2d().direct_space_state
-	var query = PhysicsShapeQueryParameters2D.new()
-	var shape = CircleShape2D.new()
-	shape.radius = pd_range
-	query.shape = shape
-	query.transform = Transform2D(0, position)
 	
-	var results = space_state.intersect_shape(query, 32)
-	for res in results:
+	for c_id in active_contacts:
 		if ready_lasers.is_empty(): break
 		
-		var body = res["collider"]
-		if body == self: continue
-		if "owner_id" in body and body.owner_id != owner_id:
-			if body.name.begins_with("Missile_"): # It's a missile
-				var rel_pos = body.position - position
+		var contact = active_contacts[c_id]
+		if contact.get("classification", "") == "INCOMING ORDNANCE":
+			var body = instance_from_id(contact.get("instance_id", -1))
+			if not is_instance_valid(body) or body == self: continue
+			
+			var dist = position.distance_to(body.position)
+			if dist > pd_range: continue
+			
+			var rel_pos = body.position - position
+
+			for w_id in ready_lasers:
+				var weapon = ship_components.filter(func(c): return c["id"] == w_id)[0]
 				
-				for w_id in ready_lasers:
-					var weapon = ship_components.filter(func(c): return c["id"] == w_id)[0]
+				var aim_angle = (body.position - (position + weapon["rect"].position.rotated(rotation))).angle()
+				
+				var weapon_data = weapons[w_id]
+				var w_global_heading = rotation + weapon_data["heading"]
+				var rel_angle = wrapf(aim_angle - w_global_heading, -PI, PI)
+				
+				if abs(rel_angle) <= weapon_data["arc_width"] / 2.0:
+					weapons[w_id]["cooldown"] = weapon_data["cooldown_max"]
+					weapons[w_id]["ammo"] -= 1
 					
-					var aim_angle = (body.position - (position + weapon["rect"].position.rotated(rotation))).angle()
+					var start_pos = position + weapon["rect"].position.rotated(rotation)
+					transient_events.append({
+						"type": "laser",
+						"start_pos": start_pos,
+						"end_pos": body.position
+					})
+					
 					if multiplayer.get_unique_id() == owner_id:
-						if main_node and main_node.has_method("draw_laser"):
-							main_node.draw_laser.rpc(position + weapon["rect"].position.rotated(rotation), body.position)
-					
-					var weapon_data = weapons[w_id]
-					var w_global_heading = rotation + weapon_data["heading"]
-					var rel_angle = wrapf(aim_angle - w_global_heading, -PI, PI)
-					
-					if abs(rel_angle) <= weapon_data["arc_width"] / 2.0:
-						weapons[w_id]["cooldown"] = weapon_data["cooldown_max"]
-						weapons[w_id]["ammo"] -= 1
-						if multiplayer.get_unique_id() == owner_id:
-							sfx_laser.play()
-						var hit_dir = (body.position - (position + weapon["rect"].position.rotated(rotation))).normalized()
-						body.take_damage(100.0, body.position, hit_dir, "laser")
-						ready_lasers.erase(w_id)
-						break
+						sfx_laser.play()
+						
+					var hit_dir = (body.position - start_pos).normalized()
+					body.take_damage(100.0, body.position, hit_dir, "laser")
+					ready_lasers.erase(w_id)
+					break
 
 
 
