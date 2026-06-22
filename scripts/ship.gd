@@ -1095,6 +1095,7 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 		controller.target_id = target_contact_id
 		if target_contact_id != "" and active_contacts.has(target_contact_id):
 			proj.active_contacts[target_contact_id] = active_contacts[target_contact_id].duplicate(true)
+			proj.active_contacts[target_contact_id]["pos_timer"] = 0.0
 		
 		var launch_dir = Vector2.RIGHT.rotated(weapon_launch_angle)
 		var rel_mount = weapon_data["mount_pos"]
