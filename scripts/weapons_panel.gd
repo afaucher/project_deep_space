@@ -17,6 +17,10 @@ func _ready() -> void:
 	style.bg_color = Color(0.1, 0.05, 0.05, 0.8)
 	style.border_width_top = 2
 	style.border_color = Color.RED
+	style.content_margin_left = 3
+	style.content_margin_right = 3
+	style.content_margin_top = 3
+	style.content_margin_bottom = 3
 	add_theme_stylebox_override("panel", style)
 	
 	var vbox = VBoxContainer.new()
@@ -181,3 +185,4 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 		else:
 			target_info_label.text = "TARGET LOST"
 			if is_instance_valid(spider_chart): spider_chart.hide()
+

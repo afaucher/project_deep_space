@@ -16,6 +16,7 @@ var pinned_contacts: Array = []
 var current_ship_oriented: bool = false
 
 var sfx_laser: AudioStreamPlayer
+var spawn_dropdown: OptionButton
 
 func _ready() -> void:
 	sfx_laser = AudioStreamPlayer.new()
@@ -68,6 +69,22 @@ func _ready() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_bar.add_child(spacer)
 	
+	spawn_dropdown = OptionButton.new()
+	spawn_dropdown.add_item("Spawn...")
+	spawn_dropdown.add_item("Asteroids (10)")
+	spawn_dropdown.add_item("Target Drone")
+	spawn_dropdown.add_item("Target Buoy")
+	spawn_dropdown.item_selected.connect(_on_spawn_selected)
+	top_bar.add_child(spawn_dropdown)
+	
+	var spacer2 = Control.new()
+	spacer2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(spacer2)
+	
+	var spacer3 = Control.new()
+	spacer3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(spacer3)
+	
 	var ship_oriented_toggle = CheckButton.new()
 	ship_oriented_toggle.text = "Ship Oriented"
 	ship_oriented_toggle.button_pressed = false
@@ -87,6 +104,7 @@ func _ready() -> void:
 	nav_style.bg_color = Color(0.05, 0.05, 0.1)
 	nav_style.border_width_right = 2
 	nav_style.border_color = Color(0.2, 0.4, 0.2)
+	_add_margins(nav_style)
 	nav_container.add_theme_stylebox_override("panel", nav_style)
 	
 	nav_panel = NavigationPanel.new()
@@ -102,6 +120,7 @@ func _ready() -> void:
 	sensor_style.bg_color = Color(0.02, 0.05, 0.02)
 	sensor_style.border_width_right = 2
 	sensor_style.border_color = Color(0.2, 0.4, 0.2)
+	_add_margins(sensor_style)
 	sensor_container.add_theme_stylebox_override("panel", sensor_style)
 	
 	sensor_panel = SensorPanel.new()
@@ -125,6 +144,7 @@ func _ready() -> void:
 	helm_style.bg_color = Color(0.05, 0.05, 0.05)
 	helm_style.border_width_left = 2
 	helm_style.border_color = Color(0.2, 0.4, 0.2)
+	_add_margins(helm_style)
 	helm_container.add_theme_stylebox_override("panel", helm_style)
 	
 	helm_panel = HelmPanel.new()
@@ -139,6 +159,7 @@ func _ready() -> void:
 	weapons_style.border_width_top = 2
 	weapons_style.border_width_left = 2
 	weapons_style.border_color = Color.DARK_RED
+	_add_margins(weapons_style)
 	weapons_container.add_theme_stylebox_override("panel", weapons_style)
 	
 	weapons_panel = WeaponsPanel.new()
@@ -154,6 +175,7 @@ func _ready() -> void:
 	eng_style.bg_color = Color(0.05, 0.05, 0.05)
 	eng_style.border_width_left = 2
 	eng_style.border_color = Color(0.6, 0.4, 0.1)
+	_add_margins(eng_style)
 	eng_container.add_theme_stylebox_override("panel", eng_style)
 	
 	eng_panel = EngineeringPanel.new()
@@ -168,6 +190,27 @@ func _ready() -> void:
 	helm_toggle.toggled.connect(func(pressed): helm_container.visible = pressed)
 	weapons_toggle.toggled.connect(func(pressed): weapons_container.visible = pressed)
 	eng_toggle.toggled.connect(func(pressed): eng_container.visible = pressed)
+
+func _add_margins(style: StyleBoxFlat) -> void:
+	style.content_margin_left = 3
+	style.content_margin_right = 3
+	style.content_margin_top = 3
+	style.content_margin_bottom = 3
+
+func _on_spawn_selected(idx: int) -> void:
+	if idx == 0: return
+	var my_id = multiplayer.get_unique_id()
+	var ship_node_name = "Ship_" + str(my_id)
+	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	if ship_node:
+		if idx == 1:
+			ship_node.rpc_id(1, "request_spawn", "asteroids")
+		elif idx == 2:
+			ship_node.rpc_id(1, "request_spawn", "drone")
+		elif idx == 3:
+			ship_node.rpc_id(1, "request_spawn", "buoy")
+	
+	spawn_dropdown.select(0)
 
 func update_data(packet: Dictionary) -> void:
 	# Inject local UI state into the packet so sub-panels can read it
@@ -241,3 +284,5 @@ func _on_component_power_toggled(component_id: String, is_active: bool) -> void:
 	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
 	if ship_node:
 		ship_node.rpc_id(1, "set_component_power", component_id, is_active)
+
+

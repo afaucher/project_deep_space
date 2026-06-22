@@ -455,6 +455,20 @@ var _high_res_target_timer: float = 0.0
 var manual_sensor_target: String = ""
 
 @rpc("any_peer", "call_local")
+func request_spawn(type: String) -> void:
+	if not is_multiplayer_authority(): return
+	var main = get_node_or_null("/root/Main")
+	if not main: return
+	
+	if type == "asteroids":
+		main._spawn_asteroids()
+	elif type == "drone":
+		main._spawn_drone()
+	elif type == "buoy":
+		main._spawn_buoy()
+
+
+@rpc("any_peer", "call_local")
 func set_sensor_state(sensor_id: String, is_active: bool) -> void:
 	if not is_multiplayer_authority():
 		return
@@ -1174,3 +1188,5 @@ func apply_control_input(thrust: float, t_vel: float, heading: float, s_mode: in
 	target_heading = heading
 	steering_mode = s_mode
 	linear_mode = l_mode
+
+

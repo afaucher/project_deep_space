@@ -32,6 +32,10 @@ grow_horizontal = 2
 grow_vertical = 2
 alignment = 1
 
+[node name="LocalTestButton" type="Button" parent="CanvasLayer/Menu"]
+layout_mode = 2
+text = "SINGLE PLAYER GAME"
+
 [node name="HostButton" type="Button" parent="CanvasLayer/Menu"]
 layout_mode = 2
 text = "HOST SIMULATION"
@@ -40,6 +44,3 @@ text = "HOST SIMULATION"
 layout_mode = 2
 text = "JOIN TERMINAL"
 
-[node name="LocalTestButton" type="Button" parent="CanvasLayer/Menu"]
-layout_mode = 2
-text = "LOCAL SINGLEPLAYER"
