@@ -1151,6 +1151,7 @@ func _process_point_defense() -> void:
 		if contact.get("classification", "") == "INCOMING ORDNANCE":
 			var body = instance_from_id(contact.get("instance_id", -1))
 			if not is_instance_valid(body) or body == self: continue
+			if body is Ship and body.is_dead: continue
 			
 			var dist = position.distance_to(body.position)
 			if dist > pd_range: continue
@@ -1181,6 +1182,7 @@ func _process_point_defense() -> void:
 						sfx_laser.play()
 						
 					var hit_dir = (body.position - start_pos).normalized()
+					print("[PD] ", name, " shooting at ", body.name, " (", c_id, ")")
 					body.take_damage(100.0, body.position, hit_dir, "laser")
 					ready_lasers.erase(w_id)
 					break

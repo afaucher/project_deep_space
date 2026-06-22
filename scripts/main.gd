@@ -194,6 +194,7 @@ func _spawn_buoy() -> void:
 	ship.name = "Buoy_" + str(buoy_id)
 	ship.owner_id = buoy_id
 	ship.iff_tags = ["TEAM_ENEMY"]
+	ship.weapons = {} # Target buoy has no weapons / PD
 	
 	var player_pos = Vector2.ZERO
 	if players.has(1): player_pos = players[1].position
