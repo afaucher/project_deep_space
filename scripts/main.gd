@@ -4,7 +4,10 @@ extends Node2D
 @onready var terminal_display = $CanvasLayer/TerminalDisplay
 @onready var menu = $CanvasLayer/Menu
 
-const Ship = preload("res://scripts/ship.gd")
+const Frigate = preload("res://scripts/ships/frigate.gd")
+const TargetDrone = preload("res://scripts/ships/target_drone.gd")
+const Buoy = preload("res://scripts/ships/buoy.gd")
+const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
 
 var is_host: bool = false
@@ -110,10 +113,9 @@ func _spawn_asteroids() -> void:
 		asteroids.append(ast)
 
 func _spawn_bouys() -> void:
-	var BouyClass = load("res://scripts/bouy.gd")
 	for i in range(5):
-		var b = BouyClass.new()
-		b.name = "Bouy_" + str(i)
+		var b = Buoy.new()
+		b.name = "Buoy_" + str(i)
 		# Spawn them somewhat close so they are within sensor range (40km)
 		b.position = Vector2(randf_range(-15000, 15000), randf_range(-15000, 15000))
 		b.linear_velocity = Vector2(randf_range(-10, 10), randf_range(-10, 10))
@@ -125,7 +127,7 @@ func _on_peer_connected(id: int) -> void:
 		_spawn_ship(id)
 
 func _spawn_ship(id: int) -> void:
-	var ship = Ship.new()
+	var ship = Frigate.new()
 	ship.name = "Ship_" + str(id)
 	ship.owner_id = id
 	ship.iff_tags = ["TEAM_PLAYER"]
@@ -148,7 +150,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _spawn_drone(is_friendly: bool = false) -> void:
 	var drone_id = 900 + players.size()
-	var ship = Ship.new()
+	var ship = TargetDrone.new()
 	ship.name = "Ship_" + str(drone_id)
 	ship.owner_id = drone_id
 	
@@ -190,11 +192,8 @@ func _spawn_sensor_drone() -> void:
 
 func _spawn_buoy() -> void:
 	var buoy_id = 800 + players.size()
-	var ship = Ship.new()
+	var ship = Buoy.new()
 	ship.name = "Buoy_" + str(buoy_id)
-	ship.owner_id = buoy_id
-	ship.iff_tags = ["TEAM_ENEMY"]
-	ship.weapons = {} # Target buoy has no weapons / PD
 	
 	var player_pos = Vector2.ZERO
 	if players.has(1): player_pos = players[1].position
@@ -204,7 +203,6 @@ func _spawn_buoy() -> void:
 	ship.position = player_pos + Vector2(cos(angle), sin(angle)) * 8000.0
 	
 	add_child(ship)
-	players[buoy_id] = ship
 	
 	print("Spawned Target Buoy ", buoy_id, " at ", ship.position)
 

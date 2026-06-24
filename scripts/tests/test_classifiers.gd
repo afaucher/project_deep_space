@@ -1,6 +1,6 @@
 extends Node
 
-const Ship = preload("res://scripts/ship.gd")
+const Ship = preload("res://scripts/ships/frigate.gd")
 
 func setup(main) -> void:
 	print("Test test_classifiers initialized.")

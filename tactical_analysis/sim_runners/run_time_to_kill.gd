@@ -1,6 +1,6 @@
 extends Node
 
-const Ship = preload("res://scripts/ship.gd")
+const Frigate = preload("res://scripts/ships/frigate.gd")
 
 var main_node
 var log_file: FileAccess
@@ -39,7 +39,7 @@ func _start_scenario() -> void:
 	scenario_frames = 0
 	
 	# Spawn Ship A (Player)
-	ship_a = Ship.new()
+	ship_a = Frigate.new()
 	ship_a.name = "ShipA_" + str(current_run)
 	ship_a.owner_id = 1
 	ship_a.iff_tags = ["TEAM_A"]
@@ -49,7 +49,7 @@ func _start_scenario() -> void:
 	main_node.add_child(ship_a)
 	
 	# Spawn Ship B (Enemy)
-	ship_b = Ship.new()
+	ship_b = Frigate.new()
 	ship_b.name = "ShipB_" + str(current_run)
 	ship_b.owner_id = 2
 	ship_b.iff_tags = ["TEAM_B"]

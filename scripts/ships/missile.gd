@@ -1,4 +1,4 @@
-extends Ship
+extends "res://scripts/ships/ship.gd"
 class_name Missile
 
 func _init() -> void:

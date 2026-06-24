@@ -1,4 +1,13 @@
 # build.ps1 - Build and package Project Deep Space
+function Normalize-ProcessPath {
+    if ($env:PATH) {
+        $env:Path = $env:PATH
+        [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+    }
+}
+
+Normalize-ProcessPath
+
 Write-Host "Stopping any running instances of the game..." -ForegroundColor Yellow
 Stop-Process -Name "ProjectDeepSpace" -ErrorAction SilentlyContinue
 

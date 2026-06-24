@@ -1,9 +1,11 @@
 extends Node
 
+const Ship = preload("res://scripts/ships/frigate.gd")
+
 # Test: Component Power-off, Damaged, and Destroyed states
 # Verifies that each major component correctly gates its behavior.
 #
-# We create a bare Ship.new(), add it to the scene, let physics tick,
+# We create a current Frigate via the Ship alias, add it to the scene, let physics tick,
 # and measure outputs (velocity, angular_velocity, sensor contacts, weapon fire).
 
 var ship: Ship = null

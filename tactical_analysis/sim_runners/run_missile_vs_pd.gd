@@ -1,7 +1,7 @@
 extends Node
 
-const Ship = preload("res://scripts/ship.gd")
-const Missile = preload("res://scripts/missile.gd")
+const Frigate = preload("res://scripts/ships/frigate.gd")
+const Missile = preload("res://scripts/ships/missile.gd")
 const MissileController = preload("res://scripts/missile_controller.gd")
 
 var main_node
@@ -64,7 +64,7 @@ func _start_scenario() -> void:
 	timeouts = 0
 	missiles.clear()
 	
-	f_ship = Ship.new()
+	f_ship = Frigate.new()
 	f_ship.name = "DefenderShip_" + str(current_run)
 	f_ship.owner_id = 1
 	f_ship.iff_tags = ["TEAM_A"]

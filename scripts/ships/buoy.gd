@@ -1,5 +1,5 @@
 extends RigidBody2D
-class_name Bouy
+class_name Buoy
 
 var cross_section: float = 10.0
 var base_heat: float = 50.0 # High heat so it looks like a ship to sensors

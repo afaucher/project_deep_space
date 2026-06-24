@@ -1085,7 +1085,7 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 		var main_node = get_tree().current_scene
 		if not is_instance_valid(main_node): return
 		
-		var Missile = load("res://scripts/missile.gd")
+		var Missile = load("res://scripts/ships/missile.gd")
 		var proj = Missile.new()
 		
 		# Add controller

@@ -1,4 +1,12 @@
 # run_analysis_suite.ps1 - Orchestrates the entire tactical analysis pipeline
+function Normalize-ProcessPath {
+    if ($env:PATH) {
+        $env:Path = $env:PATH
+        [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+    }
+}
+
+Normalize-ProcessPath
 
 $godotPath = "$PSScriptRoot\..\Godot_v4.4.1-stable_win64.exe"
 $pythonPath = "python"

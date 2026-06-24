@@ -1,6 +1,6 @@
 extends Node
 
-const Ship = preload("res://scripts/ship.gd")
+const Ship = preload("res://scripts/ships/frigate.gd")
 
 var main_node: Node = null
 var ship: Ship = null

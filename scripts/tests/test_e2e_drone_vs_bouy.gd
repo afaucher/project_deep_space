@@ -1,7 +1,10 @@
 extends Node
 
+const Ship = preload("res://scripts/ships/target_drone.gd")
+const Buoy = preload("res://scripts/ships/buoy.gd")
+
 var drone_ship: Ship
-var bouy: Bouy
+var bouy: Buoy
 
 func setup(main_node: Node) -> void:
 	print("Starting E2E Test: Drone vs Bouy")
@@ -21,7 +24,7 @@ func setup(main_node: Node) -> void:
 	drone_ship.add_child(ai)
 	
 	# Add Bouy
-	bouy = Bouy.new()
+	bouy = Buoy.new()
 	bouy.name = "Bouy_1"
 	bouy.position = Vector2(5000.0, 0) # 5km away
 	main_node.add_child(bouy)
