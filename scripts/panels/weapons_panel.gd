@@ -5,6 +5,13 @@ signal fire_weapon_requested(weapon_id: String)
 
 const FIRING_FLASH_WINDOW := 0.2 # seconds before cooldown ends where the button reads "* FIRING *" instead of "COOLDOWN"
 
+# Closing-rate sample/window sizes for the acceleration readout below --
+# matches TimeSeriesGraph's own sample-and-hold pattern, since differentiating
+# raw frame-to-frame closing velocity would amplify contact-position jitter
+# into a wildly noisy acceleration number.
+const CLOSING_VEL_SAMPLE_INTERVAL := 0.2
+const CLOSING_ACCEL_WINDOW := 1.0
+
 var current_state: Dictionary = {}
 var selected_contact_id: String = ""
 var weapon_buttons: Dictionary = {}
@@ -12,6 +19,7 @@ var target_info_label: Label
 var weapon_grid: GridContainer
 var spider_chart: Control
 var history_graph: Control
+var _closing_vel_samples: Array = [] # [{"t": float, "v": float}, ...]
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(460, 200)
@@ -96,12 +104,34 @@ func _create_weapon_ui(grid: GridContainer, w_id: String, w_name: String) -> voi
 		"btn": fire_btn
 	}
 
+# Tracks closing_vel in sparse, time-stamped samples and returns the average
+# rate of change over CLOSING_ACCEL_WINDOW -- smooths out the jitter that a
+# naive frame-to-frame diff of a lerp-smoothed contact velocity would produce.
+func _track_closing_accel(closing_vel: float) -> float:
+	var now = Time.get_ticks_msec() / 1000.0
+	if _closing_vel_samples.is_empty() or now - _closing_vel_samples[-1]["t"] >= CLOSING_VEL_SAMPLE_INTERVAL:
+		_closing_vel_samples.append({"t": now, "v": closing_vel})
+		var cutoff = now - CLOSING_ACCEL_WINDOW
+		while _closing_vel_samples.size() > 1 and _closing_vel_samples[0]["t"] < cutoff:
+			_closing_vel_samples.pop_front()
+
+	if _closing_vel_samples.size() < 2:
+		return 0.0
+	var oldest = _closing_vel_samples[0]
+	var newest = _closing_vel_samples[-1]
+	var dt = newest["t"] - oldest["t"]
+	if dt <= 0.0:
+		return 0.0
+	return (newest["v"] - oldest["v"]) / dt
+
 func update_data(packet: Dictionary, target_id: String) -> void:
 	current_state = packet
 	# Switching targets (including to/from "no target") shows a fresh history
 	# instead of graphing a mix of two different ships' signatures.
-	if target_id != selected_contact_id and is_instance_valid(history_graph):
-		history_graph.reset()
+	if target_id != selected_contact_id:
+		if is_instance_valid(history_graph):
+			history_graph.reset()
+		_closing_vel_samples.clear()
 	selected_contact_id = target_id
 
 	if current_state.has("weapons"):
@@ -197,9 +227,21 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 			# this label.
 			var sig = c.get("signature", {"heat": 0.0, "em_noise": 0.0, "cross_section": 1.0, "density": 0.0})
 			var speed = c.get("vel", Vector2.ZERO).length()
-			var dist = current_state.get("pos", Vector2.ZERO).distance_to(c.get("pos", Vector2.ZERO))
-			target_info_label.text = "Target: %s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nDist: %.1f m | Spd: %.1f m/s" % [
-				selected_contact_id, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0), dist, speed
+			var s_pos = current_state.get("pos", Vector2.ZERO)
+			var c_pos = c.get("pos", Vector2.ZERO)
+			var dist = s_pos.distance_to(c_pos)
+
+			# Closing rate: positive = target getting closer, negative = pulling
+			# away. More actionable in combat than either ship's absolute speed.
+			var rel_pos = c_pos - s_pos
+			var rel_vel = c.get("vel", Vector2.ZERO) - current_state.get("vel", Vector2.ZERO)
+			var closing_vel = 0.0
+			if rel_pos.length() > 0.001:
+				closing_vel = -rel_pos.normalized().dot(rel_vel)
+			var closing_accel = _track_closing_accel(closing_vel)
+
+			target_info_label.text = "Target: %s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nDist: %.1f m | Spd: %.1f m/s\nClosing: %.1f m/s | Accel: %.1f m/s^2" % [
+				selected_contact_id, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0), dist, speed, closing_vel, closing_accel
 			]
 			if is_instance_valid(spider_chart):
 				spider_chart.set_values(sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0))
