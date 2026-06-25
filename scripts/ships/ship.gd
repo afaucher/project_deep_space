@@ -87,12 +87,6 @@ const KINETIC_HEAT_MODIFIER := 0.05    # fraction of absorbed non-laser damage c
 
 const SHIP_COLLISION_RADIUS := 50.0    # physical hit/collision circle radius -- separate from the cross_section sensor stat
 
-# Point-defense engagement range. Currently a flat number rather than derived
-# from the PD laser component's own authored `range` (4000.0) -- TODO:
-# revisit as part of a future point-defense rework so this can't silently
-# drift out of sync with the weapon data it's supposed to represent.
-const PD_RANGE := 3500.0
-
 const RCS_SFX_TORQUE_THRESHOLD := 100.0 # torque above this plays the RCS thruster sound cue
 
 const HIT_TRACE_DURATION := 3.0 # seconds a damage-raymarch trace lingers for the engineering panel's spatial view to fade out
@@ -1209,47 +1203,72 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 func _process_point_defense() -> void:
 	var main_node = get_tree().current_scene
 	if not is_instance_valid(main_node): return
-	
+
 	var ready_lasers = []
+	var max_ready_range = 0.0
 	for w in get_components_by_type("weapons"):
 		if w["weapon_type"] == "laser" and w["ammo"] > 0 and w["cooldown"] <= 0.0:
 			if is_component_powered(w["id"]):
 				ready_lasers.append(w["id"])
-				
+				max_ready_range = max(max_ready_range, w["range"])
+
 	if ready_lasers.is_empty():
 		return
 
-	var pd_range = PD_RANGE
+	# Shortest-range first, so a target gets the smallest laser that can
+	# actually reach it -- reserving longer-range lasers for farther targets
+	# instead of spending them on whatever's first in the component list.
+	ready_lasers.sort_custom(func(a, b): return get_component(a)["range"] < get_component(b)["range"])
+
 	var behavior = WeaponBehaviorRegistry.get_behavior("laser")
 
+	# Gather qualifying targets with enough info to prioritize them: least
+	# shot-at first (we get little feedback on hits, so spread shots around),
+	# then closest. Engagement range comes from each laser's own authored
+	# range via can_fire() below, not a flat ship-wide number -- this filter
+	# is just "could ANY ready laser conceivably reach this" to avoid sorting
+	# targets nothing can touch.
+	var targets = []
 	for c_id in active_contacts:
+		var contact = active_contacts[c_id]
+		if contact.get("classification", "") != "INCOMING ORDNANCE":
+			continue
+		var body = instance_from_id(contact.get("instance_id", -1))
+		if not is_instance_valid(body) or body == self: continue
+		if body is Ship and body.is_dead: continue
+		var dist = position.distance_to(body.position)
+		if dist > max_ready_range: continue
+		targets.append({"c_id": c_id, "body": body, "dist": dist, "shots_fired": contact.get("pd_shots_fired", 0)})
+
+	targets.sort_custom(func(a, b):
+		if a["shots_fired"] != b["shots_fired"]:
+			return a["shots_fired"] < b["shots_fired"]
+		return a["dist"] < b["dist"])
+
+	for t in targets:
 		if ready_lasers.is_empty(): break
 
-		var contact = active_contacts[c_id]
-		if contact.get("classification", "") == "INCOMING ORDNANCE":
-			var body = instance_from_id(contact.get("instance_id", -1))
-			if not is_instance_valid(body) or body == self: continue
-			if body is Ship and body.is_dead: continue
+		var c_id = t["c_id"]
+		var body = t["body"]
 
-			var dist = position.distance_to(body.position)
-			if dist > pd_range: continue
+		for w_id in ready_lasers:
+			var weapon_data = get_component(w_id)
 
-			for w_id in ready_lasers:
-				var weapon_data = get_component(w_id)
+			if behavior.can_fire(self, weapon_data, c_id):
+				var start_pos = position + get_component_origin(weapon_data).rotated(rotation)
+				behavior.execute_fire(self, weapon_data, body.position, c_id)
 
-				if behavior.can_fire(self, weapon_data, c_id):
-					var start_pos = position + get_component_origin(weapon_data).rotated(rotation)
-					behavior.execute_fire(self, weapon_data, body.position, c_id)
+				transient_events.append({
+					"type": "laser",
+					"start_pos": start_pos,
+					"end_pos": body.position
+				})
 
-					transient_events.append({
-						"type": "laser",
-						"start_pos": start_pos,
-						"end_pos": body.position
-					})
+				active_contacts[c_id]["pd_shots_fired"] = t["shots_fired"] + 1
 
-					print("[PD] ", name, " shooting at ", body.name, " (", c_id, ")")
-					ready_lasers.erase(w_id)
-					break
+				print("[PD] ", name, " shooting at ", body.name, " (", c_id, ")")
+				ready_lasers.erase(w_id)
+				break
 
 
 

@@ -55,16 +55,18 @@ Detailed design, findings, and task breakdown are in [m2_dynamic_heat_em_design.
 
 ---
 
-## M3 — Point Defense Target Prioritization (`point_defence.md`)
+## M3 — Point Defense Target Prioritization (`point_defence.md`) — DONE
 **No dependencies — do this anytime, including before M1.**
 
 **Scope:**
 1. Replace "fire every weapon at each target before moving to next" with sort-by `(times_fired_ascending, range_ascending)`.
 2. When selecting a weapon for a target, pick the shortest-range ready laser, reserving long-range lasers for farther targets.
 
-**Touches:** point defense loop referenced in commit history (`5c0e5ae Fix: Disarm Target Buoy PD and skip dead targets in point defense loop`) — likely in `scripts/ships/ship.gd` or `scripts/weapons_panel.gd`.
+**Touches:** `scripts/ships/ship.gd` (`_process_point_defense()`).
 
 **Done when:** `test_point_defense.gd` covers the new sort order and weapon-selection rule.
+
+Implementation notes: `active_contacts[c_id]["pd_shots_fired"]` is the persistent times-fired counter (lives on the contact dict, naturally resets when a contact is lost and re-acquired). Also folded in the long-standing `PD_RANGE` TODO -- removed the flat ship-wide engagement-range constant and replaced it with each laser's own authored `range` field (already checked per-weapon by `LaserBehavior.can_fire()`); the remaining `max_ready_range` pre-filter is just "could any ready laser conceivably reach this," not an engagement-range source of truth. No ship today has lasers with different ranges, so the weapon-selection rule is implemented and unit-tested but currently a no-op on the only ship that exists -- it'll become visible the moment a ship design mixes laser ranges.
 
 ---
 
