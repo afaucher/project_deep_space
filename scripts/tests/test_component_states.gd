@@ -55,7 +55,6 @@ func _reset_ship() -> void:
 	ship.rotation = 0.0
 	ship.subsystems["reactor"]["power"] = 1.0
 	ship.subsystems["engines"]["power"] = 1.0
-	ship.subsystems["weapons"]["power"] = 1.0
 	ship.subsystems["sensors"]["power"] = 1.0
 	ship.apply_control_input(0.0, 0.0, 0.0, 1, 0) # zero input, combat mode, direct throttle
 	for w in ship.get_components_by_type("weapons"):

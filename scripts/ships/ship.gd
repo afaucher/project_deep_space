@@ -122,7 +122,6 @@ var actual_throttle: float = 0.0
 var subsystems: Dictionary = {
 	"reactor": {"power": 1.0},
 	"engines": {"power": 1.0},
-	"weapons": {"power": 1.0},
 	"sensors": {"power": 1.0}
 }
 
@@ -589,7 +588,6 @@ func hulk() -> void:
 	# Shut down subsystems to stop heat/EM generation
 	subsystems["reactor"]["power"] = 0.0
 	subsystems["engines"]["power"] = 0.0
-	subsystems["weapons"]["power"] = 0.0
 	subsystems["sensors"]["power"] = 0.0
 	# Shut down all individual components
 	for c in ship_components:
