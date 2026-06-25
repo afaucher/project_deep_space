@@ -9,57 +9,49 @@ func _init() -> void:
 			remove_child(child)
 			
 	cross_section = 2.0
-	reactor_power_rating = 10.0 # Small battery reactor for active seeker
-	engine_power_rating = 10.0 # Small thruster EM signature
 
-	max_thrust = 10000.0 # Very fast
+	# Mass now derives from rect area x density x Ship.MASS_SCALE (see ship.gd).
+	# Density is the same 20.0 used by Frigate -- same "stuff", smaller box, so
+	# the derived mass comes out much lighter than the old flat 20.0; max_thrust
+	# below is retuned to keep the same thrust/mass ratio (same accel feel).
+	max_thrust = 2991.0 # retuned to match pre-derived-mass acceleration (was 10000.0 at mass 20.0)
 	max_torque = 2500.0 # Prevent overcorrection/spinning
 	max_omega = 10.0 # High turn rate for missiles
 	max_speed = 3000.0
 
 	ship_components = [
-		{"id": "seeker", "type": "sensors", "rect": Rect2(5, -2, 5, 4), "health": 10.0, "max_health": 10.0, "density": 0.2,
+		{"id": "seeker", "type": "sensors", "rect": Rect2(5, -2, 5, 4), "health": 10.0, "max_health": 10.0, "density": 20.0,
 			"heat": 0.0, "base_em_emission": 10.0, "em_emission": 10.0,
 			"sensor_type": "active", "active": true, "heading": 0.0, "arc_width": PI / 1.5, # 120 degree forward cone
 			"range": 30000.0, "resolution": 5.0, "timer": 0.0, "refresh_interval": 0.1, "num_bins": 60},
-		{"id": "warhead", "type": "hull", "rect": Rect2(-2, -3, 7, 6), "health": 20.0, "max_health": 20.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0},
-		{"id": "hull_body", "type": "hull", "rect": Rect2(-10, -3, 8, 6), "health": 30.0, "max_health": 30.0, "density": 0.5, "heat": 0.0, "em_emission": 0.0},
-		{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -4, 5, 8), "health": 20.0, "max_health": 20.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0}
+		{"id": "warhead", "type": "hull", "rect": Rect2(-2, -3, 7, 6), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
+		{"id": "hull_body", "type": "hull", "rect": Rect2(-10, -3, 8, 6), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
+		{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -4, 5, 8), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "power_rating": 10.0},
+		# Tiny capacitor standing in for a full reactor — too small for one, per design notes.
+		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-8, -2, 4, 4), "health": 5.0, "max_health": 5.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 10.0}
 	]
 
 func _ready() -> void:
-	# Small mass, low inertia
-	mass = 20.0
-	inertia = 50.0
-	gravity_scale = 0.0
-	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
-	linear_damp = 0.0
-	angular_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
-	angular_damp = 5.0
-	
 	max_heat = 500.0
 	heat_dissipation_rate = 20.0
 	current_heat = 10.0
-	
+
 	# Add custom collision shape for the tiny body
 	var collision = CollisionShape2D.new()
 	var shape = CircleShape2D.new()
 	shape.radius = 2.0
 	collision.shape = shape
 	add_child(collision)
-	
-	# We DO NOT call super() because Ship._ready() sets mass=1000 and adds huge colliders
-	# Wait, actually Ship._ready() doesn't add huge colliders, it adds one based on max component extents.
-	# Let's call super._ready() first, then overwrite mass, inertia, and damping.
+
+	# mass comes from get_ship_mass() via super._ready(), summed from ship_components above
 	super._ready()
-	
+
 	# Clean up any duplicate or inherited collision shapes from Ship._ready()
 	for child in get_children():
 		if child is CollisionShape2D and child != collision:
 			child.queue_free()
 			remove_child(child)
-			
-	mass = 20.0
+
 	inertia = 50.0
 	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
 	linear_damp = 0.0

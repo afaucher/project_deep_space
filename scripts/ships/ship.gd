@@ -3,6 +3,12 @@ class_name Ship
 
 const WeaponBehaviorRegistry = preload("res://scripts/components/weapon_behavior_registry.gd")
 
+# Mass is derived from each component's rect area x density, not authored directly.
+# Calibrated so the default Frigate loadout (total area 2775 x density 20.0)
+# reproduces its original flat mass of 100.0 -- smaller ships built from the
+# same density naturally come out lighter.
+const MASS_SCALE := 100.0 / 55500.0
+
 var owner_id: int = -1
 
 func _init() -> void:
@@ -45,8 +51,8 @@ var ship_components: Array = [
 	{"id": "hull_stbd", "type": "hull", "rect": Rect2(-15, 5, 30, 10), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 	{"id": "hull_aft", "type": "hull", "rect": Rect2(-30, -15, 15, 30), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 
-	{"id": "reactor_core", "type": "reactor", "rect": Rect2(-15, -5, 10, 10), "health": 200.0, "max_health": 200.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-	{"id": "engine_main", "type": "engines", "rect": Rect2(-35, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true},
+	{"id": "reactor_core", "type": "reactor", "rect": Rect2(-15, -5, 10, 10), "health": 200.0, "max_health": 200.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 100.0},
+	{"id": "engine_main", "type": "engines", "rect": Rect2(-35, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 100.0},
 
 	# Sensors: each logical sensor is its own physical hardpoint (1:1), replacing the old
 	# hp_sensor_fwd/hp_sensor_omni boxes that pooled 5 sensors behind a guessed "parent" id.
@@ -176,6 +182,40 @@ func get_component(comp_id: String) -> Dictionary:
 func get_component_origin(comp: Dictionary) -> Vector2:
 	return comp["rect"].position
 
+# M1b: mass and power rating are summed from components instead of being flat
+# ship-level constants, so a "dual reactor"/"dual engine" ship degrades to
+# whatever's still alive instead of needing special-casing.
+func get_ship_mass() -> float:
+	var total = 0.0
+	for c in ship_components:
+		var area = c["rect"].size.x * c["rect"].size.y
+		total += area * c["density"] * MASS_SCALE
+	return total
+
+func get_total_power_rating(sys_type: String) -> float:
+	var total = 0.0
+	for c in ship_components:
+		if c["type"] == sys_type and is_component_powered(c["id"]):
+			total += c.get("power_rating", 0.0) * get_component_health_ratio(c["id"])
+	return total
+
+func get_max_power_rating(sys_type: String) -> float:
+	var total = 0.0
+	for c in ship_components:
+		if c["type"] == sys_type:
+			total += c.get("power_rating", 0.0)
+	return total
+
+# Fraction of rated power currently available for sys_type (0 if no such
+# components exist). Reduces to is_component_powered(id) ? health_ratio : 0
+# when there's exactly one component of that type, so it's a drop-in
+# replacement for the old single-hardcoded-id checks.
+func get_power_ratio(sys_type: String) -> float:
+	var max_rating = get_max_power_rating(sys_type)
+	if max_rating <= 0.0:
+		return 0.0
+	return get_total_power_rating(sys_type) / max_rating
+
 # Legacy getters
 var health: float:
 	get: return get_sys_health("hull")
@@ -183,9 +223,6 @@ var health: float:
 
 var base_heat: float:
 	get: return current_heat
-	
-var reactor_power_rating: float = 100.0
-var engine_power_rating: float = 100.0
 
 var em_noise: float:
 	get:
@@ -356,8 +393,8 @@ func _ready() -> void:
 		owner_id = int(name.replace("Ship_", ""))
 		
 	add_to_group("ships")
-		
-	mass = 100.0
+
+	mass = get_ship_mass()
 	inertia = 1000.0
 	gravity_scale = 0.0
 	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
@@ -462,11 +499,7 @@ func _physics_process(delta: float) -> void:
 	var forward = Vector2.RIGHT.rotated(rotation)
 	var current_forward_speed = linear_velocity.dot(forward)
 	
-	var active_max_thrust = max_thrust
-	if not is_component_powered("engine_main"):
-		active_max_thrust = 0.0
-	else:
-		active_max_thrust *= get_component_health_ratio("engine_main")
+	var active_max_thrust = max_thrust * get_power_ratio("engines")
 
 	if linear_mode == 0:
 		# Direct Throttle Control
@@ -508,9 +541,7 @@ func _physics_process(delta: float) -> void:
 	# Time-Optimal Rotational Controller (Square-root curve braking)
 	var angle_diff = wrapf(target_heading - rotation, -PI, PI)
 	
-	var active_engine_efficiency = 0.0
-	if is_component_powered("engine_main"):
-		active_engine_efficiency = get_component_health_ratio("engine_main") * subsystems["engines"]["power"]
+	var active_engine_efficiency = get_power_ratio("engines") * subsystems["engines"]["power"]
 	
 	var torque = 0.0
 	var active_max_torque = 0.0
@@ -566,9 +597,9 @@ func _physics_process(delta: float) -> void:
 		var heat_gen = 0.0
 		var reactor_heat = 2.0 * subsystems["reactor"]["power"]
 		var engine_inefficiency_mult = 1.0
-		if is_component_powered("engine_main"):
-			var eff = get_component_health_ratio("engine_main")
-			engine_inefficiency_mult = max(1.0, 1.0 / max(0.1, eff))
+		var engine_ratio = get_power_ratio("engines")
+		if engine_ratio > 0.0:
+			engine_inefficiency_mult = max(1.0, 1.0 / max(0.1, engine_ratio))
 			
 		var engine_heat = abs(actual_throttle) * 10.0 * subsystems["engines"]["power"] * engine_inefficiency_mult
 		engine_heat += (abs(torque) / max(1.0, active_max_torque)) * 5.0 * subsystems["engines"]["power"] * engine_inefficiency_mult
@@ -584,18 +615,18 @@ func _physics_process(delta: float) -> void:
 		current_heat_gen = heat_gen
 		
 		current_heat += heat_gen * delta
-		var active_dissipation = heat_dissipation_rate * get_component_health_ratio("reactor_core")
+		var active_dissipation = heat_dissipation_rate * get_power_ratio("reactor")
 		current_heat -= active_dissipation * delta
 		current_heat = clampf(current_heat, 0.0, max_heat)
 		
 		if current_heat >= max_heat:
 			for c in ship_components:
-				if c["id"] == "reactor":
+				if c["type"] == "reactor":
 					c["health"] -= 10.0 * delta
-					
+
 		# Update Component EM & Heat
-		var base_em = reactor_power_rating * subsystems["reactor"]["power"]
-		var current_em = base_em + (abs(actual_throttle) * engine_power_rating)
+		var base_em = get_total_power_rating("reactor") * subsystems["reactor"]["power"]
+		var current_em = base_em + (abs(actual_throttle) * get_total_power_rating("engines"))
 		var sensor_em = 0.0
 		var sensor_power_ratio = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
 		if sensor_power_ratio > 0.0:
@@ -611,10 +642,10 @@ func _physics_process(delta: float) -> void:
 			
 			if comp["type"] == "reactor":
 				comp["heat"] = 10.0 + reactor_heat
-				comp["em_emission"] = reactor_power_rating
+				comp["em_emission"] = comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"])
 			elif comp["type"] == "engines":
 				comp["heat"] = b_heat + engine_heat
-				comp["em_emission"] = b_em + abs(actual_throttle) * engine_power_rating
+				comp["em_emission"] = b_em + abs(actual_throttle) * comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"])
 			elif comp["type"] == "sensors":
 				comp["heat"] = b_heat + 5.0
 				comp["em_emission"] = b_em + comp.get("base_em_emission", 0.0) * sensor_power_ratio

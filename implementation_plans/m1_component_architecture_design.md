@@ -372,6 +372,8 @@ The per-frame loop replaces its `elif comp["type"] == "weapons": comp["heat"] = 
 
 `ship_is_the_parts.md` also calls for component-driven **mass** and **power-rating** (today `mass`, `reactor_power_rating`, `engine_power_rating` are flat ship-level vars, not summed from components — confirmed: `mass = 100.0` is hardcoded in `_ready()`, and component `density` is only used for damage ablation, never for mass). That's real future work for the "dual reactor" / "ship design validator" parts of the doc, but it's a separable change from the sensor-dome fix and isn't needed to unblock M2 (dynamic heat/EM) or M3-M6. Treat it as **M1b**, scoped later, once the sensor merge has proven the pattern out.
 
+**M1b is done — see the section below.** `mass` ended up derived from `rect` area × `density` (no authored field), and `density` itself got unified to one shared scale across all ship classes as part of that.
+
 The behavior-architecture layer above is **M1c**: it doesn't block the sensor/weapon data merge (steps 1-8 below work today with the existing inline `elif` dispatch, just on the merged schema), but it should land before M2 or before any new weapon class is added — otherwise M2's event-driven heat/EM and the next weapon type both get built against the dispatch style we already know doesn't scale.
 
 ## Migration steps (ordered)
@@ -388,3 +390,56 @@ The behavior-architecture layer above is **M1c**: it doesn't block the sensor/we
 10. **(M1c)** Add `WeaponBehavior`/`WeaponBehaviorRegistry` under `scripts/components/`; lift the existing laser/missile `elif` bodies into `LaserBehavior`/`MissileBehavior` verbatim, with `_consume_default()` replacing the inline ammo/cooldown mutation (no behavior change otherwise). Re-run the same regression suite to confirm the lift was behavior-preserving.
 
 **Done when:** no references to `sensor_hardware`, `weapons` (the Dict), `parent`, or `mount_pos` remain in `scripts/`; `fire_weapon` and `_process_point_defense` read weapon origin through the same `get_component_origin()` call and delegate firing to `WeaponBehavior`; and the full regression suite above passes.
+
+---
+
+## M1b: component-driven mass and power rating
+
+`reactor_power_rating`/`engine_power_rating`/`mass` were flat ship-level vars, not summed from `ship_components` — the same "ship-wide constant standing in for a component property" pattern M1 already fixed for sensors (`base_em_emission`) and M1c fixed for weapon EM pulses. Tracing the per-frame heat/EM loop turned up the identical *pooled-overwrite* bug M1 found and fixed for sensors, just not yet fixed for `reactor`/`engines`: `comp["em_emission"] = reactor_power_rating` wrote the **ship-wide** total into *every* component of type `"reactor"`, and the same for `"engines"` — invisible with exactly one of each, but wrong the moment a ship has two.
+
+It also turned up two bugs unrelated to mass/power but found while tracing the same code:
+
+- **Missile has zero `"reactor"`-type components.** `take_damage()`'s death check is `get_sys_health("reactor") <= 0.0 or get_sys_health("hull") <= 0.0` — with no reactor component, `get_sys_health("reactor")` is permanently `0.0`, so *any* hit at all instantly hulks a missile regardless of damage dealt. `test_point_defense.gd` doesn't catch this because it only asserts "eventually dead," not "took exactly one hit." Fixed by giving `Missile` a tiny `reactor_core` component (5 HP) standing in for "too small for a full reactor, uses a capacitor instead" (`ship_is_the_parts.md`'s own suggested explanation) — missiles now need that capacitor (or full hull loss) destroyed to die, which means they may survive more PD hits than they effectively did before. Approved as an intentional behavior change, not just a refactor.
+- **Dead overheat-damage check**: `if c["id"] == "reactor":` never matched anything (the actual id is `reactor_core`; no component has id `"reactor"`) — overheating never actually damaged the reactor. Fixed to check `c["type"] == "reactor"`.
+
+### Decision: mass is static, derived from `rect` area × `density` (no authored field)
+
+Two axes were decided here, both resolved by discussion rather than left as authored data:
+
+**Static vs. dynamic.** Static (compute once, at `_ready()`) vs. dynamic (recompute every frame so destroyed/unpowered components reduce mass, simulating jettisoned debris). Went with **static** — nothing in `ship_is_the_parts.md`'s motivating examples (dual reactor, dual engine) asks for mass to react to damage, only power. Dynamic mass is a real future option if "venting/jettisoned debris" ever becomes a desired mechanic, but it's a gameplay feature, not implied by this milestone.
+
+**Authored `mass` field vs. derived from `density`.** First pass authored a `mass` literal per component (proportional to `max_health` share, tuned to reproduce today's flat totals exactly). Reconsidered: `density` already exists per component and already means "how much material is here" — it drives the damage-ablation absorption rate in `take_damage()`. Reusing it for mass instead of inventing a parallel field is more architecturally honest, *if* the scale problem can be solved without changing ablation behavior.
+
+The scale problem: today's `density` values were tuned purely for ablation feel — flat `20.0` across every Frigate component regardless of type, varied `0.2`-`0.9` per component on Missile/SensorDrone. `rect.size.x * rect.size.y * density` for Frigate's `hull_fwd` alone comes out to `450 * 20 = 9000`, dwarfing the ship's current total mass of `100`. Resolution: **introduce one shared scale constant** (`MASS_SCALE = 100.0 / 55500.0`, calibrated so Frigate's own loadout — area `2775` × density `20.0` — reproduces its existing mass of `100.0` exactly) rather than touching `density`'s ablation role at all:
+
+```gdscript
+const MASS_SCALE := 100.0 / 55500.0
+
+func get_ship_mass() -> float:
+    for c in ship_components:
+        var area = c["rect"].size.x * c["rect"].size.y
+        total += area * c["density"] * MASS_SCALE
+    return total
+```
+
+**Density is also unified to the same `20.0` scale across ship classes**, not just Frigate — Missile and SensorDrone's per-component density variation (`0.2`-`0.9`) wasn't meaningful (nothing depended on one missile component being denser than another), so both were flattened to `20.0` too. Consequence: mass is no longer preserved exactly for those two ships — Missile drops from `20.0` to `~5.98`, SensorDrone from `200.0` to `~16.2` (smaller craft, same "stuff," less of it). SensorDrone's drop is free (its `max_thrust` is already `0.0` — no thrust tuning depends on its mass). Missile's drop is **not** free: `max_thrust` was retuned from `10000.0` to `2991.0` (`10000 * 5.98/20`) to keep the exact same `thrust/mass` ratio, preserving today's acceleration feel. `max_torque`/`max_omega` were left untouched since rotational dynamics key off `inertia`, a separate hand-tuned constant unaffected by this change.
+
+One accepted tradeoff: flattening Missile's density to `20.0` (a ~34x jump from its previous ~`0.58` average) also raises its ablation absorption cap (`effective_density * step_size * 50`) above a typical hit's damage, so a single hit now resolves entirely against whichever component the ray touches first, rather than spreading across 2-3 of Missile's tiny components as it does today. Accepted deliberately — at Missile's scale, every component is small enough that losing any one of them is comparable to losing the missile outright, so which specific component absorbs the hit doesn't meaningfully change the PD-vs-missile balance already tuned earlier in this milestone.
+
+### Decision: power rating sums across components by type, weighted by health
+
+```gdscript
+func get_total_power_rating(sys_type: String) -> float:
+    for c in ship_components:
+        if c["type"] == sys_type and is_component_powered(c["id"]):
+            total += c.get("power_rating", 0.0) * get_component_health_ratio(c["id"])
+    return total
+```
+
+This is the literal "sum from components" framing `ship_is_the_parts.md` uses for the dual-reactor case ("two different reactors were providing power, but now one is, and one is enough") — losing one reactor/engine degrades the total instead of being unnoticed.
+
+`get_power_ratio(sys_type)` (= `get_total_power_rating(sys_type) / get_max_power_rating(sys_type)`, or `0` if no components of that type exist) generalizes the old hardcoded single-id checks — `is_component_powered("engine_main")` / `get_component_health_ratio("engine_main"/"reactor_core")` — to thrust/torque/heat-dissipation gating. For a ship with exactly one component of a type (every ship today), it's numerically identical to the old single-id check; the generalization only matters once a ship has two. Per-component `em_emission` in the dispatch loop now uses each component's own `power_rating * get_component_health_ratio(...)` instead of the pooled ship-wide value, closing the bug above.
+
+**Open question, still pending:** whether `get_power_ratio` stays in this form. It exists only because `max_thrust`/`max_torque`/`max_omega`/`heat_dissipation_rate` are still flat ship-level design constants tuned assuming "fully healthy, fully powered" = `1.0`, so `get_total_power_rating(type)` (an absolute, already-derived value) has to be normalized back down to a 0-1 fraction before it can scale them. If `power_rating` ever became a physically-derived absolute the way `mass` now is, those four constants could plausibly be replaced by direct component sums and `get_power_ratio` would have nothing left to normalize against. Not pursued in this pass — flagged for a future milestone if/when `power_rating` gets the same treatment `density`/mass just did.
+
+**Done when (M1b):** `reactor_power_rating`/`engine_power_rating` ship-level vars no longer exist; `mass` is derived from `rect` area × `density` × `MASS_SCALE` (no authored `mass` field anywhere); thrust/torque availability and heat dissipation are derived from `ship_components` via `get_power_ratio()`; `density` is unified to the same `20.0` scale across Frigate/TargetDrone/Missile/SensorDrone; the per-component EM pooled-overwrite bug is fixed for `reactor`/`engines` the same way M1 fixed it for `sensors`; and the full regression suite (10 tests, including `test_helm_input.gd`/`test_inertial_flight.gd`) passes.
