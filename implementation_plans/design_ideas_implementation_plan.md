@@ -70,7 +70,7 @@ Implementation notes: `active_contacts[c_id]["pd_shots_fired"]` is the persisten
 
 ---
 
-## M4 — Real-Time Sensor Signal History UI (`real-time-sensor-signal.md`)
+## M4 — Real-Time Sensor Signal History UI (`real-time-sensor-signal.md`) — DONE
 **Depends on:** M2 (there's nothing meaningful to chart over time until heat/EM are dynamic per-component signals rather than static).
 
 **Scope:**
@@ -78,9 +78,11 @@ Implementation notes: `active_contacts[c_id]["pd_shots_fired"]` is the persisten
 2. Add relative velocity and acceleration meters for combat.
 3. Surface raw EM/heat time-series so players can spot patterns (e.g. heat dropping off) ahead of/alongside the classifier.
 
-**Touches:** `scripts/spider_chart.gd`, `scripts/sensor_panel.gd`, `scripts/terminal_display.gd`.
+**Touches:** `scripts/panels/weapons_panel.gd` (targeting computer: history graph, closing-rate/acceleration), `scripts/timeseries_graph.gd`, `scripts/spider_chart.gd`.
 
 **Done when:** a target hit by a weapon shows a visible, time-extended signal change in the UI, backed by `test_classifiers_e2e.gd`.
+
+Implementation notes: items 1 and 3 landed in `weapons_panel.gd`'s TARGETING COMPUTER section (not `sensor_panel.gd`/`terminal_display.gd` as originally sketched -- that's where the locked-target context already lived) via `TimeSeriesGraph`, an independently-auto-scaling rolling plot floored at `SpiderChart.MAX_HEAT_DISPLAY`/`MAX_EM_DISPLAY` so ordinary idle jitter doesn't fill the scale while real spikes (reactor whiteout, fire pulses) still aren't clipped. Item 2 (closing rate + closing acceleration) is computed entirely client-side from data already in the state packet, no network changes. The "Done when" bar is covered by `test_classifiers_e2e.gd` firing a real laser hit and asserting `current_heat` spikes then dissipates within 5 seconds.
 
 ---
 
