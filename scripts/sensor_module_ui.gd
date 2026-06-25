@@ -171,11 +171,7 @@ func _draw() -> void:
 		var b_center = (b_start + b_end) / 2.0
 		var dot_pos = center + Vector2(dot_radius, 0).rotated(b_center)
 
-		var color = Color.YELLOW
-		if sensor_id == Utils.HIGHLIGHT_SENSOR_ID:
-			color = Color.CYAN
-
-		draw_circle(dot_pos, 4.0, color)
+		draw_circle(dot_pos, 4.0, Color.CYAN)
 
 	# Draw highlight
 	if selected_contact_id != "" and contacts.has(selected_contact_id):

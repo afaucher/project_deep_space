@@ -271,10 +271,7 @@ func _draw() -> void:
 				var b_center = (b_start + b_end) / 2.0
 				var dot_pos = pos + Vector2(dist, 0).rotated(b_center)
 
-				var color = Color.YELLOW
-				if sensor_id == Utils.HIGHLIGHT_SENSOR_ID: color = Color.CYAN
-				elif sensor_id == "omni_short_hi_res": color = Color.ORANGE
-				draw_circle(dot_pos, 4.0 / map_zoom, color)
+				draw_circle(dot_pos, 4.0 / map_zoom, Color.CYAN)
 	
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
