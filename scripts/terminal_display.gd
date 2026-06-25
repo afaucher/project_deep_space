@@ -1,10 +1,10 @@
 extends Control
 
-const NavigationPanel = preload("res://scripts/navigation_panel.gd")
-const HelmPanel = preload("res://scripts/helm_panel.gd")
-const SensorPanel = preload("res://scripts/sensor_panel.gd")
-const WeaponsPanel = preload("res://scripts/weapons_panel.gd")
-const EngineeringPanel = preload("res://scripts/engineering_panel.gd")
+const NavigationPanel = preload("res://scripts/panels/navigation_panel.gd")
+const HelmPanel = preload("res://scripts/panels/helm_panel.gd")
+const SensorPanel = preload("res://scripts/panels/sensor_panel.gd")
+const WeaponsPanel = preload("res://scripts/panels/weapons_panel.gd")
+const EngineeringPanel = preload("res://scripts/panels/engineering_panel.gd")
 
 var nav_panel: Control
 var helm_panel: Control
