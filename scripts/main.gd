@@ -225,6 +225,8 @@ func _distribute_state() -> void:
 			"rot": ship.rotation,
 			"vel": ship.linear_velocity,
 			"throttle": ship.actual_throttle,
+			"steering_mode": ship.steering_mode,
+			"linear_mode": ship.linear_mode,
 			"sensors": ship.active_sensor_sweeps.duplicate(true),
 			"sensor_config": ship.get_components_by_type("sensors"),
 			"contacts": ship.active_contacts.duplicate(true),

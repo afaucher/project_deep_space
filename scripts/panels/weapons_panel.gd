@@ -3,6 +3,8 @@ class_name WeaponsPanel
 
 signal fire_weapon_requested(weapon_id: String)
 
+const FIRING_FLASH_WINDOW := 0.2 # seconds before cooldown ends where the button reads "* FIRING *" instead of "COOLDOWN"
+
 var current_state: Dictionary = {}
 var selected_contact_id: String = ""
 var weapon_buttons: Dictionary = {}
@@ -108,77 +110,78 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 		# Generate UI dynamically if not present
 		if weapon_buttons.size() == 0:
 			for w_info in weapons:
-				_create_weapon_ui(weapon_grid, w_info["id"], w_info["id"].to_upper())
+				_create_weapon_ui(weapon_grid, w_info.get("id", ""), w_info.get("id", "").to_upper())
 
 		for w_info in weapons:
-			var w_id = w_info["id"]
+			var w_id = w_info.get("id", "")
 			if weapon_buttons.has(w_id):
-				var ammo = w_info["ammo"]
-				var cd = w_info["cooldown"]
-				
+				var ammo = w_info.get("ammo", 0)
+				var cd = w_info.get("cooldown", 0.0)
+
 				var lbl = weapon_buttons[w_id]["ammo_label"]
 				lbl.text = "Ammo: %d | CD: %.1f" % [ammo, cd]
-				
+
 				var btn = weapon_buttons[w_id]["btn"]
-				
+
 				var is_in_arc = false
 				var is_in_range = false
 				var has_target = false
-				
+
 				var is_powered = true
 				var is_alive = true
 				if current_state.has("engineering") and current_state["engineering"].has("ship_components"):
 					for comp in current_state["engineering"]["ship_components"]:
-						if comp["id"] == w_id:
+						if comp.get("id", "") == w_id:
 							is_alive = comp.get("health", 0.0) > 0.0
 							is_powered = comp.get("powered_on", true)
 							break
-				
+
 				if selected_contact_id != "" and current_state.has("contacts") and current_state["contacts"].has(selected_contact_id):
 					has_target = true
 					var c = current_state["contacts"][selected_contact_id]
 					var c_pos = c.get("pos", Vector2.ZERO)
 					var s_pos = current_state.get("pos", Vector2.ZERO)
 					var s_rot = current_state.get("rot", 0.0)
-					
+
 					var w_heading = w_info.get("heading", 0.0)
-					var arc_w = w_info.get("arc_width", 6.28318) # TAU
+					var arc_w = w_info.get("arc_width", TAU)
 					var w_range = w_info.get("range", 999999.0)
-					
+
 					var dist = s_pos.distance_to(c_pos)
 					is_in_range = (dist <= w_range)
-					
+
 					var angle_to = (c_pos - s_pos).angle()
 					var weapon_global_heading = s_rot + w_heading
 					var rel_angle = wrapf(angle_to - weapon_global_heading, -PI, PI)
-					
+
 					is_in_arc = (abs(rel_angle) <= arc_w / 2.0)
-					
-				var can_fire = (ammo > 0 and cd <= 0.0 and has_target and is_in_arc and is_alive and is_powered)
-				if w_info.get("weapon_type", "") == "laser":
-					can_fire = can_fire and is_in_range
-					
+
+				var is_laser = w_info.get("weapon_type", "") == "laser"
+				var range_ok = is_in_range or not is_laser # range only gates lasers -- missiles fly to target regardless of launch distance
+
+				# Single ordered priority list so can_fire and the status text
+				# can never disagree about which condition is actually blocking
+				# the shot -- each entry is (blocking_condition, display_text).
+				var blockers = [
+					[not is_alive, "DESTROYED"],
+					[not is_powered, "OFFLINE"],
+					[not has_target, "NO LOCK"],
+					[ammo <= 0, "EMPTY"],
+					[cd > w_info.get("cooldown_max", 1.0) - FIRING_FLASH_WINDOW, "* FIRING *"],
+					[cd > 0.0, "COOLDOWN"],
+					[not is_in_arc, "OUT OF ARC"],
+					[not range_ok, "OUT OF RANGE"],
+				]
+				var can_fire = true
+				var status_text = "FIRE"
+				for blocker in blockers:
+					if blocker[0]:
+						can_fire = false
+						status_text = blocker[1]
+						break
+
 				btn.disabled = not can_fire
-				
-				if not is_alive:
-					btn.text = "DESTROYED"
-				elif not is_powered:
-					btn.text = "OFFLINE"
-				elif not has_target:
-					btn.text = "NO LOCK"
-				elif ammo <= 0:
-					btn.text = "EMPTY"
-				elif cd > 0.0:
-					if cd > w_info.get("cooldown_max", 1.0) - 0.2:
-						btn.text = "* FIRING *"
-					else:
-						btn.text = "COOLDOWN"
-				elif not is_in_arc:
-					btn.text = "OUT OF ARC"
-				elif w_info.get("weapon_type", "") == "laser" and not is_in_range:
-					btn.text = "OUT OF RANGE"
-				else:
-					btn.text = "FIRE"
+				btn.text = status_text
 					
 	if selected_contact_id == "":
 		target_info_label.text = "NO TARGET LOCKED"
@@ -194,7 +197,7 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 			# this label.
 			var sig = c.get("signature", {"heat": 0.0, "em_noise": 0.0, "cross_section": 1.0, "density": 0.0})
 			var speed = c.get("vel", Vector2.ZERO).length()
-			var dist = current_state["pos"].distance_to(c["pos"]) if current_state.has("pos") and c.has("pos") else 0.0
+			var dist = current_state.get("pos", Vector2.ZERO).distance_to(c.get("pos", Vector2.ZERO))
 			target_info_label.text = "Target: %s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nDist: %.1f m | Spd: %.1f m/s" % [
 				selected_contact_id, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0), dist, speed
 			]

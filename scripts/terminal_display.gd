@@ -197,11 +197,13 @@ func _add_margins(style: StyleBoxFlat) -> void:
 	style.content_margin_top = 3
 	style.content_margin_bottom = 3
 
+func _get_my_ship() -> Node:
+	var ship_node_name = "Ship_" + str(multiplayer.get_unique_id())
+	return get_node_or_null("/root/Main/" + ship_node_name)
+
 func _on_spawn_selected(idx: int) -> void:
 	if idx == 0: return
-	var my_id = multiplayer.get_unique_id()
-	var ship_node_name = "Ship_" + str(my_id)
-	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	var ship_node = _get_my_ship()
 	if ship_node:
 		if idx == 1:
 			ship_node.rpc_id(1, "request_spawn", "asteroids")
@@ -217,7 +219,7 @@ func update_data(packet: Dictionary) -> void:
 	packet["pinned_contacts"] = pinned_contacts
 	packet["is_ship_oriented"] = current_ship_oriented
 	
-	var selected_target = sensor_panel.get_selected_contact_id() if sensor_panel.has_method("get_selected_contact_id") else ""
+	var selected_target = sensor_panel.get_selected_contact_id()
 	packet["selected_contact_id"] = selected_target
 	
 	if nav_panel and nav_panel.has_method("update_data"):
@@ -237,14 +239,11 @@ func update_data(packet: Dictionary) -> void:
 				sfx_laser.play()
 
 func _on_fire_weapon_requested(weapon_id: String) -> void:
-	var target_id = sensor_panel.get_selected_contact_id() if sensor_panel.has_method("get_selected_contact_id") else ""
+	var target_id = sensor_panel.get_selected_contact_id()
 	if target_id == "": return
 	var target_pos = Vector2.ZERO # The host will compute actual lead pos, we just send a zero vector for now
-	
-	# We need the ship's ID to call the RPC on the correct node
-	var my_id = multiplayer.get_unique_id()
-	var ship_node_name = "Ship_" + str(my_id)
-	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+
+	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "fire_weapon", weapon_id, target_pos, target_id)
 
@@ -257,31 +256,23 @@ func _on_contact_pin_toggled(c_id: String, is_pinned: bool) -> void:
 func _on_selection_changed(c_id: String) -> void:
 	if sensor_panel and sensor_panel.has_method("set_selected_contact_id"):
 		sensor_panel.set_selected_contact_id(c_id)
-	
-	var my_id = multiplayer.get_unique_id()
-	var ship_node_name = "Ship_" + str(my_id)
-	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+
+	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "set_sensor_target", c_id)
 
 func _on_sensor_state_changed(sensor_id: String, is_active: bool) -> void:
-	var my_id = multiplayer.get_unique_id()
-	var ship_node_name = "Ship_" + str(my_id)
-	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "set_sensor_state", sensor_id, is_active)
 
 func _on_all_sensors_state_changed(is_active: bool) -> void:
-	var my_id = multiplayer.get_unique_id()
-	var ship_node_name = "Ship_" + str(my_id)
-	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "set_all_sensors_state", is_active)
 
 func _on_component_power_toggled(component_id: String, is_active: bool) -> void:
-	var my_id = multiplayer.get_unique_id()
-	var ship_node_name = "Ship_" + str(my_id)
-	var ship_node = get_node_or_null("/root/Main/" + ship_node_name)
+	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "set_component_power", component_id, is_active)
 

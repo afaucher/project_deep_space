@@ -15,7 +15,7 @@ var thrust_slider: VSlider
 var vel_gauge: ProgressBar
 var mode_button: CheckButton
 
-@onready var main_node = get_node("/root/Main")
+@onready var main_node = get_node_or_null("/root/Main")
 
 class HeadingDial extends Control:
 	signal target_angle_changed(angle: float)
@@ -48,33 +48,23 @@ class HeadingDial extends Control:
 		# Draw markings
 		var font = ThemeDB.fallback_font
 		var font_size = 12
-		var map_rot = 0.0
-		if is_ship_oriented:
-			map_rot = -actual_angle - PI/2.0
-			
+		var map_rot = Utils.get_map_rotation(is_ship_oriented, actual_angle)
+
 		for i in range(0, 360, 30):
-			var godot_angle = deg_to_rad(i - 90.0)
-			var draw_angle = godot_angle + map_rot
+			var draw_angle = deg_to_rad(i - 90.0) + map_rot
 			var dir = Vector2.RIGHT.rotated(draw_angle)
-			
-			var is_cardinal = (i % 90 == 0)
-			var tick_color = Color.GREEN if is_cardinal else Color(0.0, 0.8, 0.0, 0.6)
-			var tick_width = 3.0 if is_cardinal else 1.0
-			
-			var p1 = center + dir * (radius - (15.0 if is_cardinal else 8.0))
+
+			var style = Utils.compass_tick_style(i)
+			var p1 = center + dir * (radius - (15.0 if style["is_cardinal"] else 8.0))
 			var p2 = center + dir * radius
-			draw_line(p1, p2, tick_color, tick_width)
-			
+			draw_line(p1, p2, style["color"], style["width"])
+
 			var text_pos = center + dir * (radius - 25.0)
-			var text = str(i)
-			if i == 0: text = "N"
-			elif i == 90: text = "E"
-			elif i == 180: text = "S"
-			elif i == 270: text = "W"
-			
+			var text = Utils.compass_label_text(i)
+
 			var text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
-			draw_string(font, text_pos - text_size / 2.0 + Vector2(0, font_size / 3.0), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, tick_color)
-			
+			draw_string(font, text_pos - text_size / 2.0 + Vector2(0, font_size / 3.0), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, style["color"])
+
 		# Draw ghost needle (Target)
 		var draw_target = target_angle + map_rot
 		var ghost_end = center + Vector2.RIGHT.rotated(draw_target) * radius
@@ -89,7 +79,9 @@ class HeadingDial extends Control:
 class EngineSlider extends Control:
 	signal intent_changed(val: float)
 	signal became_active()
-	
+
+	const DEADZONE_RATIO := 0.05 # fraction of the slider's full range snapped to exactly 0.0 near center
+
 	var is_active_control: bool = false
 	var min_val: float = -1.0
 	var max_val: float = 1.0
@@ -112,7 +104,7 @@ class EngineSlider extends Control:
 				var new_val = lerpf(min_val, max_val, t)
 				
 				var range_val = max_val - min_val
-				if abs(new_val) < (range_val * 0.05):
+				if abs(new_val) < (range_val * DEADZONE_RATIO):
 					new_val = 0.0
 					
 				if target_val != new_val:
@@ -250,19 +242,36 @@ func _send_input() -> void:
 
 func update_data(packet: Dictionary) -> void:
 	current_state = packet
-	
+
+	# Re-sync mode toggle/active-slider indicators from the server's reported
+	# steering_mode/linear_mode -- these are otherwise only ever changed
+	# locally on user interaction, so without this they can silently drift
+	# from the ship's actual mode (e.g. after a reconnect, or if some other
+	# input source changes it). set_pressed_no_signal avoids re-firing
+	# _on_mode_toggled and bouncing a fresh _send_input() back out.
+	var server_steering_mode = current_state.get("steering_mode", steering_mode)
+	if server_steering_mode != steering_mode:
+		steering_mode = server_steering_mode
+		mode_button.set_pressed_no_signal(steering_mode == 1)
+
+	var server_linear_mode = current_state.get("linear_mode", linear_mode)
+	if server_linear_mode != linear_mode:
+		linear_mode = server_linear_mode
+		throttle_slider.is_active_control = (linear_mode == 0)
+		velocity_slider.is_active_control = (linear_mode == 1)
+
 	# Update dial
 	var rot = current_state.get("rot", 0.0)
 	heading_dial.actual_angle = rot
 	heading_dial.is_ship_oriented = current_state.get("is_ship_oriented", false)
 	heading_dial.queue_redraw()
-	
+
 	# Update Engine Controls
 	var actual_vel = current_state.get("vel", Vector2.ZERO)
 	var forward = Vector2.RIGHT.rotated(rot)
 	var forward_speed = actual_vel.dot(forward)
 	var actual_throttle = current_state.get("throttle", 0.0)
-	
+
 	throttle_slider.actual_val = actual_throttle
 	velocity_slider.actual_val = forward_speed
 	

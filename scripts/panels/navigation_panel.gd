@@ -2,6 +2,8 @@ extends Control
 
 signal contact_selected(c_id: String)
 
+const WORLD_HALF_EXTENT := 200000.0 # map clamps the camera/grid to +/- this on each axis
+
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
 	"rot": 0.0,
@@ -50,38 +52,26 @@ func _ready() -> void:
 	)
 	overlay.add_child(zoom_slider)
 	
-	var cb_wep = CheckButton.new()
-	cb_wep.text = "Weapon Arcs"
-	cb_wep.button_pressed = show_weapon_arcs
-	cb_wep.toggled.connect(func(pressed: bool): show_weapon_arcs = pressed; queue_redraw())
-	overlay.add_child(cb_wep)
-	
-	var cb_sens = CheckButton.new()
-	cb_sens.text = "Sensor Arcs"
-	cb_sens.button_pressed = show_sensor_arcs
-	cb_sens.toggled.connect(func(pressed: bool): show_sensor_arcs = pressed; queue_redraw())
-	overlay.add_child(cb_sens)
-	
-	var cb_labels = CheckButton.new()
-	cb_labels.text = "Contact Labels"
-	cb_labels.button_pressed = show_contact_labels
-	cb_labels.toggled.connect(func(pressed: bool): show_contact_labels = pressed; queue_redraw())
-	overlay.add_child(cb_labels)
-	
-	var cb_vel = CheckButton.new()
-	cb_vel.text = "Velocity Vectors"
-	cb_vel.button_pressed = show_velocity_vectors
-	cb_vel.toggled.connect(func(pressed: bool): show_velocity_vectors = pressed; queue_redraw())
-	overlay.add_child(cb_vel)
-	
-	var cb_grid = CheckButton.new()
-	cb_grid.text = "Grid"
-	cb_grid.button_pressed = show_grid
-	cb_grid.toggled.connect(func(pressed: bool): show_grid = pressed; queue_redraw())
-	overlay.add_child(cb_grid)
+	_add_toggle(overlay, "Weapon Arcs", "show_weapon_arcs")
+	_add_toggle(overlay, "Sensor Arcs", "show_sensor_arcs")
+	_add_toggle(overlay, "Contact Labels", "show_contact_labels")
+	_add_toggle(overlay, "Velocity Vectors", "show_velocity_vectors")
+	_add_toggle(overlay, "Grid", "show_grid")
+
+# Binds a checkbox directly to one of this panel's own show_* bool properties
+# by name, instead of hand-writing a near-identical CheckButton + closure for
+# each toggle.
+func _add_toggle(parent: Control, label: String, property_name: String) -> void:
+	var cb = CheckButton.new()
+	cb.text = label
+	cb.button_pressed = get(property_name)
+	cb.toggled.connect(func(pressed: bool):
+		set(property_name, pressed)
+		queue_redraw()
+	)
+	parent.add_child(cb)
 
 func _gui_input(event: InputEvent) -> void:
-	var is_ship_oriented = current_state.get("is_ship_oriented", false)
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			zoom_slider.value *= 1.25
@@ -99,7 +89,7 @@ func _handle_click(click_pos: Vector2) -> void:
 	
 	var is_ship_oriented = current_state.get("is_ship_oriented", false)
 	if not is_ship_oriented:
-		var grid_size = 200000.0
+		var grid_size = WORLD_HALF_EXTENT
 		var visible_half = (size / 2.0) / map_zoom
 		if visible_half.x < grid_size:
 			camera_pos.x = clampf(camera_pos.x, -grid_size + visible_half.x, grid_size - visible_half.x)
@@ -112,8 +102,7 @@ func _handle_click(click_pos: Vector2) -> void:
 
 	var t = Transform2D()
 	t = t.translated(-camera_pos)
-	if is_ship_oriented:
-		t = t.rotated(-rot - PI/2.0)
+	t = t.rotated(Utils.get_map_rotation(is_ship_oriented, rot))
 	t = t.scaled(Vector2(map_zoom, map_zoom))
 	t.origin += size / 2.0
 	
@@ -158,7 +147,7 @@ func _draw() -> void:
 	var vel = current_state.get("vel", Vector2.ZERO)
 	
 	# Transform logic
-	var grid_size = 200000.0
+	var grid_size = WORLD_HALF_EXTENT
 	var camera_pos = pos
 	
 	if not is_ship_oriented:
@@ -177,8 +166,7 @@ func _draw() -> void:
 
 	var t = Transform2D()
 	t = t.translated(-camera_pos) # 1. Move camera target to origin
-	if is_ship_oriented:
-		t = t.rotated(-rot - PI/2.0) # 2. Rotate around origin if needed
+	t = t.rotated(Utils.get_map_rotation(is_ship_oriented, rot)) # 2. Rotate around origin if needed
 	t = t.scaled(Vector2(map_zoom, map_zoom)) # 3. Scale around origin
 	t.origin += center # 4. Shift origin to center of screen
 
@@ -275,16 +263,16 @@ func _draw() -> void:
 				
 			var s_start_angle = s_heading - (s_arc_width / 2.0)
 			for sig in bins:
-				var b_idx = sig["bin_idx"]
+				var b_idx = sig.get("bin_idx", 0)
 				var b_start = s_start_angle + (b_idx * bin_angle)
 				var b_end = b_start + bin_angle
-				
+
 				var dist = sig.get("distance", 0.0)
 				var b_center = (b_start + b_end) / 2.0
 				var dot_pos = pos + Vector2(dist, 0).rotated(b_center)
-				
+
 				var color = Color.YELLOW
-				if sensor_id == "dir_high_res": color = Color.CYAN
+				if sensor_id == Utils.HIGHLIGHT_SENSOR_ID: color = Color.CYAN
 				elif sensor_id == "omni_short_hi_res": color = Color.ORANGE
 				draw_circle(dot_pos, 4.0 / map_zoom, color)
 	
@@ -299,20 +287,15 @@ func _draw() -> void:
 		# Draw physical bounds (estimated from radar cross section)
 		var cross_section = c.get("signature", {}).get("cross_section", 0.0)
 		if cross_section > 0:
-			var estimated_radius = sqrt(cross_section) * 10.0 # arbitrary visual scaling
+			var estimated_radius = sqrt(max(0.0, cross_section)) * 10.0 # arbitrary visual scaling
 			draw_arc(c_pos, estimated_radius, 0, TAU, 16, color, 1.0 / map_zoom)
 			
 		# Draw velocity vector
-		if show_velocity_vectors and c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2 and c["vel"].length() > 0:
-			draw_line(c_pos, c_pos + c["vel"] * 2.0, color, 1.0 / map_zoom)
-			
-		# Draw Contact Label
-		if show_contact_labels:
-			var font = ThemeDB.fallback_font
-			# Draw label unscaled? We can't use font in world scale easily if it's too large or small.
-			# But we are drawing it with current map_zoom. The font scaling needs a transform reset,
-			# but we can just let it scale for now, or we draw it later when transform is reset.
-			pass
+		if show_velocity_vectors and c.get("vel", Vector2.ZERO).length() > 0:
+			draw_line(c_pos, c_pos + c.get("vel", Vector2.ZERO) * 2.0, color, 1.0 / map_zoom)
+
+	# Contact labels are drawn later, after the transform reset below --
+	# world-space text would scale with map_zoom otherwise.
 
 	# Draw active lasers
 	for laser in active_lasers:
@@ -378,36 +361,26 @@ func _draw() -> void:
 	var compass_radius = min(size.x, size.y) / 2.0 - 40.0
 	draw_arc(center, compass_radius, 0, PI*2, 64, Color(0.0, 0.5, 0.0, 0.3), 2.0)
 	
-	var map_rot = 0.0
-	if is_ship_oriented:
-		map_rot = -rot - PI/2.0
-		
+	var map_rot = Utils.get_map_rotation(is_ship_oriented, rot)
+
 	var font = ThemeDB.fallback_font
 	var font_size = 14
-	
+
 	for i in range(0, 360, 30):
-		var godot_angle = deg_to_rad(i - 90.0)
-		var draw_angle = godot_angle + map_rot
-		
+		var draw_angle = deg_to_rad(i - 90.0) + map_rot
+
 		var dir = Vector2.RIGHT.rotated(draw_angle)
 		var p1 = center + dir * compass_radius
 		var p2 = center + dir * (compass_radius + 10.0)
-		
-		# Make cardinal directions stand out
-		var is_cardinal = (i % 90 == 0)
-		var tick_color = Color.GREEN if is_cardinal else Color(0.0, 0.8, 0.0, 0.6)
-		var tick_width = 3.0 if is_cardinal else 1.0
-		draw_line(p1, p2, tick_color, tick_width)
-		
+
+		var style = Utils.compass_tick_style(i)
+		draw_line(p1, p2, style["color"], style["width"])
+
 		var text_pos = center + dir * (compass_radius + 25.0)
-		var text = str(i)
-		if i == 0: text = "N"
-		elif i == 90: text = "E"
-		elif i == 180: text = "S"
-		elif i == 270: text = "W"
-		
+		var text = Utils.compass_label_text(i)
+
 		var text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
-		draw_string(font, text_pos - text_size / 2.0 + Vector2(0, font_size / 3.0), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, tick_color)
+		draw_string(font, text_pos - text_size / 2.0 + Vector2(0, font_size / 3.0), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, style["color"])
 	
 	# Draw telemetry text
 	var default_font_size = 16
@@ -434,7 +407,8 @@ func _draw() -> void:
 			var x_ratio = abs(offset.x) / (size.x/2.0 - margin)
 			var y_ratio = abs(offset.y) / (size.y/2.0 - margin)
 			var max_ratio = max(x_ratio, y_ratio)
-			
+			if max_ratio <= 0.0: continue # contact is dead-center, can't be off-screen -- avoid a divide-by-zero
+
 			var edge_pos = center + offset / max_ratio
 			
 			var dir_to_contact = offset.normalized()
@@ -457,11 +431,5 @@ func _draw() -> void:
 			draw_string(font, label_pos, c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
 
 func _get_contact_color(c: Dictionary) -> Color:
-	match c.get("classification", ""):
-		"INCOMING ORDNANCE": return Color.YELLOW
-		"UNIDENTIFIED VESSEL": return Color.RED
-		"FRIENDLY VESSEL": return Color.GREEN
-		"FRIENDLY ORDNANCE": return Color.DARK_GREEN
-		"ASTEROID": return Color.GRAY
-		_: return Color.WHITE
+	return Utils.classification_color(c.get("classification", ""))
 

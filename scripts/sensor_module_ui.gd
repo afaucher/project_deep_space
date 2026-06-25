@@ -53,7 +53,8 @@ func update_data(id: String, bins: Array, p_pos: Vector2, c_dict: Dictionary, se
 		sensor_heading = bins[0].get("sensor_heading", 0.0)
 		sensor_arc_width = bins[0].get("sensor_arc_width", TAU)
 		sensor_range = bins[0].get("sensor_range", 40000.0)
-		num_bins = int(sensor_arc_width / bins[0].get("bin_angle", TAU/36.0))
+		var reported_bin_angle = bins[0].get("bin_angle", TAU/36.0)
+		num_bins = int(sensor_arc_width / reported_bin_angle) if reported_bin_angle > 0.0 else 1
 		
 	queue_redraw()
 
@@ -67,23 +68,19 @@ func _gui_input(event: InputEvent) -> void:
 		
 		for c_id in contacts.keys():
 			var c = contacts[c_id]
-			var dist = my_pos.distance_to(c["pos"])
+			var c_pos = c.get("pos", Vector2.ZERO)
+			var dist = my_pos.distance_to(c_pos)
 			if dist > sensor_range: continue
-			
-			var angle = (c["pos"] - my_pos).angle()
+
+			var angle = (c_pos - my_pos).angle()
 			var rel_angle = wrapf(angle - sensor_heading, -PI, PI)
-			
+
 			var half_arc = sensor_arc_width / 2.0
 			if rel_angle >= -half_arc and rel_angle <= half_arc:
 				var dist_ratio = clampf(dist / sensor_range, 0.0, 1.0)
 				var dot_radius = radius * dist_ratio
-				
-				var is_ship_oriented = current_state.get("is_ship_oriented", false)
-				var ship_rot = current_state.get("rot", 0.0)
-				var map_rot = 0.0
-				if is_ship_oriented:
-					map_rot = -ship_rot - PI/2.0
-					
+
+				var map_rot = Utils.get_map_rotation(current_state.get("is_ship_oriented", false), current_state.get("rot", 0.0))
 				var ui_pos = center + Vector2(dot_radius, 0).rotated(angle + map_rot)
 				
 				var click_dist = event.position.distance_to(ui_pos)
@@ -97,13 +94,9 @@ func _gui_input(event: InputEvent) -> void:
 func _draw() -> void:
 	var center = size / 2.0
 	var radius = min(size.x, size.y) / 2.0 - 20.0
-	
-	var is_ship_oriented = current_state.get("is_ship_oriented", false)
-	var ship_rot = current_state.get("rot", 0.0)
-	var map_rot = 0.0
-	if is_ship_oriented:
-		map_rot = -ship_rot - PI/2.0
-		
+
+	var map_rot = Utils.get_map_rotation(current_state.get("is_ship_oriented", false), current_state.get("rot", 0.0))
+
 	var start_angle = sensor_heading - (sensor_arc_width / 2.0) + map_rot
 	var end_angle = sensor_heading + (sensor_arc_width / 2.0) + map_rot
 	
@@ -157,10 +150,10 @@ func _draw() -> void:
 	# Bins
 	var bin_angle = sensor_arc_width / float(num_bins)
 	for sig in current_bins:
-		var b_idx = sig["bin_idx"]
+		var b_idx = sig.get("bin_idx", 0)
 		var b_start = start_angle + (b_idx * bin_angle)
 		var b_end = b_start + bin_angle
-		
+
 		# Grey background wedge for hit
 		var points = PackedVector2Array()
 		points.append(center)
@@ -169,27 +162,27 @@ func _draw() -> void:
 			points.append(center + Vector2(radius, 0).rotated(a))
 		points.append(center)
 		draw_colored_polygon(points, Color(0.3, 0.3, 0.3, 0.4))
-		
+
 		# Draw dot at distance
 		var dist = sig.get("distance", 0.0)
 		var dist_ratio = clampf(dist / sensor_range, 0.0, 1.0)
 		var dot_radius = radius * dist_ratio
-		
+
 		var b_center = (b_start + b_end) / 2.0
 		var dot_pos = center + Vector2(dot_radius, 0).rotated(b_center)
-		
+
 		var color = Color.YELLOW
-		if sensor_id == "dir_high_res":
+		if sensor_id == Utils.HIGHLIGHT_SENSOR_ID:
 			color = Color.CYAN
-			
+
 		draw_circle(dot_pos, 4.0, color)
-		
+
 	# Draw highlight
 	if selected_contact_id != "" and contacts.has(selected_contact_id):
 		var c = contacts[selected_contact_id]
-		var dist = my_pos.distance_to(c["pos"])
+		var dist = my_pos.distance_to(c.get("pos", Vector2.ZERO))
 		if dist <= sensor_range:
-			var angle = (c["pos"] - my_pos).angle()
+			var angle = (c.get("pos", Vector2.ZERO) - my_pos).angle()
 			var rel_angle = wrapf(angle - sensor_heading, -PI, PI)
 			var half_arc = sensor_arc_width / 2.0
 			if rel_angle >= -half_arc and rel_angle <= half_arc:

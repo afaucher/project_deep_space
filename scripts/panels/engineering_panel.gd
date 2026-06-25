@@ -2,6 +2,9 @@ extends Control
 
 signal component_power_toggled(component_id: String, is_active: bool)
 
+const HIGHLIGHT_SENSOR_PEAK_EM_BONUS := 40.0 # flat display-only bump to "Peak EM" when the highlighted sensor is active
+const POWER_TOGGLE_DEBOUNCE_MSEC := 500 # how long a local power-button click is trusted over a conflicting server update
+
 var current_state: Dictionary = {}
 
 var top_hbox: HBoxContainer
@@ -16,32 +19,36 @@ var lbl_peak_em: Label
 var lbl_det_dist: Label
 
 class EMPolarChart extends Control:
+	const RING_RADIUS_RATIOS := [1.0, 0.66, 0.33]
+	const NOISE_RESEED_INTERVAL_MSEC := 100 # how often the radiation-pattern jitter changes
+	const EM_RADIUS_SCALE := 400.0   # em_value at this maps to the chart's full radius
+	const SENSOR_EM_RADIUS_SCALE := 200.0 # an active sensor's own em_emission at this adds a full-radius bump in its cone
+
 	var em_value: float = 0.0
 	var sensor_config: Array = []
 	var is_ship_oriented: bool = false
 	var ship_rot: float = 0.0
-	
+	var _rng := RandomNumberGenerator.new()
+
 	func _process(delta: float) -> void:
 		queue_redraw()
-	
+
 	func _draw() -> void:
 		var center = size / 2.0
 		var max_radius = min(size.x, size.y) / 2.0 - 5.0
 		# draw rings
-		draw_arc(center, max_radius, 0, TAU, 32, Color(0.2, 0.4, 0.2, 0.5), 1.0)
-		draw_arc(center, max_radius * 0.66, 0, TAU, 32, Color(0.2, 0.4, 0.2, 0.5), 1.0)
-		draw_arc(center, max_radius * 0.33, 0, TAU, 32, Color(0.2, 0.4, 0.2, 0.5), 1.0)
-		
+		for ratio in RING_RADIUS_RATIOS:
+			draw_arc(center, max_radius * ratio, 0, TAU, 32, Color(0.2, 0.4, 0.2, 0.5), 1.0)
+
 		draw_line(center - Vector2(max_radius, 0), center + Vector2(max_radius, 0), Color(0.2, 0.4, 0.2, 0.5), 1.0)
 		draw_line(center - Vector2(0, max_radius), center + Vector2(0, max_radius), Color(0.2, 0.4, 0.2, 0.5), 1.0)
-		
+
 		# draw radiation pattern
 		var pts = PackedVector2Array()
-		var random = RandomNumberGenerator.new()
-		var time_offset = Time.get_ticks_msec() / 100 # Change every 100ms
-		random.seed = 12345 + int(em_value) + time_offset
-		
-		var base_radius = (em_value / 400.0) * max_radius
+		var time_offset = Time.get_ticks_msec() / NOISE_RESEED_INTERVAL_MSEC
+		_rng.seed = 12345 + int(em_value) + time_offset
+
+		var base_radius = (em_value / EM_RADIUS_SCALE) * max_radius
 		
 		for i in range(32):
 			var a = (i / 32.0) * TAU
@@ -64,9 +71,9 @@ class EMPolarChart extends Control:
 					var diff = abs(wrapf(a - s_heading, -PI, PI))
 					if diff <= s_arc / 2.0:
 						var s_power = s.get("em_emission", 0.0)
-						local_r += (s_power / 200.0) * max_radius * (1.0 - diff/(s_arc/2.0))
-			
-			var noise = random.randf_range(0.9, 1.1)
+						local_r += (s_power / SENSOR_EM_RADIUS_SCALE) * max_radius * (1.0 - diff/(s_arc/2.0))
+
+			var noise = _rng.randf_range(0.9, 1.1)
 			var r = min(max_radius, local_r * noise)
 			pts.append(center + Vector2(cos(a), sin(a)) * r)
 			
@@ -93,7 +100,7 @@ class ComponentSpatialView extends Control:
 		
 		if eng_state.has("ship_components"):
 			for c in eng_state["ship_components"]:
-				var r: Rect2 = c["rect"]
+				var r: Rect2 = c.get("rect", Rect2())
 				min_x = min(min_x, r.position.x)
 				max_x = max(max_x, r.position.x + r.size.x)
 				min_y = min(min_y, r.position.y)
@@ -115,25 +122,26 @@ class ComponentSpatialView extends Control:
 		
 		if eng_state.has("ship_components"):
 			for c in eng_state["ship_components"]:
-				var r: Rect2 = c["rect"]
-				var health_ratio = max(0.0, c["health"]) / max(1.0, c["max_health"])
-				
+				var r: Rect2 = c.get("rect", Rect2())
+				var health = c.get("health", 0.0)
+				var health_ratio = max(0.0, health) / max(1.0, c.get("max_health", 1.0))
+
 				var color = Color(1.0 - health_ratio, health_ratio, 0.0, 0.8)
 				if health_ratio <= 0.0:
 					color = Color(0.1, 0.1, 0.1, 0.8) # Dead
-					
+
 				var draw_x = center.x + ((r.position.y - offset_x) * scale_factor)
 				var draw_y = center.y - ((r.position.x - offset_y) * scale_factor) - (r.size.x * scale_factor)
 				var draw_w = r.size.y * scale_factor
 				var draw_h = r.size.x * scale_factor
-				
+
 				var draw_rect2 = Rect2(draw_x, draw_y, draw_w, draw_h)
-				
+
 				draw_rect(draw_rect2, color, true)
 				draw_rect(draw_rect2, Color(0.8, 0.8, 0.8, 0.5), false, 1.0)
-				
-				var label = c["type"]
-				if c["health"] <= 0: label = "DEAD"
+
+				var label = c.get("type", "")
+				if health <= 0: label = "DEAD"
 				if font:
 					var text_size = font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
 					var text_pos = Vector2(draw_x + (draw_w - text_size.x) / 2.0, draw_y + (draw_h + text_size.y) / 2.0)
@@ -141,18 +149,18 @@ class ComponentSpatialView extends Control:
 
 		if eng_state.has("hit_traces"):
 			for trace in eng_state["hit_traces"]:
-				var alpha = clamp(trace.get("time_remaining", 3.0) / 3.0, 0.0, 1.0)
-				
+				var alpha = clamp(trace.get("time_remaining", Ship.HIT_TRACE_DURATION) / Ship.HIT_TRACE_DURATION, 0.0, 1.0)
+
 				var prev_pos = trace.get("start_local", Vector2.ZERO)
 				var prev_ui_x = center.x + ((prev_pos.y - offset_x) * scale_factor)
 				var prev_ui_y = center.y - ((prev_pos.x - offset_y) * scale_factor)
-				
+
 				var max_dmg = 0.0
 				if trace.get("segments", []).size() > 0:
 					max_dmg = trace["segments"][0].get("dmg_remaining", 1.0)
-				
+
 				for seg in trace.get("segments", []):
-					var p = seg["pos"]
+					var p = seg.get("pos", Vector2.ZERO)
 					var ui_x = center.x + ((p.y - offset_x) * scale_factor)
 					var ui_y = center.y - ((p.x - offset_y) * scale_factor)
 					
@@ -311,12 +319,17 @@ func update_data(state: Dictionary) -> void:
 		var peak_em = em_sig
 		for s in em_chart.sensor_config:
 			if s.get("sensor_type", "") == "active" and s.get("active", true):
-				if s.get("id") == "dir_high_res":
-					peak_em += 40.0
-					
+				if s.get("id") == Utils.HIGHLIGHT_SENSOR_ID:
+					peak_em += HIGHLIGHT_SENSOR_PEAK_EM_BONUS
+
 		if lbl_peak_em: lbl_peak_em.text = "Peak: %.0f EM" % peak_em
 		if lbl_det_dist:
-			var det_dist = (peak_em * 10000.0) / 15.0
+			# Same falloff/noise-floor math an enemy's own passive EM sensor
+			# would use to detect us (Ship._run_sensor_sweep) -- referencing
+			# Ship's constants directly instead of re-typing 10000.0/15.0
+			# here so this display can't silently drift from the actual
+			# detection math.
+			var det_dist = (peak_em * Ship.EM_FALLOFF_REFERENCE_DISTANCE) / Ship.PASSIVE_EM_NOISE_FLOOR
 			lbl_det_dist.text = "Det. Range: %s" % Utils.format_dist(det_dist)
 		
 		spatial_view.eng_state = eng
@@ -336,14 +349,18 @@ func update_data(state: Dictionary) -> void:
 				var prog_health: ProgressBar
 				var lbl_heat: Label
 				var lbl_em: Label
-				
+
 				if comp_rows.has(c_id):
-					row = comp_rows[c_id]
-					lbl_name = row.get_child(0)
-					power_btn = row.get_child(1)
-					prog_health = row.get_child(2)
-					lbl_heat = row.get_child(3)
-					lbl_em = row.get_child(4)
+					# Named refs cached at creation time below -- not
+					# positional get_child() lookups, so any future change to
+					# this row's child layout can't silently break this.
+					var refs = comp_rows[c_id]
+					row = refs["row"]
+					lbl_name = refs["lbl_name"]
+					power_btn = refs["power_btn"]
+					prog_health = refs["prog_health"]
+					lbl_heat = refs["lbl_heat"]
+					lbl_em = refs["lbl_em"]
 				else:
 					row = HBoxContainer.new()
 					lbl_name = Label.new()
@@ -377,8 +394,9 @@ func update_data(state: Dictionary) -> void:
 					row.add_child(lbl_em)
 					
 					components_vbox.add_child(row)
-					comp_rows[c_id] = row
-					
+					comp_rows[c_id] = {"row": row, "lbl_name": lbl_name, "power_btn": power_btn, "prog_health": prog_health, "lbl_heat": lbl_heat, "lbl_em": lbl_em}
+
+
 				# Update values
 				lbl_name.text = c_id
 				
@@ -392,7 +410,7 @@ func update_data(state: Dictionary) -> void:
 					
 				var is_powered = c.get("powered_on", true)
 				var last_toggle_time = power_btn.get_meta("pending_toggle", 0)
-				if Time.get_ticks_msec() - last_toggle_time > 500: # Wait 500ms after a click before allowing server to override
+				if Time.get_ticks_msec() - last_toggle_time > POWER_TOGGLE_DEBOUNCE_MSEC:
 					if power_btn.button_pressed != is_powered:
 						power_btn.set_pressed_no_signal(is_powered)
 					
@@ -410,5 +428,7 @@ func update_data(state: Dictionary) -> void:
 			# Cleanup old rows
 			for key in comp_rows.keys():
 				if not key in active_ids:
-					comp_rows[key].queue_free()
+					var old_row = comp_rows[key]["row"]
+					if is_instance_valid(old_row):
+						old_row.queue_free()
 					comp_rows.erase(key)

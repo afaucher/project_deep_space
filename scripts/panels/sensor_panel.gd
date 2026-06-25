@@ -133,7 +133,7 @@ func update_data(packet: Dictionary) -> void:
 			var all_on = true
 			var all_off = true
 			for c in cfg:
-				var sensor_id = c["id"]
+				var sensor_id = c.get("id", "")
 				if not sensor_modules.has(sensor_id):
 					var mod = SensorModuleUI.new()
 					mod.contact_selected.connect(_on_contact_selected)
@@ -186,8 +186,9 @@ func _update_contact_list(contacts: Dictionary) -> void:
 	# Remove old panels
 	for c_id in contact_panels.keys():
 		if not c_id in active_ids:
-			if is_instance_valid(contact_panels[c_id]):
-				contact_panels[c_id].queue_free()
+			var old_panel = contact_panels[c_id]["panel"]
+			if is_instance_valid(old_panel):
+				old_panel.queue_free()
 			contact_panels.erase(c_id)
 			
 	var pinned_list = current_state.get("pinned_contacts", [])
@@ -201,79 +202,62 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var pin_btn: CheckButton
 		var info: Label
 		var p_style: StyleBoxFlat
-		
+
 		if contact_panels.has(c_id):
-			panel = contact_panels[c_id]
-			p_style = panel.get_theme_stylebox("panel")
-			var vbox = panel.get_child(0)
-			var header_hbox = vbox.get_child(0)
-			header = header_hbox.get_child(0)
-			pin_btn = header_hbox.get_child(1)
-			info = vbox.get_child(1)
+			# Named refs cached at creation time below -- not positional
+			# get_child() lookups, so any future change to this row's child
+			# layout can't silently break this.
+			var refs = contact_panels[c_id]
+			panel = refs["panel"]
+			p_style = refs["style"]
+			header = refs["header"]
+			pin_btn = refs["pin_btn"]
+			info = refs["info"]
 		else:
 			panel = PanelContainer.new()
 			p_style = StyleBoxFlat.new()
 			p_style.border_width_left = 4
 			panel.add_theme_stylebox_override("panel", p_style)
 			panel.gui_input.connect(_on_contact_panel_gui_input.bind(c_id))
-			
+
 			var vbox = VBoxContainer.new()
 			panel.add_child(vbox)
-			
+
 			var header_hbox = HBoxContainer.new()
 			vbox.add_child(header_hbox)
-			
+
 			header = Label.new()
 			header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			header_hbox.add_child(header)
-			
+
 			pin_btn = CheckButton.new()
 			pin_btn.text = "Pin"
 			pin_btn.toggled.connect(func(pressed): emit_signal("contact_pin_toggled", c_id, pressed))
 			header_hbox.add_child(pin_btn)
-			
+
 			info = Label.new()
 			info.add_theme_font_size_override("font_size", 12)
 			vbox.add_child(info)
-			
+
 			contact_list_vbox.add_child(panel)
-			contact_panels[c_id] = panel
-			
+			contact_panels[c_id] = {"panel": panel, "style": p_style, "header": header, "pin_btn": pin_btn, "info": info}
+
 		# Reorder to keep sorted
 		panel.get_parent().move_child(panel, idx)
 		idx += 1
 		
 		# Update visual properties
+		var classification_str = c.get("classification", "UNKNOWN")
 		if c_id == selected_contact_id:
 			p_style.bg_color = Color(0.2, 0.4, 0.2, 0.8)
 			p_style.border_color = Color.WHITE
 		else:
 			p_style.bg_color = Color(0.15, 0.15, 0.15, 0.8)
-			var classification = c.get("classification", "UNKNOWN")
-			if classification == "INCOMING ORDNANCE":
-				p_style.border_color = Color.YELLOW
-			elif classification == "UNIDENTIFIED VESSEL":
-				p_style.border_color = Color.RED
-			elif classification == "FRIENDLY VESSEL":
-				p_style.border_color = Color.GREEN
-			elif classification == "FRIENDLY ORDNANCE":
-				p_style.border_color = Color.DARK_GREEN
-			else:
-				p_style.border_color = Color.GRAY
-				
-		var classification_str = c.get("classification", "UNKNOWN")
+			p_style.border_color = Utils.classification_color(classification_str)
+
 		header.text = c_id + " [" + classification_str + "]"
-		if classification_str == "INCOMING ORDNANCE":
-			header.add_theme_color_override("font_color", Color.YELLOW)
-		elif classification_str == "UNIDENTIFIED VESSEL":
-			header.add_theme_color_override("font_color", Color.RED)
-		elif classification_str == "FRIENDLY VESSEL":
-			header.add_theme_color_override("font_color", Color.GREEN)
-		elif classification_str == "FRIENDLY ORDNANCE":
-			header.add_theme_color_override("font_color", Color.DARK_GREEN)
-		else:
-			header.add_theme_color_override("font_color", Color.GRAY)
-			
+		header.add_theme_color_override("font_color", Utils.classification_color(classification_str))
+
 		# Update state without emitting signal
 		pin_btn.set_pressed_no_signal(pinned_list.has(c_id))
 		

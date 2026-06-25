@@ -95,6 +95,8 @@ const PD_RANGE := 3500.0
 
 const RCS_SFX_TORQUE_THRESHOLD := 100.0 # torque above this plays the RCS thruster sound cue
 
+const HIT_TRACE_DURATION := 3.0 # seconds a damage-raymarch trace lingers for the engineering panel's spatial view to fade out
+
 var owner_id: int = -1
 
 func _init() -> void:
@@ -529,7 +531,7 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 			"end_local": local_pos,
 			"dir_local": local_dir,
 			"segments": [],
-			"time_remaining": 3.0 # Persist for 3 seconds
+			"time_remaining": HIT_TRACE_DURATION
 		}
 		
 		var hit_something = false
