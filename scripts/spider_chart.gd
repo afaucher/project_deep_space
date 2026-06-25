@@ -1,7 +1,17 @@
 extends Control
 class_name SpiderChart
 
-var max_values: Array[float] = [200.0, 100.0, 300.0, 500.0]
+# Display ceilings for each axis (values clamp/scale against these, they
+# don't change the underlying signature). EM was raised from its original
+# 100.0 -- a reactor whiteout pulse (Ship.REACTOR_WHITEOUT_MULTIPLIER x
+# power_rating) can spike well past that, e.g. 500.0 for the Frigate's own
+# reactor, and would otherwise just clip flat against the old ceiling.
+const MAX_HEAT_DISPLAY := 200.0          # matches Ship.max_heat
+const MAX_EM_DISPLAY := 500.0
+const MAX_CROSS_SECTION_DISPLAY := 300.0
+const MAX_DENSITY_DISPLAY := 500.0
+
+var max_values: Array[float] = [MAX_HEAT_DISPLAY, MAX_EM_DISPLAY, MAX_CROSS_SECTION_DISPLAY, MAX_DENSITY_DISPLAY]
 var axis_labels: Array[String] = ["HEAT", "EM", "C_SEC", "DENS"]
 var current_values: Array[float] = [0.0, 0.0, 0.0, 0.0]
 

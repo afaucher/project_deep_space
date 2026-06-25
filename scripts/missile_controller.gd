@@ -1,6 +1,20 @@
 extends Node
 class_name MissileController
 
+# Guidance-law tuning. FUEL_LIFETIME bounds effective engagement range/time
+# together with the missile's own max_speed; the lock-related thresholds
+# trade lock stability against how easy a target is to break lock by breaking
+# sensor contact.
+const FUEL_LIFETIME := 15.0          # seconds before self-destruct ("ran out of fuel")
+const LOCK_LOSS_STALENESS := 5.0     # seconds an existing lock's contact can go unrefreshed before it's dropped
+const ACQUISITION_FRESHNESS := 1.0   # seconds a contact must have been refreshed within to be eligible for a *new* lock (stricter than keeping one)
+const LEAD_TIME_CAP := 0.7           # seconds -- caps how far ahead proportional-nav aims so the missile doesn't cross the target's path
+const VELOCITY_STEER_THRESHOLD := 10.0 # below this velocity error, steer directly at the intercept point instead of the desired-velocity vector
+const SEEKER_EDGE_MARGIN := 10.0     # degrees of margin kept off the seeker's edge so the target doesn't fall out of FOV next frame
+const SEEKER_FALLBACK_HALF_ARC := PI / 3.0 # used only if no seeker component is found (shouldn't happen in practice)
+const PROXIMITY_FUSE_RANGE := 100.0  # distance at which the warhead detonates
+const WARHEAD_DAMAGE := 250.0
+
 var ship: RigidBody2D
 var target_id: String = ""
 var age: float = 0.0
@@ -16,7 +30,7 @@ func _physics_process(delta: float) -> void:
 	if ship.is_dead: return
 	
 	age += delta
-	if age > 15.0:
+	if age > FUEL_LIFETIME:
 		# Run out of fuel, self-destruct or go inert
 		print("[Missile] Out of fuel looking for target")
 		ship.hulk()
@@ -26,7 +40,7 @@ func _physics_process(delta: float) -> void:
 	var current_target_valid = false
 	if target_id != "" and ship.active_contacts.has(target_id):
 		var contact = ship.active_contacts[target_id]
-		if contact.get("pos_timer", 0.0) <= 5.0:
+		if contact.get("pos_timer", 0.0) <= LOCK_LOSS_STALENESS:
 			current_target_valid = true
 			
 	if not current_target_valid:
@@ -43,7 +57,7 @@ func _physics_process(delta: float) -> void:
 			var classification = contact.get("classification", "")
 			if classification != "UNIDENTIFIED VESSEL" and classification != "INCOMING ORDNANCE":
 				continue
-			if contact.get("pos_timer", 0.0) > 1.0:
+			if contact.get("pos_timer", 0.0) > ACQUISITION_FRESHNESS:
 				continue # Need a fresh contact to acquire lock
 				
 			var dist_to = ship.position.distance_to(contact["pos"])
@@ -76,26 +90,26 @@ func _physics_process(delta: float) -> void:
 		time_to_impact = rel_pos.length() / max(1.0, ship.linear_velocity.length())
 		
 	# Cap the lead time so the missile doesn't aim too far ahead and cross the target's path
-	time_to_impact = min(time_to_impact, 0.7)
+	time_to_impact = min(time_to_impact, LEAD_TIME_CAP)
 		
 	var intercept_pos = target_pos + (target_vel * time_to_impact)
 	
 	var desired_vel = (intercept_pos - ship.position).normalized() * ship.max_speed
 	var vel_error = desired_vel - ship.linear_velocity
 	var desired_heading = ship.rotation
-	if vel_error.length() > 10.0:
+	if vel_error.length() > VELOCITY_STEER_THRESHOLD:
 		desired_heading = vel_error.angle()
 	else:
 		desired_heading = (intercept_pos - ship.position).angle()
 	
 	# Clamp heading to keep target within seeker cone
 	var angle_to_target = rel_pos.angle()
-	var seeker_half_arc = PI / 3.0
+	var seeker_half_arc = SEEKER_FALLBACK_HALF_ARC
 	for s in ship.get_components_by_type("sensors"):
 		if s["id"] == "seeker":
 			seeker_half_arc = s["arc_width"] / 2.0
 			break
-	var max_lead = max(0.1, seeker_half_arc - deg_to_rad(10.0))
+	var max_lead = max(0.1, seeker_half_arc - deg_to_rad(SEEKER_EDGE_MARGIN))
 	var lead_angle_diff = wrapf(desired_heading - angle_to_target, -PI, PI)
 	lead_angle_diff = clampf(lead_angle_diff, -max_lead, max_lead)
 	desired_heading = angle_to_target + lead_angle_diff
@@ -104,7 +118,7 @@ func _physics_process(delta: float) -> void:
 	ship.apply_control_input(1.0, 0.0, desired_heading, 1, 0)
 	
 	# Warhead detonate logic
-	if rel_pos.length() < 100.0:
+	if rel_pos.length() < PROXIMITY_FUSE_RANGE:
 		detonate()
 
 func detonate() -> void:
@@ -128,7 +142,7 @@ func detonate() -> void:
 		if result and result.collider.has_method("take_damage") and result.collider != ship:
 			var hit_dir = (result.collider.position - ship.position).normalized()
 			# Missiles are laser-heads, so they deal laser damage (which applies extreme heat)
-			result.collider.take_damage(250.0, result.position, hit_dir, "laser")
+			result.collider.take_damage(WARHEAD_DAMAGE, result.position, hit_dir, "laser")
 			
 	# Destroy missile
 	ship.hulk()

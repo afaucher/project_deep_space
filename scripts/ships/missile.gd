@@ -1,6 +1,9 @@
 extends "res://scripts/ships/ship.gd"
 class_name Missile
 
+const MISSILE_COLLISION_RADIUS := 2.0 # tiny body, much smaller than Ship.SHIP_COLLISION_RADIUS
+const MISSILE_ANGULAR_DAMP := 5.0     # ships free-spin (0.0 damp); missiles need rotation to settle so the seeker can track
+
 func _init() -> void:
 	# Clean up inherited ship collision shapes
 	for child in get_children():
@@ -39,7 +42,7 @@ func _ready() -> void:
 	# Add custom collision shape for the tiny body
 	var collision = CollisionShape2D.new()
 	var shape = CircleShape2D.new()
-	shape.radius = 2.0
+	shape.radius = MISSILE_COLLISION_RADIUS
 	collision.shape = shape
 	add_child(collision)
 
@@ -55,7 +58,7 @@ func _ready() -> void:
 	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
 	linear_damp = 0.0
 	angular_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
-	angular_damp = 5.0
+	angular_damp = MISSILE_ANGULAR_DAMP
 	gravity_scale = 0.0
 
 func setup(p_owner_id: int, p_pos: Vector2, p_vel: Vector2, initial_heading: float) -> void:

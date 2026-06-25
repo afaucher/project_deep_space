@@ -36,6 +36,65 @@ const ENGINE_OSC_GAIN := 1.0        # crest height relative to power_rating at 1
 const REACTOR_WHITEOUT_MULTIPLIER := 5.0 # crest height relative to power_rating
 const REACTOR_WHITEOUT_DURATION := 1.5   # seconds to decay to zero
 
+# Flight-control feel constants (_physics_process). Smooth mode (steering_mode
+# == 0) deliberately cuts rotational authority harder than linear throttle --
+# it's meant to feel like a cruise/precision mode, not just "everything at
+# half power" -- so torque and max-omega get their own, smaller ratios rather
+# than reusing the throttle one.
+const VELOCITY_CONTROL_GAIN := 2.0    # P-gain: required_accel = v_error * this
+const SMOOTH_MODE_THRUST_RATIO := 0.5 # Smooth-mode throttle cap vs Combat's full +/-1.0
+const SMOOTH_MODE_TORQUE_RATIO := 0.2 # Smooth-mode torque cap vs Combat's full ship_max_torque
+const SMOOTH_MODE_OMEGA_RATIO := 0.25 # Smooth-mode max-omega cap vs Combat's full max_omega
+const ROTATION_TRACKING_GAIN := 10.0  # required_alpha = omega_error * this -- how aggressively torque tracks the time-optimal turn curve
+
+# Heat-budget constants (_physics_process). max_heat/heat_dissipation_rate
+# below are per-ship-class vars (Missile overrides both -- see missile.gd),
+# but the formulas that feed them are shared across every ship and live here.
+const REACTOR_HEAT_COEFFICIENT := 2.0 # reactor_heat = this * reactor power slider (0-1)
+const OVERHEAT_DAMAGE_RATE := 10.0    # HP/sec drained from reactors while current_heat is pegged at max_heat
+const PASSIVE_COMPONENT_HEAT := 0.1   # flat heat leak per powered, alive, non-hull component
+const PASSIVE_COMPONENT_EM := 0.5     # flat EM leak per powered, alive, non-hull component
+const REACTOR_HEAT_FLOOR := 10.0      # a reactor's own resting heat even with no load
+const SENSOR_HEAT_FLOOR := 5.0        # an active sensor's own resting heat even with no load
+
+# classify_contact() thresholds. cross-section splits "small" (ordnance-sized)
+# from "large" (vessel-sized) contacts; vessels get a higher heat bar than
+# ordnance because a cold-running missile/torpedo should still read as a
+# threat at a lower heat signature than a cold-running ship would need to.
+const ORDNANCE_CS_THRESHOLD := 10.0    # cross_section below this reads as ordnance, not a vessel
+const ACTIVE_EM_THRESHOLD := 5.0       # em_noise above this means "powered and active" for any object class
+const ORDNANCE_HEAT_THRESHOLD := 5.0   # heat above this flags a small (ordnance-sized) contact as active
+const VESSEL_HEAT_THRESHOLD := 10.0    # heat above this flags a large (vessel-sized) contact as active
+const ASTEROID_DENSITY_THRESHOLD := 250.0 # denser than this (and big enough) reads as rock, not dead metal
+const ASTEROID_CS_THRESHOLD := 50.0    # minimum size to be called an asteroid rather than wreckage debris
+const UNKNOWN_DENSITY_DEFAULT := 500.0 # density assumed when a signature omits the field entirely
+
+# Sensor fusion / contact tracking (_physics_process contact decay + correlate-tracks).
+const CONTACT_TIMEOUT := 20.0          # seconds with no fresh detection before a tracked contact is dropped
+const CONTACT_CORRELATION_RANGE := 2000.0 # max distance (no instance_id match) to fuse a new blip into an existing contact instead of starting a new one
+const CONTACT_RESOLUTION_STALE_TIME := 0.3 # seconds since the last position update before a coarser-resolution bin is allowed to override position anyway
+const CONTACT_FUSION_SMOOTHING := 0.8  # lerp weight toward each new reading -- shared by pos/vel/cross_section/heat/em_noise so none of them drift out of sync with the others
+const PASSIVE_EM_NOISE_FLOOR := 15.0   # received EM (after range/direction falloff) below this is undetectable by passive sensors
+const EM_FALLOFF_REFERENCE_DISTANCE := 10000.0 # distance at which received EM starts dropping below the broadcast value
+const SENSOR_VELOCITY_NOISE := 0.05    # +/- fractional magnitude and +/- radian jitter applied to a sensor's reported target velocity
+
+# take_damage() raymarch / damage-soak constants.
+const DAMAGE_RAYMARCH_STEP := 2.0      # px per step along the hit ray when distributing damage across internal components
+const MIN_EFFECTIVE_DENSITY := 0.05    # floor so a destroyed (0-health) component still has some soak, not an instant pass-through
+const DAMAGE_ABSORPTION_PER_DENSITY := 50.0 # dmg_absorbed per step = effective_density * DAMAGE_RAYMARCH_STEP * this
+const LASER_HEAT_MODIFIER := 0.5       # fraction of absorbed laser damage converted to component heat
+const KINETIC_HEAT_MODIFIER := 0.05    # fraction of absorbed non-laser damage converted to component heat -- lasers run 10x hotter per point of damage
+
+const SHIP_COLLISION_RADIUS := 50.0    # physical hit/collision circle radius -- separate from the cross_section sensor stat
+
+# Point-defense engagement range. Currently a flat number rather than derived
+# from the PD laser component's own authored `range` (4000.0) -- TODO:
+# revisit as part of a future point-defense rework so this can't silently
+# drift out of sync with the weapon data it's supposed to represent.
+const PD_RANGE := 3500.0
+
+const RCS_SFX_TORQUE_THRESHOLD := 100.0 # torque above this plays the RCS thruster sound cue
+
 var owner_id: int = -1
 
 func _init() -> void:
@@ -122,7 +181,14 @@ var ship_components: Array = [
 		"weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 500.0, "heading": PI / 2.0, "arc_width": PI / 2.0}
 ]
 
-var current_heat: float = 10.0
+# Per-ship-class heat budget (overridden by Missile -- see missile.gd). These
+# are vars, not consts, specifically so each ship class can have its own
+# thermal envelope; the Frigate baseline values below were picked so a
+# fully-loaded reactor (REACTOR_HEAT_COEFFICIENT * 1.0 power) plus full-burn
+# engines roughly fills max_heat over several seconds of sustained combat,
+# not so fast overheat punishes a single alpha strike, not so slow it's never
+# a real constraint.
+var current_heat: float = 10.0 # ambient starting heat, same order as REACTOR_HEAT_FLOOR
 var max_heat: float = 200.0
 var heat_dissipation_rate = 10.0
 var current_heat_gen: float = 0.0
@@ -151,27 +217,27 @@ static func classify_contact(signature: Dictionary, observer_iff_tags: Array) ->
 	var cs = signature.get("cross_section", 0.0)
 	var heat = signature.get("heat", 0.0)
 	var em = signature.get("em_noise", 0.0)
-	var density = signature.get("density", 500.0)
-	
+	var density = signature.get("density", UNKNOWN_DENSITY_DEFAULT)
+
 	# 1. Size check (Ordnance)
-	if cs < 10.0 and (em > 5.0 or heat > 5.0):
+	if cs < ORDNANCE_CS_THRESHOLD and (em > ACTIVE_EM_THRESHOLD or heat > ORDNANCE_HEAT_THRESHOLD):
 		if is_friendly:
 			return "FRIENDLY ORDNANCE"
 		else:
 			return "INCOMING ORDNANCE"
-			
+
 	# 2. Emission check (Vessels)
-	if cs >= 10.0 and (em > 5.0 or heat > 10.0):
+	if cs >= ORDNANCE_CS_THRESHOLD and (em > ACTIVE_EM_THRESHOLD or heat > VESSEL_HEAT_THRESHOLD):
 		if is_friendly:
 			return "FRIENDLY VESSEL"
 		else:
 			return "UNIDENTIFIED VESSEL"
-			
+
 	# 3. Density check (Dead objects / Cold ships)
-	if em <= 5.0 and heat <= 10.0:
-		if density > 250.0 and cs > 50.0:
+	if em <= ACTIVE_EM_THRESHOLD and heat <= VESSEL_HEAT_THRESHOLD:
+		if density > ASTEROID_DENSITY_THRESHOLD and cs > ASTEROID_CS_THRESHOLD:
 			return "ASTEROID"
-		elif density <= 250.0:
+		elif density <= ASTEROID_DENSITY_THRESHOLD:
 			return "WRECKAGE"
 			
 	return "UNKNOWN ANOMALY"
@@ -414,7 +480,7 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 		var local_dir = global_dir.rotated(-rotation)
 		
 		var remaining_damage = amount
-		var step_size = 2.0
+		var step_size = DAMAGE_RAYMARCH_STEP
 		
 		if _cached_max_steps == 0:
 			var max_dist = 200.0
@@ -480,14 +546,14 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 					
 					# Ablation: Effective density drops as component loses health
 					var health_ratio = max(0.0, comp["health"] / comp.get("max_health", 1000.0))
-					var effective_density = max(0.05, comp["density"] * health_ratio)
-					
-					var dmg_absorbed = min(remaining_damage, effective_density * step_size * 50.0)
+					var effective_density = max(MIN_EFFECTIVE_DENSITY, comp["density"] * health_ratio)
+
+					var dmg_absorbed = min(remaining_damage, effective_density * step_size * DAMAGE_ABSORPTION_PER_DENSITY)
 					if dmg_absorbed > 0:
 						comp["health"] -= dmg_absorbed
-						
+
 						# Laser hits add significantly more heat to the component
-						var heat_modifier = 0.5 if damage_type == "laser" else 0.05
+						var heat_modifier = LASER_HEAT_MODIFIER if damage_type == "laser" else KINETIC_HEAT_MODIFIER
 						var heat_generated = dmg_absorbed * heat_modifier
 						
 						# Burst lives in its own field and decays over time (see
@@ -565,7 +631,7 @@ func _ready() -> void:
 	# Add collision shape so raycasts can hit the ship
 	var collision = CollisionShape2D.new()
 	var shape = CircleShape2D.new()
-	shape.radius = 50.0
+	shape.radius = SHIP_COLLISION_RADIUS
 	collision.shape = shape
 	add_child(collision)
 	
@@ -667,7 +733,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		# Velocity Control (PID/Bang-Bang)
 		var v_error = target_velocity - current_forward_speed
-		var required_accel = v_error * 2.0 # P gain
+		var required_accel = v_error * VELOCITY_CONTROL_GAIN
 		var required_force = required_accel * mass
 		if active_max_thrust > 0.0:
 			actual_throttle = required_force / active_max_thrust
@@ -676,7 +742,7 @@ func _physics_process(delta: float) -> void:
 		
 	# Apply limits based on steering mode
 	if steering_mode == 0:
-		actual_throttle = clampf(actual_throttle, -0.5, 0.5)
+		actual_throttle = clampf(actual_throttle, -SMOOTH_MODE_THRUST_RATIO, SMOOTH_MODE_THRUST_RATIO)
 	else:
 		actual_throttle = clampf(actual_throttle, -1.0, 1.0)
 	
@@ -707,8 +773,8 @@ func _physics_process(delta: float) -> void:
 	var torque = 0.0
 	var active_max_torque = 0.0
 	if ship_max_torque > 0.0 and engine_power_slider > 0.0:
-		active_max_torque = (ship_max_torque if steering_mode == 1 else ship_max_torque * 0.2) * engine_power_slider
-		var active_max_omega = (max_omega if steering_mode == 1 else max_omega * 0.25) * get_power_ratio("engines") * engine_power_slider
+		active_max_torque = (ship_max_torque if steering_mode == 1 else ship_max_torque * SMOOTH_MODE_TORQUE_RATIO) * engine_power_slider
+		var active_max_omega = (max_omega if steering_mode == 1 else max_omega * SMOOTH_MODE_OMEGA_RATIO) * get_power_ratio("engines") * engine_power_slider
 		
 		var alpha_max = active_max_torque / inertia
 		
@@ -716,14 +782,14 @@ func _physics_process(delta: float) -> void:
 		target_omega = clampf(target_omega, -active_max_omega, active_max_omega)
 		
 		var omega_error = target_omega - angular_velocity
-		var required_alpha = omega_error * 10.0 # Tuning factor for how aggressively to track the curve
+		var required_alpha = omega_error * ROTATION_TRACKING_GAIN
 		
 		torque = required_alpha * inertia
 		torque = clampf(torque, -active_max_torque, active_max_torque)
 		
 		apply_torque(torque)
 	
-	if abs(torque) > 100.0:
+	if abs(torque) > RCS_SFX_TORQUE_THRESHOLD:
 		if is_my_ship and not sfx_rcs.playing:
 			sfx_rcs.play()
 	else:
@@ -746,7 +812,7 @@ func _physics_process(delta: float) -> void:
 		if c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2:
 			c["pos"] += c["vel"] * delta
 			
-		if c["last_seen_timer"] > 20.0:
+		if c["last_seen_timer"] > CONTACT_TIMEOUT:
 			to_remove.append(c_id)
 	for c_id in to_remove:
 		active_contacts.erase(c_id)
@@ -756,7 +822,7 @@ func _physics_process(delta: float) -> void:
 	# --- Heat & Engineering Logic ---
 	if is_multiplayer_authority():
 		var heat_gen = 0.0
-		var reactor_heat = 2.0 * subsystems["reactor"]["power"]
+		var reactor_heat = REACTOR_HEAT_COEFFICIENT * subsystems["reactor"]["power"]
 		var ship_reactor_rating = get_total_power_rating("reactor")
 		var ship_max_thrust = get_ship_max_thrust()
 
@@ -772,8 +838,8 @@ func _physics_process(delta: float) -> void:
 		var passive_em = 0.0
 		for comp in ship_components:
 			if comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull":
-				passive_heat += 0.1
-				passive_em += 0.5
+				passive_heat += PASSIVE_COMPONENT_HEAT
+				passive_em += PASSIVE_COMPONENT_EM
 
 		heat_gen = total_reactor_heat + total_engine_heat + passive_heat
 		current_heat_gen = heat_gen
@@ -786,7 +852,7 @@ func _physics_process(delta: float) -> void:
 		if current_heat >= max_heat:
 			for c in ship_components:
 				if c["type"] == "reactor":
-					c["health"] -= 10.0 * delta
+					c["health"] -= OVERHEAT_DAMAGE_RATE * delta
 
 		# Update Component EM & Heat
 		var base_em = get_total_power_rating("reactor") * subsystems["reactor"]["power"]
@@ -799,18 +865,18 @@ func _physics_process(delta: float) -> void:
 					sensor_em += s.get("base_em_emission", 0.0) * sensor_power_ratio
 		
 		for comp in ship_components:
-			var b_heat = 0.1 if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
-			var b_em = 0.5 if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
-			
+			var b_heat = PASSIVE_COMPONENT_HEAT if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
+			var b_em = PASSIVE_COMPONENT_EM if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
+
 			if comp["type"] == "reactor":
-				comp["heat"] = 10.0 + _reactor_heat_contribution(comp, reactor_heat, ship_reactor_rating) + _decay_damage_heat(comp, delta)
+				comp["heat"] = REACTOR_HEAT_FLOOR + _reactor_heat_contribution(comp, reactor_heat, ship_reactor_rating) + _decay_damage_heat(comp, delta)
 				comp["em_emission"] = comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"]) + _update_reactor_whiteout(comp, delta)
 			elif comp["type"] == "engines":
 				comp["heat"] = b_heat + _engine_heat_contribution(comp, actual_throttle, torque, active_max_torque, ship_max_thrust) + _decay_damage_heat(comp, delta)
 				var engine_health_ratio = get_component_health_ratio(comp["id"])
 				comp["em_emission"] = b_em + abs(actual_throttle) * comp.get("power_rating", 0.0) * engine_health_ratio + _engine_damage_oscillation(comp, engine_health_ratio, delta)
 			elif comp["type"] == "sensors":
-				comp["heat"] = b_heat + 5.0 + _decay_damage_heat(comp, delta)
+				comp["heat"] = b_heat + SENSOR_HEAT_FLOOR + _decay_damage_heat(comp, delta)
 				comp["em_emission"] = b_em + comp.get("base_em_emission", 0.0) * sensor_power_ratio
 			elif comp["type"] == "weapons":
 				comp["heat"] = b_heat + _decay_damage_heat(comp, delta)
@@ -867,7 +933,7 @@ func _physics_process(delta: float) -> void:
 			if active_contacts.has(new_id):
 				closest_contact_id = new_id
 		else:
-			var closest_dist = 2000.0 # 2km correlation threshold
+			var closest_dist = CONTACT_CORRELATION_RANGE
 			for c_id in active_contacts:
 				var c = active_contacts[c_id]
 				var dist = c["pos"].distance_to(bin_pos)
@@ -881,15 +947,15 @@ func _physics_process(delta: float) -> void:
 			var current_res = c.get("resolution", TAU)
 			var time_since_pos = c.get("pos_timer", 0.0)
 			
-			if bin_angle <= current_res or time_since_pos > 0.3:
-				c["pos"] = c["pos"].lerp(bin_pos, 0.8)
-				c["vel"] = c["vel"].lerp(bin.get("vel", Vector2.ZERO), 0.8)
+			if bin_angle <= current_res or time_since_pos > CONTACT_RESOLUTION_STALE_TIME:
+				c["pos"] = c["pos"].lerp(bin_pos, CONTACT_FUSION_SMOOTHING)
+				c["vel"] = c["vel"].lerp(bin.get("vel", Vector2.ZERO), CONTACT_FUSION_SMOOTHING)
 				c["resolution"] = bin_angle
 				c["pos_timer"] = 0.0
-				
-				if bin.has("cross_section"): c["signature"]["cross_section"] = lerp(c["signature"].get("cross_section", 0.0), bin.get("cross_section", 0.0), 0.8)
-				if bin.has("heat"): c["signature"]["heat"] = lerp(c["signature"].get("heat", 0.0), bin.get("heat", 0.0), 0.8)
-				if bin.has("em_noise"): c["signature"]["em_noise"] = lerp(c["signature"].get("em_noise", 0.0), bin.get("em_noise", 0.0), 0.8)
+
+				if bin.has("cross_section"): c["signature"]["cross_section"] = lerp(c["signature"].get("cross_section", 0.0), bin.get("cross_section", 0.0), CONTACT_FUSION_SMOOTHING)
+				if bin.has("heat"): c["signature"]["heat"] = lerp(c["signature"].get("heat", 0.0), bin.get("heat", 0.0), CONTACT_FUSION_SMOOTHING)
+				if bin.has("em_noise"): c["signature"]["em_noise"] = lerp(c["signature"].get("em_noise", 0.0), bin.get("em_noise", 0.0), CONTACT_FUSION_SMOOTHING)
 				if bin.has("owner_id"): c["signature"]["owner_id"] = bin["owner_id"]
 				if bin.has("iff_tags"): c["signature"]["iff_tags"] = bin["iff_tags"]
 				if bin.has("instance_id"): c["instance_id"] = bin["instance_id"]
@@ -924,15 +990,6 @@ func _physics_process(delta: float) -> void:
 				"classification": classification
 			}
 			
-	for c_id in active_contacts.keys():
-		var c = active_contacts[c_id]
-		c["last_seen_timer"] = c.get("last_seen_timer", 0.0) + delta
-		c["pos_timer"] = c.get("pos_timer", 0.0) + delta
-		
-		# Drop old contacts
-		if c["last_seen_timer"] > 10.0:
-			active_contacts.erase(c_id)
-				
 	# Datalink Relay (Temporarily Disabled as requested)
 	#for s in get_tree().get_nodes_in_group("ships"):
 	#	if s == self or s.is_dead or s.owner_id != owner_id or not s.is_relay: continue
@@ -1003,8 +1060,8 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 				var angle_from_target = (origin - collider.position).angle()
 				var em_power = _total_received_em(sig, angle_from_target)
 
-				var received_em = em_power * (10000.0 / max(10000.0, dist))
-				if received_em < 15.0:
+				var received_em = em_power * (EM_FALLOFF_REFERENCE_DISTANCE / max(EM_FALLOFF_REFERENCE_DISTANCE, dist))
+				if received_em < PASSIVE_EM_NOISE_FLOOR:
 					continue # Passive EM only detects targets above noise floor (after falloff)
 
 				# Report what was actually received (direction + distance
@@ -1102,8 +1159,8 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 		merged["pos"] = origin + Vector2(weighted_dist, 0).rotated(bin_center_angle)
 		
 		# Cheat velocity with noise
-		var noisy_vel = weighted_vel * (1.0 + randf_range(-0.05, 0.05))
-		noisy_vel = noisy_vel.rotated(randf_range(-0.05, 0.05))
+		var noisy_vel = weighted_vel * (1.0 + randf_range(-SENSOR_VELOCITY_NOISE, SENSOR_VELOCITY_NOISE))
+		noisy_vel = noisy_vel.rotated(randf_range(-SENSOR_VELOCITY_NOISE, SENSOR_VELOCITY_NOISE))
 		merged["vel"] = noisy_vel
 		
 		merged["bin_idx"] = bin_idx
@@ -1166,7 +1223,7 @@ func _process_point_defense() -> void:
 	if ready_lasers.is_empty():
 		return
 
-	var pd_range = 3500.0
+	var pd_range = PD_RANGE
 	var behavior = WeaponBehaviorRegistry.get_behavior("laser")
 
 	for c_id in active_contacts:

@@ -9,6 +9,12 @@ const EM_PULSE_DECAY := 25.0 # per second
 # than a second parallel decay system.
 const FIRE_HEAT_SPIKE := 15.0
 
+# Matches Ship.SHIP_COLLISION_RADIUS deliberately, not coincidentally: the
+# query just needs to be at least as big as the target's own collision
+# circle to register a hit despite the position being a slightly-stale
+# tracked contact, not a separate aim-leniency balance lever.
+const HIT_QUERY_RADIUS := Ship.SHIP_COLLISION_RADIUS
+
 func can_fire(ship: Ship, comp: Dictionary, target_contact_id: String) -> bool:
 	if not super.can_fire(ship, comp, target_contact_id):
 		return false
@@ -34,7 +40,7 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 	var space_state = ship.get_world_2d().direct_space_state
 	var query = PhysicsShapeQueryParameters2D.new()
 	var shape = CircleShape2D.new()
-	shape.radius = 50.0
+	shape.radius = HIT_QUERY_RADIUS
 	query.shape = shape
 	query.transform = Transform2D(0, real_target_pos)
 
