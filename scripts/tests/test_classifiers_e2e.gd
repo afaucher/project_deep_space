@@ -6,8 +6,12 @@ const Missile = preload("res://scripts/ships/missile.gd")
 
 var main_node: Node = null
 var observer: Ship = null
+var enemy: Ship = null
 var time_elapsed: float = 0.0
 var test_phase: int = 0
+var phase_start_time: float = 0.0
+var heat_before_hit: float = 0.0
+var heat_after_hit: float = 0.0
 
 var expected_contacts = {
 	"FRIENDLY VESSEL": false,
@@ -39,7 +43,7 @@ func setup(main) -> void:
 	main_node.add_child(friendly)
 	
 	# 3. Enemy Vessel
-	var enemy = Ship.new()
+	enemy = Ship.new()
 	enemy.name = "EnemyShip"
 	enemy.owner_id = 2
 	enemy.iff_tags = ["TEAM_B"]
@@ -81,9 +85,8 @@ func _physics_process(delta: float) -> void:
 	if test_phase == 0:
 		# Wait 2 seconds for sensors to sweep and classify everything
 		if time_elapsed > 2.0:
-			test_phase = 1
 			print("Checking observer's active contacts...")
-			
+
 			for c_id in observer.active_contacts:
 				var c = observer.active_contacts[c_id]
 				var sig = c.get("signature", {})
@@ -91,17 +94,52 @@ func _physics_process(delta: float) -> void:
 				print("Found contact: ", c_id, " classified as: ", c_class, " (Pos: ", c.get("pos"), " CS: ", sig.get("cross_section"), " Heat: ", sig.get("heat"), " EM: ", sig.get("em_noise"), " Owner: ", sig.get("owner_id"), " Density: ", sig.get("density"), ")")
 				if expected_contacts.has(c_class):
 					expected_contacts[c_class] = true
-					
+
 			var all_found = true
 			var missing = []
 			for k in expected_contacts:
 				if not expected_contacts[k]:
 					all_found = false
 					missing.append(k)
-					
-			if all_found:
-				print("[TEST PASSED] test_classifiers_e2e. All expected classifications found in simulation.")
-				get_tree().quit(0)
-			else:
+
+			if not all_found:
 				printerr("[TEST FAILED] Missing expected classifications: ", missing)
 				get_tree().quit(1)
+				return
+
+			print("Classifications OK. Firing a laser hit at the enemy ship...")
+			# heat is the ship-wide value get_signature() exposes externally as
+			# "heat" -- the same value that feeds the sensed contact signature
+			# and the targeting computer's history graph. A hit should spike it
+			# immediately, then ordinary dissipation should bring it back down
+			# over the next few seconds, matching M4's "visible, time-extended
+			# signal change" bar without depending on sensor-fusion lag/timing.
+			heat_before_hit = enemy.current_heat
+			# Same known-good hit coordinates test_component_states.gd uses --
+			# (-32, 0) relative to the ship lands inside engine_main's rect
+			# (Rect2(-35,-10,5,20)), guaranteeing a non-zero damage_heat burst.
+			enemy.take_damage(50.0, enemy.position + Vector2(-32, 0), Vector2(1, 0), "laser")
+			heat_after_hit = enemy.current_heat
+
+			if heat_after_hit <= heat_before_hit:
+				printerr("[TEST FAILED] Hit didn't raise the enemy's heat signature. before=", heat_before_hit, " after=", heat_after_hit)
+				get_tree().quit(1)
+				return
+
+			test_phase = 1
+			phase_start_time = time_elapsed
+		return
+
+	if test_phase == 1:
+		# Give dissipation (heat_dissipation_rate, gated by reactor power
+		# ratio) several seconds to work the burst back down.
+		if time_elapsed - phase_start_time > 5.0:
+			var heat_after_decay = enemy.current_heat
+			print("Heat before hit: ", heat_before_hit, " after hit: ", heat_after_hit, " after decay: ", heat_after_decay)
+			if heat_after_decay < heat_after_hit:
+				print("[TEST PASSED] test_classifiers_e2e. Weapon hit produced a visible, time-extended heat signature change.")
+				get_tree().quit(0)
+			else:
+				printerr("[TEST FAILED] Heat signature did not decay after the hit. after_hit=", heat_after_hit, " after_decay=", heat_after_decay)
+				get_tree().quit(1)
+		return
