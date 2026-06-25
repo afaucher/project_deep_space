@@ -73,7 +73,7 @@ func _register_tests() -> void:
 		"check": func():
 			var fwd_sensor_hp = 50.0
 			for c in ship.ship_components:
-				if c["id"] == "hp_sensor_fwd":
+				if c["id"] == "dir_high_res":
 					fwd_sensor_hp = c["health"]
 					break
 			return _assert(fwd_sensor_hp < 50.0, "Forward sensor should take damage when hit from front. HP=" + str(fwd_sensor_hp))

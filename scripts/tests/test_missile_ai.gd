@@ -71,7 +71,7 @@ func _start_scenario(idx: int) -> void:
 	e_ship.iff_tags = ["TEAM_B"]
 	e_ship.position = sc["target_pos"]
 	e_ship.linear_velocity = sc["target_vel"]
-	e_ship.weapons.clear()
+	e_ship.ship_components = e_ship.ship_components.filter(func(c): return c["type"] != "weapons")
 	main_scene.add_child(e_ship)
 	
 	# Add Friendly Missile

@@ -11,36 +11,20 @@ func _init() -> void:
 	cross_section = 2.0
 	reactor_power_rating = 10.0 # Small battery reactor for active seeker
 	engine_power_rating = 10.0 # Small thruster EM signature
-	weapons = {}
-	
+
 	max_thrust = 10000.0 # Very fast
 	max_torque = 2500.0 # Prevent overcorrection/spinning
 	max_omega = 10.0 # High turn rate for missiles
 	max_speed = 3000.0
-	
+
 	ship_components = [
-		{"id": "sensor_nose", "type": "sensors", "rect": Rect2(5, -2, 5, 4), "health": 10.0, "max_health": 10.0, "density": 0.2, "heat": 0.0, "em_emission": 0.0},
+		{"id": "seeker", "type": "sensors", "rect": Rect2(5, -2, 5, 4), "health": 10.0, "max_health": 10.0, "density": 0.2,
+			"heat": 0.0, "base_em_emission": 10.0, "em_emission": 10.0,
+			"sensor_type": "active", "active": true, "heading": 0.0, "arc_width": PI / 1.5, # 120 degree forward cone
+			"range": 30000.0, "resolution": 5.0, "timer": 0.0, "refresh_interval": 0.1, "num_bins": 60},
 		{"id": "warhead", "type": "hull", "rect": Rect2(-2, -3, 7, 6), "health": 20.0, "max_health": 20.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0},
 		{"id": "hull_body", "type": "hull", "rect": Rect2(-10, -3, 8, 6), "health": 30.0, "max_health": 30.0, "density": 0.5, "heat": 0.0, "em_emission": 0.0},
 		{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -4, 5, 8), "health": 20.0, "max_health": 20.0, "density": 0.8, "heat": 0.0, "em_emission": 0.0}
-	]
-	
-	sensor_hardware = [
-		{
-			"id": "seeker",
-			"type": "active",
-			"parent": "sensor_nose",
-			"heading": 0.0,
-			"arc_width": PI / 1.5, # 120 degree forward cone
-			"range": 30000.0,
-			"resolution": 5.0,
-			"health": 10.0,
-			"active": true,
-			"em_emission": 10.0,
-			"timer": 0.0,
-			"refresh_interval": 0.1,
-			"num_bins": 60
-		}
 	]
 
 func _ready() -> void:

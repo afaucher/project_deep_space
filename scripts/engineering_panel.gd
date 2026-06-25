@@ -54,7 +54,7 @@ class EMPolarChart extends Control:
 			var local_r = base_radius * rear_bias
 			
 			for s in sensor_config:
-				if s.get("type", "") == "active" and s.get("active", true):
+				if s.get("sensor_type", "") == "active" and s.get("active", true):
 					var s_arc = s.get("arc_width", TAU)
 					var s_heading = s.get("heading", 0.0)
 					if is_ship_oriented:
@@ -310,7 +310,7 @@ func update_data(state: Dictionary) -> void:
 		
 		var peak_em = em_sig
 		for s in em_chart.sensor_config:
-			if s.get("type", "") == "active" and s.get("active", true):
+			if s.get("sensor_type", "") == "active" and s.get("active", true):
 				if s.get("id") == "dir_high_res":
 					peak_em += 40.0
 					

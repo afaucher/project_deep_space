@@ -43,7 +43,8 @@ func _physics_process(delta: float) -> void:
 	# Point sensor at target
 	ship.set_sensor_target(target_id)
 	
-	var has_ammo = ship.weapons.has("hp_fwd_missile") and ship.weapons["hp_fwd_missile"]["ammo"] > 0
+	var fwd_missile = ship.get_component("hp_fwd_missile")
+	var has_ammo = not fwd_missile.is_empty() and fwd_missile["ammo"] > 0
 	
 	if not has_ammo:
 		# Evasive maneuvers

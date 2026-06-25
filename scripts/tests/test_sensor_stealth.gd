@@ -51,9 +51,9 @@ func _reset_scene() -> void:
 	main_scene.add_child(asteroid)
 	
 	# Ensure active sensors are scanning and timers reset
-	for s in ship_a.sensor_hardware:
+	for s in ship_a.get_components_by_type("sensors"):
 		s["timer"] = 0.0 # Force immediate sweep
-		if s["type"] == "active":
+		if s["sensor_type"] == "active":
 			s["active"] = true
 			s["range"] = 15000.0 # Make sure they can see far enough
 
@@ -98,8 +98,8 @@ func _register_tests() -> void:
 		"name": "Passive EM Detection",
 		"setup": func():
 			_reset_scene()
-			for s in ship_a.sensor_hardware:
-				if s["type"] == "active":
+			for s in ship_a.get_components_by_type("sensors"):
+				if s["sensor_type"] == "active":
 					s["active"] = false
 			ship_b.subsystems["reactor"]["power"] = 4.0,
 		"check": func():

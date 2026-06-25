@@ -236,14 +236,13 @@ func _draw() -> void:
 	
 	# Draw weapon firing arcs
 	if show_weapon_arcs:
-		var weapons = current_state.get("weapons", {})
-		for w_id in weapons:
-			var w = weapons[w_id]
+		var weapons = current_state.get("weapons", []) # Array of ship_components weapon entries
+		for w in weapons:
 			if w.has("range") and w.has("arc_width") and w.has("heading"):
 				var r = w["range"]
 				var arc_w = w["arc_width"]
 				var w_heading = w["heading"]
-				var mount_pos = w.get("mount_pos", Vector2.ZERO)
+				var mount_pos = w.get("rect", Rect2()).position
 				var global_mount = pos + mount_pos.rotated(rot)
 				
 				var start_angle = rot + w_heading - arc_w / 2.0

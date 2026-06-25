@@ -91,7 +91,7 @@ func _physics_process(delta: float) -> void:
 	# Clamp heading to keep target within seeker cone
 	var angle_to_target = rel_pos.angle()
 	var seeker_half_arc = PI / 3.0
-	for s in ship.sensor_hardware:
+	for s in ship.get_components_by_type("sensors"):
 		if s["id"] == "seeker":
 			seeker_half_arc = s["arc_width"] / 2.0
 			break

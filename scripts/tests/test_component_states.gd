@@ -53,8 +53,8 @@ func _reset_ship() -> void:
 	ship.subsystems["weapons"]["power"] = 1.0
 	ship.subsystems["sensors"]["power"] = 1.0
 	ship.apply_control_input(0.0, 0.0, 0.0, 1, 0) # zero input, combat mode, direct throttle
-	for w in ship.weapons:
-		ship.weapons[w]["cooldown"] = 0.0
+	for w in ship.get_components_by_type("weapons"):
+		w["cooldown"] = 0.0
 
 func _assert(condition: bool, msg: String) -> bool:
 	if not condition:
@@ -164,12 +164,12 @@ func _build_tests() -> void:
 
 	# ===== SENSORS =====
 
-	# Sensor Fwd: Powered Off → no dir_high_res sweep results
+	# dir_high_res: Powered Off → no sweep results
 	tests.append({
-		"name": "hp_sensor_fwd: powered_off → no sweep",
+		"name": "dir_high_res: powered_off → no sweep",
 		"setup": func():
 			_reset_ship()
-			_set_component("hp_sensor_fwd", 50.0, false), # full health, OFF
+			_set_component("dir_high_res", 50.0, false), # full health, OFF
 		"check": func():
 			var sweeps = ship.active_sensor_sweeps.get("dir_high_res", [])
 			return _assert(sweeps.size() == 0,
@@ -177,12 +177,12 @@ func _build_tests() -> void:
 		"duration": 15
 	})
 
-	# Sensor Fwd: Destroyed → no dir_high_res sweep results
+	# dir_high_res: Destroyed → no sweep results
 	tests.append({
-		"name": "hp_sensor_fwd: destroyed → no sweep",
+		"name": "dir_high_res: destroyed → no sweep",
 		"setup": func():
 			_reset_ship()
-			_set_component("hp_sensor_fwd", 0.0, true), # destroyed, powered on
+			_set_component("dir_high_res", 0.0, true), # destroyed, powered on
 		"check": func():
 			var sweeps = ship.active_sensor_sweeps.get("dir_high_res", [])
 			return _assert(sweeps.size() == 0,
@@ -190,27 +190,27 @@ func _build_tests() -> void:
 		"duration": 15
 	})
 
-	# Sensor Omni: Powered Off → no omni sweep results
+	# omni_main: Powered Off → no sweep results
 	tests.append({
-		"name": "hp_sensor_omni: powered_off → no sweep",
+		"name": "omni_main: powered_off → no sweep",
 		"setup": func():
 			_reset_ship()
-			_set_component("hp_sensor_omni", 100.0, false),
+			_set_component("omni_main", 40.0, false),
 		"check": func():
-			var sweeps = ship.active_sensor_sweeps.get("omni", [])
+			var sweeps = ship.active_sensor_sweeps.get("omni_main", [])
 			return _assert(sweeps.size() == 0,
 				"Omni sensor should produce no sweeps when powered off. got=" + str(sweeps.size())),
 		"duration": 15
 	})
 
-	# Sensor Omni: Destroyed → no omni sweep results
+	# omni_main: Destroyed → no sweep results
 	tests.append({
-		"name": "hp_sensor_omni: destroyed → no sweep",
+		"name": "omni_main: destroyed → no sweep",
 		"setup": func():
 			_reset_ship()
-			_set_component("hp_sensor_omni", 0.0, true),
+			_set_component("omni_main", 0.0, true),
 		"check": func():
-			var sweeps = ship.active_sensor_sweeps.get("omni", [])
+			var sweeps = ship.active_sensor_sweeps.get("omni_main", [])
 			return _assert(sweeps.size() == 0,
 				"Omni sensor should produce no sweeps when destroyed. got=" + str(sweeps.size())),
 		"duration": 15
@@ -226,11 +226,11 @@ func _build_tests() -> void:
 			_set_component("hp_fwd_laser", 150.0, false) # full health, OFF
 			# Give it a fake contact to shoot at
 			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
-			var ammo_before = ship.weapons["hp_fwd_laser"]["ammo"]
+			var ammo_before = ship.get_component("hp_fwd_laser")["ammo"]
 			ship.set_meta("ammo_before", ammo_before)
 			ship.fire_weapon("hp_fwd_laser", Vector2(500, 0), "FAKE_TGT"),
 		"check": func():
-			var ammo_after = ship.weapons["hp_fwd_laser"]["ammo"]
+			var ammo_after = ship.get_component("hp_fwd_laser")["ammo"]
 			var ammo_before = ship.get_meta("ammo_before", 999)
 			return _assert(ammo_after == ammo_before,
 				"Weapon should not fire when powered off. ammo_before=" + str(ammo_before) + " ammo_after=" + str(ammo_after)),
@@ -244,11 +244,11 @@ func _build_tests() -> void:
 			_reset_ship()
 			_set_component("hp_fwd_laser", 0.0, true) # destroyed, powered on
 			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
-			var ammo_before = ship.weapons["hp_fwd_laser"]["ammo"]
+			var ammo_before = ship.get_component("hp_fwd_laser")["ammo"]
 			ship.set_meta("ammo_before", ammo_before)
 			ship.fire_weapon("hp_fwd_laser", Vector2(500, 0), "FAKE_TGT"),
 		"check": func():
-			var ammo_after = ship.weapons["hp_fwd_laser"]["ammo"]
+			var ammo_after = ship.get_component("hp_fwd_laser")["ammo"]
 			var ammo_before = ship.get_meta("ammo_before", 999)
 			return _assert(ammo_after == ammo_before,
 				"Weapon should not fire when destroyed. ammo_before=" + str(ammo_before) + " ammo_after=" + str(ammo_after)),

@@ -1,0 +1,118 @@
+# Design Ideas Implementation Plan
+
+Source docs: `design_ideas/ship_is_the_parts.md`, `responsive_heat_em.md`, `real-time-sensor-signal.md`, `point_defence.md`, `missile_tracking_tradeoffs.md`, `comms.md`.
+
+## Dependency graph
+
+```
+M1 Component Architecture (ship_is_the_parts)
+   |--> M2 Dynamic Heat/EM per component (responsive_heat_em)
+   |        |--> M4 Sensor history UI (real-time-sensor-signal)
+   |
+M3 PD Target Prioritization (point_defence)        [independent]
+M5 Missile Lost-Lock Behavior (missile_tracking_tradeoffs)  [independent, needs decision]
+   |
+   `--> M6 Multi-Ship Contact Fusion (comms)   [needs stable per-ship contact model;
+                                                 benefits from M4's signal model]
+```
+
+M3 and M5 have no upstream dependency and are the cheapest, highest-value items — do them first while M1 is designed.
+
+---
+
+## M1 — Component Architecture Refactor (`ship_is_the_parts.md`)
+**Why first:** every other milestone (per-component heat/EM, multi-ship sensor fusion) currently assumes ship-wide stats computed ad hoc in `ship.gd` (1200 lines, monolithic). Decoupling "ship" from "components" is the prerequisite for the rest making sense rather than being bolted on twice.
+
+**Scope:**
+1. Define a `Component` base resource/node with: physical extents + hardpoint, configuration (class/variant), runtime state (ammo, powered, health), and contribution functions (power, mass, heat, EM).
+2. Move ship-wide aggregates (power, mass, EM, heat) to be *summed from components* instead of hardcoded on `Ship`. Support redundancy (e.g. two reactors, one needed).
+3. Support one-to-many / many-to-one hardpoints by splitting the sensor dome into discrete sub-components (explicitly punted to "avoid for now" per the doc — keep it that way for this milestone).
+4. Apply the same model to `scripts/ships/missile.gd` so missiles are "small ships" with the same component contract, just smaller classes.
+5. Add a ship-design validator: each component class must meet baseline dimension/performance thresholds.
+
+**Touches:** `scripts/ships/ship.gd`, `scripts/ships/missile.gd`, `scripts/ships/buoy.gd`, `scripts/ships/frigate.gd`, `scripts/ships/sensor_drone.gd`, `scripts/engineering_panel.gd`.
+
+**Done when:** `test_component_states.gd` and `test_damage_propagation.gd` pass against the new model with no ship-wide special-casing of power/mass/heat/EM left in `ship.gd`.
+
+Detailed design, including the sensor-dome split decision and the weapon-side merge it generalizes to, is in [m1_component_architecture_design.md](m1_component_architecture_design.md). That doc also adds **M1c**: a stateless per-weapon-class `WeaponBehavior` registry, replacing the `if weapon_type == "laser": ... elif ...` dispatch in `fire_weapon`/`_process_point_defense`/the heat-EM loop. M1c should land before M2 — M2's event-driven heat/EM pulses are the same "lifecycle state in the component dict, decay logic in the behavior class" pattern, just for reactor/engine/hull instead of weapons.
+
+---
+
+## M2 — Dynamic Per-Component Heat/EM (`responsive_heat_em.md`)
+**Depends on:** M1 (needs per-component contribution hooks to attach event-driven spikes to), and ideally M1c (so reactor/engine/hull pulses use the same behavior-class pattern weapons will already have, instead of more inline `elif`s in `Ship`).
+
+**Scope:**
+1. Move heat/EM from "powered = fixed value" to dynamic, ~1Hz-refreshed signals per component.
+2. Event-driven spikes: firing a laser → EM pulse + waste heat; taking a hit → heat burst; damaged engine → EM spike; reactor destroyed → 1-2s EM "whiteout".
+3. Decide and implement heat model: per-component buildup, dissipation/bleed between adjacent components, and ship-wide heat cap vs. per-component cap (the open questions in the doc need an explicit answer before coding).
+
+**Touches:** `scripts/ships/ship.gd` (component update loop), `scripts/weapons_panel.gd`, `scripts/sensor_panel.gd` (EM summation already exists and is instantaneous — extend, don't replace).
+
+**Done when:** EM/heat values visibly change over time per the event triggers above, validated by extending `test_component_states.gd`.
+
+---
+
+## M3 — Point Defense Target Prioritization (`point_defence.md`)
+**No dependencies — do this anytime, including before M1.**
+
+**Scope:**
+1. Replace "fire every weapon at each target before moving to next" with sort-by `(times_fired_ascending, range_ascending)`.
+2. When selecting a weapon for a target, pick the shortest-range ready laser, reserving long-range lasers for farther targets.
+
+**Touches:** point defense loop referenced in commit history (`5c0e5ae Fix: Disarm Target Buoy PD and skip dead targets in point defense loop`) — likely in `scripts/ships/ship.gd` or `scripts/weapons_panel.gd`.
+
+**Done when:** `test_point_defense.gd` covers the new sort order and weapon-selection rule.
+
+---
+
+## M4 — Real-Time Sensor Signal History UI (`real-time-sensor-signal.md`)
+**Depends on:** M2 (there's nothing meaningful to chart over time until heat/EM are dynamic per-component signals rather than static).
+
+**Scope:**
+1. Add a "what do we know about my target" panel showing signal history over time (not just the current spider chart snapshot).
+2. Add relative velocity and acceleration meters for combat.
+3. Surface raw EM/heat time-series so players can spot patterns (e.g. heat dropping off) ahead of/alongside the classifier.
+
+**Touches:** `scripts/spider_chart.gd`, `scripts/sensor_panel.gd`, `scripts/terminal_display.gd`.
+
+**Done when:** a target hit by a weapon shows a visible, time-extended signal change in the UI, backed by `test_classifiers_e2e.gd`.
+
+---
+
+## M5 — Missile Lost-Lock Behavior (`missile_tracking_tradeoffs.md`)
+**No hard dependency**, but should be decided before M6 since handed-off contact data (recent commits already pass contact data to missiles on launch) feeds directly into whichever approach is chosen.
+
+**Scope (decision required before implementation):**
+- Pick one of: dumb-fire (A), seek-last-coordinate (B), dead-reckoning (C), or search-pattern (D) as the default for the current single missile type.
+- Recommendation: implement **C (dead reckoning)** first — it reuses the position+velocity hand-off already built (per `192ef99`, `4ee5c6f` commits) and is a strict superset of B in complexity terms, while D's search pattern can be layered on top later as a missile "class" without touching the core fallback.
+- Keep the approach parameterized per missile class so A/D can be added later without rework (ties into M1's component-class system for missiles).
+
+**Touches:** `scripts/missile_controller.gd`, `scripts/ships/missile.gd`.
+
+**Done when:** `test_missile_ai.gd` covers lost-lock fallback behavior for the chosen approach.
+
+---
+
+## M6 — Multi-Ship Contact Fusion / Comms Relay (`comms.md`)
+**Depends on:** a stable per-ship contact/sensor data model (already exists informally; M4 makes the "freshness vs. fusion" tradeoff visible to players, which should inform which fusion strategy to ship).
+
+**Scope:**
+1. Point-to-point radio link between friendly ships with line-of-sight requirement.
+2. Share contact lists between linked ships; treat relayed contacts as additional sensor signal sources.
+3. Start with **simplest fusion: take the freshest contact report** per target (explicitly called out as the easy first cut in the doc). Defer the recency-weighted quantile estimator approach.
+4. Defer proxied/multi-hop relay delay (A→B→C) — explicitly punted in the doc.
+
+**Touches:** new `scripts/comms_module.gd` (or similar) wired into `scripts/ships/ship.gd` contact list; `scripts/sensor_panel.gd` for display of relayed vs. direct contacts.
+
+**Done when:** two friendly ships in line-of-sight share contacts, and a new e2e test (e.g. `test_comms_relay.gd`) verifies freshest-wins resolution.
+
+---
+
+## Suggested execution order
+
+1. M3 (PD prioritization) — quick win, no dependencies.
+2. M5 (missile lost-lock, Approach C) — quick win, no dependencies.
+3. M1 (component architecture) — foundational, largest effort.
+4. M2 (dynamic heat/EM) — built on M1.
+5. M4 (sensor signal history UI) — built on M2.
+6. M6 (comms relay) — built on stable contact model, informed by M4.

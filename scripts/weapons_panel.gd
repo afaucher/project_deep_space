@@ -90,16 +90,16 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 	selected_contact_id = target_id
 	
 	if current_state.has("weapons"):
-		var weapons = current_state["weapons"]
-		
+		var weapons = current_state["weapons"] # Array of ship_components weapon entries
+
 		# Generate UI dynamically if not present
 		if weapon_buttons.size() == 0:
-			for w_id in weapons.keys():
-				_create_weapon_ui(weapon_grid, w_id, w_id.to_upper())
-				
-		for w_id in weapons.keys():
+			for w_info in weapons:
+				_create_weapon_ui(weapon_grid, w_info["id"], w_info["id"].to_upper())
+
+		for w_info in weapons:
+			var w_id = w_info["id"]
 			if weapon_buttons.has(w_id):
-				var w_info = weapons[w_id]
 				var ammo = w_info["ammo"]
 				var cd = w_info["cooldown"]
 				
@@ -142,7 +142,7 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 					is_in_arc = (abs(rel_angle) <= arc_w / 2.0)
 					
 				var can_fire = (ammo > 0 and cd <= 0.0 and has_target and is_in_arc and is_alive and is_powered)
-				if w_info.get("type", "") == "laser":
+				if w_info.get("weapon_type", "") == "laser":
 					can_fire = can_fire and is_in_range
 					
 				btn.disabled = not can_fire
@@ -162,7 +162,7 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 						btn.text = "COOLDOWN"
 				elif not is_in_arc:
 					btn.text = "OUT OF ARC"
-				elif w_info.get("type", "") == "laser" and not is_in_range:
+				elif w_info.get("weapon_type", "") == "laser" and not is_in_range:
 					btn.text = "OUT OF RANGE"
 				else:
 					btn.text = "FIRE"
