@@ -232,7 +232,6 @@ func _distribute_state() -> void:
 			"contacts": ship.active_contacts.duplicate(true),
 			"weapons": ship.get_components_by_type("weapons"),
 			"engineering": {
-				"subsystems": ship.subsystems.duplicate(true),
 				"ship_components": ship.ship_components.duplicate(true),
 				"current_heat": ship.current_heat,
 				"max_heat": ship.max_heat,

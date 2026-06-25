@@ -100,7 +100,6 @@ const HIT_TRACE_DURATION := 3.0 # seconds a damage-raymarch trace lingers for th
 var owner_id: int = -1
 
 func _init() -> void:
-	subsystems = subsystems.duplicate(true)
 	ship_components = ship_components.duplicate(true)
 	iff_tags = iff_tags.duplicate(true)
 	active_contacts = {}
@@ -117,13 +116,6 @@ var max_speed: float = 1000.0
 var iff_tags: Array = []
 
 var actual_throttle: float = 0.0
-
-# Engineering / Subsystems
-var subsystems: Dictionary = {
-	"reactor": {"power": 1.0},
-	"engines": {"power": 1.0},
-	"sensors": {"power": 1.0}
-}
 
 var _cached_max_steps: int = 0
 var _cached_bbox_min: Vector2 = Vector2(-INF, -INF)
@@ -207,6 +199,15 @@ func get_sys_health(sys_type: String) -> float:
 			h += max(0.0, c["health"])
 	return h
 
+# Health-only check (ignores powered_on), used to gate ship death so switching
+# a component off can never be mistaken for it being destroyed -- only an
+# actual loss of health should be fatal.
+func is_sys_destroyed(sys_type: String) -> bool:
+	for c in ship_components:
+		if c["type"] == sys_type and c["health"] > 0.0:
+			return false
+	return true
+
 static func classify_contact(signature: Dictionary, observer_iff_tags: Array) -> String:
 	var contact_tags = signature.get("iff_tags", [])
 	var is_friendly = false
@@ -253,7 +254,15 @@ func get_sys_max_health(sys_type: String) -> float:
 func is_component_powered(comp_id: String) -> bool:
 	for c in ship_components:
 		if c["id"] == comp_id:
-			return c.get("powered_on", true) and c["health"] > 0.0
+			if not (c.get("powered_on", true) and c["health"] > 0.0):
+				return false
+			# Reactor/hull don't draw power from a reactor themselves -- every
+			# other type cascades off ship-wide reactor output, so killing or
+			# switching off every reactor goes dark everywhere downstream,
+			# and recovers automatically the instant a reactor comes back on.
+			if c["type"] == "reactor" or c["type"] == "hull":
+				return true
+			return get_total_power_rating("reactor") > 0.0
 	return false
 
 func get_component_health_ratio(comp_id: String) -> float:
@@ -339,8 +348,8 @@ func _engine_heat_contribution(comp: Dictionary, throttle: float, applied_torque
 	var ratio = get_component_health_ratio(comp["id"])
 	var inefficiency = max(1.0, 1.0 / max(0.1, ratio))
 	var thrust_share = (comp.get("thrust_rating", 0.0) * ratio) / ship_max_thrust
-	var h = abs(throttle) * 10.0 * subsystems["engines"]["power"] * inefficiency * thrust_share
-	h += (abs(applied_torque) / max(1.0, max_torque_now)) * 5.0 * subsystems["engines"]["power"] * inefficiency * thrust_share
+	var h = abs(throttle) * 10.0 * inefficiency * thrust_share
+	h += (abs(applied_torque) / max(1.0, max_torque_now)) * 5.0 * inefficiency * thrust_share
 	return h
 
 # Same fix as _engine_heat_contribution, for reactors: apportion the ship-wide
@@ -446,13 +455,6 @@ var health: float:
 
 var base_heat: float:
 	get: return current_heat
-
-var em_noise: float:
-	get:
-		var noise = 5.0 * subsystems["reactor"]["power"]
-		for s in get_components_by_type("sensors"):
-			if s.get("active", true): noise += 5.0
-		return noise
 
 # Sensor Signature Profile
 var cross_section: float = 50.0  # Medium size
@@ -579,21 +581,15 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 			print("[Damage] Raycast completely missed all internal components!")
 			
 	# Check death condition (reactor dead)
-	if get_sys_health("reactor") <= 0.0 or get_sys_health("hull") <= 0.0:
+	if is_sys_destroyed("reactor") or is_sys_destroyed("hull"):
 		print("[Damage] ", name, " suffers catastrophic failure and dies.")
 		hulk()
 
 func hulk() -> void:
 	is_dead = true
-	# Shut down subsystems to stop heat/EM generation
-	subsystems["reactor"]["power"] = 0.0
-	subsystems["engines"]["power"] = 0.0
-	subsystems["sensors"]["power"] = 0.0
 	# Shut down all individual components
 	for c in ship_components:
 		c["powered_on"] = false
-		if c["type"] == "reactor":
-			c["power_draw"] = 0.0
 	target_thrust = 0.0
 	actual_throttle = 0.0
 
@@ -767,14 +763,13 @@ func _physics_process(delta: float) -> void:
 	# Time-Optimal Rotational Controller (Square-root curve braking)
 	var angle_diff = wrapf(target_heading - rotation, -PI, PI)
 	
-	var engine_power_slider = subsystems["engines"]["power"]
 	var ship_max_torque = get_ship_max_torque()
 
 	var torque = 0.0
 	var active_max_torque = 0.0
-	if ship_max_torque > 0.0 and engine_power_slider > 0.0:
-		active_max_torque = (ship_max_torque if steering_mode == 1 else ship_max_torque * SMOOTH_MODE_TORQUE_RATIO) * engine_power_slider
-		var active_max_omega = (max_omega if steering_mode == 1 else max_omega * SMOOTH_MODE_OMEGA_RATIO) * get_power_ratio("engines") * engine_power_slider
+	if ship_max_torque > 0.0:
+		active_max_torque = ship_max_torque if steering_mode == 1 else ship_max_torque * SMOOTH_MODE_TORQUE_RATIO
+		var active_max_omega = (max_omega if steering_mode == 1 else max_omega * SMOOTH_MODE_OMEGA_RATIO) * get_power_ratio("engines")
 		
 		var alpha_max = active_max_torque / inertia
 		
@@ -822,7 +817,7 @@ func _physics_process(delta: float) -> void:
 	# --- Heat & Engineering Logic ---
 	if is_multiplayer_authority():
 		var heat_gen = 0.0
-		var reactor_heat = REACTOR_HEAT_COEFFICIENT * subsystems["reactor"]["power"]
+		var reactor_heat = REACTOR_HEAT_COEFFICIENT
 		var ship_reactor_rating = get_total_power_rating("reactor")
 		var ship_max_thrust = get_ship_max_thrust()
 
@@ -837,7 +832,7 @@ func _physics_process(delta: float) -> void:
 		var passive_heat = 0.0
 		var passive_em = 0.0
 		for comp in ship_components:
-			if comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull":
+			if comp["type"] != "hull" and is_component_powered(comp["id"]):
 				passive_heat += PASSIVE_COMPONENT_HEAT
 				passive_em += PASSIVE_COMPONENT_EM
 
@@ -855,7 +850,7 @@ func _physics_process(delta: float) -> void:
 					c["health"] -= OVERHEAT_DAMAGE_RATE * delta
 
 		# Update Component EM & Heat
-		var base_em = get_total_power_rating("reactor") * subsystems["reactor"]["power"]
+		var base_em = get_total_power_rating("reactor")
 		var current_em = base_em + (abs(actual_throttle) * get_total_power_rating("engines"))
 		var sensor_em = 0.0
 		var sensor_power_ratio = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
@@ -865,19 +860,20 @@ func _physics_process(delta: float) -> void:
 					sensor_em += s.get("base_em_emission", 0.0) * sensor_power_ratio
 		
 		for comp in ship_components:
-			var b_heat = PASSIVE_COMPONENT_HEAT if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
-			var b_em = PASSIVE_COMPONENT_EM if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
+			var is_powered = is_component_powered(comp["id"])
+			var b_heat = PASSIVE_COMPONENT_HEAT if (is_powered and comp["type"] != "hull") else 0.0
+			var b_em = PASSIVE_COMPONENT_EM if (is_powered and comp["type"] != "hull") else 0.0
 
 			if comp["type"] == "reactor":
-				comp["heat"] = REACTOR_HEAT_FLOOR + _reactor_heat_contribution(comp, reactor_heat, ship_reactor_rating) + _decay_damage_heat(comp, delta)
-				comp["em_emission"] = comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"]) + _update_reactor_whiteout(comp, delta)
+				comp["heat"] = (REACTOR_HEAT_FLOOR + _reactor_heat_contribution(comp, reactor_heat, ship_reactor_rating) if is_powered else 0.0) + _decay_damage_heat(comp, delta)
+				comp["em_emission"] = (comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"]) if is_powered else 0.0) + _update_reactor_whiteout(comp, delta)
 			elif comp["type"] == "engines":
 				comp["heat"] = b_heat + _engine_heat_contribution(comp, actual_throttle, torque, active_max_torque, ship_max_thrust) + _decay_damage_heat(comp, delta)
 				var engine_health_ratio = get_component_health_ratio(comp["id"])
 				comp["em_emission"] = b_em + abs(actual_throttle) * comp.get("power_rating", 0.0) * engine_health_ratio + _engine_damage_oscillation(comp, engine_health_ratio, delta)
 			elif comp["type"] == "sensors":
-				comp["heat"] = b_heat + SENSOR_HEAT_FLOOR + _decay_damage_heat(comp, delta)
-				comp["em_emission"] = b_em + comp.get("base_em_emission", 0.0) * sensor_power_ratio
+				comp["heat"] = b_heat + (SENSOR_HEAT_FLOOR if is_powered else 0.0) + _decay_damage_heat(comp, delta)
+				comp["em_emission"] = b_em + (comp.get("base_em_emission", 0.0) * sensor_power_ratio if is_powered else 0.0)
 			elif comp["type"] == "weapons":
 				comp["heat"] = b_heat + _decay_damage_heat(comp, delta)
 				WeaponBehaviorRegistry.get_behavior(comp["weapon_type"]).tick(self, comp, delta)
@@ -897,7 +893,7 @@ func _physics_process(delta: float) -> void:
 		em_signature = current_em + sensor_em + passive_em + weapon_em
 
 	# Sensor Sweeps
-	var active_sensor_efficiency = (get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))) * subsystems["sensors"]["power"]
+	var active_sensor_efficiency = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
 	
 	for sensor in get_components_by_type("sensors"):
 		if not is_component_powered(sensor["id"]):

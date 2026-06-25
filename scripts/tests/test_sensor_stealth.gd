@@ -100,8 +100,7 @@ func _register_tests() -> void:
 			_reset_scene()
 			for s in ship_a.get_components_by_type("sensors"):
 				if s["sensor_type"] == "active":
-					s["active"] = false
-			ship_b.subsystems["reactor"]["power"] = 4.0,
+					s["active"] = false,
 		"check": func():
 			var has_sweep_hit = false
 			for arr in ship_a.active_sensor_sweeps.values():

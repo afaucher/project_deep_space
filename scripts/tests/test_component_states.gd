@@ -53,9 +53,6 @@ func _reset_ship() -> void:
 	ship.angular_velocity = 0.0
 	ship.position = Vector2.ZERO
 	ship.rotation = 0.0
-	ship.subsystems["reactor"]["power"] = 1.0
-	ship.subsystems["engines"]["power"] = 1.0
-	ship.subsystems["sensors"]["power"] = 1.0
 	ship.apply_control_input(0.0, 0.0, 0.0, 1, 0) # zero input, combat mode, direct throttle
 	for w in ship.get_components_by_type("weapons"):
 		w["cooldown"] = 0.0
@@ -401,7 +398,7 @@ func _build_tests() -> void:
 			# Manually check: reactor health 0 + hull damage should trigger hulk
 			_set_component("reactor_core", 0.0)
 			# Force the death check
-			if ship.get_sys_health("reactor") <= 0.0:
+			if ship.is_sys_destroyed("reactor"):
 				ship.hulk()
 			return _assert(ship.is_dead,
 				"Ship should be dead when reactor is destroyed. is_dead=" + str(ship.is_dead)),

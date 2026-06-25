@@ -35,7 +35,6 @@ func _reset_ship() -> void:
 	for c in ship.ship_components:
 		c["health"] = c.get("max_health", 100.0)
 	
-	ship.subsystems["reactor"]["power"] = 1.0
 	ship.actual_throttle = 0.0
 	ship.is_dead = false
 
