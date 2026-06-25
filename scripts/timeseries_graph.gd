@@ -61,9 +61,13 @@ func _draw() -> void:
 	var now = Time.get_ticks_msec() / 1000.0
 	var t_min = now - HISTORY_DURATION
 
-	# Floor keeps a flat-zero signal from looking like noisy full-scale jitter.
-	var max_heat = 10.0
-	var max_em = 10.0
+	# Floor at each ship's typical full operating range (same constants
+	# SpiderChart uses) so ordinary idle jitter -- a few points of baseline
+	# heat/EM wobble -- doesn't fill the whole vertical scale and read as a
+	# dramatic swing. Real events (weapon hits, reactor whiteout) still push
+	# the scale higher than the floor via max(), so they're never clipped.
+	var max_heat = SpiderChart.MAX_HEAT_DISPLAY
+	var max_em = SpiderChart.MAX_EM_DISPLAY
 	for s in _samples:
 		max_heat = max(max_heat, s["heat"])
 		max_em = max(max_em, s["em"])
