@@ -4,6 +4,11 @@ extends "res://scripts/components/weapon_behavior.gd"
 const FIRE_EM_SPIKE := 50.0
 const EM_PULSE_DECAY := 25.0 # per second
 
+# Waste heat from firing reuses Ship's damage_heat/_decay_damage_heat
+# mechanism (same "burst now, decay over time" shape as a combat hit) rather
+# than a second parallel decay system.
+const FIRE_HEAT_SPIKE := 15.0
+
 func can_fire(ship: Ship, comp: Dictionary, target_contact_id: String) -> bool:
 	if not super.can_fire(ship, comp, target_contact_id):
 		return false
@@ -16,6 +21,7 @@ func can_fire(ship: Ship, comp: Dictionary, target_contact_id: String) -> bool:
 func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_contact_id: String) -> void:
 	_consume_default(comp)
 	comp["em_pulse"] = FIRE_EM_SPIKE
+	comp["damage_heat"] = comp.get("damage_heat", 0.0) + FIRE_HEAT_SPIKE
 
 	if ship.multiplayer.get_unique_id() == ship.owner_id:
 		ship.sfx_laser.play()

@@ -41,6 +41,11 @@ func _reset_ship() -> void:
 	# Reset all components to full health and powered on
 	for c in ship.ship_components:
 		c["health"] = c["max_health"]
+		c["damage_heat"] = 0.0
+		c["_prev_health"] = c["max_health"]
+		c["em_pulse"] = 0.0
+		c["_em_pulse_decay_rate"] = 0.0
+		c["em_osc_phase"] = 0.0
 		if c.has("powered_on"):
 			c["powered_on"] = true
 	ship.is_dead = false
@@ -255,6 +260,134 @@ func _build_tests() -> void:
 		"duration": 5
 	})
 
+	# ===== WEAPON FIRE EM/HEAT (M2) =====
+	# Lasers generate waste heat when fired; missile tubes are railgun-style
+	# launchers -- an EM launch pulse, but no heat (MissileBehavior.execute_fire
+	# deliberately has no damage_heat line, contrast with LaserBehavior's).
+
+	tests.append({
+		"name": "hp_fwd_laser: fire → waste heat added",
+		"setup": func():
+			_reset_ship()
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.fire_weapon("hp_fwd_laser", Vector2(500, 0), "FAKE_TGT"),
+		"check": func():
+			var heat = _get_component("hp_fwd_laser").get("heat", 0.0)
+			return _assert(heat > 10.0,
+				"Laser fire should add waste heat (FIRE_HEAT_SPIKE=15) on top of the flat baseline. heat=" + str(heat)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "hp_fwd_missile: fire → NO heat added (railgun launcher)",
+		"setup": func():
+			_reset_ship()
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.fire_weapon("hp_fwd_missile", Vector2(500, 0), "FAKE_TGT"),
+		"check": func():
+			var heat = _get_component("hp_fwd_missile").get("heat", 0.0)
+			return _assert(heat < 1.0,
+				"Missile fire should NOT add waste heat -- only the flat 0.1 powered baseline. heat=" + str(heat)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "hp_fwd_missile: fire → EM pulse still present (railgun EM signature)",
+		"setup": func():
+			_reset_ship()
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.fire_weapon("hp_fwd_missile", Vector2(500, 0), "FAKE_TGT"),
+		"check": func():
+			var em = _get_component("hp_fwd_missile").get("em_emission", 0.0)
+			return _assert(em > 20.0,
+				"Missile launch should still produce an EM pulse (FIRE_EM_SPIKE=30) even with no heat. em=" + str(em)),
+		"duration": 1
+	})
+
+	# ===== EM SIGNATURE MAGNITUDE (M2) =====
+	# Direct unit tests of the directional EM math (_received_em_power /
+	# _total_received_em) against hand-computed exact values, rather than
+	# just qualitative thresholds -- validates the model's actual magnitudes,
+	# not just "something nonzero happened."
+
+	tests.append({
+		"name": "_received_em_power: omni emitter, bow-on view → 1.0x (no rear bias)",
+		"setup": func(): pass,
+		"check": func():
+			var comp = {"type": "reactor", "em_emission": 100.0}
+			# target faces +X (rotation 0); receiver is also along +X from the
+			# target, i.e. looking at the target's nose.
+			var power = ship._received_em_power(comp, 0.0, 0.0)
+			return _assert(absf(power - 100.0) < 0.01,
+				"Bow-on omni emission should be exactly em_emission * 1.0. got=" + str(power)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "_received_em_power: omni emitter, tail-on view → 1.5x (full rear bias)",
+		"setup": func(): pass,
+		"check": func():
+			var comp = {"type": "reactor", "em_emission": 100.0}
+			# receiver is behind the target (along target's -X / six o'clock).
+			var power = ship._received_em_power(comp, 0.0, PI)
+			return _assert(absf(power - 150.0) < 0.01,
+				"Tail-on omni emission should be exactly em_emission * 1.5. got=" + str(power)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "_received_em_power: directional emitter, on-axis → full strength",
+		"setup": func(): pass,
+		"check": func():
+			var comp = {"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
+			var power = ship._received_em_power(comp, 0.0, 0.0) # dead-on the boresight
+			return _assert(absf(power - 100.0) < 0.01,
+				"On-axis directional emission should be full strength, no falloff. got=" + str(power)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "_received_em_power: directional emitter, half-arc/2 off-axis → 50% falloff",
+		"setup": func(): pass,
+		"check": func():
+			var comp = {"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0} # half_arc = PI/6
+			var power = ship._received_em_power(comp, 0.0, PI / 12.0) # half_arc / 2
+			return _assert(absf(power - 50.0) < 0.01,
+				"At half the half-arc off-axis, linear falloff should give exactly 50%. got=" + str(power)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "_received_em_power: directional emitter, outside arc → zero",
+		"setup": func(): pass,
+		"check": func():
+			var comp = {"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
+			var power = ship._received_em_power(comp, 0.0, PI / 2.0) # 90 degrees off, well outside +-30deg
+			return _assert(power == 0.0,
+				"Outside the emission cone should give exactly zero, not a small falloff tail. got=" + str(power)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "_total_received_em: sums omni + directional emitters bow-on",
+		"setup": func(): pass,
+		"check": func():
+			var sig = {"rot": 0.0, "em_emitters": [
+				{"type": "reactor", "em_emission": 100.0},
+				{"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
+			]}
+			var total = ship._total_received_em(sig, 0.0) # bow-on AND on-axis for the weapon
+			return _assert(absf(total - 200.0) < 0.01,
+				"Bow-on: reactor 100*1.0 + weapon 100*1.0 (on-axis) = 200. got=" + str(total)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "_total_received_em: directional emitter drops out of the sum off-arc",
+		"setup": func(): pass,
+		"check": func():
+			var sig = {"rot": 0.0, "em_emitters": [
+				{"type": "reactor", "em_emission": 100.0},
+				{"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
+			]}
+			var total = ship._total_received_em(sig, PI) # tail-on: reactor rear-biased, weapon arc doesn't reach
+			return _assert(absf(total - 150.0) < 0.01,
+				"Tail-on: reactor 100*1.5 + weapon 0 (outside its forward arc) = 150. got=" + str(total)),
+		"duration": 1
+	})
+
 	# ===== REACTOR =====
 
 	# Reactor: Destroyed → ship is dead
@@ -274,6 +407,121 @@ func _build_tests() -> void:
 			return _assert(ship.is_dead,
 				"Ship should be dead when reactor is destroyed. is_dead=" + str(ship.is_dead)),
 		"duration": 5
+	})
+
+	# ===== DAMAGE HEAT (M2) =====
+	# A laser hit's heat burst (take_damage -> comp["damage_heat"]) must survive
+	# the per-frame dispatch loop and decay over time, instead of being
+	# clobbered to the steady-state value (or force-zeroed for hull) every tick.
+
+	# engine_main rect is Rect2(-35, -10, 5, 20) -- (-32, 0) is inside it and
+	# nowhere else, so this hits engine_main cleanly.
+	tests.append({
+		"name": "engine_main: laser hit → visible heat burst next frame",
+		"setup": func():
+			_reset_ship()
+			ship.take_damage(50.0, Vector2(-32, 0), Vector2(1, 0), "laser"), # 50 * 0.5 heat_modifier = 25 damage_heat
+		"check": func():
+			var heat = _get_component("engine_main").get("heat", 0.0)
+			return _assert(heat > 20.0,
+				"Engine heat burst should still be visible one frame after the hit. heat=" + str(heat)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "engine_main: heat burst decays back to baseline over time",
+		"setup": func():
+			_reset_ship()
+			ship.take_damage(50.0, Vector2(-32, 0), Vector2(1, 0), "laser"),
+		"check": func():
+			var heat = _get_component("engine_main").get("heat", 0.0)
+			return _assert(heat < 1.0,
+				"Engine heat burst should have decayed back to baseline after 2s. heat=" + str(heat)),
+		"duration": 120 # ~2s at 60fps; burst decays at 20.0/sec from 25
+	})
+
+	# hull_aft rect is Rect2(-30, -15, 15, 30) -- (-20, 0) is inside it. Hull
+	# used to be force-zeroed every frame (the "else" branch in the dispatch
+	# loop), so this is a direct regression test for that fix.
+	tests.append({
+		"name": "hull_aft: laser hit → visible heat burst (not force-zeroed)",
+		"setup": func():
+			_reset_ship()
+			ship.take_damage(50.0, Vector2(-20, 0), Vector2(1, 0), "laser"),
+		"check": func():
+			var heat = _get_component("hull_aft").get("heat", 0.0)
+			return _assert(heat > 20.0,
+				"Hull heat burst should be visible one frame after the hit. heat=" + str(heat)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "hull_aft: heat burst decays back to zero over time",
+		"setup": func():
+			_reset_ship()
+			ship.take_damage(50.0, Vector2(-20, 0), Vector2(1, 0), "laser"),
+		"check": func():
+			var heat = _get_component("hull_aft").get("heat", 0.0)
+			return _assert(heat < 1.0,
+				"Hull heat burst should have decayed back to ~0 after 2s. heat=" + str(heat)),
+		"duration": 120
+	})
+
+	# ===== ENGINE DAMAGE EM OSCILLATION (M2) =====
+	# 30% health -> damage_ratio 0.7 -> osc_freq = 0.2 + 0.7*0.6 = 0.62Hz.
+	# Zero throttle isolates the oscillation term (the throttle-proportional
+	# baseline term is 0 either way), so em_emission is just the 0.5 powered
+	# trickle (b_em) plus the oscillation.
+
+	tests.append({
+		"name": "engine_main: damaged → EM near baseline at oscillation phase start",
+		"setup": func():
+			_reset_ship()
+			_set_component("engine_main", 90.0, true) # 30% health
+			ship.apply_control_input(0.0, 0.0, 0.0, 1, 0), # zero throttle
+		"check": func():
+			var em = _get_component("engine_main").get("em_emission", 0.0)
+			return _assert(em < 15.0,
+				"EM should start near the flat baseline right as the oscillation phase begins. em=" + str(em)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "engine_main: damaged → EM rises well above baseline at oscillation peak",
+		"setup": func():
+			_reset_ship()
+			_set_component("engine_main", 90.0, true)
+			ship.apply_control_input(0.0, 0.0, 0.0, 1, 0),
+		"check": func():
+			var em = _get_component("engine_main").get("em_emission", 0.0)
+			return _assert(em > 50.0,
+				"EM should have risen to near its oscillation peak (~70 + 0.5 baseline) by quarter-period (~24 frames). em=" + str(em)),
+		"duration": 24 # ~quarter-period at 0.62Hz, 60fps
+	})
+
+	# ===== REACTOR WHITEOUT (M2) =====
+	# Reactor health crossing from alive to destroyed should fire a one-shot
+	# EM whiteout that decays over REACTOR_WHITEOUT_DURATION (1.5s), not a
+	# silent drop to zero emission.
+
+	tests.append({
+		"name": "reactor_core: destroyed → EM whiteout visible next frame",
+		"setup": func():
+			_reset_ship()
+			_set_component("reactor_core", 0.0, true), # health crosses 200 -> 0 this frame
+		"check": func():
+			var em = _get_component("reactor_core").get("em_emission", 0.0)
+			return _assert(em > 400.0,
+				"Whiteout should be near its full magnitude (power_rating 100 * 5.0 = 500) one frame after destruction. em=" + str(em)),
+		"duration": 1
+	})
+	tests.append({
+		"name": "reactor_core: EM whiteout decays to ~0 after its duration",
+		"setup": func():
+			_reset_ship()
+			_set_component("reactor_core", 0.0, true),
+		"check": func():
+			var em = _get_component("reactor_core").get("em_emission", 0.0)
+			return _assert(em < 1.0,
+				"Whiteout should have fully decayed (1.5s duration) and reactor health is 0, so baseline EM is also 0. em=" + str(em)),
+		"duration": 95 # > 1.5s at 60fps with margin
 	})
 
 	# ===== is_component_powered unit checks =====

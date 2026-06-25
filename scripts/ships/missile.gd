@@ -10,12 +10,12 @@ func _init() -> void:
 			
 	cross_section = 2.0
 
-	# Mass now derives from rect area x density x Ship.MASS_SCALE (see ship.gd).
+	# Mass and inertia derive from rect area/distance x density (see ship.gd).
 	# Density is the same 20.0 used by Frigate -- same "stuff", smaller box, so
-	# the derived mass comes out much lighter than the old flat 20.0; max_thrust
-	# below is retuned to keep the same thrust/mass ratio (same accel feel).
-	max_thrust = 2991.0 # retuned to match pre-derived-mass acceleration (was 10000.0 at mass 20.0)
-	max_torque = 2500.0 # Prevent overcorrection/spinning
+	# both come out much lighter than the old flat values. thrust_rating/
+	# torque_rating on engine_main below are authored directly (not derived --
+	# see the M1b doc appendix for why that breaks ship-to-ship balance), set
+	# to reproduce the same accel/angular-accel ratios as before this rework.
 	max_omega = 10.0 # High turn rate for missiles
 	max_speed = 3000.0
 
@@ -26,7 +26,7 @@ func _init() -> void:
 			"range": 30000.0, "resolution": 5.0, "timer": 0.0, "refresh_interval": 0.1, "num_bins": 60},
 		{"id": "warhead", "type": "hull", "rect": Rect2(-2, -3, 7, 6), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
 		{"id": "hull_body", "type": "hull", "rect": Rect2(-10, -3, 8, 6), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
-		{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -4, 5, 8), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "power_rating": 10.0},
+		{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -4, 5, 8), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "power_rating": 10.0, "thrust_rating": 2991.0, "torque_rating": 435.65},
 		# Tiny capacitor standing in for a full reactor — too small for one, per design notes.
 		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-8, -2, 4, 4), "health": 5.0, "max_health": 5.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 10.0}
 	]
@@ -52,7 +52,6 @@ func _ready() -> void:
 			child.queue_free()
 			remove_child(child)
 
-	inertia = 50.0
 	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
 	linear_damp = 0.0
 	angular_damp_mode = RigidBody2D.DAMP_MODE_REPLACE

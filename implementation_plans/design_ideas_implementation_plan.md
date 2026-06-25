@@ -38,17 +38,20 @@ Detailed design, including the sensor-dome split decision and the weapon-side me
 
 ---
 
-## M2 — Dynamic Per-Component Heat/EM (`responsive_heat_em.md`)
-**Depends on:** M1 (needs per-component contribution hooks to attach event-driven spikes to), and ideally M1c (so reactor/engine/hull pulses use the same behavior-class pattern weapons will already have, instead of more inline `elif`s in `Ship`).
+## M2 — Dynamic Per-Component Heat/EM (`responsive_heat_em.md`) — DONE
+**Depends on:** M1/M1b (per-component mass/power/thrust/torque/heat helpers already landed), and M1c (so weapon fire pulses use the same behavior-class pattern reactor/engine pulses will reuse, instead of more inline `elif`s in `Ship`).
 
 **Scope:**
-1. Move heat/EM from "powered = fixed value" to dynamic, ~1Hz-refreshed signals per component.
-2. Event-driven spikes: firing a laser → EM pulse + waste heat; taking a hit → heat burst; damaged engine → EM spike; reactor destroyed → 1-2s EM "whiteout".
-3. Decide and implement heat model: per-component buildup, dissipation/bleed between adjacent components, and ship-wide heat cap vs. per-component cap (the open questions in the doc need an explicit answer before coding).
+1. Fix the combat-heat overwrite bug: `take_damage()`'s per-component heat increment is currently discarded every physics frame by the heat/EM dispatch loop's unconditional overwrite.
+2. Unify EM directionality: generalize the cone-falloff mechanism sensors already use to every emitter (reactor/engine/passive default omni, sensors and weapons default directional) instead of the current two-tier scalar-plus-rear-bias hack.
+3. Event-driven pulses: firing a laser → EM pulse (mechanic already exists in `LaserBehavior` but isn't wired into detection yet) + waste heat; taking a hit → heat burst; damaged engine → EM spike (currently inverted — damage suppresses emission instead of spiking it); reactor destroyed → 1-2s EM "whiteout".
+4. Heat model resolved: no inter-component bleed, ship-wide cap only (per-component `heat` stays a signature/display quantity, not a second damage model).
 
-**Touches:** `scripts/ships/ship.gd` (component update loop), `scripts/weapons_panel.gd`, `scripts/sensor_panel.gd` (EM summation already exists and is instantaneous — extend, don't replace).
+**Touches:** `scripts/ships/ship.gd` (heat/EM dispatch loop, `_run_sensor_sweep`, `get_signature`), `scripts/components/weapon_behavior.gd` + `weapons/*_behavior.gd` (fire pulses).
 
-**Done when:** EM/heat values visibly change over time per the event triggers above, validated by extending `test_component_states.gd`.
+**Done when:** EM/heat values visibly change over time per all four event triggers above, every emitter is direction-aware, validated by extending `test_component_states.gd`.
+
+Detailed design, findings, and task breakdown are in [m2_dynamic_heat_em_design.md](m2_dynamic_heat_em_design.md).
 
 ---
 

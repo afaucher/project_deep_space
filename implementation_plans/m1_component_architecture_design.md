@@ -443,3 +443,126 @@ This is the literal "sum from components" framing `ship_is_the_parts.md` uses fo
 **Open question, still pending:** whether `get_power_ratio` stays in this form. It exists only because `max_thrust`/`max_torque`/`max_omega`/`heat_dissipation_rate` are still flat ship-level design constants tuned assuming "fully healthy, fully powered" = `1.0`, so `get_total_power_rating(type)` (an absolute, already-derived value) has to be normalized back down to a 0-1 fraction before it can scale them. If `power_rating` ever became a physically-derived absolute the way `mass` now is, those four constants could plausibly be replaced by direct component sums and `get_power_ratio` would have nothing left to normalize against. Not pursued in this pass — flagged for a future milestone if/when `power_rating` gets the same treatment `density`/mass just did.
 
 **Done when (M1b):** `reactor_power_rating`/`engine_power_rating` ship-level vars no longer exist; `mass` is derived from `rect` area × `density` × `MASS_SCALE` (no authored `mass` field anywhere); thrust/torque availability and heat dissipation are derived from `ship_components` via `get_power_ratio()`; `density` is unified to the same `20.0` scale across Frigate/TargetDrone/Missile/SensorDrone; the per-component EM pooled-overwrite bug is fixed for `reactor`/`engines` the same way M1 fixed it for `sensors`; and the full regression suite (10 tests, including `test_helm_input.gd`/`test_inertial_flight.gd`) passes.
+
+---
+
+## Appendix: Frigate vs. Missile spec comparison (post-M1b)
+
+Now that both ship classes share one schema and one `density` scale, their specs are directly comparable for the first time. Captured here as a sanity check on the M1b numbers and as a worked example for the validator idea below.
+
+### Core specs
+
+| Spec | Frigate | Missile | Ratio (Missile/Frigate) |
+|---|---|---|---|
+| Mass (derived) | 100.0 | 5.98 | 0.06x — much lighter |
+| `thrust_rating` (engine component field) | 5000.0 | 2991.0 | — |
+| Accel (`get_ship_max_thrust()/mass`) | 50.0 | 500.0 | **10x** (preserved exactly from the pre-M1b flat-mass values) |
+| `torque_rating` (engine component field) | 10000.0 | 435.65 | — |
+| `inertia` (derived) | 1000.0 | 8.71 | — |
+| Angular accel (`get_ship_max_torque()/inertia`) | 10.0 | 50.0 | **5x** (preserved exactly from the pre-inertia-derivation values) |
+| `max_omega` | 2.0 rad/s | 10.0 rad/s | 5x |
+| `max_speed` | 1000.0 | 3000.0 | 3x |
+| `cross_section` | 50.0 | 2.0 | 0.04x |
+| Hull-type HP | 4000 (4×1000) | 50 (warhead 20 + hull_body 30) | — |
+| Reactor HP / `power_rating` | 200 / 100.0 | 5 / 10.0 | — |
+| Engine HP / `power_rating` | 300 / 100.0 | 20 / 10.0 | — |
+| Sensors | 5 (range 1,500–80,000) | 1 seeker (range 30,000, 120° cone) | — |
+| Weapons | 12 hardpoints (5 lasers, 7 missile tubes) | 0 — it *is* the ordnance (see below) | — |
+
+### Weapon comparison — the missile's "laser warhead" bypasses the component system entirely
+
+Missile has no `"type": "weapons"` entry in `ship_components` at all. Its actual weapon — confirmed in [missile_controller.gd:110-135](scripts/missile_controller.gd:110), whose own comment calls it a "laser warhead" — is a hardcoded proximity-triggered raycast in `MissileController.detonate()`, completely outside the `WeaponBehaviorRegistry`/`LaserBehavior` path everything else fires through:
+
+| | Frigate laser (e.g. `hp_fwd_laser`) | Missile "laser warhead" |
+|---|---|---|
+| Damage | `500.0 × health_ratio` | flat `250.0`, never scaled |
+| Range | `4000.0`, checked in `can_fire()` | ~100-unit proximity trigger, then a 2000-unit raycast |
+| Reuse | `999` ammo, `1.0s` cooldown | one-shot — missile self-destructs immediately after |
+| Gating | `can_fire()`: ammo, cooldown, **own component** powered+alive, target in arc | none — no ammo/cooldown/power check, fires unconditionally in range |
+
+Notably, **the reactor doesn't gate or scale this shot at all** — `is_component_powered()` in `WeaponBehavior.can_fire()` checks the *weapon's own* state, never the reactor's, and the missile's warhead-laser doesn't even go through `can_fire()` to begin with. So "is the reactor big enough to justify the laser" has no mechanical answer today: reactor size has zero functional connection to whether or how hard the warhead-laser hits. Folding the missile's detonation into `LaserBehavior` (scaling `250.0` by `reactor_core`'s or a dedicated weapon component's health ratio) would be the fix if this should actually matter — not pursued here, just identified.
+
+### Power-to-weight ratio — two different things share the word "power"
+
+**Thrust/mass (the real one):** `5000/100 = 50.0` (Frigate) vs `2991/5.98 = 500.0` (Missile) — exactly `10x`, and not a coincidence: `max_thrust` for Missile was solved for specifically to reproduce the pre-M1b ratio (`10000/20 = 500`) bit-for-bit. This is the one ratio in this appendix that was actually engineered, not just observed.
+
+**`power_rating`/mass (coincidentally-named, not propulsion):** `100/100 = 1.0` (Frigate) vs `10/5.98 = 1.67` (Missile). This drifted as a side effect of the mass rework — `power_rating` values (`100` vs `10`, a 10:1 split) were untouched while mass dropped ~16.7x instead of the pre-M1b 5x — and currently has zero gameplay consequence, since no formula divides `power_rating` by mass anywhere. Flagged in case EM-signature-per-mass ever becomes a meaningful design lens later.
+
+**Specific torque (`max_torque / engine mass`):** `10000/3.60 = 2776` (Frigate) vs `2500/1.44 = 1734` (Missile) — `0.625x`, the *opposite* direction from specific thrust (`1.5x`, Missile ahead). Missile's engine produces more thrust but less torque per unit mass than Frigate's — a defensible asymmetry (a locked-on missile mostly flies straight with small corrections, doesn't need agility the way it needs speed) but worth knowing it's there rather than assumed.
+
+### Inertia is also derived now — `mass`'s rotational counterpart
+
+`inertia` had the exact same problem `mass` did before this milestone: a flat, hand-tuned literal (`1000.0` Frigate, `50.0` Missile) with no connection to the component data that's supposed to produce it. Real moment of inertia is `Σ component_mass × distance_from_center²` — the same component data `mass` now uses, just weighted by position instead of summed flat. Implemented the same way as `get_ship_mass()`, as a point-mass approximation (treats each component as a point mass at its `rect` centroid, ignores each box's own rotational inertia about its own center — "roughly the right shape," not exact physics):
+
+```gdscript
+const INERTIA_SCALE := 1000.0 / 40422.2973  # calibrated so Frigate's derived raw sum reproduces its original 1000.0
+
+func get_ship_inertia() -> float:
+    for c in ship_components:
+        var mass = area * c["density"] * MASS_SCALE
+        var centroid = c["rect"].position + c["rect"].size / 2.0
+        total += mass * centroid.length_squared()
+    return total * INERTIA_SCALE
+```
+
+Same resolution pattern as `mass`/`density`: one shared constant, calibrated from Frigate (so Frigate's `inertia` is unchanged at exactly `1000.0`), not a per-ship fudge factor. Missile's derived inertia drops to `~8.71` — its raw `Σ(mass × dist²)` ratio to Frigate's (`~115x`) doesn't match the old hand-tuned ratio (`20x`), the same shape of mismatch `density` had. Decision: **keep Missile's current angular performance instead of letting it ride as an unreviewed buff** — `max_torque` retuned from `2500.0` to `435.65` (`50.0 × 8.71`) to hold the exact same `torque/inertia = 50.0` and the same `5x` angular-accel ratio over Frigate as before this change, mirroring the `max_thrust` retune for linear accel. Without the retune, Missile's angular accel would have jumped to `~287` (a `5.7x` buff stacked on the existing `5x`, ~`28.6x` total over Frigate) — rejected as an unintended side effect, not a deliberate balance choice.
+
+### `max_thrust`/`max_torque` promoted to summed component fields — but not derived from area/density
+
+The natural next question after `mass`/`inertia`: should `max_thrust`/`max_torque` derive from the engine component too? Tried it two ways and both broke the established balance:
+
+- **Reuse `power_rating`** (same field driving EM): `THRUST_SCALE = 5000/100 = 50.0` from Frigate, applied to Missile's `power_rating(10.0)` gives `500.0` — not the `2991.0` solved for earlier. Accel ratio drops to `1.67x`, not `10x`.
+- **Derive from engine mass** (the same approach that worked for `mass`/`inertia`): `THRUST_PER_MASS = 5000/3.60 = 1388.9` from Frigate, applied to Missile's engine mass (`1.44`) gives `2000.6` — still not `2991.0`. Accel ratio: `6.68x`, not `10x`.
+
+Neither is a tuning slip — it's structural. `mass`/`inertia` derived cleanly because `density` was already a real physical property whose values were chosen independently of ship identity; once unified, smaller ships naturally came out lighter, which is *why* it worked. Thrust/torque have no equivalent field: `power_rating` was authored purely for EM with no thrust consideration, and deriving from mass with one shared constant by definition forces every ship to the same specific-thrust ratio — which would erase the `1.5x` specific-thrust asymmetry found above, not explain it. The `10x`/`5x` ratios are hand-picked game-balance numbers from before any of this work, not something that falls out of any physical property currently in the data.
+
+**Resolution: promote `thrust_rating`/`torque_rating` to authored-and-summed component fields on `engine_main`, the same pattern `power_rating` already uses** — not derived from area/density, just relocated from a ship-level literal to a component field:
+
+```gdscript
+func get_total_rating(sys_type: String, field: String) -> float:
+    for c in ship_components:
+        if c["type"] == sys_type and is_component_powered(c["id"]):
+            total += c.get(field, 0.0) * get_component_health_ratio(c["id"])
+    return total
+
+func get_ship_max_thrust() -> float: return get_total_rating("engines", "thrust_rating")
+func get_ship_max_torque() -> float: return get_total_rating("engines", "torque_rating")
+```
+
+`get_total_power_rating` becomes a thin wrapper over the same generic helper. Today's values carry over unchanged as field values (Frigate's `engine_main`: `thrust_rating: 5000.0, torque_rating: 10000.0`; Missile's: `2991.0, 435.65`) — zero behavior change, just relocated. The `var max_thrust`/`var max_torque` ship-level vars are gone entirely.
+
+Two real effects: (1) a dual-engine ship's total thrust/torque now correctly degrades by exactly the dead engine's contribution instead of one ship-level constant having no idea how many engines exist; (2) `get_power_ratio` is no longer used to scale `max_thrust`/`max_torque` — `active_max_thrust`/`active_max_torque` are the direct (already health/power-weighted) sums. `get_power_ratio` didn't disappear though — it's still the right tool for genuinely *normalized* 0-1 ratios that aren't tied to a summed absolute quantity: reactor heat-dissipation scaling (`heat_dissipation_rate * get_power_ratio("reactor")`) keeps using it, since `heat_dissipation_rate` has no per-component "rating" of its own to sum instead. (`engine_inefficiency_mult` moved off `get_power_ratio` too — see below, same reasoning as thrust/torque: once there's a per-component rating to key off, compute it per-component instead of from the fleet-wide ratio.)
+
+### Engine and reactor heat are also per-component now, not pooled
+
+Same bug class as the `em_emission` pooled-overwrite fix from earlier in M1b, just not caught the first time: the heat/EM dispatch loop wrote a single ship-wide `engine_heat` value (and `reactor_heat` for reactors) into *every* component of that type — invisible with exactly one engine/reactor per ship, wrong the moment there are two. Fixed both sides by computing each component's own heat contribution, apportioned by its share of the ship-wide total, with its *own* health driving its *own* share instead of a fleet-wide average:
+
+```gdscript
+func _engine_heat_contribution(comp, throttle, applied_torque, max_torque_now, ship_max_thrust) -> float:
+    if not is_component_powered(comp["id"]) or ship_max_thrust <= 0.0:
+        return 0.0
+    var ratio = get_component_health_ratio(comp["id"])
+    var inefficiency = max(1.0, 1.0 / max(0.1, ratio))
+    var thrust_share = (comp.get("thrust_rating", 0.0) * ratio) / ship_max_thrust
+    # ... throttle/torque heat terms, each scaled by inefficiency * thrust_share
+
+func _reactor_heat_contribution(comp, reactor_heat_total, ship_reactor_rating) -> float:
+    if not is_component_powered(comp["id"]) or ship_reactor_rating <= 0.0:
+        return 0.0
+    var ratio = get_component_health_ratio(comp["id"])
+    var reactor_share = (comp.get("power_rating", 0.0) * ratio) / ship_reactor_rating
+    return reactor_heat_total * reactor_share
+```
+
+The reactor version is simpler — no inefficiency term, since the existing `reactor_heat` formula (`2.0 * subsystems["reactor"]["power"]`) never depended on reactor health to begin with, just the slider. Both denominators (`ship_max_thrust`, `ship_reactor_rating`) come from the *health-weighted* sums (`get_ship_max_thrust()`, `get_total_power_rating("reactor")`), not the raw rated totals — that's what makes each share reduce to exactly `1.0` for any ship with exactly one component of that type (every ship today), reproducing the old pooled formulas bit-for-bit regardless of that component's health. Confirmed by the regression suite, zero behavior change today; only matters once a dual-engine or dual-reactor ship exists.
+
+### Toward a ship design validator
+
+`ship_is_the_parts.md`'s validator concept ("each ship design has to meet a baseline set of performance metrics to be valid") is a different, lighter-weight question from the derivation above — it's not "compute `thrust_rating` from the engine's size," it's "check that whatever `thrust_rating` was authored falls in a *plausible band* given the engine component's size." "More engine mass should mean more acceleration" becomes a bounds check on **specific thrust** (`thrust_rating / engine_component_mass`), not a strict equation:
+
+| | Engine mass | `thrust_rating` | Specific thrust |
+|---|---|---|---|
+| Frigate | 3.60 | 5000.0 | 1388 |
+| Missile | 1.44 | 2991.0 | 2076 |
+
+Missile's engine is ~1.5x more thrust-efficient per unit mass than Frigate's — plausible (small specialized hardware beating a generalist platform gram-for-gram), not an order-of-magnitude red flag. A validator rule like "specific thrust must stay within some tunable band of a baseline" would pass both ships today without either being hand-derived from the other — exactly the "roughly the right shape, not perfect 1:1" bar the doc's validator concept calls for. Not built yet; this is the worked example that would seed it. The same shape of check extends naturally to reactor (`power_rating / mass`) and to the doc's own weapon-hardpoint-sizing example ("a small missile launcher needs to be 3×3×7 cells, but any larger gets more capacity per cell").

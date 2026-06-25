@@ -9,6 +9,33 @@ const WeaponBehaviorRegistry = preload("res://scripts/components/weapon_behavior
 # same density naturally come out lighter.
 const MASS_SCALE := 100.0 / 55500.0
 
+# Inertia is likewise derived (point-mass approximation: sum of each component's
+# mass x squared distance from ship center). Calibrated so the default Frigate
+# loadout's raw sum (~40422.30) reproduces its original flat inertia of 1000.0.
+const INERTIA_SCALE := 1000.0 / 40422.2973
+
+# Combat heat from take_damage() decays at this rate (per second) instead of
+# being overwritten outright by the per-frame heat/EM dispatch loop below --
+# see _decay_damage_heat().
+const DAMAGE_HEAT_DECAY_RATE := 20.0
+
+# A damaged engine's EM baseline still drops with health (less power, less
+# output -- physically right), but damage also adds a rectified oscillation
+# on top so "damaged" reads as running rough, not just quieter. Frequency
+# rises with damage but stays under 1Hz even at 100% so it's a player-visible
+# pulse rather than aliasing into noise against sensor refresh rates -- see
+# _engine_damage_oscillation().
+const ENGINE_OSC_FREQ_BASE := 0.2   # Hz, lightly-damaged flicker rate (~5s period)
+const ENGINE_OSC_FREQ_RANGE := 0.6  # Hz, added at 100% damage -> max 0.8Hz (~1.25s period)
+const ENGINE_OSC_GAIN := 1.0        # crest height relative to power_rating at 100% damage
+
+# A reactor crossing from alive to destroyed fires a one-shot EM "whiteout"
+# scaled to its own power_rating (so Missile's tiny capacitor and Frigate's
+# full reactor both decay over the same duration, not the same magnitude --
+# see _update_reactor_whiteout()).
+const REACTOR_WHITEOUT_MULTIPLIER := 5.0 # crest height relative to power_rating
+const REACTOR_WHITEOUT_DURATION := 1.5   # seconds to decay to zero
+
 var owner_id: int = -1
 
 func _init() -> void:
@@ -24,8 +51,6 @@ var target_heading: float = 0.0
 var steering_mode: int = 0 # 0 = Smooth, 1 = Combat
 var linear_mode: int = 0 # 0 = Throttle, 1 = Velocity
 
-var max_thrust: float = 5000.0
-var max_torque: float = 10000.0
 var max_omega: float = 2.0
 var max_speed: float = 1000.0
 var iff_tags: Array = []
@@ -52,7 +77,7 @@ var ship_components: Array = [
 	{"id": "hull_aft", "type": "hull", "rect": Rect2(-30, -15, 15, 30), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 
 	{"id": "reactor_core", "type": "reactor", "rect": Rect2(-15, -5, 10, 10), "health": 200.0, "max_health": 200.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 100.0},
-	{"id": "engine_main", "type": "engines", "rect": Rect2(-35, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 100.0},
+	{"id": "engine_main", "type": "engines", "rect": Rect2(-35, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 100.0, "thrust_rating": 5000.0, "torque_rating": 10000.0},
 
 	# Sensors: each logical sensor is its own physical hardpoint (1:1), replacing the old
 	# hp_sensor_fwd/hp_sensor_omni boxes that pooled 5 sensors behind a guessed "parent" id.
@@ -192,18 +217,149 @@ func get_ship_mass() -> float:
 		total += area * c["density"] * MASS_SCALE
 	return total
 
-func get_total_power_rating(sys_type: String) -> float:
+# Point-mass approximation: treats each component as a point mass at its rect
+# centroid, ignores each box's own rotational inertia about its own center.
+# Close enough for "roughly the right shape" -- not meant to be exact physics.
+func get_ship_inertia() -> float:
+	var total = 0.0
+	for c in ship_components:
+		var area = c["rect"].size.x * c["rect"].size.y
+		var mass = area * c["density"] * MASS_SCALE
+		var centroid = c["rect"].position + c["rect"].size / 2.0
+		total += mass * centroid.length_squared()
+	return total * INERTIA_SCALE
+
+# Generic "sum a rating field across components of a type" helper -- powers
+# get_total_power_rating, get_ship_max_thrust, get_ship_max_torque, etc.
+# Weighted by health and gated by powered state, same as get_sys_health.
+func get_total_rating(sys_type: String, field: String) -> float:
 	var total = 0.0
 	for c in ship_components:
 		if c["type"] == sys_type and is_component_powered(c["id"]):
-			total += c.get("power_rating", 0.0) * get_component_health_ratio(c["id"])
+			total += c.get(field, 0.0) * get_component_health_ratio(c["id"])
 	return total
 
-func get_max_power_rating(sys_type: String) -> float:
+func get_max_rating(sys_type: String, field: String) -> float:
 	var total = 0.0
 	for c in ship_components:
 		if c["type"] == sys_type:
-			total += c.get("power_rating", 0.0)
+			total += c.get(field, 0.0)
+	return total
+
+func get_total_power_rating(sys_type: String) -> float:
+	return get_total_rating(sys_type, "power_rating")
+
+func get_max_power_rating(sys_type: String) -> float:
+	return get_max_rating(sys_type, "power_rating")
+
+# thrust_rating/torque_rating are authored per-engine-component fields, summed
+# the same way power_rating is -- not derived from area/density, since that
+# breaks ship-to-ship balance ratios that were deliberately tuned (see M1b
+# appendix). A dual-engine ship's total degrades correctly if one dies.
+func get_ship_max_thrust() -> float:
+	return get_total_rating("engines", "thrust_rating")
+
+func get_ship_max_torque() -> float:
+	return get_total_rating("engines", "torque_rating")
+
+# This engine's own share of the ship-wide throttle/torque heat -- apportioned
+# by its share of total live thrust, with its own (not the fleet-wide) health
+# ratio driving inefficiency. Reduces to "ship-wide heat, thrust_share = 1.0"
+# for any ship with exactly one engine (every ship today).
+func _engine_heat_contribution(comp: Dictionary, throttle: float, applied_torque: float, max_torque_now: float, ship_max_thrust: float) -> float:
+	if not is_component_powered(comp["id"]) or ship_max_thrust <= 0.0:
+		return 0.0
+	var ratio = get_component_health_ratio(comp["id"])
+	var inefficiency = max(1.0, 1.0 / max(0.1, ratio))
+	var thrust_share = (comp.get("thrust_rating", 0.0) * ratio) / ship_max_thrust
+	var h = abs(throttle) * 10.0 * subsystems["engines"]["power"] * inefficiency * thrust_share
+	h += (abs(applied_torque) / max(1.0, max_torque_now)) * 5.0 * subsystems["engines"]["power"] * inefficiency * thrust_share
+	return h
+
+# Same fix as _engine_heat_contribution, for reactors: apportion the ship-wide
+# slider-driven reactor heat by each reactor's share of total live power_rating
+# instead of pooling the same value into every reactor component.
+func _reactor_heat_contribution(comp: Dictionary, reactor_heat_total: float, ship_reactor_rating: float) -> float:
+	if not is_component_powered(comp["id"]) or ship_reactor_rating <= 0.0:
+		return 0.0
+	var ratio = get_component_health_ratio(comp["id"])
+	var reactor_share = (comp.get("power_rating", 0.0) * ratio) / ship_reactor_rating
+	return reactor_heat_total * reactor_share
+
+# Rectified, damage-scaled oscillation added on top of an engine's
+# proportional-to-health EM baseline. Zero at full health; amplitude AND
+# frequency both rise with damage (see ENGINE_OSC_* above). Phase is its own
+# running accumulator (not wall-clock time) so the stutter restarts cleanly
+# whenever a fresh injury starts it back up, instead of phase depending on
+# how long the ship has existed.
+func _engine_damage_oscillation(comp: Dictionary, health_ratio: float, delta: float) -> float:
+	var damage_ratio = 1.0 - health_ratio
+	if damage_ratio <= 0.0:
+		comp["em_osc_phase"] = 0.0
+		return 0.0
+	var osc_freq = ENGINE_OSC_FREQ_BASE + damage_ratio * ENGINE_OSC_FREQ_RANGE
+	var phase = comp.get("em_osc_phase", 0.0) + TAU * osc_freq * delta
+	comp["em_osc_phase"] = phase
+	return absf(sin(phase)) * damage_ratio * comp.get("power_rating", 0.0) * ENGINE_OSC_GAIN
+
+# One-shot "reactor destroyed" EM whiteout: triggers once when health crosses
+# from alive to dead, then decays over REACTOR_WHITEOUT_DURATION regardless of
+# reactor size (a fixed decay-per-second constant would make bigger reactors'
+# pulses linger longer for no reason).
+func _update_reactor_whiteout(comp: Dictionary, delta: float) -> float:
+	if comp.get("_prev_health", comp["health"]) > 0.0 and comp["health"] <= 0.0:
+		var magnitude = comp.get("power_rating", 0.0) * REACTOR_WHITEOUT_MULTIPLIER
+		comp["em_pulse"] = magnitude
+		comp["_em_pulse_decay_rate"] = magnitude / REACTOR_WHITEOUT_DURATION
+	comp["_prev_health"] = comp["health"]
+	var pulse = max(0.0, comp.get("em_pulse", 0.0) - comp.get("_em_pulse_decay_rate", 0.0) * delta)
+	comp["em_pulse"] = pulse
+	return pulse
+
+# Decays a component's combat-damage heat burst (from take_damage()) and
+# returns the remaining amount so callers can add it on top of their own
+# steady-state heat instead of it being clobbered outright.
+func _decay_damage_heat(comp: Dictionary, delta: float) -> float:
+	var damage_heat = max(0.0, comp.get("damage_heat", 0.0) - DAMAGE_HEAT_DECAY_RATE * delta)
+	comp["damage_heat"] = damage_heat
+	return damage_heat
+
+# EM emission pattern is a function of component type, not an authored field:
+# sensors and weapons already carry their own heading/arc_width (used for
+# sensing/engagement arcs), so they emit directionally through that same
+# cone for free. Everything else (reactor, engine, passive leakage) has no
+# natural facing and stays omnidirectional.
+func _is_directional_emitter(comp: Dictionary) -> bool:
+	return comp["type"] == "sensors" or comp["type"] == "weapons"
+
+# How much of one component's em_emission a receiver at angle_from_target
+# (world-space angle from the receiver back to the emitting ship) actually
+# sees, given the emitting ship's rotation. Omni sources use the existing
+# rear-aspect dipole bias; directional sources (sensors/weapons) fall off
+# across their own mount arc, same shape as the old sensor-only cone code.
+func _received_em_power(comp: Dictionary, target_rotation: float, angle_from_target: float) -> float:
+	var em_emission = comp.get("em_emission", 0.0)
+	if em_emission <= 0.0:
+		return 0.0
+	if not _is_directional_emitter(comp):
+		var relative_angle = angle_from_target - target_rotation
+		var rear_bias = 1.0 + 0.5 * max(0.0, cos(relative_angle + PI))
+		return em_emission * rear_bias
+	var comp_heading = target_rotation + comp.get("heading", 0.0)
+	var arc = comp.get("arc_width", TAU)
+	var diff = abs(wrapf(angle_from_target - comp_heading, -PI, PI))
+	if diff > arc / 2.0:
+		return 0.0
+	return em_emission * (1.0 - diff / (arc / 2.0))
+
+# Sums received EM across every emitter a target's get_signature() exposes,
+# replacing the old "one rear-biased scalar + sensor_config-only cone spikes"
+# split with one consistent per-component pass.
+func _total_received_em(sig: Dictionary, angle_from_target: float) -> float:
+	var target_rotation = sig.get("rot", 0.0)
+	var total = 0.0
+	for comp in sig.get("em_emitters", []):
+		total += _received_em_power(comp, target_rotation, angle_from_target)
 	return total
 
 # Fraction of rated power currently available for sys_type (0 if no such
@@ -334,7 +490,10 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 						var heat_modifier = 0.5 if damage_type == "laser" else 0.05
 						var heat_generated = dmg_absorbed * heat_modifier
 						
-						comp["heat"] = comp.get("heat", 0.0) + heat_generated
+						# Burst lives in its own field and decays over time (see
+						# _decay_damage_heat) instead of comp["heat"], which the
+						# per-frame dispatch loop below recomputes from scratch.
+						comp["damage_heat"] = comp.get("damage_heat", 0.0) + heat_generated
 						current_heat += heat_generated
 						remaining_damage -= dmg_absorbed
 			
@@ -385,6 +544,7 @@ func get_signature() -> Dictionary:
 		"vel": linear_velocity,
 		"sensors": active_sensor_sweeps,
 		"sensor_config": get_components_by_type("sensors"),
+		"em_emitters": get_components_by_type("reactor") + get_components_by_type("engines") + get_components_by_type("sensors") + get_components_by_type("weapons"),
 		"contacts": active_contacts
 	}
 
@@ -395,7 +555,7 @@ func _ready() -> void:
 	add_to_group("ships")
 
 	mass = get_ship_mass()
-	inertia = 1000.0
+	inertia = get_ship_inertia()
 	gravity_scale = 0.0
 	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
 	linear_damp = 0.0 # No drag in space
@@ -499,7 +659,7 @@ func _physics_process(delta: float) -> void:
 	var forward = Vector2.RIGHT.rotated(rotation)
 	var current_forward_speed = linear_velocity.dot(forward)
 	
-	var active_max_thrust = max_thrust * get_power_ratio("engines")
+	var active_max_thrust = get_ship_max_thrust()
 
 	if linear_mode == 0:
 		# Direct Throttle Control
@@ -541,13 +701,14 @@ func _physics_process(delta: float) -> void:
 	# Time-Optimal Rotational Controller (Square-root curve braking)
 	var angle_diff = wrapf(target_heading - rotation, -PI, PI)
 	
-	var active_engine_efficiency = get_power_ratio("engines") * subsystems["engines"]["power"]
-	
+	var engine_power_slider = subsystems["engines"]["power"]
+	var ship_max_torque = get_ship_max_torque()
+
 	var torque = 0.0
 	var active_max_torque = 0.0
-	if active_engine_efficiency > 0.0:
-		active_max_torque = (max_torque if steering_mode == 1 else max_torque * 0.2) * active_engine_efficiency
-		var active_max_omega = (max_omega if steering_mode == 1 else max_omega * 0.25) * active_engine_efficiency
+	if ship_max_torque > 0.0 and engine_power_slider > 0.0:
+		active_max_torque = (ship_max_torque if steering_mode == 1 else ship_max_torque * 0.2) * engine_power_slider
+		var active_max_omega = (max_omega if steering_mode == 1 else max_omega * 0.25) * get_power_ratio("engines") * engine_power_slider
 		
 		var alpha_max = active_max_torque / inertia
 		
@@ -596,22 +757,25 @@ func _physics_process(delta: float) -> void:
 	if is_multiplayer_authority():
 		var heat_gen = 0.0
 		var reactor_heat = 2.0 * subsystems["reactor"]["power"]
-		var engine_inefficiency_mult = 1.0
-		var engine_ratio = get_power_ratio("engines")
-		if engine_ratio > 0.0:
-			engine_inefficiency_mult = max(1.0, 1.0 / max(0.1, engine_ratio))
-			
-		var engine_heat = abs(actual_throttle) * 10.0 * subsystems["engines"]["power"] * engine_inefficiency_mult
-		engine_heat += (abs(torque) / max(1.0, active_max_torque)) * 5.0 * subsystems["engines"]["power"] * engine_inefficiency_mult
-		
+		var ship_reactor_rating = get_total_power_rating("reactor")
+		var ship_max_thrust = get_ship_max_thrust()
+
+		var total_reactor_heat = 0.0
+		for rct in get_components_by_type("reactor"):
+			total_reactor_heat += _reactor_heat_contribution(rct, reactor_heat, ship_reactor_rating)
+
+		var total_engine_heat = 0.0
+		for eng in get_components_by_type("engines"):
+			total_engine_heat += _engine_heat_contribution(eng, actual_throttle, torque, active_max_torque, ship_max_thrust)
+
 		var passive_heat = 0.0
 		var passive_em = 0.0
 		for comp in ship_components:
 			if comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull":
 				passive_heat += 0.1
 				passive_em += 0.5
-		
-		heat_gen = reactor_heat + engine_heat + passive_heat
+
+		heat_gen = total_reactor_heat + total_engine_heat + passive_heat
 		current_heat_gen = heat_gen
 		
 		current_heat += heat_gen * delta
@@ -634,28 +798,37 @@ func _physics_process(delta: float) -> void:
 				if s.get("active", true):
 					sensor_em += s.get("base_em_emission", 0.0) * sensor_power_ratio
 		
-		em_signature = current_em + sensor_em + passive_em
-		
 		for comp in ship_components:
 			var b_heat = 0.1 if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
 			var b_em = 0.5 if (comp.get("powered_on", true) and comp.get("health", 0.0) > 0.0 and comp["type"] != "hull") else 0.0
 			
 			if comp["type"] == "reactor":
-				comp["heat"] = 10.0 + reactor_heat
-				comp["em_emission"] = comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"])
+				comp["heat"] = 10.0 + _reactor_heat_contribution(comp, reactor_heat, ship_reactor_rating) + _decay_damage_heat(comp, delta)
+				comp["em_emission"] = comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"]) + _update_reactor_whiteout(comp, delta)
 			elif comp["type"] == "engines":
-				comp["heat"] = b_heat + engine_heat
-				comp["em_emission"] = b_em + abs(actual_throttle) * comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"])
+				comp["heat"] = b_heat + _engine_heat_contribution(comp, actual_throttle, torque, active_max_torque, ship_max_thrust) + _decay_damage_heat(comp, delta)
+				var engine_health_ratio = get_component_health_ratio(comp["id"])
+				comp["em_emission"] = b_em + abs(actual_throttle) * comp.get("power_rating", 0.0) * engine_health_ratio + _engine_damage_oscillation(comp, engine_health_ratio, delta)
 			elif comp["type"] == "sensors":
-				comp["heat"] = b_heat + 5.0
+				comp["heat"] = b_heat + 5.0 + _decay_damage_heat(comp, delta)
 				comp["em_emission"] = b_em + comp.get("base_em_emission", 0.0) * sensor_power_ratio
 			elif comp["type"] == "weapons":
-				comp["heat"] = b_heat
+				comp["heat"] = b_heat + _decay_damage_heat(comp, delta)
 				WeaponBehaviorRegistry.get_behavior(comp["weapon_type"]).tick(self, comp, delta)
 				comp["em_emission"] += b_em
 			else:
-				comp["heat"] = 0.0
+				# Hull and other non-generating types have no steady-state heat
+				# of their own, but still carry combat-damage burst + decay.
+				comp["heat"] = _decay_damage_heat(comp, delta)
 				comp["em_emission"] = 0.0
+
+		# Computed after the loop above so weapon fire pulses (just updated by
+		# WeaponBehavior.tick()) are reflected the same frame instead of lagging
+		# by one tick.
+		var weapon_em = 0.0
+		for w in get_components_by_type("weapons"):
+			weapon_em += w.get("em_emission", 0.0)
+		em_signature = current_em + sensor_em + passive_em + weapon_em
 
 	# Sensor Sweeps
 	var active_sensor_efficiency = (get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))) * subsystems["sensors"]["power"]
@@ -812,43 +985,33 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 			
 			var dist = origin.distance_to(collider.position)
 
-			if sensor.get("sensor_type", "active") == "passive_em":
-				var em_power = sig.get("em_noise", 0.0)
-
-				# Rear-aspect EM bias
-				var angle_from_target = (origin - collider.position).angle()
-				var relative_angle = angle_from_target - collider.rotation
-				var rear_bias = 1.0 + 0.5 * max(0.0, cos(relative_angle + PI))
-				em_power *= rear_bias
-
-				# Active Sensor EM Spikes
-				var target_sensors = sig.get("sensor_config", [])
-				for s in target_sensors:
-					if s.get("sensor_type", "") == "active" and s.get("active", true):
-						var s_arc = s.get("arc_width", TAU)
-						var s_heading = s.get("heading", 0.0)
-						var diff = abs(wrapf(angle_from_target - s_heading, -PI, PI))
-						if diff <= s_arc / 2.0:
-							var s_power = s.get("em_emission", 0.0)
-							em_power += s_power * (1.0 - diff/(s_arc/2.0))
-
 			var ray_query = PhysicsRayQueryParameters2D.create(origin, collider.position)
 			ray_query.exclude = [self]
 			var ray_res = space_state.intersect_ray(ray_query)
 			if ray_res and ray_res.collider != collider:
 				continue # Blocked by obstacle
 
+			# Heat (sig["heat"]) intentionally has NO distance/direction falloff
+			# model, unlike EM above -- an active sensor that detects the target
+			# at all (range/arc/LOS) reports its true current_heat unmodified.
+			# This is a deliberate scope cut for now, not an oversight: give heat
+			# the same observation-fidelity treatment as EM later if it's wanted.
 			if sensor.get("sensor_type", "active") == "passive_em":
-				var em_power = sig.get("em_noise", 0.0)
-				# Rear-aspect EM bias
+				# Sums every emitter's own contribution (omni rear-bias or
+				# directional cone falloff per _received_em_power) instead of
+				# one rear-biased scalar plus a sensor-only cone bolt-on.
 				var angle_from_target = (origin - collider.position).angle()
-				var relative_angle = angle_from_target - collider.rotation
-				var rear_bias = 1.0 + 0.5 * max(0.0, cos(relative_angle + PI))
-				em_power *= rear_bias
+				var em_power = _total_received_em(sig, angle_from_target)
 
 				var received_em = em_power * (10000.0 / max(10000.0, dist))
 				if received_em < 15.0:
 					continue # Passive EM only detects targets above noise floor (after falloff)
+
+				# Report what was actually received (direction + distance
+				# falloff applied), not the raw broadcast value -- otherwise
+				# the directional model only ever gated detection, never what
+				# gets classified/displayed once detected.
+				sig["em_noise"] = received_em
 
 			var angle = (collider.position - origin).angle()
 
@@ -869,12 +1032,10 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 				sig["instance_id"] = collider.get_instance_id()
 				if sensor.get("sensor_type", "active") == "passive_em":
 					sig.erase("cross_section")
-					sig.erase("heat")
+					sig.erase("heat") # passive EM doesn't sense heat at all, by design
 					sig.erase("density")
-					# em_power calculation was applied above, but it's out of scope here.
-					# Let's apply it directly to sig["em_noise"] in the first block, or we can just use sig["em_noise"] since we don't have rear aspect here... wait!
-					# I'll just use the raw signature em_noise for the bin data. Rear bias isn't saved in the bin? Actually, it shouldn't be.
-					sig["em_noise"] = sig.get("em_noise", 0.0)
+					# sig["em_noise"] is already the received (direction +
+					# distance falloff applied) value set above.
 					
 				bins[bin_idx].append(sig)
 	

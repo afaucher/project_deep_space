@@ -9,9 +9,10 @@ var weapon_buttons: Dictionary = {}
 var target_info_label: Label
 var weapon_grid: GridContainer
 var spider_chart: Control
+var history_graph: Control
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(300, 200)
+	custom_minimum_size = Vector2(460, 200)
 	
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.1, 0.05, 0.05, 0.8)
@@ -53,11 +54,19 @@ func _ready() -> void:
 	target_info_label.add_theme_font_size_override("font_size", 12)
 	vbox.add_child(target_info_label)
 	
+	var charts_hbox = HBoxContainer.new()
+	charts_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(charts_hbox)
+
 	spider_chart = load("res://scripts/spider_chart.gd").new()
 	spider_chart.custom_minimum_size = Vector2(160, 160)
-	spider_chart.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	vbox.add_child(spider_chart)
+	charts_hbox.add_child(spider_chart)
 	spider_chart.hide()
+
+	history_graph = load("res://scripts/timeseries_graph.gd").new()
+	history_graph.custom_minimum_size = Vector2(220, 160)
+	charts_hbox.add_child(history_graph)
+	history_graph.hide()
 
 func _create_weapon_ui(grid: GridContainer, w_id: String, w_name: String) -> void:
 	var info_vbox = VBoxContainer.new()
@@ -87,8 +96,12 @@ func _create_weapon_ui(grid: GridContainer, w_id: String, w_name: String) -> voi
 
 func update_data(packet: Dictionary, target_id: String) -> void:
 	current_state = packet
+	# Switching targets (including to/from "no target") shows a fresh history
+	# instead of graphing a mix of two different ships' signatures.
+	if target_id != selected_contact_id and is_instance_valid(history_graph):
+		history_graph.reset()
 	selected_contact_id = target_id
-	
+
 	if current_state.has("weapons"):
 		var weapons = current_state["weapons"] # Array of ship_components weapon entries
 
@@ -170,9 +183,15 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 	if selected_contact_id == "":
 		target_info_label.text = "NO TARGET LOCKED"
 		if is_instance_valid(spider_chart): spider_chart.hide()
+		if is_instance_valid(history_graph): history_graph.hide()
 	else:
 		if current_state.has("contacts") and current_state["contacts"].has(selected_contact_id):
 			var c = current_state["contacts"][selected_contact_id]
+			# c["signature"] is OUR OWN sensors' fused, lerp-smoothed track data
+			# (Ship._run_sensor_sweep + the correlation lerp in _physics_process),
+			# not the target's actual current_heat/em_signature -- the spider
+			# chart and history graph below are both observed readings, same as
+			# this label.
 			var sig = c.get("signature", {"heat": 0.0, "em_noise": 0.0, "cross_section": 1.0, "density": 0.0})
 			var speed = c.get("vel", Vector2.ZERO).length()
 			var dist = current_state["pos"].distance_to(c["pos"]) if current_state.has("pos") and c.has("pos") else 0.0
@@ -182,7 +201,11 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 			if is_instance_valid(spider_chart):
 				spider_chart.set_values(sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0))
 				spider_chart.show()
+			if is_instance_valid(history_graph):
+				history_graph.push_sample(sig.get("heat", 0.0), sig.get("em_noise", 0.0))
+				history_graph.show()
 		else:
 			target_info_label.text = "TARGET LOST"
 			if is_instance_valid(spider_chart): spider_chart.hide()
+			if is_instance_valid(history_graph): history_graph.hide()
 

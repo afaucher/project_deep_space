@@ -1,8 +1,17 @@
 class_name MissileBehavior
 extends "res://scripts/components/weapon_behavior.gd"
 
+# Smaller and shorter-lived than LaserBehavior's -- a launch flash, not a
+# sustained beam.
+const FIRE_EM_SPIKE := 30.0
+const EM_PULSE_DECAY := 15.0 # per second
+
 func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_contact_id: String) -> void:
 	_consume_default(comp)
+	# Railgun-style launcher: an electromagnetic launch pulse, but no waste
+	# heat the way a laser's beam generates -- deliberately no damage_heat
+	# addition here (contrast with LaserBehavior.execute_fire()).
+	comp["em_pulse"] = FIRE_EM_SPIKE
 
 	if ship.multiplayer.get_unique_id() == ship.owner_id:
 		ship.sfx_missile.play()
@@ -53,3 +62,7 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 	proj.linear_velocity = ship.linear_velocity + (Vector2.RIGHT.rotated(weapon_launch_angle) * 200.0)
 	proj.add_collision_exception_with(ship)
 	main_node.add_child(proj, true)
+
+func tick(ship: Ship, comp: Dictionary, delta: float) -> void:
+	comp["em_pulse"] = max(0.0, comp.get("em_pulse", 0.0) - EM_PULSE_DECAY * delta)
+	comp["em_emission"] = comp.get("base_em_emission", 0.0) + comp["em_pulse"]
