@@ -7,6 +7,7 @@ class_name Frigate
 # duplicate(true) still deep-copies it (and initializes iff_tags /
 # active_contacts).
 func _init() -> void:
+	ship_tier = ComponentSpec.Tier.MEDIUM
 	ship_components = [
 		# Layout relative to center (0,0). Forward +X, Right +Y
 		{"id": "hull_fwd", "type": "hull", "rect": Rect2(15, -15, 15, 30), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},

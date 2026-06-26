@@ -135,6 +135,9 @@ export.
 
 ## M9b — Component spec chart + tier constants + validator
 
+**Full design (tier ladder, exact spec-chart numbers, validator rules, test
+spec) in [m9b_spec_chart_design.md](m9b_spec_chart_design.md).** In progress.
+
 **Why:** this is the doc's central ask (#3, #4) — "baseline sizes at each tier
 and levels of spec progression between tiers… validate designs against the
 spec chart for consistency."
@@ -307,6 +310,10 @@ M9e Sweep parallelization  [independent — can land any time, unblocks M9f's gr
 M9a and M9e have no interdependency and are both cheap/high-value — either can
 go first. M9b is the keystone everything downstream validates against.
 
+**M10 (sandbox spawn UI) is pulled forward** to land alongside / just before
+M9c — it's the test instrument that makes each authored ship immediately
+playable. See [m10_sandbox_spawn_design.md](m10_sandbox_spawn_design.md).
+
 ---
 
 ## Deferred to M10+ (explicitly out of M9 scope)
@@ -315,8 +322,9 @@ go first. M9b is the keystone everything downstream validates against.
   defence pod, station, asteroid station. (* buoy exists as a separate
   `RigidBody2D`, not a `Ship` subclass — folding it into the component model is
   its own question.)
-- **Sandbox / ship-switcher** — pick-your-ship + spawn friendly/enemy/
-  neutral-beacon/pirate-FFA. UI + spawn-director work; needs the catalog first.
+- **~~Sandbox / ship-switcher~~ → promoted to M10** (friendly/enemy/pirate
+  subset). Neutral/beacon stays deferred — it needs M7 (IFF beacons). See
+  [m10_sandbox_spawn_design.md](m10_sandbox_spawn_design.md).
 - **Docking mechanics** — station docking (doc #5); no existing system, a real
   new mechanic, lowest priority.
 - **Cargo as a system** — shuttles/freighters imply cargo capacity as a real
