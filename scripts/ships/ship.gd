@@ -137,17 +137,29 @@ var ship_components: Array = [
 		"sensor_type": "active", "active": true, "range": 40000.0, "arc_width": PI / 6.0, "num_bins": 30, "refresh_interval": 0.5, "timer": 0.0, "heading": 0.0},
 	{"id": "omni_main", "type": "sensors", "rect": Rect2(-5, -5, 5, 5), "health": 40.0, "max_health": 40.0, "density": 20.0, "heat": 0.0, "base_em_emission": 10.0, "em_emission": 10.0, "switchable": true, "powered_on": true,
 		"sensor_type": "active", "active": true, "range": 40000.0, "arc_width": TAU, "num_bins": 36, "refresh_interval": 2.0, "timer": 0.0, "heading": 0.0},
-	# Tuned as the ship's close-in fire-control sensor: bin_angle = arc_width/
-	# num_bins sets the angular quantization of merged["pos"] in
-	# _run_sensor_sweep, so going from 180 to 36000 bins takes positional
-	# error at typical PD range (~4000) from ~140 units (bigger than a
-	# missile's own ~25-unit hitbox -- a guaranteed miss) down to ~0.7 units.
-	# Faster refresh (0.25s -> 0.05s) also bounds how far the per-tick
-	# vel*delta dead-reckoning can drift on a noisy vel reading between
-	# fixes. Extra bins/refreshes are free -- bins are sparse-allocated per
-	# detection, not pre-sized arrays.
+	# Tuned as the ship's close-in fire-control sensor. Two independent fixes,
+	# confirmed complementary via a 2x2 ablation (bins x refresh) across the
+	# missile-vs-PD tactical sim's full range grid:
+	#  - bin_angle = arc_width/num_bins sets the angular quantization of
+	#    merged["pos"] in _run_sensor_sweep. 180->36000 bins takes positional
+	#    error at ~4000 range from ~140 units (bigger than a missile's own
+	#    ~25-unit hitbox -- a guaranteed miss) down to ~0.7 units. Bins alone
+	#    fixed short/medium range (2000-5000) but made long range (7000)
+	#    WORSE than baseline: by then the missile is moving fast enough that
+	#    a precise-but-stale reading drifts past the hitbox before the next
+	#    correction, via the dead-reckoning in _physics_process.
+	#  - missile_controller.gd steers via continuous proportional navigation
+	#    (recomputes desired_heading every physics tick) -- it never holds a
+	#    straight line, so dead-reckoning between refreshes lags by however
+	#    far it can turn in one refresh window. Refresh alone (0.25s->0.0,
+	#    every physics tick) gave a modest flat improvement everywhere but
+	#    never got close to reliable on its own -- still capped by 180-bin
+	#    quantization error.
+	#  - Only with both does PD become reliably lethal (14-15/15) across the
+	#    full 2000-7000 range envelope tested. Extra bins are free regardless
+	#    -- bins are sparse-allocated per detection, not pre-sized arrays.
 	{"id": "omni_short_hi_res", "type": "sensors", "rect": Rect2(0, -5, 5, 5), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 5.0, "em_emission": 5.0, "switchable": true, "powered_on": true,
-		"sensor_type": "active", "active": true, "range": 5000.0, "arc_width": TAU, "num_bins": 36000, "refresh_interval": 0.05, "timer": 0.0, "heading": 0.0},
+		"sensor_type": "active", "active": true, "range": 5000.0, "arc_width": TAU, "num_bins": 36000, "refresh_interval": 0.0, "timer": 0.0, "heading": 0.0},
 	{"id": "passive_em", "type": "sensors", "rect": Rect2(-5, 0, 5, 5), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
 		"sensor_type": "passive_em", "active": true, "range": 80000.0, "arc_width": TAU, "num_bins": 360, "refresh_interval": 1.0, "timer": 0.0, "heading": 0.0},
 	{"id": "omni_collision", "type": "sensors", "rect": Rect2(0, 0, 5, 5), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
@@ -543,7 +555,7 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 				
 		if tmax >= tmin and tmax >= 0 and hit_box:
 			local_pos = local_pos + local_dir * max(0.0, tmin)
-			
+
 		var max_steps = _cached_max_steps
 		var current_pos = local_pos
 		

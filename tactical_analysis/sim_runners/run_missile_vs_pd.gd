@@ -69,8 +69,14 @@ func _start_scenario() -> void:
 	f_ship.owner_id = 1
 	f_ship.iff_tags = ["TEAM_A"]
 	
+	# Missiles always spawn near global bearing +PI/2 (see angle below),
+	# regardless of axis -- so "frontal" needs the ship's forward (local +X,
+	# i.e. global direction cos(rotation),sin(rotation)) pointed at that same
+	# bearing to actually be a nose-on engagement. +PI/2 does that; the
+	# previous -PI/2 pointed forward 180 degrees the other way, making
+	# "frontal" a dead-astern attack with no weapon arc covering it.
 	if config["axis"] == "frontal":
-		f_ship.rotation = -PI / 2.0
+		f_ship.rotation = PI / 2.0
 	else:
 		f_ship.rotation = 0.0
 		
