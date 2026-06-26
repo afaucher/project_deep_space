@@ -38,13 +38,55 @@ $errFile = "$PSScriptRoot\$TestName.err.log"
 if (Test-Path $logFile) { Remove-Item $logFile }
 if (Test-Path $errFile) { Remove-Item $errFile }
 
-# We run Godot headless and pass the test name as an argument
-# The main scene or a dedicated test scene will parse this and run the logic.
-$args = "--path `"$PSScriptRoot`" --headless --run-test `"$TestName`""
-$proc = Start-Process -FilePath $godotPath -ArgumentList $args -Wait -PassThru -NoNewWindow -RedirectStandardOutput $logFile -RedirectStandardError $errFile
+# We run Godot headless and pass the test name as an argument.
+#
+# Hard per-test timeout: a hung test must FAIL the build, never wedge it
+# indefinitely. test_missile_ai (and occasionally others) can flakily fail to
+# exit cleanly in headless even after get_tree().quit() -- the test logic is
+# bounded (frame-capped), so a process that's still alive well past any
+# legitimate run time is hung, not working. We use a raw .NET Process rather
+# than Start-Process so we can (a) enforce the timeout via WaitForExit(ms) and
+# (b) read ExitCode reliably alongside redirected output (Start-Process
+# -PassThru doesn't expose ExitCode once output is redirected).
+$TEST_TIMEOUT_SEC = 180
 
-$logContent = Get-Content $logFile -Raw
-$errContent = if (Test-Path $errFile) { Get-Content $errFile -Raw } else { "" }
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $godotPath
+$psi.Arguments = "--path `"$PSScriptRoot`" --headless --run-test `"$TestName`""
+$psi.UseShellExecute = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+
+$proc = New-Object System.Diagnostics.Process
+$proc.StartInfo = $psi
+[void]$proc.Start()
+$stdOutTask = $proc.StandardOutput.ReadToEndAsync()
+$stdErrTask = $proc.StandardError.ReadToEndAsync()
+
+$exitedInTime = $proc.WaitForExit($TEST_TIMEOUT_SEC * 1000)
+if (-not $exitedInTime) {
+    # Hung: kill the process so the async stdout/stderr pipes close and their
+    # ReadToEndAsync tasks complete -- only then is it safe to read .Result
+    # (reading it on a still-running process would itself block forever).
+    try { $proc.Kill() } catch {}
+    $proc.WaitForExit()
+}
+
+$logContent = $stdOutTask.Result
+$errContent = $stdErrTask.Result
+Set-Content -Path $logFile -Value $logContent
+if ($errContent -ne "") { Set-Content -Path $errFile -Value $errContent }
+
+if (-not $exitedInTime) {
+    Write-Host "`n  >>> [TEST FAILED] $TestName (TIMEOUT -- killed after ${TEST_TIMEOUT_SEC}s) <<<" -ForegroundColor Red
+    Write-Host "Test did not exit within the time budget -- treated as a hang. Partial log:"
+    Write-Host $logContent
+    if ($errContent -ne "") {
+        Write-Host "Error Output:"
+        Write-Host $errContent
+    }
+    exit 1
+}
 
 if ($proc.ExitCode -eq 0 -and $logContent -match "\[TEST PASSED\]") {
     Write-Host "`n  >>> [TEST PASSED] $TestName <<<" -ForegroundColor Green
