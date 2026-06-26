@@ -1,8 +1,12 @@
 extends Node
 
 const Ship = preload("res://scripts/ships/frigate.gd")
+const Missile = preload("res://scripts/ships/missile.gd")
+const WeaponBehaviorRegistry = preload("res://scripts/components/weapon_behavior_registry.gd")
 
 var ship: Ship
+var main_node: Node
+var target_missile: Missile
 var frames: int = 0
 var test_frame_start: int = 0
 
@@ -12,19 +16,38 @@ var passed: int = 0
 var failed: int = 0
 var total: int = 0
 
-func setup(main_node: Node) -> void:
+func setup(main: Node) -> void:
 	print("Starting Test: Damage Propagation")
-	
+
+	main_node = main
 	ship = Ship.new()
 	ship.name = "TestShip"
 	ship.owner_id = 1
 	ship.iff_tags = ["TEAM_A"]
 	ship.position = Vector2.ZERO
 	main_node.add_child(ship)
-	
+
 	_register_tests()
 	total = tests.size()
 	_start_next_test()
+
+func _spawn_target_missile(pos: Vector2, vel: Vector2) -> Missile:
+	if is_instance_valid(target_missile):
+		target_missile.queue_free()
+	target_missile = Missile.new()
+	target_missile.name = "TargetMissile"
+	target_missile.owner_id = 2
+	target_missile.iff_tags = ["TEAM_B"]
+	target_missile.position = pos
+	target_missile.linear_velocity = vel
+	main_node.add_child(target_missile)
+	return target_missile
+
+func _missile_took_damage(missile: Missile) -> bool:
+	for c in missile.ship_components:
+		if c["health"] < c["max_health"]:
+			return true
+	return false
 
 func _reset_ship() -> void:
 	ship.position = Vector2.ZERO
@@ -93,6 +116,28 @@ func _register_tests() -> void:
 					engine_hp = c["health"]
 					break
 			return _assert(engine_hp < 300.0, "Engine should take damage when hit from behind. HP=" + str(engine_hp))
+	})
+
+	tests.append({
+		"name": "Fresh Contact (No Staleness) Still Hits Normally",
+		"setup": func():
+			_reset_ship()
+			var missile = _spawn_target_missile(Vector2(10000, 0), Vector2(500, 0))
+			ship.active_contacts["TRK-TEST"] = {
+				"pos": missile.position, "vel": missile.linear_velocity, "pos_timer": 0.0,
+				"instance_id": missile.get_instance_id(), "classification": "INCOMING ORDNANCE", "last_seen_timer": 0.0
+			},
+		# Firing happens in "check" (not "setup") -- the missile's collision
+		# shape isn't registered with the physics server until its _ready()
+		# runs, which doesn't happen synchronously within the same setup()
+		# call as add_child(). By the time "check" runs (after "duration"
+		# elapsed frames), the missile is fully ready to be hit.
+		"check": func():
+			var weapon = ship.get_component("hp_fwd_laser")
+			weapon["cooldown"] = 0.0
+			weapon["ammo"] = 999
+			WeaponBehaviorRegistry.get_behavior("laser").execute_fire(ship, weapon, target_missile.position, "TRK-TEST")
+			return _assert(_missile_took_damage(target_missile), "A fresh (zero-staleness) contact should still hit normally.")
 	})
 
 func _start_next_test() -> void:

@@ -10,13 +10,13 @@ M1 Component Architecture (ship_is_the_parts)
    |        |--> M4 Sensor history UI (real-time-sensor-signal)
    |
 M3 PD Target Prioritization (point_defence)        [independent]
-M5 Missile Lost-Lock Behavior (missile_tracking_tradeoffs)  [independent, needs decision]
-   |
-   `--> M6 Multi-Ship Contact Fusion (comms)   [needs stable per-ship contact model;
-                                                 benefits from M4's signal model]
+M5 Missile Lost-Lock Behavior (missile_tracking_tradeoffs)  [skipped -- dumb-fire fallback judged sufficient]
+M6 Datalink Relay + Contact Fusion (comms Part 1)  [independent]
+   |--> M7 IFF Beacons (comms Part 2)
+M8 Text Comms (comms Part 3)                       [independent, lowest priority, needs docking/surrender mechanics first]
 ```
 
-M3 and M5 have no upstream dependency and are the cheapest, highest-value items — do them first while M1 is designed.
+M3 and M6 have no upstream dependency and were the cheapest, highest-value items — done first.
 
 ---
 
@@ -100,7 +100,7 @@ Implementation notes: items 1 and 3 landed in `weapons_panel.gd`'s TARGETING COM
 
 ---
 
-## M6 — Multi-Ship Contact Fusion / Comms Relay (`comms.md`)
+## M6 — Datalink Relay + Contact Fusion (`comms.md` Part 1) — DONE
 **Depends on:** a stable per-ship contact/sensor data model (already exists informally; M4 makes the "freshness vs. fusion" tradeoff visible to players, which should inform which fusion strategy to ship).
 
 **Scope:**
@@ -109,17 +109,42 @@ Implementation notes: items 1 and 3 landed in `weapons_panel.gd`'s TARGETING COM
 3. Start with **simplest fusion: take the freshest contact report** per target (explicitly called out as the easy first cut in the doc). Defer the recency-weighted quantile estimator approach.
 4. Defer proxied/multi-hop relay delay (A→B→C) — explicitly punted in the doc.
 
-**Touches:** new `scripts/comms_module.gd` (or similar) wired into `scripts/ships/ship.gd` contact list; `scripts/sensor_panel.gd` for display of relayed vs. direct contacts.
+**Touches:** `scripts/ships/ship.gd` (new `comms` component type, `get_comms_range()`, `_iff_tags_overlap()`, the datalink relay block in `_physics_process`), `scripts/ships/sensor_drone.gd` (longer-ranged comms array, removed the now-superseded `is_relay` flag).
 
-**Done when:** two friendly ships in line-of-sight share contacts, and a new e2e test (e.g. `test_comms_relay.gd`) verifies freshest-wins resolution.
+**Done when:** two friendly ships in line-of-sight share contacts, and a new e2e test (`test_comms_relay.gd`) verifies freshest-wins resolution.
+
+Implementation notes: comms became a real destructible/powerable component (`type: "comms"`, gated through the existing `is_component_powered()`) rather than a standalone flag, so a comms array can be knocked out or powered down like any other subsystem — replaced the old `is_relay: bool` entirely. The relay reruns from scratch every physics tick (no persistent link graph): friendly (IFF-tag overlap) + both ends' comms powered + within the *smaller* of the two ships' comms ranges + clear line-of-sight (reusing the same raycast-occlusion pattern the active sensor sweep already used). Multi-hop propagation (A→B→C) falls out for free from this re-running every tick — a contact relayed into B's `active_contacts` this frame is available for B to relay onward to C next frame, one tick of latency per hop, with no explicit delay model needed (resolves the doc's "leave this for later" punt on proxied delay as a side effect). Each source ship also injects a synthetic ground-truth self-report (zero staleness, keyed by the same instance_id-derived TRK id sensors use) so two linked friendlies always know exactly where each other are, not just what they detect on sensors — this is functionally a beacon, but IFF-gated and folded into the comms link rather than a separate system; keep that distinction sharp once M7 (below) adds a real beacon for non-team neutrals. `test_comms_relay.gd` covers 7 scenarios: relay + self-report (positive), multi-hop A→B→C (positive), blocked LOS, non-friendly IFF, destroyed receiving comms, powered-off sending comms, and out-of-range (all negative).
+
+---
+
+## M7 — IFF Beacons (`comms.md` Part 2)
+**No hard dependency on M6**, but can ride its contact-as-signal-source plumbing if beacons should also flow over the relay.
+
+**Scope:**
+1. A beacon broadcast (name + location) any ship/station can declare.
+2. Ships within range of a beacon get an exact contact trace for it, bypassing the noisy heat/EM/cross-section classification path (`classify_contact()`) entirely.
+3. Needs a real classification decision, not just code: today `classify_contact()` only knows "friendly" (shared `iff_tags`) or "unidentified" — no neutral/known-third-party bucket exists. A beacon must either inject a new classification or short-circuit to one, and that decision also affects PD/missile targeting (a neutral station shouldn't get auto-engaged as "UNIDENTIFIED").
+
+**Touches:** `scripts/ships/ship.gd` (`classify_contact()`, a new beacon component or broadcast mechanism).
+
+**Done when:** a beacon-equipped neutral ship/station is never classified `UNIDENTIFIED VESSEL` by an observer in range, validated by a new test.
+
+---
+
+## M8 — Text Comms (`comms.md` Part 3)
+**No dependency on M6/M7**, but lowest priority — it's keyed to game events that may not exist yet (docking, surrender). Needs its own design pass once those triggering systems exist; not scoped in detail here.
+
+**Scope:** docking instructions, taunts, death rattles, friendly chatter, surrender messages.
 
 ---
 
 ## Suggested execution order
 
-1. M3 (PD prioritization) — quick win, no dependencies.
-2. M5 (missile lost-lock, Approach C) — quick win, no dependencies.
-3. M1 (component architecture) — foundational, largest effort.
-4. M2 (dynamic heat/EM) — built on M1.
-5. M4 (sensor signal history UI) — built on M2.
-6. M6 (comms relay) — built on stable contact model, informed by M4.
+1. M3 (PD prioritization) — quick win, no dependencies. DONE
+2. M5 (missile lost-lock) — skipped; dumb-fire fallback judged sufficient.
+3. M1 (component architecture) — foundational, largest effort. DONE
+4. M2 (dynamic heat/EM) — built on M1. DONE
+5. M4 (sensor signal history UI) — built on M2. DONE
+6. M6 (datalink relay + contact fusion) — built on stable contact model, informed by M4. DONE
+7. M7 (IFF beacons) — built on M6's contact plumbing. Not started.
+8. M8 (text comms) — lowest priority, needs docking/surrender mechanics first. Not started.

@@ -99,7 +99,6 @@ func _init() -> void:
 	iff_tags = iff_tags.duplicate(true)
 	active_contacts = {}
 
-var is_relay: bool = false
 var target_thrust: float = 0.0
 var target_velocity: float = 0.0
 var target_heading: float = 0.0
@@ -126,14 +125,29 @@ var ship_components: Array = [
 	{"id": "reactor_core", "type": "reactor", "rect": Rect2(-15, -5, 10, 10), "health": 200.0, "max_health": 200.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 100.0},
 	{"id": "engine_main", "type": "engines", "rect": Rect2(-35, -10, 5, 20), "health": 300.0, "max_health": 300.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 100.0, "thrust_rating": 5000.0, "torque_rating": 10000.0},
 
+	# Comms: gates the datalink relay (M6) -- destroying or powering this off
+	# stops the ship both receiving and offering relayed contacts, same as
+	# any other component. "range" is the radio's own reach; a link between
+	# two ships is capped by the weaker of their two ranges.
+	{"id": "comms_array", "type": "comms", "rect": Rect2(0, -5, 5, 5), "health": 60.0, "max_health": 60.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0},
+
 	# Sensors: each logical sensor is its own physical hardpoint (1:1), replacing the old
 	# hp_sensor_fwd/hp_sensor_omni boxes that pooled 5 sensors behind a guessed "parent" id.
 	{"id": "dir_high_res", "type": "sensors", "rect": Rect2(30, -2.5, 5, 5), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "base_em_emission": 20.0, "em_emission": 20.0, "switchable": true, "powered_on": true,
 		"sensor_type": "active", "active": true, "range": 40000.0, "arc_width": PI / 6.0, "num_bins": 30, "refresh_interval": 0.5, "timer": 0.0, "heading": 0.0},
 	{"id": "omni_main", "type": "sensors", "rect": Rect2(-5, -5, 5, 5), "health": 40.0, "max_health": 40.0, "density": 20.0, "heat": 0.0, "base_em_emission": 10.0, "em_emission": 10.0, "switchable": true, "powered_on": true,
 		"sensor_type": "active", "active": true, "range": 40000.0, "arc_width": TAU, "num_bins": 36, "refresh_interval": 2.0, "timer": 0.0, "heading": 0.0},
+	# Tuned as the ship's close-in fire-control sensor: bin_angle = arc_width/
+	# num_bins sets the angular quantization of merged["pos"] in
+	# _run_sensor_sweep, so going from 180 to 36000 bins takes positional
+	# error at typical PD range (~4000) from ~140 units (bigger than a
+	# missile's own ~25-unit hitbox -- a guaranteed miss) down to ~0.7 units.
+	# Faster refresh (0.25s -> 0.05s) also bounds how far the per-tick
+	# vel*delta dead-reckoning can drift on a noisy vel reading between
+	# fixes. Extra bins/refreshes are free -- bins are sparse-allocated per
+	# detection, not pre-sized arrays.
 	{"id": "omni_short_hi_res", "type": "sensors", "rect": Rect2(0, -5, 5, 5), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 5.0, "em_emission": 5.0, "switchable": true, "powered_on": true,
-		"sensor_type": "active", "active": true, "range": 5000.0, "arc_width": TAU, "num_bins": 180, "refresh_interval": 0.25, "timer": 0.0, "heading": 0.0},
+		"sensor_type": "active", "active": true, "range": 5000.0, "arc_width": TAU, "num_bins": 36000, "refresh_interval": 0.05, "timer": 0.0, "heading": 0.0},
 	{"id": "passive_em", "type": "sensors", "rect": Rect2(-5, 0, 5, 5), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
 		"sensor_type": "passive_em", "active": true, "range": 80000.0, "arc_width": TAU, "num_bins": 360, "refresh_interval": 1.0, "timer": 0.0, "heading": 0.0},
 	{"id": "omni_collision", "type": "sensors", "rect": Rect2(0, 0, 5, 5), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
@@ -203,14 +217,15 @@ func is_sys_destroyed(sys_type: String) -> bool:
 			return false
 	return true
 
+static func _iff_tags_overlap(tags_a: Array, tags_b: Array) -> bool:
+	for tag in tags_a:
+		if tags_b.has(tag):
+			return true
+	return false
+
 static func classify_contact(signature: Dictionary, observer_iff_tags: Array) -> String:
-	var contact_tags = signature.get("iff_tags", [])
-	var is_friendly = false
-	for tag in contact_tags:
-		if observer_iff_tags.has(tag):
-			is_friendly = true
-			break
-			
+	var is_friendly = _iff_tags_overlap(signature.get("iff_tags", []), observer_iff_tags)
+
 	var cs = signature.get("cross_section", 0.0)
 	var heat = signature.get("heat", 0.0)
 	var em = signature.get("em_noise", 0.0)
@@ -265,6 +280,16 @@ func get_component_health_ratio(comp_id: String) -> float:
 		if c["id"] == comp_id:
 			return max(0.0, c["health"]) / max(1.0, c["max_health"])
 	return 0.0
+
+# Longest range of any currently-working comms component, or 0.0 if the ship
+# has none/all are destroyed or powered off. A link between two ships is
+# capped by the weaker of their two ranges -- see the datalink relay block.
+func get_comms_range() -> float:
+	var best_range = 0.0
+	for c in get_components_by_type("comms"):
+		if is_component_powered(c["id"]):
+			best_range = max(best_range, c.get("range", 0.0))
+	return best_range
 
 func get_components_by_type(type: String) -> Array:
 	return ship_components.filter(func(c): return c["type"] == type)
@@ -984,20 +1009,65 @@ func _physics_process(delta: float) -> void:
 				"classification": classification
 			}
 			
-	# Datalink Relay (Temporarily Disabled as requested)
-	#for s in get_tree().get_nodes_in_group("ships"):
-	#	if s == self or s.is_dead or s.owner_id != owner_id or not s.is_relay: continue
-	#	for c_id in s.active_contacts:
-	#		var external_contact = s.active_contacts[c_id]
-	#		if not active_contacts.has(c_id):
-	#			active_contacts[c_id] = external_contact.duplicate(true)
-	#		else:
-	#			var c = active_contacts[c_id]
-	#			if external_contact["last_seen_timer"] < c["last_seen_timer"]:
-	#				c["pos"] = external_contact["pos"]
-	#				c["vel"] = external_contact["vel"]
-	#				c["last_seen_timer"] = external_contact["last_seen_timer"]
-	#				c["resolution"] = min(c["resolution"], external_contact["resolution"])
+	# Datalink Relay: friendly ships in mutual comms range and line-of-sight
+	# share active_contacts via freshest-wins. This reruns from scratch every
+	# tick (no persistent link graph), so multi-hop propagation falls out for
+	# free -- a contact relayed into this ship's active_contacts this frame
+	# is available to relay onward to a third ship next frame, one tick of
+	# latency per hop instead of needing an explicitly modeled delay.
+	var self_comms_range = get_comms_range()
+	if self_comms_range > 0.0:
+		var space_state = get_world_2d().direct_space_state
+		for s in get_tree().get_nodes_in_group("ships"):
+			if s == self or s.is_dead: continue
+			if not _iff_tags_overlap(iff_tags, s.iff_tags): continue
+
+			var their_comms_range = s.get_comms_range()
+			if their_comms_range <= 0.0: continue
+
+			var link_range = min(self_comms_range, their_comms_range)
+			if position.distance_to(s.position) > link_range: continue
+
+			var ray_query = PhysicsRayQueryParameters2D.create(position, s.position)
+			ray_query.exclude = [self]
+			var ray_res = space_state.intersect_ray(ray_query)
+			if ray_res and ray_res.collider != s:
+				continue # Line of sight blocked
+
+			# A ship never appears in its own active_contacts (you don't sense
+			# yourself), so without this, two linked friendlies would only
+			# ever learn about third parties via relay, never get a clean
+			# read on each other through the link itself. Synthesize a
+			# ground-truth self-report -- zero staleness since it's live
+			# telemetry, not a sensor return -- keyed by the same
+			# instance_id-derived TRK id sensors would assign s, so it
+			# correlates with (rather than duplicates) any independent
+			# sensor detection of s.
+			var self_report_id = "TRK-%03d" % (abs(s.get_instance_id()) % 1000)
+			var relayed_contacts = s.active_contacts.duplicate()
+			relayed_contacts[self_report_id] = {
+				"id": self_report_id,
+				"instance_id": s.get_instance_id(),
+				"pos": s.position,
+				"vel": s.linear_velocity,
+				"resolution": 0.0,
+				"pos_timer": 0.0,
+				"signature": s.get_signature(),
+				"last_seen_timer": 0.0,
+				"classification": Ship.classify_contact(s.get_signature(), iff_tags)
+			}
+
+			for c_id in relayed_contacts:
+				var external_contact = relayed_contacts[c_id]
+				if not active_contacts.has(c_id):
+					active_contacts[c_id] = external_contact.duplicate(true)
+				else:
+					var c = active_contacts[c_id]
+					if external_contact["last_seen_timer"] < c["last_seen_timer"]:
+						c["pos"] = external_contact["pos"]
+						c["vel"] = external_contact["vel"]
+						c["last_seen_timer"] = external_contact["last_seen_timer"]
+						c["resolution"] = min(c["resolution"], external_contact["resolution"])
 
 	if is_multiplayer_authority():
 		var i = hit_traces.size() - 1
@@ -1249,30 +1319,40 @@ func _process_point_defense() -> void:
 			return a["shots_fired"] < b["shots_fired"]
 		return a["dist"] < b["dist"])
 
-	for t in targets:
-		if ready_lasers.is_empty(): break
+	# One pass only assigns each target its single highest-priority laser --
+	# with fewer targets than ready lasers (the common single-missile case)
+	# that left the rest idle instead of concentrating fire. Keep re-passing
+	# the same priority-ordered target list until every ready laser has
+	# fired or none of them can reach any remaining target.
+	var fired_any = true
+	while not ready_lasers.is_empty() and fired_any:
+		fired_any = false
+		for t in targets:
+			if ready_lasers.is_empty(): break
 
-		var c_id = t["c_id"]
-		var body = t["body"]
+			var c_id = t["c_id"]
+			var body = t["body"]
 
-		for w_id in ready_lasers:
-			var weapon_data = get_component(w_id)
+			for w_id in ready_lasers:
+				var weapon_data = get_component(w_id)
 
-			if behavior.can_fire(self, weapon_data, c_id):
-				var start_pos = position + get_component_origin(weapon_data).rotated(rotation)
-				behavior.execute_fire(self, weapon_data, body.position, c_id)
+				if behavior.can_fire(self, weapon_data, c_id):
+					var start_pos = position + get_component_origin(weapon_data).rotated(rotation)
+					behavior.execute_fire(self, weapon_data, body.position, c_id)
 
-				transient_events.append({
-					"type": "laser",
-					"start_pos": start_pos,
-					"end_pos": body.position
-				})
+					transient_events.append({
+						"type": "laser",
+						"start_pos": start_pos,
+						"end_pos": body.position
+					})
 
-				active_contacts[c_id]["pd_shots_fired"] = t["shots_fired"] + 1
+					t["shots_fired"] += 1
+					active_contacts[c_id]["pd_shots_fired"] = t["shots_fired"]
 
-				print("[PD] ", name, " shooting at ", body.name, " (", c_id, ")")
-				ready_lasers.erase(w_id)
-				break
+					print("[PD] ", name, " shooting at ", body.name, " (", c_id, ")")
+					ready_lasers.erase(w_id)
+					fired_any = true
+					break
 
 
 

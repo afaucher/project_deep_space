@@ -84,6 +84,7 @@ func _run_unit_tests(main) -> bool:
 	ok = _test_sort_by_range(main) and ok
 	ok = _test_sort_by_shots_fired(main) and ok
 	ok = _test_weapon_selection_by_range(main) and ok
+	ok = _test_multiple_lasers_concentrate_on_one_target(main) and ok
 	return ok
 
 func _make_test_ship(main) -> Node:
@@ -181,4 +182,30 @@ func _test_weapon_selection_by_range(main) -> bool:
 	ship.queue_free()
 	near.queue_free()
 	far.queue_free()
+	return ok
+
+# Regression test for the single-missile PD-effectiveness bug: with only one
+# target and multiple ready lasers, the per-target assignment loop used to
+# stop after handing the target its one highest-priority laser, leaving any
+# remaining ready lasers idle for the tick even though nothing else needed
+# them. All ready lasers that can reach the lone target should fire on it.
+func _test_multiple_lasers_concentrate_on_one_target(main) -> bool:
+	var ship = _make_test_ship(main)
+	ship.get_component("hp_port_laser_1")["heading"] = 0.0
+	ship.get_component("hp_port_laser_1")["arc_width"] = PI / 3.0
+
+	var lone = _make_dummy_target(main, Vector2(1000, 0))
+	_add_incoming_contact(ship, "lone", lone)
+
+	ship._process_point_defense()
+
+	var ok = _assert(ship.get_component("hp_fwd_laser")["cooldown"] > 0.0,
+		"hp_fwd_laser should fire on the lone target.")
+	ok = _assert(ship.get_component("hp_port_laser_1")["cooldown"] > 0.0,
+		"hp_port_laser_1 should ALSO fire on the lone target instead of sitting idle.") and ok
+	ok = _assert(ship.active_contacts["lone"]["pd_shots_fired"] == 2,
+		"Lone target should take a shot from every reachable ready laser this tick. shots=" + str(ship.active_contacts["lone"]["pd_shots_fired"])) and ok
+
+	ship.queue_free()
+	lone.queue_free()
 	return ok

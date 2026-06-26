@@ -20,3 +20,18 @@ A very simple way to resolve this is to just take the freshest.
 What are the pros and cons of this?
 
 The complicated way to address this might be a timeseries of quantile estimators to get some sort of recency-weighted average and confidence interval.
+
+# Part 2
+
+The next part of comms is to define beacons.  They are like IFF but declare the name of the ship and the location.  Being in range lets you have accurate contact trace for them.
+
+This would be used if we had a neutral ship or station.  They would declare themselves and therefore we wouldn't treat unknown as hostile.
+
+# Part 3
+
+Long term we need to support text comms where ships can send messages.  This would cover:
+1. Station sending docking instructions
+2. Enemy taunts
+3. Death rattles
+4. Friendly chatter
+5. Surrender

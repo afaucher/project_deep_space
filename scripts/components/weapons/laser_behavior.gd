@@ -32,7 +32,13 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 	if ship.multiplayer.get_unique_id() == ship.owner_id:
 		ship.sfx_laser.play()
 
-	var real_target_pos = ship.active_contacts[target_contact_id]["pos"]
+	var contact = ship.active_contacts[target_contact_id]
+	# contact["pos"] is NOT a stale snapshot -- Ship._physics_process dead-reckons
+	# every active contact's pos forward by vel*delta every tick regardless of
+	# sensor refresh rate, only re-snapping via lerp once a fresh reading
+	# arrives. Re-projecting pos + vel*pos_timer here would double-count that
+	# same extrapolation and overshoot the aim by a second full vel*pos_timer.
+	var target_aim_pos = contact["pos"]
 	var global_mount_pos = ship.position + ship.get_component_origin(comp).rotated(ship.rotation)
 	var component_health_ratio = ship.get_component_health_ratio(comp["id"])
 
@@ -42,15 +48,15 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 	var shape = CircleShape2D.new()
 	shape.radius = HIT_QUERY_RADIUS
 	query.shape = shape
-	query.transform = Transform2D(0, real_target_pos)
+	query.transform = Transform2D(0, target_aim_pos)
 
 	var results = space_state.intersect_shape(query, 32)
 	for res in results:
 		var body = res["collider"]
 		if body == ship: continue
 		if body.has_method("take_damage"):
-			# Ray hits target - simulate from global_mount_pos to real_target_pos
-			var hit_dir = (real_target_pos - global_mount_pos).normalized()
+			# Ray hits target - simulate from global_mount_pos to the tracked position
+			var hit_dir = (target_aim_pos - global_mount_pos).normalized()
 			var actual_damage = comp["damage"] * component_health_ratio
 			body.take_damage(actual_damage, global_mount_pos, hit_dir, comp["weapon_type"])
 		elif body.has_method("get_signature"):

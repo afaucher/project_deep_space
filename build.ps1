@@ -23,15 +23,53 @@ if (-not (Test-Path $godotPath)) {
 }
 
 # 2. Run Automated Tests
-Write-Host "Running automated test suite..." -ForegroundColor Cyan
+# Each test scenario is an independent headless Godot process with its own
+# log/err files, so they have no shared state -- launch them all at once
+# instead of waiting on each one sequentially. Output is still captured per
+# test and printed one at a time afterward so it stays readable instead of
+# interleaving across processes.
+Write-Host "Running automated test suite (parallel)..." -ForegroundColor Cyan
 $testFiles = Get-ChildItem -Path "$PSScriptRoot\scripts\tests\*.gd" -Exclude "test_asteroid.gd"
 $testsPassed = $true
 
-foreach ($file in $testFiles) {
-    Write-Host "Running $($file.BaseName)..."
-    $testProcess = Start-Process -FilePath powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\test_runner.ps1`" -TestName $($file.BaseName)" -Wait -PassThru -NoNewWindow
-    if ($testProcess.ExitCode -ne 0) {
-        Write-Host "Test $($file.BaseName) FAILED!" -ForegroundColor Red
+# Start-Process -PassThru's returned object doesn't reliably expose ExitCode
+# once -RedirectStandardOutput/-Error is also set -- use raw .NET Process
+# objects instead, which track exit codes correctly.
+$runners = foreach ($file in $testFiles) {
+    $runnerLog = "$PSScriptRoot\$($file.BaseName).runner.log"
+    $runnerErr = "$PSScriptRoot\$($file.BaseName).runner.err.log"
+    if (Test-Path $runnerLog) { Remove-Item $runnerLog -Force }
+    if (Test-Path $runnerErr) { Remove-Item $runnerErr -Force }
+    Write-Host "Launching $($file.BaseName)..."
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "powershell.exe"
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\test_runner.ps1`" -TestName $($file.BaseName)"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    $stdOutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stdErrTask = $proc.StandardError.ReadToEndAsync()
+
+    [PSCustomObject]@{ Name = $file.BaseName; Process = $proc; StdOutTask = $stdOutTask; StdErrTask = $stdErrTask; RunnerLog = $runnerLog; RunnerErr = $runnerErr }
+}
+
+foreach ($r in $runners) {
+    $r.Process.WaitForExit()
+    Set-Content -Path $r.RunnerLog -Value $r.StdOutTask.Result
+    Set-Content -Path $r.RunnerErr -Value $r.StdErrTask.Result
+
+    Write-Host "`n========== $($r.Name) ==========" -ForegroundColor Cyan
+    Write-Host $r.StdOutTask.Result
+    if ($r.StdErrTask.Result.Trim().Length -gt 0) {
+        Write-Host "Runner stderr:"
+        Write-Host $r.StdErrTask.Result
+    }
+    if ($r.Process.ExitCode -ne 0) {
         $testsPassed = $false
     }
 }
