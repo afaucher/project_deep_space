@@ -18,7 +18,9 @@ const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 const REQUIRED_KEYS := ["id", "type", "rect", "health", "max_health", "density"]
 
 # Returns { "ok": bool, "tier": int, "violations": Array }
-# Each violation: { "component_id": String, "field": String, "reason": String }
+# Each violation: { "component_id": String, "field": String, "reason": String, "severity": String }
+# "ok" is true iff there are no "error"-severity violations -- "warning"-severity
+# violations (banded stat checks + handling checks, see M9c) don't block.
 static func validate(ship) -> Dictionary:
 	var tier: int = ship.ship_tier
 	var violations: Array = []
@@ -32,7 +34,8 @@ static func validate(ship) -> Dictionary:
 	_check_banded_stats(components, tier, violations)
 	_check_handling(ship, tier, violations)
 
-	return {"ok": violations.is_empty(), "tier": tier, "violations": violations}
+	var has_error := violations.any(func(v): return v["severity"] == "error")
+	return {"ok": not has_error, "tier": tier, "violations": violations}
 
 # ---------------------------------------------------------------------------
 # 3a. Structural rules
@@ -59,6 +62,7 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 				"component_id": comp_id,
 				"field": "schema",
 				"reason": "missing required key(s): " + str(missing_keys),
+				"severity": "error",
 			})
 			# Skip further checks on this component if core fields are absent --
 			# health-sanity checks below assume the keys exist.
@@ -70,6 +74,7 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 				"component_id": comp_id,
 				"field": "id",
 				"reason": "duplicate component id",
+				"severity": "error",
 			})
 		else:
 			seen_ids[comp_id] = true
@@ -79,11 +84,11 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 		var max_health = comp["max_health"]
 		var density = comp["density"]
 		if not (max_health > 0):
-			violations.append({"component_id": comp_id, "field": "max_health", "reason": "max_health must be > 0, got " + str(max_health)})
+			violations.append({"component_id": comp_id, "field": "max_health", "reason": "max_health must be > 0, got " + str(max_health), "severity": "error"})
 		if not (health > 0 and health <= max_health):
-			violations.append({"component_id": comp_id, "field": "health", "reason": "health must satisfy 0 < health <= max_health, got health=" + str(health) + " max_health=" + str(max_health)})
+			violations.append({"component_id": comp_id, "field": "health", "reason": "health must satisfy 0 < health <= max_health, got health=" + str(health) + " max_health=" + str(max_health), "severity": "error"})
 		if not (density > 0):
-			violations.append({"component_id": comp_id, "field": "density", "reason": "density must be > 0, got " + str(density)})
+			violations.append({"component_id": comp_id, "field": "density", "reason": "density must be > 0, got " + str(density), "severity": "error"})
 
 		var type: String = comp.get("type", "")
 
@@ -92,11 +97,11 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 		elif type == "reactor":
 			has_reactor = true
 			if not (comp.get("power_rating", 0.0) > 0):
-				violations.append({"component_id": comp_id, "field": "power_rating", "reason": "reactor must have power_rating > 0, got " + str(comp.get("power_rating", 0.0))})
+				violations.append({"component_id": comp_id, "field": "power_rating", "reason": "reactor must have power_rating > 0, got " + str(comp.get("power_rating", 0.0)), "severity": "error"})
 		elif type == "engines":
 			has_engines = true
 			if not (comp.get("thrust_rating", 0.0) > 0):
-				violations.append({"component_id": comp_id, "field": "thrust_rating", "reason": "engine must have thrust_rating > 0, got " + str(comp.get("thrust_rating", 0.0))})
+				violations.append({"component_id": comp_id, "field": "thrust_rating", "reason": "engine must have thrust_rating > 0, got " + str(comp.get("thrust_rating", 0.0)), "severity": "error"})
 		elif type == "sensors":
 			has_sensors = true
 
@@ -106,28 +111,28 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 
 	# Rule 4: has a hull.
 	if not has_hull:
-		violations.append({"component_id": "<ship>", "field": "hull", "reason": "ship has no component of type 'hull'"})
+		violations.append({"component_id": "<ship>", "field": "hull", "reason": "ship has no component of type 'hull'", "severity": "error"})
 
 	# Rule 5: has a reactor (with power_rating > 0, checked per-component above).
 	if not has_reactor:
-		violations.append({"component_id": "<ship>", "field": "reactor", "reason": "ship has no component of type 'reactor' with power_rating > 0"})
+		violations.append({"component_id": "<ship>", "field": "reactor", "reason": "ship has no component of type 'reactor' with power_rating > 0", "severity": "error"})
 
 	# Rule 6: mobility -- DRONE..HEAVY need engines; STRUCTURE is exempt (and
 	# having engines at all is itself a violation for STRUCTURE).
 	if tier == ComponentSpec.Tier.STRUCTURE:
 		if has_engines:
-			violations.append({"component_id": "<ship>", "field": "engines", "reason": "STRUCTURE-tier ship must not have any 'engines' component (immobile by design)"})
+			violations.append({"component_id": "<ship>", "field": "engines", "reason": "STRUCTURE-tier ship must not have any 'engines' component (immobile by design)", "severity": "error"})
 	else:
 		if not has_engines:
-			violations.append({"component_id": "<ship>", "field": "engines", "reason": "ship has no component of type 'engines' with thrust_rating > 0"})
+			violations.append({"component_id": "<ship>", "field": "engines", "reason": "ship has no component of type 'engines' with thrust_rating > 0", "severity": "error"})
 
 	# Rule 7: not blind.
 	if not has_sensors:
-		violations.append({"component_id": "<ship>", "field": "sensors", "reason": "ship has no component of type 'sensors'"})
+		violations.append({"component_id": "<ship>", "field": "sensors", "reason": "ship has no component of type 'sensors'", "severity": "error"})
 
 	# Rule 8: reactor sufficiency (structural form -- gross case only).
 	if has_powered_non_reactor and not has_reactor:
-		violations.append({"component_id": "<ship>", "field": "reactor", "reason": "ship has powered systems but no reactor"})
+		violations.append({"component_id": "<ship>", "field": "reactor", "reason": "ship has powered systems but no reactor", "severity": "error"})
 
 # ---------------------------------------------------------------------------
 # 3b. Banded stat checks (chart-driven, §4.2)
@@ -160,6 +165,7 @@ static func _check_banded_stats(components: Array, tier: int, violations: Array)
 					"component_id": comp_id,
 					"field": field,
 					"reason": str(field) + "=" + str(value) + " outside " + spec_class + " band for tier " + str(tier) + " [" + str(lo) + ", " + str(hi) + "]",
+					"severity": "warning",
 				})
 
 # ---------------------------------------------------------------------------
@@ -179,6 +185,7 @@ static func _check_handling(ship, tier: int, violations: Array) -> void:
 				"component_id": "<ship>",
 				"field": "max_speed",
 				"reason": "max_speed=" + str(max_speed) + " outside handling band for tier " + str(tier) + " [" + str(speed_band[0]) + ", " + str(speed_band[1]) + "]",
+				"severity": "warning",
 			})
 
 	if bands.has("max_omega"):
@@ -189,4 +196,5 @@ static func _check_handling(ship, tier: int, violations: Array) -> void:
 				"component_id": "<ship>",
 				"field": "max_omega",
 				"reason": "max_omega=" + str(max_omega) + " outside handling band for tier " + str(tier) + " [" + str(omega_band[0]) + ", " + str(omega_band[1]) + "]",
+				"severity": "warning",
 			})

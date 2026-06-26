@@ -10,6 +10,9 @@ class_name ShipCatalog
 # class_name can fail to compile in that path).
 const SPAWNABLE := [
 	{ "name": "Frigate", "script": preload("res://scripts/ships/frigate.gd") },
+	{ "name": "Cargo Shuttle", "script": preload("res://scripts/ships/cargo_shuttle.gd") },
+	{ "name": "Light Attack Craft", "script": preload("res://scripts/ships/light_attack_craft.gd") },
+	{ "name": "Destroyer", "script": preload("res://scripts/ships/destroyer.gd") },
 ]
 
 enum Team { FRIENDLY, ENEMY, PIRATE }
