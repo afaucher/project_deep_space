@@ -5,7 +5,6 @@ extends Node2D
 @onready var menu = $CanvasLayer/Menu
 
 const Frigate = preload("res://scripts/ships/frigate.gd")
-const TargetDrone = preload("res://scripts/ships/target_drone.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
 const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
@@ -150,7 +149,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _spawn_drone(is_friendly: bool = false) -> void:
 	var drone_id = 900 + players.size()
-	var ship = TargetDrone.new()
+	var ship = Frigate.new()
 	ship.name = "Ship_" + str(drone_id)
 	ship.owner_id = drone_id
 	
