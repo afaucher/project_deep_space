@@ -8,10 +8,14 @@ const Frigate = preload("res://scripts/ships/frigate.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
 const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
+const ShipCatalog = preload("res://scripts/ship_catalog.gd")
+const SpawnPanel = preload("res://scripts/panels/spawn_panel.gd")
 
 var is_host: bool = false
 var players = {}
 var asteroids = []
+var spawn_panel: Control = null
+var _next_sandbox_id: int = 900
 
 func _ready() -> void:
 	# Check for automated tests
@@ -96,7 +100,8 @@ func _on_connection_established(hosting: bool) -> void:
 		print("I am the authoritative host.")
 		_spawn_asteroids()
 		#_spawn_bouys() # Temporarily disabled
-		_spawn_ship(multiplayer.get_unique_id())
+		_spawn_player_ship(multiplayer.get_unique_id())
+		_ensure_spawn_panel()
 	else:
 		print("I am a client terminal.")
 
@@ -123,9 +128,9 @@ func _spawn_bouys() -> void:
 func _on_peer_connected(id: int) -> void:
 	print("Peer connected: ", id)
 	if is_host:
-		_spawn_ship(id)
+		_spawn_player_ship(id)
 
-func _spawn_ship(id: int) -> void:
+func _spawn_player_ship(id: int) -> void:
 	var ship = Frigate.new()
 	ship.name = "Ship_" + str(id)
 	ship.owner_id = id
@@ -142,34 +147,58 @@ func _on_peer_disconnected(id: int) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if is_host and event is InputEventKey and event.pressed:
-		if event.keycode == KEY_F3:
+		if event.keycode == KEY_F2:
+			_toggle_spawn_panel()
+		elif event.keycode == KEY_F3:
 			_spawn_drone()
 		elif event.keycode == KEY_F4:
 			_spawn_buoy()
 
-func _spawn_drone(is_friendly: bool = false) -> void:
-	var drone_id = 900 + players.size()
-	var ship = Frigate.new()
-	ship.name = "Ship_" + str(drone_id)
-	ship.owner_id = drone_id
-	
-	if is_friendly:
-		ship.iff_tags = ["TEAM_PLAYER"]
-	else:
-		ship.iff_tags = ["TEAM_ENEMY"]
-	
+# ----------------------------------------------------
+# M10 Sandbox Spawn Director
+# ----------------------------------------------------
+# Generalizes _spawn_drone(): instantiate any catalog hull on any of the three
+# sandbox teams. Host-only, same assumption as the rest of spawning.
+func _spawn_ship(ship_script: Script, team: int) -> Node:
+	var spawn_id = _next_sandbox_id
+	_next_sandbox_id += 1
+
+	var ship = ship_script.new()
+	ship.name = "Ship_" + str(spawn_id)
+	ship.owner_id = spawn_id
+
+	var player_tags = ["TEAM_PLAYER"]
+	if players.has(1) and players[1].iff_tags.size() > 0:
+		player_tags = players[1].iff_tags
+	ship.iff_tags = ShipCatalog.iff_for(team, spawn_id, player_tags)
+
 	var player_pos = Vector2.ZERO
 	if players.has(1): player_pos = players[1].position
-	
+
 	var angle = randf() * TAU
 	ship.position = player_pos + Vector2(cos(angle), sin(angle)) * 15000.0
-	
+
 	add_child(ship)
-	players[drone_id] = ship
-	
+	players[spawn_id] = ship
+
 	var ai = AIDroneController.new()
 	ship.add_child(ai)
-	print("Spawned AI Drone ", drone_id, " at ", ship.position)
+	print("Spawned ", ship_script.resource_path, " (id ", spawn_id, ", team ", team, ") at ", ship.position)
+	return ship
+
+func _toggle_spawn_panel() -> void:
+	_ensure_spawn_panel()
+	spawn_panel.visible = not spawn_panel.visible
+
+func _ensure_spawn_panel() -> void:
+	if spawn_panel != null: return
+	spawn_panel = SpawnPanel.new()
+	spawn_panel.main_node = self
+	ui_layer.add_child(spawn_panel)
+
+func _spawn_drone(is_friendly: bool = false) -> void:
+	var team = ShipCatalog.Team.FRIENDLY if is_friendly else ShipCatalog.Team.ENEMY
+	_spawn_ship(Frigate, team)
 
 func _spawn_sensor_drone() -> void:
 	var drone_id = 1000 + players.size()

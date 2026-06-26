@@ -13,7 +13,7 @@ func setup(main) -> void:
 	
 	# Manually set host state to avoid Steam Manager headless errors
 	main_node.is_host = true
-	main_node._spawn_ship(host_id)
+	main_node._spawn_player_ship(host_id)
 
 func _physics_process(delta: float) -> void:
 	if not main_node or not main_node.players.has(host_id): return
