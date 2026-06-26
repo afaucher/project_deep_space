@@ -146,6 +146,18 @@ Implementation notes: comms became a real destructible/powerable component (`typ
 
 Full design, tier table, sequencing, and open questions in [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
 
+Progress: **M9a DONE** (loadout extracted off `Ship`, drone role/hull separated). **M9b DONE** (component spec chart + tier ladder + `ShipDesignValidator` + `test_ship_designs.gd`; frigate validates clean as MEDIUM).
+
+---
+
+## M10 — Sandbox Spawn UI (friendly / enemy / pirate) (`ship_designs.md`)
+**Depends on:** M9a (hull/role separation). Pulled forward from "deferred" because it's the test instrument for the catalog — every M9c ship becomes immediately playable instead of a code edit. In-game UI to pick a ship class + team and spawn it. Teams are just `iff_tags`; the AI already targets any non-friendly vessel, so behavior falls out of tag assignment. **Neutral deferred** (needs M7 beacons). See [m10_sandbox_spawn_design.md](m10_sandbox_spawn_design.md).
+
+---
+
+## M11 — Direct Flight Input (keyboard + gamepad) (`ship_designs.md`)
+**Independent QoL.** Basic keyboard/gamepad steering + thrust so the player can fly by hand during playtesting instead of dragging the mouse helm dial. Feeds the existing fly-by-wire `send_helm_input` intent pipeline (not a new direct-torque path), so steering modes / RPC / the helm panel readouts all keep working. InputMap is currently empty; actions get defined from scratch. See [m11_flight_input_design.md](m11_flight_input_design.md).
+
 ---
 
 ## Suggested execution order
@@ -158,4 +170,6 @@ Full design, tier table, sequencing, and open questions in [m9_ship_catalog_desi
 6. M6 (datalink relay + contact fusion) — built on stable contact model, informed by M4. DONE
 7. M7 (IFF beacons) — built on M6's contact plumbing. Not started.
 8. M8 (text comms) — lowest priority, needs docking/surrender mechanics first. Not started.
-9. M9 (ship catalog & component tiers) — built on M1's component model. Foundation-first; not started. See [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
+9. M9 (ship catalog & component tiers) — built on M1's component model. Foundation-first. M9a + M9b DONE; M9c (author ships) next. See [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
+10. M10 (sandbox spawn UI) — built on M9a. Friendly/enemy/pirate subset; the test harness for M9c. Not started. See [m10_sandbox_spawn_design.md](m10_sandbox_spawn_design.md).
+11. M11 (direct flight input) — independent QoL; keyboard/gamepad steering via the existing intent pipeline. **Deprioritized — do last** (after M10 + remaining M9c-f). Not started. See [m11_flight_input_design.md](m11_flight_input_design.md).
