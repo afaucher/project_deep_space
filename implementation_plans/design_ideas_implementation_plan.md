@@ -1,6 +1,6 @@
 # Design Ideas Implementation Plan
 
-Source docs: `design_ideas/ship_is_the_parts.md`, `responsive_heat_em.md`, `real-time-sensor-signal.md`, `point_defence.md`, `missile_tracking_tradeoffs.md`, `comms.md`.
+Source docs: `design_ideas/ship_is_the_parts.md`, `responsive_heat_em.md`, `real-time-sensor-signal.md`, `point_defence.md`, `missile_tracking_tradeoffs.md`, `comms.md`, `ship_designs.md`.
 
 ## Dependency graph
 
@@ -9,6 +9,7 @@ M1 Component Architecture (ship_is_the_parts)
    |--> M2 Dynamic Heat/EM per component (responsive_heat_em)
    |        |--> M4 Sensor history UI (real-time-sensor-signal)
    |
+   |--> M9 Ship Catalog & Component Tiers (ship_designs)  [builds on M1's data-driven components]
 M3 PD Target Prioritization (point_defence)        [independent]
 M5 Missile Lost-Lock Behavior (missile_tracking_tradeoffs)  [skipped -- dumb-fire fallback judged sufficient]
 M6 Datalink Relay + Contact Fusion (comms Part 1)  [independent]
@@ -138,6 +139,15 @@ Implementation notes: comms became a real destructible/powerable component (`typ
 
 ---
 
+## M9 — Ship Catalog & Component Tiers (`ship_designs.md`)
+**Depends on:** M1 — its data-driven `ship_components` model is exactly what makes a new ship "just a different component array." Most of the heavy refactor is already done; M9 is about per-class loadouts, a tier/spec chart, a validator, and the tactical-sim parallelization needed to validate ~12 ships.
+
+**Scope (foundation-first):** move the loadout off the `Ship` base into `Frigate`; author a component spec chart + tier ladder + a design validator wired into the test suite; author 3-4 representative ships across the tier range; make handling (turn/accel/top-speed) size-consistent and validated; parallelize the tactical sweep (sharded headless processes); repair + generalize the stale TTK runner for asymmetric "bigger ships win" matchups. Full 12-ship catalog, sandbox ship-switcher, and docking are deferred to M10+.
+
+Full design, tier table, sequencing, and open questions in [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
+
+---
+
 ## Suggested execution order
 
 1. M3 (PD prioritization) — quick win, no dependencies. DONE
@@ -148,3 +158,4 @@ Implementation notes: comms became a real destructible/powerable component (`typ
 6. M6 (datalink relay + contact fusion) — built on stable contact model, informed by M4. DONE
 7. M7 (IFF beacons) — built on M6's contact plumbing. Not started.
 8. M8 (text comms) — lowest priority, needs docking/surrender mechanics first. Not started.
+9. M9 (ship catalog & component tiers) — built on M1's component model. Foundation-first; not started. See [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
