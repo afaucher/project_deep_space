@@ -56,6 +56,7 @@ const PASSIVE_COMPONENT_HEAT := 0.1   # flat heat leak per powered, alive, non-h
 const PASSIVE_COMPONENT_EM := 0.5     # flat EM leak per powered, alive, non-hull component
 const REACTOR_HEAT_FLOOR := 10.0      # a reactor's own resting heat even with no load
 const SENSOR_HEAT_FLOOR := 5.0        # an active sensor's own resting heat even with no load
+const PASSIVE_HEAT_DISSIPATION_RATE := 2.0 # radiative cooling that applies even with the reactor off/dead -- without it, a hulk's current_heat freezes forever at whatever it was the instant it died, since active dissipation is reactor-pumped
 
 # classify_contact() thresholds. cross-section splits "small" (ordnance-sized)
 # from "large" (vessel-sized) contacts; vessels get a higher heat bar than
@@ -834,7 +835,10 @@ func _physics_process(delta: float) -> void:
 		current_heat_gen = heat_gen
 		
 		current_heat += heat_gen * delta
-		var active_dissipation = heat_dissipation_rate * get_power_ratio("reactor")
+		# Reactor-pumped active cooling needs reactor power; passive radiative
+		# loss doesn't, so a powerless hulk still cools down over a couple of
+		# minutes instead of freezing forever at its death-instant heat.
+		var active_dissipation = max(PASSIVE_HEAT_DISSIPATION_RATE, heat_dissipation_rate * get_power_ratio("reactor"))
 		current_heat -= active_dissipation * delta
 		current_heat = clampf(current_heat, 0.0, max_heat)
 		
