@@ -22,7 +22,7 @@ func _init() -> void:
 		# stops the ship both receiving and offering relayed contacts, same as
 		# any other component. "range" is the radio's own reach; a link between
 		# two ships is capped by the weaker of their two ranges.
-		{"id": "comms_array", "type": "comms", "rect": Rect2(0, -5, 5, 5), "health": 60.0, "max_health": 60.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0},
+		{"id": "comms_array", "type": "comms", "rect": Rect2(5, -5, 5, 5), "health": 60.0, "max_health": 60.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0},
 
 		# Sensors: each logical sensor is its own physical hardpoint (1:1), replacing the old
 		# hp_sensor_fwd/hp_sensor_omni boxes that pooled 5 sensors behind a guessed "parent" id.

@@ -112,7 +112,7 @@ func _ready() -> void:
 	contact_filter_dropdown.add_item("All Contacts")
 	contact_filter_dropdown.add_item("All Ships")
 	contact_filter_dropdown.add_item("Enemies Only")
-	contact_filter_dropdown.select(1) # Default to All Ships
+	contact_filter_dropdown.select(2) # Default to All Ships
 	contact_filter_dropdown.item_selected.connect(_on_filter_selected)
 	right_vbox.add_child(contact_filter_dropdown)
 	

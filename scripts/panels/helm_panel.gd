@@ -189,9 +189,15 @@ var _detent_timer: float = 0.0
 func _process(delta: float) -> void:
 	var steer_axis = Input.get_axis("helm_steer_left", "helm_steer_right")
 	if abs(steer_axis) > 0.1:
+		const MAX_GAMEPAD_LEAD := deg_to_rad(15.0)  # 15° max lead over actual heading
 		var old_angle = heading_dial.target_angle
 		var new_angle = wrapf(old_angle + steer_axis * delta * 3.0, -PI, PI)
 		var actual = heading_dial.actual_angle
+		
+		# Clamp so target can't run more than 90° ahead of actual
+		var diff = wrapf(new_angle - actual, -PI, PI)
+		if abs(diff) > MAX_GAMEPAD_LEAD:
+			new_angle = wrapf(actual + sign(diff) * MAX_GAMEPAD_LEAD, -PI, PI)
 		
 		var old_diff = wrapf(old_angle - actual, -PI, PI)
 		var new_diff = wrapf(new_angle - actual, -PI, PI)

@@ -32,6 +32,9 @@ grow_horizontal = 2
 grow_vertical = 2
 alignment = 1
 
+[node name="ShipSelect" type="OptionButton" parent="CanvasLayer/Menu"]
+layout_mode = 2
+
 [node name="LocalTestButton" type="Button" parent="CanvasLayer/Menu"]
 layout_mode = 2
 text = "SINGLE PLAYER GAME"

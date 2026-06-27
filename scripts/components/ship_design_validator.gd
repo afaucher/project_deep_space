@@ -33,6 +33,8 @@ static func validate(ship) -> Dictionary:
 	_check_structural(components, tier, violations)
 	_check_banded_stats(components, tier, violations)
 	_check_handling(ship, tier, violations)
+	_check_overlaps(components, violations)
+	_check_connectivity(components, violations)
 
 	var has_error := violations.any(func(v): return v["severity"] == "error")
 	return {"ok": not has_error, "tier": tier, "violations": violations}
@@ -198,3 +200,82 @@ static func _check_handling(ship, tier: int, violations: Array) -> void:
 				"reason": "max_omega=" + str(max_omega) + " outside handling band for tier " + str(tier) + " [" + str(omega_band[0]) + ", " + str(omega_band[1]) + "]",
 				"severity": "warning",
 			})
+
+# ---------------------------------------------------------------------------
+# 3d. Overlap check (§4.4) -- non-hull components must not overlap each other.
+# Hull is allowed to overlap anything (armor nesting pattern).
+# ---------------------------------------------------------------------------
+
+static func _check_overlaps(components: Array, violations: Array) -> void:
+	# Collect non-hull components that have valid rects.
+	var non_hull := []
+	for comp in components:
+		if not comp.has("rect") or not comp.has("id"):
+			continue
+		if comp.get("type", "") == "hull":
+			continue
+		non_hull.append(comp)
+
+	for i in range(non_hull.size()):
+		var a = non_hull[i]
+		var rect_a: Rect2 = a["rect"]
+		for j in range(i + 1, non_hull.size()):
+			var b = non_hull[j]
+			var rect_b: Rect2 = b["rect"]
+			if rect_a.intersects(rect_b, false):  # false = exclude touching edges
+				violations.append({
+					"component_id": a["id"],
+					"field": "rect",
+					"reason": "non-hull component '" + a["id"] + "' overlaps '" + b["id"] + "'",
+					"severity": "warning",
+				})
+
+# ---------------------------------------------------------------------------
+# 3e. Connectivity check (§4.5) -- every component must touch or overlap at
+# least one other component. A component is "adjacent" if their Rect2s share
+# an edge (touching) or overlap.
+# ---------------------------------------------------------------------------
+
+static func _rects_adjacent(a: Rect2, b: Rect2) -> bool:
+	# true if the two rects overlap OR share an edge (touching).
+	# Rect2.intersects(r, true) returns true for touching edges.
+	return a.intersects(b, true)
+
+static func _check_connectivity(components: Array, violations: Array) -> void:
+	if components.size() <= 1:
+		return
+
+	# Filter to components that actually have rects.
+	var with_rects := []
+	for comp in components:
+		if comp.has("rect") and comp.has("id"):
+			with_rects.append(comp)
+
+	if with_rects.size() <= 1:
+		return
+
+	# Build adjacency and flood-fill from component 0.
+	var visited := {}
+	var queue := [0]
+	visited[0] = true
+
+	while not queue.is_empty():
+		var current = queue.pop_front()
+		var rect_c: Rect2 = with_rects[current]["rect"]
+		for k in range(with_rects.size()):
+			if visited.has(k):
+				continue
+			if _rects_adjacent(rect_c, with_rects[k]["rect"]):
+				visited[k] = true
+				queue.append(k)
+
+	# Any unvisited component is disconnected.
+	for k in range(with_rects.size()):
+		if not visited.has(k):
+			violations.append({
+				"component_id": with_rects[k]["id"],
+				"field": "rect",
+				"reason": "component '" + with_rects[k]["id"] + "' is not adjacent to any other component (disconnected)",
+				"severity": "error",
+			})
+

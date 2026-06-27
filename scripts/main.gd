@@ -3,6 +3,7 @@ extends Node2D
 @onready var ui_layer = $CanvasLayer
 @onready var terminal_display = $CanvasLayer/TerminalDisplay
 @onready var menu = $CanvasLayer/Menu
+@onready var ship_select: OptionButton = $CanvasLayer/Menu/ShipSelect
 
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
@@ -28,6 +29,11 @@ func _ready() -> void:
 			return
 			
 	SteamManager.connection_established.connect(_on_connection_established)
+	
+	# Populate ship selection dropdown from catalog
+	for entry in ShipCatalog.SPAWNABLE:
+		ship_select.add_item(entry["name"])
+	ship_select.selected = 0
 	
 	# Menu UI hookups
 	menu.get_node("HostButton").pressed.connect(_on_host_pressed)
@@ -129,7 +135,9 @@ func _on_peer_connected(id: int) -> void:
 		_spawn_player_ship(id)
 
 func _spawn_player_ship(id: int) -> void:
-	var ship = Frigate.new()
+	var selected_idx = ship_select.selected if is_instance_valid(ship_select) else 0
+	var ship_script = ShipCatalog.SPAWNABLE[selected_idx]["script"]
+	var ship = ship_script.new()
 	ship.name = "Ship_" + str(id)
 	ship.owner_id = id
 	ship.iff_tags = ["TEAM_PLAYER"]

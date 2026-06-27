@@ -12,13 +12,13 @@ func _init() -> void:
 	max_heat = 130.0
 	ship_components = [
 		# Layout relative to center (0,0). Forward +X, Right +Y
-		{"id": "hull_fwd", "type": "hull", "rect": Rect2(8, -5, 10, 10), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-		{"id": "hull_aft", "type": "hull", "rect": Rect2(-14, -4, 8, 8), "health": 40.0, "max_health": 40.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+		{"id": "hull_fwd", "type": "hull", "rect": Rect2(2, -5, 16, 10), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+		{"id": "hull_aft", "type": "hull", "rect": Rect2(-14, -5, 16, 10), "health": 40.0, "max_health": 40.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 
 		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-6, -3, 8, 6), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 55.0},
-		{"id": "engine_main", "type": "engines", "rect": Rect2(-22, -7, 6, 14), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 50.0, "thrust_rating": 1500.0, "torque_rating": 3500.0},
+		{"id": "engine_main", "type": "engines", "rect": Rect2(-20, -5, 6, 10), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 50.0, "thrust_rating": 1500.0, "torque_rating": 3500.0},
 
-		{"id": "comms_array", "type": "comms", "rect": Rect2(0, -2, 4, 4), "health": 25.0, "max_health": 25.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 20000.0},
+		{"id": "comms_array", "type": "comms", "rect": Rect2(2, -2, 4, 4), "health": 25.0, "max_health": 25.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 20000.0},
 
 		{"id": "omni_fwd_fc", "type": "sensors", "rect": Rect2(18, -2.5, 5, 5), "health": 25.0, "max_health": 25.0, "density": 20.0, "heat": 0.0, "base_em_emission": 8.0, "em_emission": 8.0, "switchable": true, "powered_on": true,
 			"sensor_type": "active", "active": true, "range": 25000.0, "arc_width": PI / 1.5, "num_bins": 60, "refresh_interval": 0.5, "timer": 0.0, "heading": 0.0},
