@@ -156,7 +156,7 @@ Progress: **M9a DONE** (loadout extracted off `Ship`, drone role/hull separated)
 ---
 
 ## M11 — Direct Flight Input (keyboard + gamepad) (`ship_designs.md`)
-**Independent QoL.** Basic keyboard/gamepad steering + thrust so the player can fly by hand during playtesting instead of dragging the mouse helm dial. Feeds the existing fly-by-wire `send_helm_input` intent pipeline (not a new direct-torque path), so steering modes / RPC / the helm panel readouts all keep working. InputMap is currently empty; actions get defined from scratch. See [m11_flight_input_design.md](m11_flight_input_design.md).
+**Gamepad DONE; keyboard folded into M13a.** A full **gamepad** control scheme is wired through the existing fly-by-wire `send_helm_input` pipeline (steer/throttle via `Input.get_axis` in `helm_panel`, plus zoom / target-cycle / mode toggles across the panels). The planned **keyboard** half is not yet bound — and since every handler already reads its action via `Input.get_axis()` / `is_action_pressed()`, adding keyboard is a pure InputMap augmentation, captured as **M13a**. See [m11_flight_input_design.md](m11_flight_input_design.md).
 
 ---
 
@@ -168,12 +168,27 @@ The legacy drone AI fired one hardcoded forward weapon, pointed nose-on (so broa
 **Scope (execution order revised after the spike — vertical slice first):**
 - **M12b-spike — Beehave headless go/no-go gate. DONE.** Vendored Beehave 2.9.2; `test_ai_beehave_spike` proves a `BeehaveTree` ticks + a leaf drives the ship inside `--headless --run-test`. Class cache is a local artifact (warm via Godot/`--import`), not committed.
 - **M12b — Beehave bring-up + minimal engage tree. DONE.** Replaced `ai_drone_controller` with a Beehave tree (`scripts/ai/ai_tree_factory.gd`: `Selector[ Sequence[acquire, steer, fire_opportunity], idle ]`). `fire_opportunity` enumerates all weapons and fires whatever bears, so the AI now uses its laser **and** missile instead of one hardcoded missile. Legacy controller retained as a baseline opponent (not attached by `_spawn_ship`); `test_e2e_drone_vs_bouy` migrated; `test_ai_engage_tree` + `test_ai_vs_legacy` added (new AI kills a buoy in 2 frames via hitscan laser vs legacy's 165, 3/3). Suite green (15/16; `test_asteroid` pre-existing non-conforming).
-- **M12a — Weapon groups & massed fire.** Now *after* the slice. First-class weapon groups (broadside-as-a-unit) + `fire_group()` single-tick volleys on `Ship` + group-aware metering in `fire_opportunity`. Massed fire is the heavy-ship win condition: a synchronized volley saturates point defense where a trickle gets swatted (ties to the missile-vs-PD volley sweep). Player single-button group-fire control in `weapons_panel` is an independent sub-track off the AI critical path.
-- **M12c — Postures + threat reactivity.** Orient-for-group (strike vs. broadside), range-keeping, evade-under-fire.
-- **M12d — Disposition + curated archetypes.** Unknown civilian / light attack flock / solo pirate / destroyer hunter-killer as trees, wired into the M10 spawn UI as a sandbox "food chain."
+- **M12a — Weapon groups & massed fire. DONE.** First-class weapon groups (broadside-as-a-unit) + `fire_group()` single-tick volleys + `is_group_volley_ready()` so the AI holds a missile volley until the live battery is synced (never waiting on damaged/empty/disabled tubes). Massed fire is the heavy-ship win condition: a synchronized volley saturates PD where a trickle gets swatted. **Player control simplified — no groups needed:** a single **Fire All** (spacebar / gamepad RT / panel button) fires everything; the server gates each shot, so weapons that cannot bear simply do nothing.
+- **M12c — Postures + threat reactivity. Broadside + disengage DONE.** The maneuver leaf brings the heaviest battery to bear and *drifts* at optimal range (reposition only when out of band); `test_ai_duel` shows the new AI beats the legacy 3/3 at zero damage taken. A top-priority Disengage branch flees when hull < 30%. **Remaining:** active missile defense — reframed as orienting incoming ordnance into the strongest PD arc (not kinematic dodging), deferred pending measurement.
+- **M12d — Disposition + curated archetypes.** Unknown civilian / light attack flock / solo pirate / destroyer hunter-killer as trees, wired into the M10 spawn UI as a sandbox "food chain." (Doubles as M13d sandbox content.)
 - **M12e–f — Mission behaviors + per-instance AI profiles + AI engagement sim**, then un-defer M9f. Profiles resolve per spawn (`base / derive(ship) / seeded jitter from owner_id`) so an individual pirate behaves slightly differently than its group, reproducibly.
 
+Also landed alongside M12: combat debug prints gated behind per-file `COMBAT_DEBUG` flags (an AI duel log dropped ~500KB → ~6KB). Full design and test strategy in [m12_ai_behavior_design.md](m12_ai_behavior_design.md).
+
 Full design, capability API, leaf library, archetype specs, and testing strategy in [m12_ai_behavior_design.md](m12_ai_behavior_design.md).
+
+---
+
+## M13 — Playable Sandbox (pick-up-and-play)
+**Depends on:** M10 (spawn), M11 (gamepad flight), M12 (combat AI), Fire All. The integration/onboarding pass that makes the existing systems handoff-ready — someone can be handed the build with no briefing and within ~30s fly, find a target, and fight.
+
+The systems exist; the gaps are all "discoverability for a keyboard+mouse player":
+- **M13a — Keyboard control parity.** Add keyboard (+ mouse-wheel) events to the existing `[input]` actions so the whole scheme is playable on keyboard+mouse. Handlers already read the actions via `Input.get_axis()` / `is_action_pressed()`, so this is InputMap-only, no code. (Absorbs the keyboard half of M11.)
+- **M13b — On-screen controls legend.** A toggleable help overlay + a one-line core-loop hint. The single highest-leverage "no explanation" item.
+- **M13c — Onboarding-loop polish.** Rename the menu play button; make spawn → select → fire legible; optionally spawn a starter enemy.
+- **M13d — Characterful enemies (= M12d).** Wire the curated archetypes into the spawn menu so the sandbox is a food chain.
+
+Full gap analysis and the **main-screen controls table (keyboard + gamepad)** in [m13_playable_sandbox_design.md](m13_playable_sandbox_design.md).
 
 ---
 
@@ -187,7 +202,8 @@ Full design, capability API, leaf library, archetype specs, and testing strategy
 6. M6 (datalink relay + contact fusion) — built on stable contact model, informed by M4. DONE
 7. M7 (IFF beacons) — built on M6's contact plumbing. Not started.
 8. M8 (text comms) — lowest priority, needs docking/surrender mechanics first. Not started.
-9. M9 (ship catalog & component tiers) — built on M1's component model. Foundation-first. M9a + M9b DONE; M9c (author ships) next. See [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
-10. M10 (sandbox spawn UI) — built on M9a. Friendly/enemy/pirate subset; the test harness for M9c. Not started. See [m10_sandbox_spawn_design.md](m10_sandbox_spawn_design.md).
-11. M12 (ship AI behavior + weapon groups) — Beehave behavior library over a `Ship` capability layer; starts with M12a weapon-groups/massed-fire. **Pulled ahead of the M9f matchup sim, which it unblocks.** Not started. See [m12_ai_behavior_design.md](m12_ai_behavior_design.md).
-12. M11 (direct flight input) — independent QoL; keyboard/gamepad steering via the existing intent pipeline. **Deprioritized — do last** (after M10 + remaining M9 + M12). Not started. See [m11_flight_input_design.md](m11_flight_input_design.md).
+9. M9 (ship catalog & component tiers) — built on M1's component model. M9a/M9b/M9c/M9e DONE; **M9f (matchup sim) deferred** until M12 AI fights competently. See [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
+10. M10 (sandbox spawn UI) — Friendly/enemy/pirate spawn from the terminal. DONE. See [m10_sandbox_spawn_design.md](m10_sandbox_spawn_design.md).
+11. M11 (flight input) — **gamepad DONE**; keyboard half folded into M13a. See [m11_flight_input_design.md](m11_flight_input_design.md).
+12. M12 (ship AI behavior) — Beehave library over a `Ship` capability layer. **M12a/M12b/M12c (broadside + massed fire + disengage) DONE**; M12d archetypes + M12e–f remaining. See [m12_ai_behavior_design.md](m12_ai_behavior_design.md).
+13. **M13 (playable sandbox) — NEXT.** Keyboard parity + on-screen controls legend + onboarding so the build is handoff-ready. See [m13_playable_sandbox_design.md](m13_playable_sandbox_design.md).

@@ -142,22 +142,25 @@ tubes per group*, so `fire_group` is precisely how a destroyer "shoots through" 
 frigate's PD. M12a makes that mechanic reachable; M12f re-runs the sim with AI actually
 exercising it.
 
-### 4.4 Player UI integration
+### 4.4 Player UI integration — shipped as **Fire All** (not group buttons)
 
-[`weapons_panel.gd`](../scripts/panels/weapons_panel.gd) already builds a per-weapon
-FIRE button and computes a `can_fire`/status blocker chain. Add, above the per-weapon
-grid, **one group button per group** ("FWD", "PORT", "STBD") that:
+The original plan here was per-group player buttons ("FWD"/"PORT"/"STBD"). **That was
+simplified away during implementation:** the player does not need weapon groups at all,
+because `fire_weapon` already gates each shot — so firing *everything* and letting the
+weapons that cannot bear silently do nothing is equivalent and far simpler. What shipped:
 
-- shows readiness from `get_group_status` (e.g. `PORT  3/4 READY` / `OUT OF ARC`),
-- emits a new `fire_group_requested(group_id)` signal,
-- routes through a `request_fire_group` RPC mirroring the existing fire path.
+- A single **FIRE ALL** button at the bottom of the weapon list in
+  [`weapons_panel.gd`](../scripts/panels/weapons_panel.gd), plus the existing per-weapon
+  FIRE buttons as manual override.
+- Bound to the **spacebar** and the gamepad right-trigger via the `combat_fire_all`
+  action; both call `_fire_all()`, which emits `fire_weapon_requested` for every weapon.
 
-Keep the individual buttons as a manual override. Single-button massed fire = press the
-group, get the volley.
+Weapon *groups* remain an AI/internal concept (broadside reasoning, `fire_group`,
+volley metering); they are not exposed to the player. (`get_group_status` is still
+available for any future per-group HUD readout, but no group button was built.)
 
-**Done when:** the player can fire a whole broadside with one button; `fire_group` fires
-all in-arc ready members in one tick; a unit test asserts a frigate `fire_group("port")`
-launches every ready port-battery weapon simultaneously and respects arc/ammo/cooldown.
+**DONE.** UI/input is not headless-testable; the logic reuses the proven
+`combat_fire_all` → `fire_weapon` path.
 
 ---
 
@@ -356,12 +359,12 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
   — exactly the gap massed fire closes. Suite green (15/16; `test_asteroid` is a
   pre-existing non-conforming legacy test, not a regression). Leaves all return
   SUCCESS/FAILURE (never RUNNING) so the Engage sequence runs steer **and** fire each tick.
-- **M12a — Weapon groups & massed fire (capability) + player single-button group fire.**
-  Now sequenced *after* the slice. Build `get_weapon_groups` / `fire_group` /
-  `get_group_status` (§4) because the broadside posture (M12c) and the shoot-through-PD
-  pillar demonstrably need them; give `fire_opportunity` group-aware metering (save a
-  massed volley instead of dribbling the magazine). The player group-fire button (§4.4)
-  is an independent sub-track that can land anytime — it is off the AI critical path.
+- **M12a — Weapon groups & massed fire. DONE.** Sequenced *after* the slice. Built
+  `get_weapon_groups` / `fire_group` / `get_group_status` (§4) because the broadside
+  posture (M12c) and the shoot-through-PD pillar need them, plus `fire_opportunity`
+  group-aware volley metering. The player control shipped as a single **Fire All** (§4.4),
+  not group buttons — `fire_weapon` already gates each shot, so groups were unnecessary
+  for the player.
   - **Capability layer DONE (2026-06-27).** `get_weapon_group_id` (explicit `group` field,
     else derived from mount bearing: fwd / aft / port / stbd), `get_weapon_groups`,
     `fire_group` (single-tick volley, returns count fired), and `get_group_status` landed
@@ -373,8 +376,9 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
     that is damaged / empty / disabled. `fire_opportunity` now fires lasers at will but
     looses missile tubes only as a synchronized per-group volley; `test_volley_metering`
     covers the wait/don't-wait cases. (At nose-on the forward group has one tube, so the
-    hold only bites once a multi-tube broadside is brought to bear in M12c.) **Remaining
-    for M12a:** the player group-fire button, and the duel test below.
+    hold only bites once a multi-tube broadside is brought to bear in M12c.) **Player
+    Fire All DONE:** spacebar / gamepad RT / a FIRE ALL button (§4.4). **Duel test DONE**
+    (see M12c below). M12a is complete.
   - **Verification deliverable: `test_ai_duel` (frigate vs frigate, head-to-head).** The
     real superiority test the project wants is a direct duel — new AI frigate vs legacy
     AI frigate, identical hulls, last one alive wins. It is parked off M12b because today
