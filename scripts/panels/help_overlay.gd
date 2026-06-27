@@ -21,6 +21,7 @@ const ROWS := [
 	{"label": "Throttle Mode", "keys": ["keyboard_v"], "pad": "generic_joystick", "pad_text": "L-Stick (click)"},
 	{"label": "Steering Mode", "keys": ["keyboard_c"], "pad": "generic_button", "pad_text": "X"},
 	{"label": "Map Orientation", "keys": ["keyboard_m"], "pad": "generic_button", "pad_text": "Y"},
+	{"label": "Spawn Enemy", "keys": ["keyboard_f2"], "pad": "", "pad_text": ""},
 	{"label": "Quit", "keys": ["keyboard_escape"], "pad": "generic_button", "pad_text": "Start"},
 	{"label": "Help (this screen)", "keys": ["keyboard_f1"], "pad": "", "pad_text": ""},
 ]
