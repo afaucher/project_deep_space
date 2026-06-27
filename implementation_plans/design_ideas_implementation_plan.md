@@ -160,6 +160,21 @@ Progress: **M9a DONE** (loadout extracted off `Ship`, drone role/hull separated)
 
 ---
 
+## M12 — Ship AI Behavior (Beehave) & Weapon Groups
+**Depends on:** M9c (ships to fly), M10 (spawn UI to play them), M1/M1c (component + weapon-behavior model). **Deliberately does not depend on M7** — the world stays binary friendly/unidentified (no neutral), and the civilian is defined by behavior (flee anything non-friendly), not classification. **Unblocks M9f** (the matchup sim is meaningless until the AI fights with its whole loadout).
+
+The current drone AI ([`ai_drone_controller.gd`](../scripts/ai_drone_controller.gd)) fires one hardcoded forward weapon, points nose-on (so broadsides never bear), and only evades when out of ammo. M12 replaces it with a composable Beehave behavior library (the framework is committed — we already run a mature Beehave setup in the sibling `team-dark` project) over a thin capability layer on `Ship`.
+
+**Scope (foundation-first):**
+- **M12a — Weapon groups & massed fire.** First-class weapon groups (broadside-as-a-unit) + `fire_group()` single-tick volleys on `Ship`, plus a player single-button group-fire control in `weapons_panel`. Massed fire is the heavy-ship win condition: a synchronized volley saturates point defense where a trickle gets swatted (ties directly to the existing missile-vs-PD volley sweep). Stands alone as a player feature.
+- **M12b — Beehave bring-up, postures, threat reactivity.** Gated by a throwaway **headless go/no-go spike** (prove a `BeehaveTree` ticks + a leaf drives the ship inside `--run-test`) *before* any leaf-library investment; pure-GDScript selector behind the same leaf interface is the fallback. Then capability/decision split; orient-for-group (strike vs. broadside), range-keeping, evade-under-fire.
+- **M12d — Disposition + curated archetypes.** Unknown civilian / light attack flock / solo pirate / destroyer hunter-killer as trees, wired into the M10 spawn UI as a sandbox "food chain."
+- **M12e–f — Mission behaviors + per-instance AI profiles + AI engagement sim**, then un-defer M9f. Profiles resolve per spawn (`base / derive(ship) / seeded jitter from owner_id`) so an individual pirate behaves slightly differently than its group, reproducibly.
+
+Full design, capability API, leaf library, archetype specs, and testing strategy in [m12_ai_behavior_design.md](m12_ai_behavior_design.md).
+
+---
+
 ## Suggested execution order
 
 1. M3 (PD prioritization) — quick win, no dependencies. DONE
@@ -172,4 +187,5 @@ Progress: **M9a DONE** (loadout extracted off `Ship`, drone role/hull separated)
 8. M8 (text comms) — lowest priority, needs docking/surrender mechanics first. Not started.
 9. M9 (ship catalog & component tiers) — built on M1's component model. Foundation-first. M9a + M9b DONE; M9c (author ships) next. See [m9_ship_catalog_design.md](m9_ship_catalog_design.md).
 10. M10 (sandbox spawn UI) — built on M9a. Friendly/enemy/pirate subset; the test harness for M9c. Not started. See [m10_sandbox_spawn_design.md](m10_sandbox_spawn_design.md).
-11. M11 (direct flight input) — independent QoL; keyboard/gamepad steering via the existing intent pipeline. **Deprioritized — do last** (after M10 + remaining M9c-f). Not started. See [m11_flight_input_design.md](m11_flight_input_design.md).
+11. M12 (ship AI behavior + weapon groups) — Beehave behavior library over a `Ship` capability layer; starts with M12a weapon-groups/massed-fire. **Pulled ahead of the M9f matchup sim, which it unblocks.** Not started. See [m12_ai_behavior_design.md](m12_ai_behavior_design.md).
+12. M11 (direct flight input) — independent QoL; keyboard/gamepad steering via the existing intent pipeline. **Deprioritized — do last** (after M10 + remaining M9 + M12). Not started. See [m11_flight_input_design.md](m11_flight_input_design.md).
