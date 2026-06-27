@@ -2,6 +2,7 @@ class_name LaserBehavior
 extends "res://scripts/components/weapon_behavior.gd"
 
 const FIRE_EM_SPIKE := 50.0
+const COMBAT_DEBUG := false # gate the verbose per-shot [Debug] laser trace
 const EM_PULSE_DECAY := 25.0 # per second
 
 # Waste heat from firing reuses Ship's damage_heat/_decay_damage_heat
@@ -57,7 +58,7 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 		if body.has_method("take_damage"):
 			# Ray hits target - simulate from global_mount_pos to the tracked position
 			var hit_dir = (target_aim_pos - global_mount_pos).normalized()
-			print("[Debug] Laser fired! global_mount_pos: ", global_mount_pos, " target_aim_pos: ", target_aim_pos, " hit_dir: ", hit_dir)
+			if COMBAT_DEBUG: print("[Debug] Laser fired! global_mount_pos: ", global_mount_pos, " target_aim_pos: ", target_aim_pos, " hit_dir: ", hit_dir)
 			var actual_damage = comp["damage"] * component_health_ratio
 			body.take_damage(actual_damage, global_mount_pos, hit_dir, comp["weapon_type"])
 		elif body.has_method("get_signature"):

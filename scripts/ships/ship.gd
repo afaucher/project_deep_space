@@ -486,13 +486,17 @@ var sfx_rcs: AudioStreamPlayer
 var sfx_laser: AudioStreamPlayer
 var sfx_missile: AudioStreamPlayer
 
+# Set true to re-enable verbose combat traces ([Damage]/[PD]); off by default so normal
+# play and headless tests are not flooded with per-hit / per-shot prints.
+const COMBAT_DEBUG := false
+
 func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic") -> void:
 	if is_dead: return
-	
-	print("[Damage] ", name, " taking ", amount, " ", damage_type, " damage at ", global_pos, " dir ", global_dir)
-	
+
+	if COMBAT_DEBUG: print("[Damage] ", name, " taking ", amount, " ", damage_type, " damage at ", global_pos, " dir ", global_dir)
+
 	if global_pos == Vector2.ZERO or global_dir == Vector2.ZERO:
-		print("[Damage] No position provided, applying fallback hull damage.")
+		if COMBAT_DEBUG: print("[Damage] No position provided, applying fallback hull damage.")
 		# Fallback: Just subtract health from first hull component
 		for c in ship_components:
 			if c["type"] == "hull":
@@ -588,7 +592,7 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 		hit_traces.append(trace)
 
 		if not hit_something:
-			print("[Damage] Raycast completely missed all internal components!")
+			if COMBAT_DEBUG: print("[Damage] Raycast completely missed all internal components!")
 			
 
 	# Check death condition (reactor dead)
@@ -1455,7 +1459,7 @@ func _process_point_defense() -> void:
 					t["shots_fired"] += 1
 					active_contacts[c_id]["pd_shots_fired"] = t["shots_fired"]
 
-					print("[PD] ", name, " shooting at ", body.name, " (", c_id, ")")
+					if COMBAT_DEBUG: print("[PD] ", name, " shooting at ", body.name, " (", c_id, ")")
 					ready_lasers.erase(w_id)
 					fired_any = true
 					break

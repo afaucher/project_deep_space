@@ -6,6 +6,7 @@ class_name MissileController
 # trade lock stability against how easy a target is to break lock by breaking
 # sensor contact.
 const FUEL_LIFETIME := 15.0          # seconds before self-destruct ("ran out of fuel")
+const COMBAT_DEBUG := false          # gate verbose [Missile] lifecycle traces
 const LOCK_LOSS_STALENESS := 5.0     # seconds an existing lock's contact can go unrefreshed before it's dropped
 const ACQUISITION_FRESHNESS := 1.0   # seconds a contact must have been refreshed within to be eligible for a *new* lock (stricter than keeping one)
 const LEAD_TIME_CAP := 0.7           # seconds -- caps how far ahead proportional-nav aims so the missile doesn't cross the target's path
@@ -32,7 +33,7 @@ func _physics_process(delta: float) -> void:
 	age += delta
 	if age > FUEL_LIFETIME:
 		# Run out of fuel, self-destruct or go inert
-		print("[Missile] Out of fuel looking for target")
+		if COMBAT_DEBUG: print("[Missile] Out of fuel looking for target")
 		ship.hulk()
 		return
 		
@@ -45,7 +46,7 @@ func _physics_process(delta: float) -> void:
 			
 	if not current_target_valid:
 		if target_id != "":
-			print("[Missile] Lost lock on target cid: ", target_id)
+			if COMBAT_DEBUG: print("[Missile] Lost lock on target cid: ", target_id)
 			target_id = ""
 			
 		# Find closest hostile target in own sensors
@@ -67,7 +68,7 @@ func _physics_process(delta: float) -> void:
 				
 		if new_target != "":
 			target_id = new_target
-			print("[Missile] Acquired new target cid: ", target_id)
+			if COMBAT_DEBUG: print("[Missile] Acquired new target cid: ", target_id)
 			
 	if target_id == "":
 		# No target and no fallback, fly straight
@@ -137,7 +138,7 @@ func detonate() -> void:
 		if main_node and main_node.has_method("draw_laser"):
 			main_node.draw_laser(ship.position, target_pos)
 			
-		print("[Missile] Firing laser warhead at target: ", target_id, " from ", ship.position, " to ", target_pos)
+		if COMBAT_DEBUG: print("[Missile] Firing laser warhead at target: ", target_id, " from ", ship.position, " to ", target_pos)
 			
 		if result and result.collider.has_method("take_damage") and result.collider != ship:
 			var hit_dir = (result.collider.position - ship.position).normalized()

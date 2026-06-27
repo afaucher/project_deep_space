@@ -49,7 +49,15 @@ func _ready() -> void:
 	weapon_grid.columns = 2
 	weapon_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(weapon_grid)
-	
+
+	# One button to fire everything that can bear -- mirrors the spacebar / gamepad
+	# combat_fire_all action. Sits at the bottom of the weapon list.
+	var fire_all_btn = Button.new()
+	fire_all_btn.text = "FIRE ALL (Space)"
+	fire_all_btn.add_theme_color_override("font_color", Color.RED)
+	fire_all_btn.pressed.connect(_fire_all)
+	vbox.add_child(fire_all_btn)
+
 	vbox.add_child(HSeparator.new())
 	
 	var target_label = Label.new()
@@ -79,11 +87,18 @@ func _ready() -> void:
 	history_graph.hide()
 
 func _input(event: InputEvent) -> void:
+	# combat_fire_all is bound to the gamepad right-trigger AND the spacebar.
 	if event.is_action_pressed("combat_fire_all"):
-		if current_state.has("weapons"):
-			for w_info in current_state["weapons"]:
-				# Let the server validate if the shot is legal (target, cooldown, arc, ammo, etc.)
-				fire_weapon_requested.emit(w_info.get("id", ""))
+		_fire_all()
+
+func _fire_all() -> void:
+	# Request EVERY weapon to fire at the current target. The server gates each shot on
+	# target/cooldown/arc/ammo, so weapons that cannot bear simply do nothing -- which is
+	# exactly why the player needs no weapon groups, just one "fire all".
+	if not current_state.has("weapons"):
+		return
+	for w_info in current_state["weapons"]:
+		fire_weapon_requested.emit(w_info.get("id", ""))
 
 func _create_weapon_ui(grid: GridContainer, w_id: String, w_name: String) -> void:
 	var info_vbox = VBoxContainer.new()
