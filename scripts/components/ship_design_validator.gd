@@ -202,32 +202,29 @@ static func _check_handling(ship, tier: int, violations: Array) -> void:
 			})
 
 # ---------------------------------------------------------------------------
-# 3d. Overlap check (§4.4) -- non-hull components must not overlap each other.
-# Hull is allowed to overlap anything (armor nesting pattern).
+# 3d. Overlap check (§4.4) -- no two components may overlap each other.
 # ---------------------------------------------------------------------------
 
 static func _check_overlaps(components: Array, violations: Array) -> void:
-	# Collect non-hull components that have valid rects.
-	var non_hull := []
+	# Collect components that have valid rects.
+	var with_rects := []
 	for comp in components:
 		if not comp.has("rect") or not comp.has("id"):
 			continue
-		if comp.get("type", "") == "hull":
-			continue
-		non_hull.append(comp)
+		with_rects.append(comp)
 
-	for i in range(non_hull.size()):
-		var a = non_hull[i]
+	for i in range(with_rects.size()):
+		var a = with_rects[i]
 		var rect_a: Rect2 = a["rect"]
-		for j in range(i + 1, non_hull.size()):
-			var b = non_hull[j]
+		for j in range(i + 1, with_rects.size()):
+			var b = with_rects[j]
 			var rect_b: Rect2 = b["rect"]
 			if rect_a.intersects(rect_b, false):  # false = exclude touching edges
 				violations.append({
 					"component_id": a["id"],
 					"field": "rect",
-					"reason": "non-hull component '" + a["id"] + "' overlaps '" + b["id"] + "'",
-					"severity": "warning",
+					"reason": "component '" + a["id"] + "' overlaps '" + b["id"] + "'",
+					"severity": "error",
 				})
 
 # ---------------------------------------------------------------------------

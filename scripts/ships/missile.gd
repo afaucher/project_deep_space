@@ -30,8 +30,8 @@ func _init() -> void:
 		{"id": "warhead", "type": "hull", "rect": Rect2(-2, -3, 7, 6), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
 		{"id": "hull_body", "type": "hull", "rect": Rect2(-10, -3, 8, 6), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
 		{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -4, 5, 8), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "power_rating": 10.0, "thrust_rating": 2991.0, "torque_rating": 435.65},
-		# Tiny capacitor standing in for a full reactor — too small for one, per design notes.
-		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-8, -2, 4, 4), "health": 5.0, "max_health": 5.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 10.0}
+		# Tiny capacitor between hull_body and engine -- touches both at shared edges.
+		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-12, -2, 2, 4), "health": 5.0, "max_health": 5.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 10.0}
 	]
 
 func _ready() -> void:

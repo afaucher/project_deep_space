@@ -495,6 +495,12 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 
 	if COMBAT_DEBUG: print("[Damage] ", name, " taking ", amount, " ", damage_type, " damage at ", global_pos, " dir ", global_dir)
 
+	# Player-feedback hook: surface "we got hit" to this ship's own terminal (impact
+	# sound + controller punch + screen flash, scaled by amount). Cleared each frame
+	# after the packet is built, same as the laser events. Other listeners guard on
+	# type, so a "damage" event is ignored where it's not wanted.
+	transient_events.append({"type": "damage", "amount": amount})
+
 	if global_pos == Vector2.ZERO or global_dir == Vector2.ZERO:
 		if COMBAT_DEBUG: print("[Damage] No position provided, applying fallback hull damage.")
 		# Fallback: Just subtract health from first hull component

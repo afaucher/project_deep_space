@@ -3,7 +3,7 @@ extends Node2D
 # Decorative slowly-rotating compass behind the opening menu -- a background accent in the
 # top-right. Sized RELATIVE to the viewport so it stays a consistent fraction of the
 # screen at any resolution, with line weight scaled to the radius. Purely cosmetic.
-@export var height_fraction: float = 0.25      # compass DIAMETER as a fraction of viewport height
+@export var height_fraction: float = 1.50      # compass DIAMETER as a fraction of viewport height
 @export var corner_margin_fraction: float = 0.05  # gap from the corner, fraction of viewport height
 @export var line_color: Color = Color(0.22, 0.22, 0.25)
 @export var line_width_fraction: float = 0.05  # base line thickness as a fraction of the radius
@@ -19,7 +19,7 @@ func _update_layout() -> void:
 	var vp := get_viewport_rect().size
 	radius = vp.y * height_fraction * 0.5
 	var margin := vp.y * corner_margin_fraction
-	position = Vector2(vp.x - radius - margin, radius + margin)
+	position = Vector2(vp.x - margin, margin)
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -42,10 +42,6 @@ func _draw() -> void:
 		var cardinal := i % 6 == 0
 		var inner := radius - (radius * 0.16 if cardinal else radius * 0.07)
 		draw_line(dir * inner, dir * radius, line_color, lw * (0.8 if cardinal else 0.5), true)
-
-	# Cardinal cross-hair.
-	draw_line(Vector2(-radius, 0), Vector2(radius, 0), line_color, lw * 0.4, true)
-	draw_line(Vector2(0, -radius), Vector2(0, radius), line_color, lw * 0.4, true)
 
 	# North pointer.
 	var pts := PackedVector2Array([

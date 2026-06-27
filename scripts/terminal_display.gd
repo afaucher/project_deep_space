@@ -18,6 +18,23 @@ var pinned_contacts: Array = []
 var current_ship_oriented: bool = false
 
 var sfx_laser: AudioStreamPlayer
+
+# --- Player feedback: heat / overheat / damage (audio + haptics + on-screen) ---
+var sfx_fan: AudioStreamPlayer       # looping coolant whir, ramped with heat
+var sfx_alarm: AudioStreamPlayer     # looping overheat klaxon
+var sfx_impact: AudioStreamPlayer    # one-shot hull thud on damage
+var damage_flash: ColorRect          # red full-screen flash on damage
+var overheat_label: Label            # blinking on-screen overheat alert
+
+var _heat_fraction: float = 0.0      # latest current_heat / max_heat, drives the fan
+var _is_overheating: bool = false    # edge state for alarm + sustained rumble
+var _flash_alpha: float = 0.0        # current red-flash intensity, fades out
+var _rumble_refresh: float = 0.0     # re-arm timer for sustained overheat rumble
+
+const FAN_HEAT_FLOOR := 0.45         # fan inaudible below this heat fraction
+const OVERHEAT_FRACTION := 0.99      # current_heat clamps to max_heat, so ~1.0 == pegged
+const FLASH_FADE := 2.5              # red damage-flash fade-out per second
+
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 var spawn_hull_dropdown: OptionButton
 var spawn_team_dropdown: OptionButton
@@ -33,7 +50,24 @@ func _ready() -> void:
 	sfx_laser = AudioStreamPlayer.new()
 	sfx_laser.stream = preload("res://assets/audio/laser.wav")
 	add_child(sfx_laser)
-	
+
+	sfx_fan = AudioStreamPlayer.new()
+	var fan_stream = load("res://assets/audio/fan.wav")
+	if fan_stream is AudioStreamWAV: fan_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	sfx_fan.stream = fan_stream
+	sfx_fan.volume_db = -60.0
+	add_child(sfx_fan)
+
+	sfx_alarm = AudioStreamPlayer.new()
+	var alarm_stream = load("res://assets/audio/alarm.wav")
+	if alarm_stream is AudioStreamWAV: alarm_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	sfx_alarm.stream = alarm_stream
+	add_child(sfx_alarm)
+
+	sfx_impact = AudioStreamPlayer.new()
+	sfx_impact.stream = load("res://assets/audio/impact.wav")
+	add_child(sfx_impact)
+
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	
 	var main_vbox = VBoxContainer.new()
@@ -216,6 +250,25 @@ func _ready() -> void:
 	weapons_toggle.toggled.connect(func(pressed): weapons_container.visible = pressed)
 	eng_toggle.toggled.connect(func(pressed): eng_container.visible = pressed)
 
+	# Damage red-flash + overheat alert overlays. Added before the help overlay so it
+	# still draws on top; both ignore the mouse so they never eat clicks.
+	damage_flash = ColorRect.new()
+	damage_flash.color = Color(0.8, 0.0, 0.0, 0.0)
+	damage_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	damage_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(damage_flash)
+
+	overheat_label = Label.new()
+	overheat_label.text = "!!  OVERHEAT  !!"
+	overheat_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overheat_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	overheat_label.offset_top = 50
+	overheat_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.2))
+	overheat_label.add_theme_font_size_override("font_size", 28)
+	overheat_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overheat_label.visible = false
+	add_child(overheat_label)
+
 	# F1 controls overlay (added last so it draws on top of every panel) + a persistent
 	# nudge so a cold player discovers it.
 	help_overlay = HelpOverlay.new()
@@ -277,6 +330,14 @@ func update_data(packet: Dictionary) -> void:
 		for ev in packet["transient_events"]:
 			if ev["type"] == "laser":
 				sfx_laser.play()
+			elif ev["type"] == "damage":
+				_on_player_damage(ev.get("amount", 0.0))
+
+	# Heat feedback: fan (continuous, in _process) + overheat alert (edge).
+	var eng = packet.get("engineering", {})
+	var maxh = eng.get("max_heat", 0.0)
+	_heat_fraction = (eng.get("current_heat", 0.0) / maxh) if maxh > 0.0 else 0.0
+	_update_overheat(_heat_fraction >= OVERHEAT_FRACTION)
 
 func _on_fire_weapon_requested(weapon_id: String) -> void:
 	var target_id = sensor_panel.get_selected_contact_id()
@@ -315,6 +376,63 @@ func _on_component_power_toggled(component_id: String, is_active: bool) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "set_component_power", component_id, is_active)
+
+# ----------------------------------------------------
+# Player feedback: heat fan / overheat alert / damage punch
+# ----------------------------------------------------
+func _process(delta: float) -> void:
+	# Coolant fan: ramp volume + pitch with heat fraction above the floor, silence below.
+	if _heat_fraction > FAN_HEAT_FLOOR:
+		if not sfx_fan.playing: sfx_fan.play()
+		var t = clampf((_heat_fraction - FAN_HEAT_FLOOR) / (1.0 - FAN_HEAT_FLOOR), 0.0, 1.0)
+		sfx_fan.volume_db = lerpf(-30.0, -6.0, t)
+		sfx_fan.pitch_scale = lerpf(0.85, 1.45, t)
+	elif sfx_fan.playing:
+		sfx_fan.stop()
+
+	# Damage flash fades back to transparent.
+	if _flash_alpha > 0.0:
+		_flash_alpha = maxf(0.0, _flash_alpha - delta * FLASH_FADE)
+		damage_flash.color.a = _flash_alpha
+
+	# While overheating: blink the alert and throb the high-freq motor only -- a pulsing
+	# buzz "alarm", deliberately unlike the balanced steering/throttle detent ticks.
+	if _is_overheating:
+		overheat_label.modulate.a = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
+		_rumble_refresh -= delta
+		if _rumble_refresh <= 0.0:
+			_rumble(0.45, 0.0, 0.22)   # buzz pulse (no heavy motor); gap before re-arm -> throb
+			_rumble_refresh = 0.45
+
+func _on_player_damage(amount: float) -> void:
+	sfx_impact.play()
+	_flash_alpha = clampf(0.2 + amount / 200.0, 0.2, 0.55)
+	# Bottom-heavy thump: low-freq "strong" motor dominant, almost no high-freq buzz, and
+	# longer than a detent tick -- so a hit reads as a hit, not as crossing the helm detent.
+	_rumble(0.1, clampf(0.55 + amount / 100.0, 0.55, 1.0), 0.28)
+
+func _update_overheat(now_over: bool) -> void:
+	if now_over == _is_overheating:
+		return
+	_is_overheating = now_over
+	if now_over:
+		if not sfx_alarm.playing: sfx_alarm.play()
+		overheat_label.visible = true
+	else:
+		sfx_alarm.stop()
+		overheat_label.visible = false
+		_stop_rumble()
+
+# Haptics layer on top of audio/visual: only when a controller is connected.
+func _rumble(weak: float, strong: float, duration: float) -> void:
+	var pads = Input.get_connected_joypads()
+	if pads.is_empty(): return
+	Input.start_joy_vibration(pads[0], weak, strong, duration)
+
+func _stop_rumble() -> void:
+	var pads = Input.get_connected_joypads()
+	if pads.is_empty(): return
+	Input.stop_joy_vibration(pads[0])
 
 
 
