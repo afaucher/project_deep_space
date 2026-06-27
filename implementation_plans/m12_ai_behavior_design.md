@@ -367,8 +367,14 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
     `fire_group` (single-tick volley, returns count fired), and `get_group_status` landed
     on `Ship`. `test_weapon_groups` verifies the frigate buckets to fwd(2)/port(5)/stbd(5),
     a `fire_group("port")` fires the full 5-weapon broadside in one tick, and the
-    out-of-arc starboard battery holds fire. **Remaining for M12a:** group-aware metering
-    in `fire_opportunity`, the player group-fire button, and the duel test below.
+    out-of-arc starboard battery holds fire. **Volley metering DONE (2026-06-27):**
+    `is_group_volley_ready(group, weapon_type)` holds a missile volley while any tube that
+    could still fire (alive, powered, has ammo) is on cooldown, and never waits on a tube
+    that is damaged / empty / disabled. `fire_opportunity` now fires lasers at will but
+    looses missile tubes only as a synchronized per-group volley; `test_volley_metering`
+    covers the wait/don't-wait cases. (At nose-on the forward group has one tube, so the
+    hold only bites once a multi-tube broadside is brought to bear in M12c.) **Remaining
+    for M12a:** the player group-fire button, and the duel test below.
   - **Verification deliverable: `test_ai_duel` (frigate vs frigate, head-to-head).** The
     real superiority test the project wants is a direct duel — new AI frigate vs legacy
     AI frigate, identical hulls, last one alive wins. It is parked off M12b because today

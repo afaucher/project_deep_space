@@ -1343,6 +1343,31 @@ func get_group_status(group_id: String, target_contact_id: String) -> Dictionary
 			ready += 1
 	return {"ready": ready, "total": total}
 
+# Massed-fire TIMING. Among a group's weapons of one type that could still contribute to
+# a volley -- alive, powered, and with ammo remaining -- are they ALL off cooldown? If
+# so the volley should loose now so every tube launches in the same tick and saturates
+# point defense; if any such tube is still cooling we hold and wait for it. Tubes that
+# are damaged, out of ammo, or disabled are EXCLUDED -- we never wait on a tube that will
+# never come ready. Returns false when no tube is live (nothing to volley).
+func is_group_volley_ready(group_id: String, weapon_type: String) -> bool:
+	var live := 0
+	var ready := 0
+	for w in get_components_by_type("weapons"):
+		if get_weapon_group_id(w) != group_id:
+			continue
+		if w["weapon_type"] != weapon_type:
+			continue
+		if w["health"] <= 0.0:                 # damaged -- never wait on it
+			continue
+		if w["ammo"] <= 0:                      # out of ammo -- never wait on it
+			continue
+		if not is_component_powered(w["id"]):   # disabled / unpowered -- never wait on it
+			continue
+		live += 1
+		if w.get("cooldown", 0.0) <= 0.0:
+			ready += 1
+	return live > 0 and ready == live
+
 func _process_point_defense() -> void:
 	var main_node = get_tree().current_scene
 	if not is_instance_valid(main_node): return
