@@ -74,9 +74,25 @@ decision is that the keys map onto the existing actions.
   keyboard+mouse. Pure InputMap work; handlers unchanged. Verify each action fires from
   its key (Godot allows `Input.action_press()` injection for a headless smoke test of a
   representative action or two).
-- **M13b — On-screen controls legend.** A toggleable help overlay (a "?" / **H** key, and
-  a small persistent hint) listing the controls so the scheme is discoverable cold. This
-  is the single highest-leverage "no explanation" item.
+- **M13b — On-screen controls legend (F1 help overlay).** The single highest-leverage "no
+  explanation" item. Design:
+  - **F1 toggles** a full-screen overlay: a dimmed backdrop + **callouts anchored on the
+    live UI controls**, each a highlight box around the control's `get_global_rect()` with
+    a chip showing its **glyph + function** beside it (helm dial → steer/throttle, FIRE
+    ALL button → fire, sensor contact list → target select, zoom, spawn dropdowns).
+  - **Split by whether a control exists:** anchored callouts for actions with a visible
+    widget; a **corner reference list** for keyboard/gamepad-only actions that have no
+    widget (mode toggles, map orient, quit, debug spawn) — that list doubles as the full
+    binding reference.
+  - **Anchor to live nodes, never hardcoded positions:** each panel exposes
+    `get_help_annotations() -> [{node, key, label}]`; `terminal_display` aggregates them so
+    the overlay only annotates what is currently on screen and follows layout/resizes. (The
+    FIRE ALL button must be stored as a member to be referenceable.)
+  - **Glyphs for both devices.** Show keyboard **and** generic-gamepad glyphs from the
+    vendored Kenney pack (see Assets below); default chips to the keyboard glyph with the
+    gamepad glyph in the reference list (optionally swap on last-input-device detection).
+  - **Persistent one-liner** outside the overlay (e.g. "F1: Controls · click a contact,
+    Space to fire") so a player who never opens F1 still gets the core loop.
 - **M13c — Onboarding-loop polish.** Rename the menu play button; make the spawn → select
   → fire loop legible (a first-run hint such as "Select a contact, then Space to fire");
   optionally spawn a starter enemy so there is instant action.
@@ -97,7 +113,21 @@ decision is that the keys map onto the existing actions.
 - **Does not need M7/M8.** Neutral IFF and text comms are not on the path to a playable
   sandbox.
 
-## 5. Open questions
+## 5. Assets — input glyphs
+
+Vendored **Kenney Input Prompts 1.5** (CC0 — free for commercial use, no attribution
+required; `License.txt` included) under `assets/input_prompts/`, SVG (vector) only:
+- `keyboard/` — 257 keyboard & mouse glyphs (`keyboard_w.svg`, `keyboard_space.svg`,
+  `keyboard_tab.svg`, mouse/scroll, etc.).
+- `generic/` — 36 device-agnostic controller glyphs (`generic_button_*`,
+  `generic_joystick_*`, `generic_button_trigger_*`, d-pad).
+
+A **single generic** controller set (not Xbox/PS/Switch-specific) was chosen so we ship
+one universal gamepad style; per-device packs can be added later if wanted. ~293 files /
+~0.9 MB vs. the full 4,644-file / 19 MB pack. The overlay maps each InputMap action to a
+glyph filename (a small lookup table: action/key → svg).
+
+## 6. Open questions
 
 - **Legend form:** transient overlay (toggle) vs. a persistent minimal control strip vs.
   both. Recommendation: a toggle overlay (full list) + a one-line persistent hint for the
