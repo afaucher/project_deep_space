@@ -362,6 +362,22 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
   pillar demonstrably need them; give `fire_opportunity` group-aware metering (save a
   massed volley instead of dribbling the magazine). The player group-fire button (§4.4)
   is an independent sub-track that can land anytime — it is off the AI critical path.
+  - **Capability layer DONE (2026-06-27).** `get_weapon_group_id` (explicit `group` field,
+    else derived from mount bearing: fwd / aft / port / stbd), `get_weapon_groups`,
+    `fire_group` (single-tick volley, returns count fired), and `get_group_status` landed
+    on `Ship`. `test_weapon_groups` verifies the frigate buckets to fwd(2)/port(5)/stbd(5),
+    a `fire_group("port")` fires the full 5-weapon broadside in one tick, and the
+    out-of-arc starboard battery holds fire. **Remaining for M12a:** group-aware metering
+    in `fire_opportunity`, the player group-fire button, and the duel test below.
+  - **Verification deliverable: `test_ai_duel` (frigate vs frigate, head-to-head).** The
+    real superiority test the project wants is a direct duel — new AI frigate vs legacy
+    AI frigate, identical hulls, last one alive wins. It is parked off M12b because today
+    two single-missile trickles stalemate: each ship's PD swats the other's lone missiles,
+    so neither dies. **It needs M12a *and* M12c:** the frigate's saturating missile volley
+    is its 3-tube *broadside*, so the new AI must both bring the broadside to bear
+    (M12c orientation) and fire it as one group (`fire_group`, M12a) — at nose-on it has
+    only the single forward tube and cannot mass. Land the duel test once both exist;
+    `test_ai_vs_legacy` (the TTK-vs-buoy laser proxy) stands in until then.
 - **M12c — Postures & threat reactivity.** `orient_for_group` (turn to bring a broadside
   to bear; strike vs. broadside), `maintain_range`, `evade`, `under_fire`. Where the
   destroyer starts fighting like a destroyer — bring a broadside to bear and `fire_group`

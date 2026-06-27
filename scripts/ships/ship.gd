@@ -1278,6 +1278,71 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 
 	behavior.execute_fire(self, weapon_data, target_pos, target_contact_id)
 
+# ----------------------------------------------------
+# M12a: Weapon groups & massed fire
+# ----------------------------------------------------
+# A "group" lets the player and the AI reason about a battery as a unit (a broadside)
+# instead of N individual hardpoints, and is the handle for massed fire. Each weapon
+# component MAY declare an explicit "group"; absent that it is derived from the mount
+# bearing, so existing ship loadouts need no edits. Forward is +X, +Y is starboard
+# (right), so heading -PI/2 is a port mount and +PI/2 is starboard (see frigate.gd).
+const WEAPON_GROUP_FWD := "fwd"
+const WEAPON_GROUP_AFT := "aft"
+const WEAPON_GROUP_PORT := "port"
+const WEAPON_GROUP_STBD := "stbd"
+
+func get_weapon_group_id(comp: Dictionary) -> String:
+	if comp.has("group"):
+		return comp["group"]
+	var h = wrapf(comp.get("heading", 0.0), -PI, PI)
+	if abs(h) < PI / 6.0:
+		return WEAPON_GROUP_FWD
+	if abs(abs(h) - PI) < PI / 6.0:
+		return WEAPON_GROUP_AFT
+	return WEAPON_GROUP_PORT if h < 0.0 else WEAPON_GROUP_STBD
+
+# { group_id: [weapon_id, ...] } over all weapon components.
+func get_weapon_groups() -> Dictionary:
+	var groups := {}
+	for w in get_components_by_type("weapons"):
+		var gid = get_weapon_group_id(w)
+		if not groups.has(gid):
+			groups[gid] = []
+		groups[gid].append(w["id"])
+	return groups
+
+# Fire EVERY weapon in a group that currently can fire, in this single call (one physics
+# tick). That single-tick simultaneity is what saturates point defense -- the heavy-ship
+# massed-fire advantage a trickle of one missile can never achieve. Returns the count
+# actually fired.
+func fire_group(group_id: String, target_pos: Vector2, target_contact_id: String) -> int:
+	if not is_multiplayer_authority() or is_dead:
+		return 0
+	var fired := 0
+	for w in get_components_by_type("weapons"):
+		if get_weapon_group_id(w) != group_id:
+			continue
+		var behavior = WeaponBehaviorRegistry.get_behavior(w["weapon_type"])
+		if behavior.can_fire(self, w, target_contact_id):
+			behavior.execute_fire(self, w, target_pos, target_contact_id)
+			fired += 1
+	return fired
+
+# Readiness snapshot for a group without firing -- for the weapons-panel group button
+# and AI utility scoring. `ready` counts weapons whose can_fire() passes right now
+# (ammo + cooldown + power + arc), `total` is the group's size.
+func get_group_status(group_id: String, target_contact_id: String) -> Dictionary:
+	var total := 0
+	var ready := 0
+	for w in get_components_by_type("weapons"):
+		if get_weapon_group_id(w) != group_id:
+			continue
+		total += 1
+		var behavior = WeaponBehaviorRegistry.get_behavior(w["weapon_type"])
+		if behavior.can_fire(self, w, target_contact_id):
+			ready += 1
+	return {"ready": ready, "total": total}
+
 func _process_point_defense() -> void:
 	var main_node = get_tree().current_scene
 	if not is_instance_valid(main_node): return
