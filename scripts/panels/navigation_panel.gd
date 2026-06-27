@@ -134,7 +134,10 @@ func update_data(packet: Dictionary) -> void:
 func _process(delta: float) -> void:
 	var zoom_axis = Input.get_axis("nav_zoom_in", "nav_zoom_out")
 	if abs(zoom_axis) > 0.1:
-		zoom_slider.value *= (1.0 + zoom_axis * delta * 2.0)
+		map_zoom *= (1.0 - zoom_axis * delta * 2.0)
+		map_zoom = clampf(map_zoom, zoom_slider.min_value, zoom_slider.max_value)
+		zoom_slider.set_value_no_signal(map_zoom)
+		queue_redraw()
 		
 	if active_lasers.size() > 0:
 		for i in range(active_lasers.size() - 1, -1, -1):
