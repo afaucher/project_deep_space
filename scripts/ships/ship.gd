@@ -85,6 +85,8 @@ const CONTACT_FUSION_SMOOTHING := 0.8  # lerp weight toward each new reading -- 
 const PASSIVE_EM_NOISE_FLOOR := 15.0   # received EM (after range/direction falloff) below this is undetectable by passive sensors
 const EM_FALLOFF_REFERENCE_DISTANCE := 10000.0 # distance at which received EM starts dropping below the broadcast value
 const SENSOR_VELOCITY_NOISE := 0.05    # +/- fractional magnitude and +/- radian jitter applied to a sensor's reported target velocity
+const SENSOR_POS_NOISE := 0.005        # +/- fractional distance noise and bin fraction noise applied to reported target position
+
 
 # take_damage() raymarch / damage-soak constants.
 const DAMAGE_RAYMARCH_STEP := 2.0      # px per step along the hit ray when distributing damage across internal components
@@ -1220,7 +1222,9 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 			
 		var bin_center_angle = SENSOR_HEADING - (ARC_WIDTH / 2.0) + (bin_idx * BIN_ANGLE) + (BIN_ANGLE / 2.0)
 		merged["distance"] = weighted_dist
-		merged["pos"] = origin + Vector2(weighted_dist, 0).rotated(bin_center_angle)
+		var noisy_dist = weighted_dist * (1.0 + randf_range(-SENSOR_POS_NOISE, SENSOR_POS_NOISE))
+		var noisy_angle = bin_center_angle + randf_range(-BIN_ANGLE * SENSOR_POS_NOISE * 50.0, BIN_ANGLE * SENSOR_POS_NOISE * 50.0) # slightly larger spread within the bin
+		merged["pos"] = origin + Vector2(noisy_dist, 0).rotated(noisy_angle)
 		
 		# Cheat velocity with noise
 		var noisy_vel = weighted_vel * (1.0 + randf_range(-SENSOR_VELOCITY_NOISE, SENSOR_VELOCITY_NOISE))
