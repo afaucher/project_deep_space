@@ -16,12 +16,12 @@ const ROWS := [
 	{"label": "Steer", "keys": ["keyboard_a", "keyboard_d"], "pad": "generic_joystick_left", "pad_text": "Left Stick"},
 	{"label": "Throttle", "keys": ["keyboard_w", "keyboard_s"], "pad": "generic_joystick", "pad_text": "Left Stick"},
 	{"label": "Fire All", "keys": ["keyboard_space"], "pad": "generic_button_trigger_a", "pad_text": "Right Trigger"},
-	{"label": "Target Next / Prev", "keys": ["keyboard_e", "keyboard_q"], "pad": "generic_joystick", "pad_text": "Stick Click"},
+	{"label": "Target Next / Prev", "keys": ["keyboard_e", "keyboard_q"], "pad": "generic_button", "pad_text": "RB / LB"},
 	{"label": "Zoom Map", "keys": ["keyboard_equals", "keyboard_minus"], "pad": "generic_joystick", "pad_text": "Right Stick"},
-	{"label": "Throttle Mode", "keys": ["keyboard_v"], "pad": "generic_button", "pad_text": "Start"},
+	{"label": "Throttle Mode", "keys": ["keyboard_v"], "pad": "generic_joystick", "pad_text": "L-Stick (click)"},
 	{"label": "Steering Mode", "keys": ["keyboard_c"], "pad": "generic_button", "pad_text": "X"},
 	{"label": "Map Orientation", "keys": ["keyboard_m"], "pad": "generic_button", "pad_text": "Y"},
-	{"label": "Quit", "keys": ["keyboard_escape"], "pad": "generic_button", "pad_text": "Back"},
+	{"label": "Quit", "keys": ["keyboard_escape"], "pad": "generic_button", "pad_text": "Start"},
 	{"label": "Help (this screen)", "keys": ["keyboard_f1"], "pad": "", "pad_text": ""},
 ]
 
