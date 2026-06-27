@@ -646,6 +646,17 @@ func request_spawn(type: String) -> void:
 	elif type == "buoy":
 		main._spawn_buoy()
 
+# M10 sandbox: spawn a catalog hull (by display name) on a sandbox team
+# (Friendly/Enemy/Pirate). The terminal's combined spawn control sends this;
+# the host resolves the name to a ship script via ShipCatalog and routes it
+# through main._spawn_ship().
+@rpc("any_peer", "call_local")
+func request_spawn_ship(ship_name: String, team: int) -> void:
+	if not is_multiplayer_authority(): return
+	var main = get_node_or_null("/root/Main")
+	if not main: return
+	main._spawn_ship_by_name(ship_name, team)
+
 
 @rpc("any_peer", "call_local")
 func set_sensor_state(sensor_id: String, is_active: bool) -> void:

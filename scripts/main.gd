@@ -9,12 +9,10 @@ const Buoy = preload("res://scripts/ships/buoy.gd")
 const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
-const SpawnPanel = preload("res://scripts/panels/spawn_panel.gd")
 
 var is_host: bool = false
 var players = {}
 var asteroids = []
-var spawn_panel: Control = null
 var _next_sandbox_id: int = 900
 
 func _ready() -> void:
@@ -101,7 +99,6 @@ func _on_connection_established(hosting: bool) -> void:
 		_spawn_asteroids()
 		#_spawn_bouys() # Temporarily disabled
 		_spawn_player_ship(multiplayer.get_unique_id())
-		_ensure_spawn_panel()
 	else:
 		print("I am a client terminal.")
 
@@ -147,9 +144,7 @@ func _on_peer_disconnected(id: int) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if is_host and event is InputEventKey and event.pressed:
-		if event.keycode == KEY_F2:
-			_toggle_spawn_panel()
-		elif event.keycode == KEY_F3:
+		if event.keycode == KEY_F3:
 			_spawn_drone()
 		elif event.keycode == KEY_F4:
 			_spawn_buoy()
@@ -186,15 +181,14 @@ func _spawn_ship(ship_script: Script, team: int) -> Node:
 	print("Spawned ", ship_script.resource_path, " (id ", spawn_id, ", team ", team, ") at ", ship.position)
 	return ship
 
-func _toggle_spawn_panel() -> void:
-	_ensure_spawn_panel()
-	spawn_panel.visible = not spawn_panel.visible
-
-func _ensure_spawn_panel() -> void:
-	if spawn_panel != null: return
-	spawn_panel = SpawnPanel.new()
-	spawn_panel.main_node = self
-	ui_layer.add_child(spawn_panel)
+# Resolve a catalog hull by display name (sent by the terminal's combined spawn
+# control via the request_spawn_ship RPC) and spawn it on the given team.
+func _spawn_ship_by_name(ship_name: String, team: int) -> void:
+	for entry in ShipCatalog.SPAWNABLE:
+		if entry["name"] == ship_name:
+			_spawn_ship(entry["script"], team)
+			return
+	push_warning("Spawn request for unknown ship: " + ship_name)
 
 func _spawn_drone(is_friendly: bool = false) -> void:
 	var team = ShipCatalog.Team.FRIENDLY if is_friendly else ShipCatalog.Team.ENEMY

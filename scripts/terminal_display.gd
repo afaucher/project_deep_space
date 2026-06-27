@@ -16,7 +16,9 @@ var pinned_contacts: Array = []
 var current_ship_oriented: bool = false
 
 var sfx_laser: AudioStreamPlayer
-var spawn_dropdown: OptionButton
+const ShipCatalog = preload("res://scripts/ship_catalog.gd")
+var spawn_hull_dropdown: OptionButton
+var spawn_team_dropdown: OptionButton
 
 func _ready() -> void:
 	sfx_laser = AudioStreamPlayer.new()
@@ -69,13 +71,27 @@ func _ready() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_bar.add_child(spacer)
 	
-	spawn_dropdown = OptionButton.new()
-	spawn_dropdown.add_item("Spawn...")
-	spawn_dropdown.add_item("Asteroids (10)")
-	spawn_dropdown.add_item("Target Drone")
-	spawn_dropdown.add_item("Target Buoy")
-	spawn_dropdown.item_selected.connect(_on_spawn_selected)
-	top_bar.add_child(spawn_dropdown)
+	# Sandbox spawn: hull dropdown + team dropdown + Spawn button (replaces the
+	# old single dropdown and the removed F2 overlay panel). Catalog hulls spawn
+	# on the selected team; the two legacy non-ship objects ignore the team.
+	spawn_hull_dropdown = OptionButton.new()
+	for entry in ShipCatalog.SPAWNABLE:
+		spawn_hull_dropdown.add_item(entry["name"])
+	spawn_hull_dropdown.add_item("Target Buoy")
+	spawn_hull_dropdown.add_item("Asteroids (10)")
+	top_bar.add_child(spawn_hull_dropdown)
+
+	spawn_team_dropdown = OptionButton.new()
+	spawn_team_dropdown.add_item("Friendly")
+	spawn_team_dropdown.add_item("Enemy")
+	spawn_team_dropdown.add_item("Pirate")
+	spawn_team_dropdown.select(ShipCatalog.Team.ENEMY)
+	top_bar.add_child(spawn_team_dropdown)
+
+	var spawn_button = Button.new()
+	spawn_button.text = "Spawn"
+	spawn_button.pressed.connect(_on_spawn_pressed)
+	top_bar.add_child(spawn_button)
 	
 	var spacer2 = Control.new()
 	spacer2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -201,18 +217,22 @@ func _get_my_ship() -> Node:
 	var ship_node_name = "Ship_" + str(multiplayer.get_unique_id())
 	return get_node_or_null("/root/Main/" + ship_node_name)
 
-func _on_spawn_selected(idx: int) -> void:
-	if idx == 0: return
+func _on_spawn_pressed() -> void:
 	var ship_node = _get_my_ship()
-	if ship_node:
-		if idx == 1:
-			ship_node.rpc_id(1, "request_spawn", "asteroids")
-		elif idx == 2:
-			ship_node.rpc_id(1, "request_spawn", "drone")
-		elif idx == 3:
-			ship_node.rpc_id(1, "request_spawn", "buoy")
-	
-	spawn_dropdown.select(0)
+	if not ship_node: return
+	var hull_idx = spawn_hull_dropdown.selected
+	var n_ships = ShipCatalog.SPAWNABLE.size()
+	if hull_idx >= 0 and hull_idx < n_ships:
+		# Catalog hull -> spawn on the selected team. Team dropdown index matches
+		# the ShipCatalog.Team enum (Friendly=0, Enemy=1, Pirate=2). The host
+		# resolves the name to a ship script and routes through _spawn_ship().
+		var ship_name = ShipCatalog.SPAWNABLE[hull_idx]["name"]
+		var team = spawn_team_dropdown.selected
+		ship_node.rpc_id(1, "request_spawn_ship", ship_name, team)
+	elif hull_idx == n_ships:
+		ship_node.rpc_id(1, "request_spawn", "buoy")
+	elif hull_idx == n_ships + 1:
+		ship_node.rpc_id(1, "request_spawn", "asteroids")
 
 func update_data(packet: Dictionary) -> void:
 	# Inject local UI state into the packet so sub-panels can read it
