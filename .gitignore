@@ -17,3 +17,7 @@ desktop.ini
 Thumbs.db
 *.exe
 *.zip
+
+# Python (generate_audio.py helper)
+__pycache__/
+*.pyc
