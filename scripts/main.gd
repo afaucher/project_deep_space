@@ -9,6 +9,7 @@ const Buoy = preload("res://scripts/ships/buoy.gd")
 const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
+const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 
 var is_host: bool = false
 var players = {}
@@ -176,8 +177,7 @@ func _spawn_ship(ship_script: Script, team: int) -> Node:
 	add_child(ship)
 	players[spawn_id] = ship
 
-	var ai = AIDroneController.new()
-	ship.add_child(ai)
+	ship.add_child(AITreeFactory.build_default())
 	print("Spawned ", ship_script.resource_path, " (id ", spawn_id, ", team ", team, ") at ", ship.position)
 	return ship
 

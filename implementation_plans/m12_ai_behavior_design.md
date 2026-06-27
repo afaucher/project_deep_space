@@ -11,9 +11,11 @@ composition model to copy rather than green-field a framework choice. See the
 "Beehave integration" and "Why Beehave" sections below.
 
 Sub-milestone labels are **M12a–M12f** (matching the M9a–f convention). They supersede
-the informal "A1–A6" sketch from the design chat — same ideas, repo numbering, with
-**weapon groups pulled to the front (M12a)** because they are the shared primitive for
-both player massed fire and AI broadside reasoning.
+the informal "A1–A6" sketch from the design chat. Each letter stays attached to its
+content, but the **execution order was revised after the spike** — see §10. In short:
+the spike retired the Beehave risk, so the Beehave bring-up (M12b) was pulled *ahead* of
+the weapon-groups capability (M12a) as a thin vertical slice, letting a real AI consumer
+pull the `Ship` capability interface into existence before it is built on spec.
 
 ---
 
@@ -321,32 +323,43 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
 
 ## 10. Milestones
 
-- **M12a — Weapon groups & massed fire (capability + player UI).** Group schema +
-  derivation; `get_weapon_groups` / `fire_group` / `get_group_status` on `Ship`; player
-  group-fire buttons + RPC in `weapons_panel`. **No Beehave** — pure `Ship` + UI, so it
-  carries zero framework risk and stands alone as a player feature. *Highest-value,
-  lowest-risk, unblocks everything.*
-- **M12b-spike — Beehave headless go/no-go gate (do this FIRST among the AI work).**
-  Before building any leaf library: vendor `addons/beehave`, stand up one `BeehaveTree`
-  on a ship with a single leaf that calls a `Ship` capability method, and prove it
-  **ticks and asserts inside `--run-test`** with no rendering. *Gate:* if headless
-  ergonomics fight the harness, fall back to a pure-GDScript selector behind the same
-  leaf interface. Either way M12a is untouched (capability layer + leaf interface are
-  framework-agnostic), so the spike risks nothing already built. Keep it throwaway.
-  - **Status: PASSED (2026-06-26) — Beehave is GO for M12.** Beehave 2.9.2 vendored at
-    `addons/beehave`; `test_ai_beehave_spike` builds a `BeehaveTree` (MANUAL thread) in
-    code, ticks it under `--headless --run-test`, and the leaf drives the ship via
-    `apply_control_input`. Existing suite unaffected by the two new autoloads. The
-    global class cache is a **local artifact** (warm once via the Godot editor or
-    `--import`), intentionally not committed — git cannot re-include a child of the
-    ignored `.godot/` dir, which matches how the project already treats it. Kept the
-    spike as a permanent Beehave-headless smoke test rather than deleting it.
-- **M12b — Beehave bring-up + parity.** Only after the spike passes: actor interface +
-  blackboard + minimal leaf set; replace `ai_drone_controller` with a trivial tree
-  (acquire → orient_for_group(best) → fire_opportunity).
-- **M12c — Postures & threat reactivity.** `orient_for_group` (strike/broadside),
-  `maintain_range`, `evade`, `under_fire`. Destroyer can now bring a broadside to bear
-  and `fire_group` through PD even while armed.
+> **Execution order revised 2026-06-26.** The original draft put M12a (weapon groups)
+> first on a "lowest-risk, no-framework" rationale. The spike retired the Beehave risk,
+> so the order flipped to a **thin vertical slice first** (M12b before M12a): stand up
+> the minimal real AI tree, let it pull the `Ship` capability interface into existence
+> through a real consumer, *then* build the weapon-groups capability the broadside
+> posture demands. The player massed-fire UI splits out as an independent track off the
+> AI critical path.
+
+- **M12b-spike — Beehave headless go/no-go gate. DONE (2026-06-26, git `fbfd06c`).**
+  Vendored Beehave 2.9.2; `test_ai_beehave_spike` builds a `BeehaveTree` (MANUAL thread)
+  in code, ticks it under `--headless --run-test`, and the leaf drives the ship via
+  `apply_control_input`. Two autoloads added; existing suite unaffected. The global class
+  cache is a **local artifact** (warm once via the Godot editor or `--import`),
+  intentionally not committed — git cannot re-include a child of the ignored `.godot/`
+  dir. Kept the spike as a permanent Beehave-headless smoke test.
+- **M12b — Beehave bring-up + minimal engage tree. DONE (2026-06-26).** Replaced
+  `ai_drone_controller` with a Beehave tree built in code by `scripts/ai/ai_tree_factory.gd`:
+  `Selector[ Sequence[ acquire_target, steer_to_target, fire_opportunity ], idle ]`.
+  `fire_opportunity` enumerates `get_components_by_type("weapons")` and fires every weapon
+  that bears through `fire_weapon` — so the AI now uses its forward laser **and** missile
+  (and any aligned battery) instead of one hardcoded `hp_fwd_missile` every 10s. Steering
+  ported verbatim from the legacy range bands (posture-aware orientation is M12c). Legacy
+  controller + its `class_name` deleted; `test_e2e_drone_vs_bouy` migrated to the tree;
+  new `test_ai_engage_tree` asserts the forward laser and missile both fire. Suite green
+  (15/16; `test_asteroid` is a pre-existing non-conforming legacy test, not a regression).
+  Leaves all return SUCCESS/FAILURE (never RUNNING) so the Engage sequence runs steer
+  **and** fire every tick.
+- **M12a — Weapon groups & massed fire (capability) + player single-button group fire.**
+  Now sequenced *after* the slice. Build `get_weapon_groups` / `fire_group` /
+  `get_group_status` (§4) because the broadside posture (M12c) and the shoot-through-PD
+  pillar demonstrably need them; give `fire_opportunity` group-aware metering (save a
+  massed volley instead of dribbling the magazine). The player group-fire button (§4.4)
+  is an independent sub-track that can land anytime — it is off the AI critical path.
+- **M12c — Postures & threat reactivity.** `orient_for_group` (turn to bring a broadside
+  to bear; strike vs. broadside), `maintain_range`, `evade`, `under_fire`. Where the
+  destroyer starts fighting like a destroyer — bring a broadside to bear and `fire_group`
+  through PD even while armed.
 - **M12d — Disposition + curated archetypes + sandbox scenario.** `target_filter`; the
   four archetypes as trees; wire into the M10 spawn UI; the food-chain scenario.
 - **M12e — Mission behaviors.** Patrol, escort (formation primitive ported from

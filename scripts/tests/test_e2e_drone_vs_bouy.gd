@@ -2,6 +2,7 @@ extends Node
 
 const Ship = preload("res://scripts/ships/frigate.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
+const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 
 var drone_ship: Ship
 var bouy: Buoy
@@ -18,10 +19,8 @@ func setup(main_node: Node) -> void:
 	drone_ship.rotation = 0.0 # Pointing right
 	main_node.add_child(drone_ship)
 	
-	# Add Drone Controller
-	var ai = AIDroneController.new()
-	ai.name = "AIDroneController"
-	drone_ship.add_child(ai)
+	# Add the M12 Beehave behavior tree (replaces the legacy AIDroneController).
+	drone_ship.add_child(AITreeFactory.build_default())
 	
 	# Add Bouy
 	bouy = Buoy.new()
