@@ -133,6 +133,7 @@ func update_data(packet: Dictionary) -> void:
 
 func _process(delta: float) -> void:
 	var zoom_axis = Input.get_axis("nav_zoom_in", "nav_zoom_out")
+	# don't get stuck at max zoom
 	if abs(zoom_axis) > 0.1:
 		map_zoom *= (1.0 - zoom_axis * delta * 2.0)
 		map_zoom = clampf(map_zoom, zoom_slider.min_value, zoom_slider.max_value)

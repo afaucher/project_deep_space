@@ -32,7 +32,19 @@ func _input(event: InputEvent) -> void:
 		var contacts = current_state.get("contacts", {})
 		if contacts.is_empty(): return
 		
-		var contact_list = contacts.keys()
+		var filter_idx = 0
+		if is_instance_valid(contact_filter_dropdown):
+			filter_idx = contact_filter_dropdown.selected
+			
+		var contact_list = []
+		for c_id in contacts.keys():
+			var classification = contacts[c_id].get("classification", "UNKNOWN")
+			if filter_idx == 1 and classification == "ASTEROID": continue
+			if filter_idx == 2 and classification != "UNIDENTIFIED VESSEL": continue
+			contact_list.append(c_id)
+			
+		if contact_list.is_empty(): return
+		
 		var pos = current_state.get("pos", Vector2.ZERO)
 		# Sort by distance
 		contact_list.sort_custom(func(a, b): return contacts[a]["pos"].distance_to(pos) < contacts[b]["pos"].distance_to(pos))
