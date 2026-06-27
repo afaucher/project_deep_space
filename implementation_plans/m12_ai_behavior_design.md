@@ -344,12 +344,18 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
   `fire_opportunity` enumerates `get_components_by_type("weapons")` and fires every weapon
   that bears through `fire_weapon` — so the AI now uses its forward laser **and** missile
   (and any aligned battery) instead of one hardcoded `hp_fwd_missile` every 10s. Steering
-  ported verbatim from the legacy range bands (posture-aware orientation is M12c). Legacy
-  controller + its `class_name` deleted; `test_e2e_drone_vs_bouy` migrated to the tree;
-  new `test_ai_engage_tree` asserts the forward laser and missile both fire. Suite green
-  (15/16; `test_asteroid` is a pre-existing non-conforming legacy test, not a regression).
-  Leaves all return SUCCESS/FAILURE (never RUNNING) so the Engage sequence runs steer
-  **and** fire every tick.
+  ported verbatim from the legacy range bands (posture-aware orientation is M12c). The
+  legacy `AIDroneController` is **retained as a baseline opponent** (no longer attached by
+  `_spawn_ship`) for the superiority regression below. `test_e2e_drone_vs_bouy` migrated
+  to the tree; `test_ai_engage_tree` asserts the forward laser and missile both fire; and
+  `test_ai_vs_legacy` pits the new AI against the legacy controller on identical hulls vs
+  an identical buoy and requires the new AI to kill faster in every trial (measured: new
+  2 frames via its hitscan laser vs legacy 165 frames waiting on a missile — 3/3, no
+  variance). A true head-to-head *duel* test is deferred to M12a: two single-missile
+  trickle frigates stalemate today because each ship's PD swats the other's lone missiles
+  — exactly the gap massed fire closes. Suite green (15/16; `test_asteroid` is a
+  pre-existing non-conforming legacy test, not a regression). Leaves all return
+  SUCCESS/FAILURE (never RUNNING) so the Engage sequence runs steer **and** fire each tick.
 - **M12a — Weapon groups & massed fire (capability) + player single-button group fire.**
   Now sequenced *after* the slice. Build `get_weapon_groups` / `fire_group` /
   `get_group_status` (§4) because the broadside posture (M12c) and the shoot-through-PD
