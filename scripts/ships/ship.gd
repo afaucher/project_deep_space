@@ -1273,7 +1273,9 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 
 	var behavior = WeaponBehaviorRegistry.get_behavior(weapon_data["weapon_type"])
 	if not behavior.can_fire(self, weapon_data, target_contact_id):
-		print("fire_weapon failed: cannot fire ", weapon_id)
+		# Expected control flow: the AI's fire_opportunity sprays the whole loadout each
+		# tick and lets can_fire gate each one, so most calls "fail" on arc/cooldown. Not
+		# an error -- stay silent (was a debug print that flooded headless logs).
 		return
 
 	behavior.execute_fire(self, weapon_data, target_pos, target_contact_id)

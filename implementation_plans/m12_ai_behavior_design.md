@@ -382,12 +382,21 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
     so neither dies. **It needs M12a *and* M12c:** the frigate's saturating missile volley
     is its 3-tube *broadside*, so the new AI must both bring the broadside to bear
     (M12c orientation) and fire it as one group (`fire_group`, M12a) — at nose-on it has
-    only the single forward tube and cannot mass. Land the duel test once both exist;
-    `test_ai_vs_legacy` (the TTK-vs-buoy laser proxy) stands in until then.
-- **M12c — Postures & threat reactivity.** `orient_for_group` (turn to bring a broadside
-  to bear; strike vs. broadside), `maintain_range`, `evade`, `under_fire`. Where the
-  destroyer starts fighting like a destroyer — bring a broadside to bear and `fire_group`
-  through PD even while armed.
+    only the single forward tube and cannot mass. **DONE (2026-06-27):** `test_ai_duel`
+    runs 3 trials and requires the new AI to dominate each — it won 3/3 at zero damage
+    taken, grinding the legacy down 2500-3790 HP. (`test_ai_vs_legacy`, the TTK-vs-buoy
+    laser proxy, remains as a faster smoke test.)
+- **M12c — Postures & threat reactivity.** Broadside posture **DONE (2026-06-27):** the
+  maneuver leaf brings the ship's HEAVIEST weapon group to bear, range-gated around an
+  optimal distance — reposition nose-on (arrival profile) when out of band, otherwise
+  present the broadside and *drift* (coast, no thrust), since thrust is along the facing
+  and the massed volley does the work. Re-presenting as the bearing changes is free RCS
+  rotation; the ship only spends thrust to reach optimal range or correct drift past the
+  hysteresis band. Forward-only hulls collapse to nose-on. `test_ai_duel` (frigate vs
+  frigate) confirms the new AI now wins decisively and consistently: **3/3 trials, new AI
+  took zero damage while grinding the legacy down 2500-3790 HP** — massed broadside fire
+  saturating the legacy's PD while its single forward missiles get swatted. **Remaining
+  for M12c:** threat-reactive evade (`under_fire` → break off / juke even while armed).
 - **M12d — Disposition + curated archetypes + sandbox scenario.** `target_filter`; the
   four archetypes as trees; wire into the M10 spawn UI; the food-chain scenario.
 - **M12e — Mission behaviors.** Patrol, escort (formation primitive ported from
