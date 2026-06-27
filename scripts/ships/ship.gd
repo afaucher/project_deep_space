@@ -124,8 +124,41 @@ var ship_tier: int = ComponentSpec.Tier.UNVALIDATED
 var actual_throttle: float = 0.0
 
 var _cached_max_steps: int = 0
-var _cached_bbox_min: Vector2 = Vector2(-INF, -INF)
-var _cached_bbox_max: Vector2 = Vector2(INF, INF)
+var _cached_aabb: Rect2 = Rect2()
+var _aabb_cached: bool = false
+
+func get_local_aabb() -> Rect2:
+	if _aabb_cached:
+		return _cached_aabb
+	
+	if ship_components.is_empty():
+		_cached_aabb = Rect2(-10, -10, 20, 20)
+	else:
+		var min_x = INF; var max_x = -INF
+		var min_y = INF; var max_y = -INF
+		for c in ship_components:
+			var r: Rect2 = c.get("rect", Rect2(-10, -10, 20, 20))
+			min_x = min(min_x, r.position.x)
+			max_x = max(max_x, r.position.x + r.size.x)
+			min_y = min(min_y, r.position.y)
+			max_y = max(max_y, r.position.y + r.size.y)
+		_cached_aabb = Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+	
+	_aabb_cached = true
+	return _cached_aabb
+
+func get_bounding_radius() -> float:
+	var aabb = get_local_aabb()
+	var corners = [
+		aabb.position,
+		aabb.position + Vector2(aabb.size.x, 0),
+		aabb.position + Vector2(0, aabb.size.y),
+		aabb.position + aabb.size
+	]
+	var max_dist = 0.0
+	for pt in corners:
+		max_dist = max(max_dist, pt.length())
+	return max_dist
 
 # Loadout is empty on the generic Ship base. Each concrete ship class declares
 # its own ship_components in _init() (see frigate.gd, sensor_drone.gd,
@@ -428,7 +461,12 @@ var base_heat: float:
 	get: return current_heat
 
 # Sensor Signature Profile
-var cross_section: float = 50.0  # Medium size
+var signature_multiplier: float = 1.0
+
+var cross_section: float:
+	get:
+		var aabb = get_local_aabb()
+		return min(aabb.size.x, aabb.size.y) * signature_multiplier
 var density: float = 90.0        # Solid armor
 
 var sfx_engine: AudioStreamPlayer
@@ -457,34 +495,23 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 		var step_size = DAMAGE_RAYMARCH_STEP
 		
 		if _cached_max_steps == 0:
-			var max_dist = 200.0
-			var min_x = INF; var max_x = -INF
-			var min_y = INF; var max_y = -INF
-			if not ship_components.is_empty():
-				for c in ship_components:
-					var r: Rect2 = c["rect"]
-					min_x = min(min_x, r.position.x)
-					max_x = max(max_x, r.position.x + r.size.x)
-					min_y = min(min_y, r.position.y)
-					max_y = max(max_y, r.position.y + r.size.y)
-				max_dist = Vector2(max_x - min_x, max_y - min_y).length()
-				_cached_bbox_min = Vector2(min_x, min_y)
-				_cached_bbox_max = Vector2(max_x, max_y)
-			else:
-				_cached_bbox_min = Vector2(-100, -100)
-				_cached_bbox_max = Vector2(100, 100)
+			var aabb = get_local_aabb()
+			var max_dist = aabb.size.length()
 			_cached_max_steps = int(ceil(max_dist / step_size))
 			
 		var tmin = -INF
 		var tmax = INF
 		var hit_box = true
+		var aabb = get_local_aabb()
 		for axis in [Vector2.AXIS_X, Vector2.AXIS_Y]:
 			if abs(local_dir[axis]) < 0.0001:
-				if local_pos[axis] < _cached_bbox_min[axis] or local_pos[axis] > _cached_bbox_max[axis]:
+				if local_pos[axis] < aabb.position[axis] or local_pos[axis] > aabb.position[axis] + aabb.size[axis]:
 					hit_box = false
 			else:
-				var t1 = (_cached_bbox_min[axis] - local_pos[axis]) / local_dir[axis]
-				var t2 = (_cached_bbox_max[axis] - local_pos[axis]) / local_dir[axis]
+				var min_bound = aabb.position[axis]
+				var max_bound = aabb.position[axis] + aabb.size[axis]
+				var t1 = (min_bound - local_pos[axis]) / local_dir[axis]
+				var t2 = (max_bound - local_pos[axis]) / local_dir[axis]
 				if t1 > t2:
 					var temp = t1
 					t1 = t2
@@ -547,10 +574,11 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 			trace["end_local"] = current_pos
 			
 		hit_traces.append(trace)
-			
+
 		if not hit_something:
 			print("[Damage] Raycast completely missed all internal components!")
 			
+
 	# Check death condition (reactor dead)
 	if is_sys_destroyed("reactor") or is_sys_destroyed("hull"):
 		print("[Damage] ", name, " suffers catastrophic failure and dies.")
@@ -578,7 +606,9 @@ func get_signature() -> Dictionary:
 		"sensors": active_sensor_sweeps,
 		"sensor_config": get_components_by_type("sensors"),
 		"em_emitters": get_components_by_type("reactor") + get_components_by_type("engines") + get_components_by_type("sensors") + get_components_by_type("weapons"),
-		"contacts": active_contacts
+		"contacts": active_contacts,
+		"bounding_radius": get_bounding_radius(),
+		"aabb": get_local_aabb()
 	}
 
 func _ready() -> void:
@@ -598,7 +628,7 @@ func _ready() -> void:
 	# Add collision shape so raycasts can hit the ship
 	var collision = CollisionShape2D.new()
 	var shape = CircleShape2D.new()
-	shape.radius = SHIP_COLLISION_RADIUS
+	shape.radius = get_bounding_radius()
 	collision.shape = shape
 	add_child(collision)
 	
@@ -900,7 +930,11 @@ func _physics_process(delta: float) -> void:
 			var bins = _run_sensor_sweep(sensor, active_range)
 			active_sensor_sweeps[sensor["id"]] = bins
 			bins_this_frame.append_array(bins)
-			
+	# Sort bins by accuracy (lowest bin_angle first). If multiple sensors sweep the
+	# same target on the exact same frame, processing the most accurate one first
+	# prevents lower-resolution sweeps from dragging the position backwards.
+	bins_this_frame.sort_custom(func(a, b): return a.get("bin_angle", TAU) < b.get("bin_angle", TAU))
+	
 	# Correlate tracks
 	for bin in bins_this_frame:
 		var closest_contact_id = ""
@@ -927,10 +961,14 @@ func _physics_process(delta: float) -> void:
 			var bin_angle = bin.get("bin_angle", TAU)
 			var current_res = c.get("resolution", TAU)
 			var time_since_pos = c.get("pos_timer", 0.0)
-			
 			if bin_angle <= current_res or time_since_pos > CONTACT_RESOLUTION_STALE_TIME:
-				c["pos"] = c["pos"].lerp(bin_pos, CONTACT_FUSION_SMOOTHING)
-				c["vel"] = c["vel"].lerp(bin.get("vel", Vector2.ZERO), CONTACT_FUSION_SMOOTHING)
+				if bin_angle < current_res:
+					c["pos"] = bin_pos
+					c["vel"] = bin.get("vel", Vector2.ZERO)
+				else:
+					c["pos"] = c["pos"].lerp(bin_pos, CONTACT_FUSION_SMOOTHING)
+					c["vel"] = c["vel"].lerp(bin.get("vel", Vector2.ZERO), CONTACT_FUSION_SMOOTHING)
+				
 				c["resolution"] = bin_angle
 				c["pos_timer"] = 0.0
 

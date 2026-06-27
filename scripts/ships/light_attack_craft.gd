@@ -9,7 +9,6 @@ func _init() -> void:
 	ship_tier = ComponentSpec.Tier.LIGHT
 	max_speed = 2200.0
 	max_omega = 4.5
-	cross_section = 22.0
 	max_heat = 130.0
 	ship_components = [
 		# Layout relative to center (0,0). Forward +X, Right +Y

@@ -11,7 +11,7 @@ func _init() -> void:
 			child.queue_free()
 			remove_child(child)
 			
-	cross_section = 2.0
+
 
 	# Mass and inertia derive from rect area/distance x density (see ship.gd).
 	# Density is the same 20.0 used by Frigate -- same "stuff", smaller box, so

@@ -219,8 +219,49 @@ func _draw() -> void:
 	draw_line(pos, pos + forward, Color.CYAN, 2.0 / map_zoom)
 	
 	# Draw ship blip and physical bounds
-	draw_circle(pos, 8.0 / map_zoom, Color.GREEN)
-	draw_arc(pos, 50.0, 0, TAU, 32, Color(0.0, 1.0, 0.0, 0.5), 2.0 / map_zoom)
+	var bounds_radius = current_state.get("bounding_radius", 50.0)
+	if bounds_radius * map_zoom > 15.0:
+		var has_drawn = false
+		
+		# Derive true physical outline from engineering components if available
+		if current_state.has("engineering") and current_state["engineering"].has("ship_components"):
+			var all_pts: PackedVector2Array = PackedVector2Array()
+			for c in current_state["engineering"]["ship_components"]:
+				var r: Rect2 = c.get("rect", Rect2())
+				all_pts.append(r.position)
+				all_pts.append(r.position + Vector2(r.size.x, 0))
+				all_pts.append(r.position + Vector2(0, r.size.y))
+				all_pts.append(r.position + r.size)
+				
+			if not all_pts.is_empty():
+				var hull = Geometry2D.convex_hull(all_pts)
+				if not hull.is_empty():
+					var world_outline: PackedVector2Array = PackedVector2Array()
+					for pt in hull:
+						world_outline.append(pos + pt.rotated(rot))
+					# Geometry2D.convex_hull usually returns a closed polygon, but ensure it draws nicely
+					if world_outline[0] != world_outline[-1]:
+						world_outline.append(world_outline[0])
+						
+					draw_polyline(world_outline, Color.GREEN, 2.0 / map_zoom)
+					draw_circle(pos, 3.0 / map_zoom, Color.GREEN)
+					has_drawn = true
+					
+		if not has_drawn:
+			# Fallback to AABB if components aren't available
+			var aabb = current_state.get("aabb", Rect2(-50, -50, 100, 100))
+			var outline_pts = PackedVector2Array([
+				pos + aabb.position.rotated(rot),
+				pos + (aabb.position + Vector2(aabb.size.x, 0)).rotated(rot),
+				pos + (aabb.position + aabb.size).rotated(rot),
+				pos + (aabb.position + Vector2(0, aabb.size.y)).rotated(rot),
+				pos + aabb.position.rotated(rot)
+			])
+			draw_polyline(outline_pts, Color.GREEN, 2.0 / map_zoom)
+			draw_circle(pos, 3.0 / map_zoom, Color.GREEN)
+	else:
+		draw_circle(pos, 8.0 / map_zoom, Color.GREEN)
+		draw_arc(pos, bounds_radius, 0, TAU, 32, Color(0.0, 1.0, 0.0, 0.5), 2.0 / map_zoom)
 	
 	# Draw weapon firing arcs
 	if show_weapon_arcs:
@@ -279,13 +320,15 @@ func _draw() -> void:
 		var c = contacts[c_id]
 		var c_pos = c.get("pos", Vector2.ZERO)
 		var color = _get_contact_color(c)
-		draw_circle(c_pos, 8.0 / map_zoom, color)
-		
-		# Draw physical bounds (estimated from radar cross section)
 		var cross_section = c.get("signature", {}).get("cross_section", 0.0)
-		if cross_section > 0:
-			var estimated_radius = sqrt(max(0.0, cross_section)) * 10.0 # arbitrary visual scaling
-			draw_arc(c_pos, estimated_radius, 0, TAU, 16, color, 1.0 / map_zoom)
+		var screen_radius = (cross_section / 2.0) * map_zoom
+		
+		if screen_radius > 15.0:
+			# Draw the radar cross section circle when zoomed in enough
+			draw_arc(c_pos, cross_section / 2.0, 0, TAU, 16, color, 2.0 / map_zoom)
+		else:
+			# Just draw a solid blip
+			draw_circle(c_pos, 8.0 / map_zoom, color)
 			
 		# Draw velocity vector
 		if show_velocity_vectors and c.get("vel", Vector2.ZERO).length() > 0:
@@ -329,6 +372,24 @@ func _draw() -> void:
 				
 				draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size/2, b_size), Color.WHITE, 2.0)
 				draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size, b_size/2), Color.WHITE, 2.0)
+				
+				# Draw telemetry
+				var s_pos = current_state.get("pos", Vector2.ZERO)
+				var dist = s_pos.distance_to(c_pos)
+				var rel_pos = c_pos - s_pos
+				var rel_vel = c.get("vel", Vector2.ZERO) - current_state.get("vel", Vector2.ZERO)
+				var closing_vel = 0.0
+				if rel_pos.length() > 0.001:
+					closing_vel = -rel_pos.normalized().dot(rel_vel)
+					
+				var info_text = "Dist: %s\nCls: %.1f m/s" % [Utils.format_dist(dist), closing_vel]
+				if not show_contact_labels:
+					info_text = c_id + "\n" + info_text
+					
+				var text_y = screen_pos.y + (24.0 if show_contact_labels else 10.0)
+				for line in info_text.split("\n"):
+					draw_string(font, Vector2(screen_pos.x + 10, text_y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+					text_y += 12.0
 	
 	# Scale Reference
 	if show_grid:

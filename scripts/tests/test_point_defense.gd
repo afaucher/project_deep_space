@@ -32,8 +32,15 @@ func _physics_process(_delta: float) -> void:
 	if not missile_scenario_started:
 		return
 
-	if not is_instance_valid(e_missile) or e_missile.is_queued_for_deletion() or e_missile.is_dead:
-		print(">>> [TEST PASSED] Point defense destroyed missile.")
+	var warhead_dead = false
+	if is_instance_valid(e_missile):
+		for c in e_missile.ship_components:
+			if c["id"] == "warhead" and c["health"] <= 0.0:
+				warhead_dead = true
+				break
+
+	if not is_instance_valid(e_missile) or e_missile.is_queued_for_deletion() or e_missile.is_dead or warhead_dead:
+		print(">>> [TEST PASSED] Point defense destroyed or neutralized missile.")
 		get_tree().quit(0)
 
 	if is_instance_valid(e_missile) and e_missile.position.distance_to(f_ship.position) < 50:

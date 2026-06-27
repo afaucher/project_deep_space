@@ -21,10 +21,11 @@ class HeadingDial extends Control:
 	signal target_angle_changed(angle: float)
 	var target_angle: float = 0.0
 	var actual_angle: float = 0.0
+	var actual_vel: Vector2 = Vector2.ZERO
 	var is_ship_oriented: bool = false
 	
 	func _ready() -> void:
-		custom_minimum_size = Vector2(200, 200)
+		custom_minimum_size = Vector2(300, 300)
 		
 	func _gui_input(event: InputEvent) -> void:
 		if event is InputEventMouseMotion or event is InputEventMouseButton:
@@ -64,6 +65,29 @@ class HeadingDial extends Control:
 
 			var text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
 			draw_string(font, text_pos - text_size / 2.0 + Vector2(0, font_size / 3.0), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, style["color"])
+
+		# Draw velocity vector and retrograde if we're moving
+		if actual_vel.length_squared() > 1.0:
+			var vel_angle = actual_vel.angle()
+			var draw_vel = vel_angle + map_rot
+			
+			var vel_dir = Vector2.RIGHT.rotated(draw_vel)
+			var retro_dir = Vector2.RIGHT.rotated(draw_vel + PI)
+			var yellow = Color(1.0, 1.0, 0.0)
+			
+			# Prograde indicator
+			draw_line(center + vel_dir * (radius - 8.0), center + vel_dir * (radius + 8.0), yellow, 3.0)
+			var vel_cw = Vector2.RIGHT.rotated(draw_vel + 0.1)
+			var vel_ccw = Vector2.RIGHT.rotated(draw_vel - 0.1)
+			draw_line(center + vel_cw * (radius - 5.0), center + vel_cw * radius, yellow, 2.0)
+			draw_line(center + vel_ccw * (radius - 5.0), center + vel_ccw * radius, yellow, 2.0)
+			
+			# Retrograde indicator
+			draw_line(center + retro_dir * (radius - 8.0), center + retro_dir * (radius + 8.0), yellow, 3.0)
+			var retro_cw = Vector2.RIGHT.rotated(draw_vel + PI + 0.1)
+			var retro_ccw = Vector2.RIGHT.rotated(draw_vel + PI - 0.1)
+			draw_line(center + retro_cw * (radius - 5.0), center + retro_cw * radius, yellow, 2.0)
+			draw_line(center + retro_ccw * (radius - 5.0), center + retro_ccw * radius, yellow, 2.0)
 
 		# Draw ghost needle (Target)
 		var draw_target = target_angle + map_rot
@@ -263,6 +287,7 @@ func update_data(packet: Dictionary) -> void:
 	# Update dial
 	var rot = current_state.get("rot", 0.0)
 	heading_dial.actual_angle = rot
+	heading_dial.actual_vel = current_state.get("vel", Vector2.ZERO)
 	heading_dial.is_ship_oriented = current_state.get("is_ship_oriented", false)
 	heading_dial.queue_redraw()
 

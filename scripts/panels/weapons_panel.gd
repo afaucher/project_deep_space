@@ -61,7 +61,7 @@ func _ready() -> void:
 	target_info_label = Label.new()
 	target_info_label.text = "NO TARGET LOCKED"
 	target_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	target_info_label.add_theme_font_size_override("font_size", 12)
+	target_info_label.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(target_info_label)
 	
 	var charts_hbox = HBoxContainer.new()
@@ -240,8 +240,8 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 				closing_vel = -rel_pos.normalized().dot(rel_vel)
 			var closing_accel = _track_closing_accel(closing_vel)
 
-			target_info_label.text = "Target: %s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nDist: %.1f m | Spd: %.1f m/s\nClosing: %.1f m/s | Accel: %.1f m/s^2" % [
-				selected_contact_id, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0), dist, speed, closing_vel, closing_accel
+			target_info_label.text = "Target: %s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nDist: %s | Spd: %.1f m/s\nClosing: %.1f m/s | Accel: %.1f m/s^2" % [
+				selected_contact_id, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0), Utils.format_dist(dist), speed, closing_vel, closing_accel
 			]
 			if is_instance_valid(spider_chart):
 				spider_chart.set_values(sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0))

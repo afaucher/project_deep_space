@@ -7,9 +7,8 @@ class_name Destroyer
 # (clearly > frigate's 4000).
 func _init() -> void:
 	ship_tier = ComponentSpec.Tier.HEAVY
-	max_speed = 700.0
+	max_speed = 750.0
 	max_omega = 1.0
-	cross_section = 75.0
 	max_heat = 400.0
 	ship_components = [
 		# Layout relative to center (0,0). Forward +X, Right +Y
