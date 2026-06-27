@@ -333,6 +333,14 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
   ergonomics fight the harness, fall back to a pure-GDScript selector behind the same
   leaf interface. Either way M12a is untouched (capability layer + leaf interface are
   framework-agnostic), so the spike risks nothing already built. Keep it throwaway.
+  - **Status: PASSED (2026-06-26) — Beehave is GO for M12.** Beehave 2.9.2 vendored at
+    `addons/beehave`; `test_ai_beehave_spike` builds a `BeehaveTree` (MANUAL thread) in
+    code, ticks it under `--headless --run-test`, and the leaf drives the ship via
+    `apply_control_input`. Existing suite unaffected by the two new autoloads. The
+    global class cache is a **local artifact** (warm once via the Godot editor or
+    `--import`), intentionally not committed — git cannot re-include a child of the
+    ignored `.godot/` dir, which matches how the project already treats it. Kept the
+    spike as a permanent Beehave-headless smoke test rather than deleting it.
 - **M12b — Beehave bring-up + parity.** Only after the spike passes: actor interface +
   blackboard + minimal leaf set; replace `ai_drone_controller` with a trivial tree
   (acquire → orient_for_group(best) → fire_opportunity).
