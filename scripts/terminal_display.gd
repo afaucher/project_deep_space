@@ -385,7 +385,7 @@ func _process(delta: float) -> void:
 	if _heat_fraction > FAN_HEAT_FLOOR:
 		if not sfx_fan.playing: sfx_fan.play()
 		var t = clampf((_heat_fraction - FAN_HEAT_FLOOR) / (1.0 - FAN_HEAT_FLOOR), 0.0, 1.0)
-		sfx_fan.volume_db = lerpf(-30.0, -6.0, t)
+		sfx_fan.volume_db = lerpf(-20.0, -2.0, t)
 		sfx_fan.pitch_scale = lerpf(0.85, 1.45, t)
 	elif sfx_fan.playing:
 		sfx_fan.stop()
