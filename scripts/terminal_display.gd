@@ -5,12 +5,14 @@ const HelmPanel = preload("res://scripts/panels/helm_panel.gd")
 const SensorPanel = preload("res://scripts/panels/sensor_panel.gd")
 const WeaponsPanel = preload("res://scripts/panels/weapons_panel.gd")
 const EngineeringPanel = preload("res://scripts/panels/engineering_panel.gd")
+const HelpOverlay = preload("res://scripts/panels/help_overlay.gd")
 
 var nav_panel: Control
 var helm_panel: Control
 var sensor_panel: Control
 var weapons_panel: Control
 var eng_panel: Control
+var help_overlay: Control
 
 var pinned_contacts: Array = []
 var current_ship_oriented: bool = false
@@ -22,6 +24,8 @@ var spawn_team_dropdown: OptionButton
 var ship_oriented_toggle: CheckButton
 
 func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("help_toggle") and help_overlay:
+		help_overlay.visible = not help_overlay.visible
 	if event.is_action_pressed("map_orient_toggle") and ship_oriented_toggle:
 		ship_oriented_toggle.button_pressed = !ship_oriented_toggle.button_pressed
 
@@ -211,6 +215,17 @@ func _ready() -> void:
 	helm_toggle.toggled.connect(func(pressed): helm_container.visible = pressed)
 	weapons_toggle.toggled.connect(func(pressed): weapons_container.visible = pressed)
 	eng_toggle.toggled.connect(func(pressed): eng_container.visible = pressed)
+
+	# F1 controls overlay (added last so it draws on top of every panel) + a persistent
+	# nudge so a cold player discovers it.
+	help_overlay = HelpOverlay.new()
+	add_child(help_overlay)
+
+	var help_hint := Label.new()
+	help_hint.text = "F1  Controls"
+	help_hint.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
+	help_hint.add_theme_font_size_override("font_size", 13)
+	main_vbox.add_child(help_hint)
 
 func _add_margins(style: StyleBoxFlat) -> void:
 	style.content_margin_left = 3

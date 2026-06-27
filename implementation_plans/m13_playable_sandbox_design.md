@@ -69,13 +69,24 @@ decision is that the keys map onto the existing actions.
 
 ## 3. Scope (phases)
 
-- **M13a — Keyboard control parity.** Add keyboard (and mouse-wheel) `InputEvent`s to the
+- **M13a — Keyboard control parity. DONE (2026-06-27).** Bound keyboard events on the
+  existing actions (A/D + arrows steer, W/S + arrows throttle, Space fire, Q/E target,
+  =/- zoom, V/C/M mode toggles, Enter/Esc, F1 help). Target cycle uses **Q/E** (not Tab —
+  Tab fights Godot's UI focus traversal) and zoom uses **=/-** keys (mouse-wheel is a
+  later handler). `test_input_bindings` asserts every keycode loaded. Original scope:
+  Add keyboard (and mouse-wheel) `InputEvent`s to the
   existing `[input]` actions in `project.godot` so the whole scheme is playable on
   keyboard+mouse. Pure InputMap work; handlers unchanged. Verify each action fires from
   its key (Godot allows `Input.action_press()` injection for a headless smoke test of a
   representative action or two).
-- **M13b — On-screen controls legend (F1 help overlay).** The single highest-leverage "no
-  explanation" item. Design:
+- **M13b — On-screen controls legend (F1 help overlay). v1 DONE (2026-06-27).** Shipped
+  the glyph-rich **reference list** form: F1 toggles `help_overlay.gd` (dimmed backdrop +
+  centered panel listing each control with its keyboard glyph + generic gamepad glyph +
+  label, Kenney CC0 glyphs), wired into `terminal_display` with a persistent "F1
+  Controls" hint. `test_help_overlay` verifies it constructs headlessly (glyphs load, 10+
+  TextureRects, hidden by default). **Still planned:** the **anchored-callouts** form
+  below (boxes on the live controls via per-panel `get_help_annotations`), and
+  last-input-device glyph swapping. Original design:
   - **F1 toggles** a full-screen overlay: a dimmed backdrop + **callouts anchored on the
     live UI controls**, each a highlight box around the control's `get_global_rect()` with
     a chip showing its **glyph + function** beside it (helm dial → steer/throttle, FIRE
