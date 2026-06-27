@@ -26,6 +26,27 @@ func set_selected_contact_id(c_id: String) -> void:
 		selected_contact_id = c_id
 		selection_changed.emit(c_id)
 		queue_redraw()
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("nav_next_contact") or event.is_action_pressed("nav_prev_contact"):
+		var contacts = current_state.get("contacts", {})
+		if contacts.is_empty(): return
+		
+		var contact_list = contacts.keys()
+		var pos = current_state.get("pos", Vector2.ZERO)
+		# Sort by distance
+		contact_list.sort_custom(func(a, b): return contacts[a]["pos"].distance_to(pos) < contacts[b]["pos"].distance_to(pos))
+		
+		var idx = contact_list.find(selected_contact_id)
+		if idx == -1:
+			idx = 0
+		elif event.is_action_pressed("nav_next_contact"):
+			idx = (idx + 1) % contact_list.size()
+		else:
+			idx = (idx - 1) if idx > 0 else contact_list.size() - 1
+			
+		set_selected_contact_id(contact_list[idx])
+
 const SensorModuleUI = preload("res://scripts/sensor_module_ui.gd")
 
 func _ready() -> void:

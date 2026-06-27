@@ -93,6 +93,7 @@ class HeadingDial extends Control:
 		var draw_target = target_angle + map_rot
 		var ghost_end = center + Vector2.RIGHT.rotated(draw_target) * radius
 		draw_line(center, ghost_end, Color(0.5, 0.5, 0.5, 0.5), 6.0)
+		draw_circle(ghost_end, 6.0, Color(0.7, 0.7, 0.7, 0.8))
 		
 		# Draw actual needle
 		var draw_actual = actual_angle + map_rot
@@ -168,6 +169,34 @@ var target_velocity: float = 0.0
 var throttle_slider: EngineSlider
 var velocity_slider: EngineSlider
 var max_speed: float = 1000.0
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("helm_linear_toggle"):
+		if linear_mode == 0:
+			velocity_slider.became_active.emit()
+		else:
+			throttle_slider.became_active.emit()
+	if event.is_action_pressed("combat_steer_toggle"):
+		mode_button.button_pressed = !mode_button.button_pressed
+
+func _process(delta: float) -> void:
+	var steer_axis = Input.get_axis("helm_steer_left", "helm_steer_right")
+	if abs(steer_axis) > 0.1:
+		heading_dial.target_angle += steer_axis * delta * 3.0
+		heading_dial.target_angle = wrapf(heading_dial.target_angle, -PI, PI)
+		heading_dial.queue_redraw()
+		_on_heading_changed(heading_dial.target_angle)
+
+	var throttle_axis = Input.get_axis("helm_throttle_up", "helm_throttle_down")
+	if abs(throttle_axis) > 0.1:
+		if linear_mode == 0:
+			throttle_slider.target_val = clampf(throttle_slider.target_val - throttle_axis * delta * 2.0, throttle_slider.min_val, throttle_slider.max_val)
+			throttle_slider.intent_changed.emit(throttle_slider.target_val)
+			throttle_slider.queue_redraw()
+		else:
+			velocity_slider.target_val = clampf(velocity_slider.target_val - throttle_axis * delta * max_speed * 0.5, velocity_slider.min_val, velocity_slider.max_val)
+			velocity_slider.intent_changed.emit(velocity_slider.target_val)
+			velocity_slider.queue_redraw()
 
 func _ready() -> void:
 	# Build layout

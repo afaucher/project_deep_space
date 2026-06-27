@@ -144,6 +144,15 @@ func _on_peer_disconnected(id: int) -> void:
 		players.erase(id)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("system_exit"):
+		get_tree().quit()
+		
+	if menu.visible and event.is_action_pressed("menu_start"):
+		_on_local_test_pressed()
+
+	if is_host and event.is_action_pressed("debug_spawn_enemy"):
+		_spawn_drone()
+
 	if is_host and event is InputEventKey and event.pressed:
 		if event.keycode == KEY_F3:
 			_spawn_drone()

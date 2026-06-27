@@ -2,7 +2,7 @@ extends RigidBody2D
 class_name Asteroid
 
 # Sensor Signature Profile
-var cross_section: float = 300.0 # Huge size
+var cross_section: float = 600.0 # Huge size (diameter)
 var base_heat: float = 0.0       # Cold rock
 var em_noise: float = 0.0        # No reactor
 var density: float = 500.0       # Solid rock

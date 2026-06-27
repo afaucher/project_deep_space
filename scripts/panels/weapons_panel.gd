@@ -78,6 +78,13 @@ func _ready() -> void:
 	charts_hbox.add_child(history_graph)
 	history_graph.hide()
 
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("combat_fire_all"):
+		if current_state.has("weapons"):
+			for w_info in current_state["weapons"]:
+				# Let the server validate if the shot is legal (target, cooldown, arc, ammo, etc.)
+				fire_weapon_requested.emit(w_info.get("id", ""))
+
 func _create_weapon_ui(grid: GridContainer, w_id: String, w_name: String) -> void:
 	var info_vbox = VBoxContainer.new()
 	info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL

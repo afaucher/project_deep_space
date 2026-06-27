@@ -19,6 +19,11 @@ var sfx_laser: AudioStreamPlayer
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 var spawn_hull_dropdown: OptionButton
 var spawn_team_dropdown: OptionButton
+var ship_oriented_toggle: CheckButton
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("map_orient_toggle") and ship_oriented_toggle:
+		ship_oriented_toggle.button_pressed = !ship_oriented_toggle.button_pressed
 
 func _ready() -> void:
 	sfx_laser = AudioStreamPlayer.new()
@@ -101,7 +106,7 @@ func _ready() -> void:
 	spacer3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_bar.add_child(spacer3)
 	
-	var ship_oriented_toggle = CheckButton.new()
+	ship_oriented_toggle = CheckButton.new()
 	ship_oriented_toggle.text = "Ship Oriented"
 	ship_oriented_toggle.button_pressed = false
 	ship_oriented_toggle.toggled.connect(func(pressed): current_ship_oriented = pressed)
