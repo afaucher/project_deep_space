@@ -11,11 +11,13 @@ const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
+const MenuCompass = preload("res://scripts/menu_compass.gd")
 
 var is_host: bool = false
 var players = {}
 var asteroids = []
 var _next_sandbox_id: int = 900
+var menu_compass: Node2D
 
 func _ready() -> void:
 	# Check for automated tests
@@ -42,6 +44,11 @@ func _ready() -> void:
 	
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+
+	# Decorative slowly-rotating compass behind the opening menu (index 0 = under the UI).
+	menu_compass = MenuCompass.new()
+	ui_layer.add_child(menu_compass)
+	ui_layer.move_child(menu_compass, 0)
 
 func _run_test(test_name: String) -> void:
 	print("Starting automated test: ", test_name)
@@ -99,6 +106,7 @@ func _auto_join_first_lobby(lobbies: Array) -> void:
 func _on_connection_established(hosting: bool) -> void:
 	is_host = hosting
 	menu.hide()
+	if is_instance_valid(menu_compass): menu_compass.queue_free()
 	terminal_display.show()
 	
 	if is_host:
