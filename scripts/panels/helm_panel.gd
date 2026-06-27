@@ -179,6 +179,8 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("combat_steer_toggle"):
 		mode_button.button_pressed = !mode_button.button_pressed
 
+var _detent_timer: float = 0.0
+
 func _process(delta: float) -> void:
 	var steer_axis = Input.get_axis("helm_steer_left", "helm_steer_right")
 	if abs(steer_axis) > 0.1:
@@ -189,14 +191,23 @@ func _process(delta: float) -> void:
 
 	var throttle_axis = Input.get_axis("helm_throttle_up", "helm_throttle_down")
 	if abs(throttle_axis) > 0.1:
-		if linear_mode == 0:
-			throttle_slider.target_val = clampf(throttle_slider.target_val - throttle_axis * delta * 2.0, throttle_slider.min_val, throttle_slider.max_val)
-			throttle_slider.intent_changed.emit(throttle_slider.target_val)
-			throttle_slider.queue_redraw()
+		if _detent_timer > 0.0:
+			_detent_timer -= delta
 		else:
-			velocity_slider.target_val = clampf(velocity_slider.target_val - throttle_axis * delta * max_speed * 0.5, velocity_slider.min_val, velocity_slider.max_val)
-			velocity_slider.intent_changed.emit(velocity_slider.target_val)
-			velocity_slider.queue_redraw()
+			var slider = throttle_slider if linear_mode == 0 else velocity_slider
+			var speed_mult = 2.0 if linear_mode == 0 else max_speed * 0.5
+			var old_val = slider.target_val
+			var new_val = clampf(old_val - throttle_axis * delta * speed_mult, slider.min_val, slider.max_val)
+			
+			if sign(old_val) != sign(new_val) and old_val != 0.0:
+				new_val = 0.0
+				_detent_timer = 0.25 # stick to 0 for 250ms
+				Input.start_joy_vibration(0, 0.4, 0.4, 0.15)
+				
+			if slider.target_val != new_val:
+				slider.target_val = new_val
+				slider.intent_changed.emit(slider.target_val)
+				slider.queue_redraw()
 
 func _ready() -> void:
 	# Build layout

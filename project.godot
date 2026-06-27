@@ -31,13 +31,6 @@ window/size/mode=3
 
 enabled=PackedStringArray("res://addons/godotsteam/plugin.cfg", "res://addons/beehave/plugin.cfg")
 
-[steam]
-
-initialization/app_id=0
-initialization/initialize_on_startup=false
-initialization/embed_callbacks=false
-multiplayer_peer/max_channels=4
-
 [input]
 
 menu_start={
@@ -115,3 +108,10 @@ debug_spawn_enemy={
 "events": [Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":1,"pressure":0.0,"pressed":false,"script":null)
 ]
 }
+
+[steam]
+
+initialization/app_id=0
+initialization/initialize_on_startup=false
+initialization/embed_callbacks=false
+multiplayer_peer/max_channels=4
