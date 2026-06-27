@@ -185,30 +185,24 @@ func _input(event: InputEvent) -> void:
 		mode_button.button_pressed = !mode_button.button_pressed
 
 var _detent_timer: float = 0.0
-var _steer_detent_timer: float = 0.0
 
 func _process(delta: float) -> void:
 	var steer_axis = Input.get_axis("helm_steer_left", "helm_steer_right")
 	if abs(steer_axis) > 0.1:
-		if _steer_detent_timer > 0.0:
-			_steer_detent_timer -= delta
-		else:
-			var old_angle = heading_dial.target_angle
-			var new_angle = wrapf(old_angle + steer_axis * delta * 3.0, -PI, PI)
-			var actual = heading_dial.actual_angle
+		var old_angle = heading_dial.target_angle
+		var new_angle = wrapf(old_angle + steer_axis * delta * 3.0, -PI, PI)
+		var actual = heading_dial.actual_angle
+		
+		var old_diff = wrapf(old_angle - actual, -PI, PI)
+		var new_diff = wrapf(new_angle - actual, -PI, PI)
+		
+		if sign(old_diff) != sign(new_diff) and abs(old_diff) < 0.5:
+			Input.start_joy_vibration(0, 0.3, 0.3, 0.15)
 			
-			var old_diff = wrapf(old_angle - actual, -PI, PI)
-			var new_diff = wrapf(new_angle - actual, -PI, PI)
-			
-			if sign(old_diff) != sign(new_diff) and abs(old_diff) < 0.5:
-				new_angle = actual
-				_steer_detent_timer = 0.1
-				Input.start_joy_vibration(0, 0.3, 0.3, 0.15)
-				
-			if heading_dial.target_angle != new_angle:
-				heading_dial.target_angle = new_angle
-				heading_dial.queue_redraw()
-				_on_heading_changed(heading_dial.target_angle)
+		if heading_dial.target_angle != new_angle:
+			heading_dial.target_angle = new_angle
+			heading_dial.queue_redraw()
+			_on_heading_changed(heading_dial.target_angle)
 
 	var throttle_axis = Input.get_axis("helm_throttle_up", "helm_throttle_down")
 	if abs(throttle_axis) > 0.1:
