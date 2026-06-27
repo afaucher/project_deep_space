@@ -267,6 +267,16 @@ func get_component_health_ratio(comp_id: String) -> float:
 			return max(0.0, c["health"]) / max(1.0, c["max_health"])
 	return 0.0
 
+# Surviving fraction of TOTAL component health (1.0 pristine, 0.0 gutted). Used by the AI
+# disengage trigger; also useful for UI / threat assessment.
+func get_health_fraction() -> float:
+	var current := 0.0
+	var maximum := 0.0
+	for c in ship_components:
+		current += max(0.0, c["health"])
+		maximum += c["max_health"]
+	return current / maximum if maximum > 0.0 else 0.0
+
 # Longest range of any currently-working comms component, or 0.0 if the ship
 # has none/all are destroyed or powered off. A link between two ships is
 # capped by the weaker of their two ranges -- see the datalink relay block.

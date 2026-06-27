@@ -396,7 +396,18 @@ than the rest of the group": shared base, individual `derive` + seeded `jitter`.
   frigate) confirms the new AI now wins decisively and consistently: **3/3 trials, new AI
   took zero damage while grinding the legacy down 2500-3790 HP** — massed broadside fire
   saturating the legacy's PD while its single forward missiles get swatted. **Remaining
-  for M12c:** threat-reactive evade (`under_fire` → break off / juke even while armed).
+  for M12c — disengage DONE (2026-06-27):** a top-priority Disengage branch
+  (`should_disengage` condition → `flee` action) breaks the ship off and runs from the
+  nearest hostile once total health drops below 30% (`Ship.get_health_fraction()`); a
+  healthy ship fails the condition and falls through to Engage. `test_ai_disengage`
+  confirms a crippled ship flees away from a threat a healthy one engages. Trigger is
+  health-only for now (out-of-ammo / outgunned can be OR-ed in later). **Still remaining:
+  active missile defense** — per design discussion this is NOT kinematic dodging: rather
+  than getting out of the way, the ship should orient to keep incoming ordnance in its
+  **strongest PD arc** (maximize laser coverage on the threat), reusing the broadside's
+  arc/orientation machinery. Worth measuring first whether our PN missile (15s fuel,
+  re-acquiring seeker) is better beaten by PD-orientation, outlasting fuel, or
+  signature/lock-break (the latter belongs with the M12e stealth pass). Deferred.
 - **M12d — Disposition + curated archetypes + sandbox scenario.** `target_filter`; the
   four archetypes as trees; wire into the M10 spawn UI; the food-chain scenario.
 - **M12e — Mission behaviors.** Patrol, escort (formation primitive ported from
