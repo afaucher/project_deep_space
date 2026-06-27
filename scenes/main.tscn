@@ -37,13 +37,17 @@ layout_mode = 2
 
 [node name="LocalTestButton" type="Button" parent="CanvasLayer/Menu"]
 layout_mode = 2
-text = "SINGLE PLAYER GAME"
+text = "SANDBOX"
 
 [node name="HostButton" type="Button" parent="CanvasLayer/Menu"]
 layout_mode = 2
+disabled = true
+tooltip_text = "Multiplayer not available yet"
 text = "HOST SIMULATION"
 
 [node name="JoinButton" type="Button" parent="CanvasLayer/Menu"]
 layout_mode = 2
+disabled = true
+tooltip_text = "Multiplayer not available yet"
 text = "JOIN TERMINAL"
 
