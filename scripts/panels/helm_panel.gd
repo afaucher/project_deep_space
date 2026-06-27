@@ -34,6 +34,11 @@ class HeadingDial extends Control:
 				var clicked_angle = (get_local_mouse_position() - center).angle()
 				if is_ship_oriented:
 					clicked_angle += actual_angle + PI/2.0
+				
+				# Snap to actual_angle if within 5.7 degrees (0.1 rads)
+				if abs(wrapf(clicked_angle - actual_angle, -PI, PI)) < 0.1:
+					clicked_angle = actual_angle
+					
 				target_angle = wrapf(clicked_angle, -PI, PI)
 				target_angle_changed.emit(target_angle)
 				queue_redraw()
