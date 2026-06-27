@@ -17,6 +17,9 @@ var volleys = [1, 2, 3, 4, 5, 6, 8, 10, 15]
 var configs = []
 var config_idx = 0
 
+var shard_index = 0
+var shard_count = 1
+
 var scenario_frames = 0
 var max_scenario_frames = 1200 # 20 seconds at 60fps
 
@@ -25,23 +28,49 @@ var missiles = []
 var hits = 0
 var timeouts = 0
 
+func _parse_cmdline_args() -> void:
+	# --shard-index <N> and --shard-count <M> are optional sharding args used
+	# by run_analysis_suite.ps1 to fan this sim out across multiple headless
+	# Godot processes (M9e). Scan the raw cmdline args array for the flags and
+	# parse the following element as int; default to a single unsharded run
+	# if absent so a plain invocation still behaves exactly as before.
+	var args = OS.get_cmdline_args()
+	for i in range(args.size()):
+		if args[i] == "--shard-index" and i + 1 < args.size():
+			shard_index = int(args[i + 1])
+		elif args[i] == "--shard-count" and i + 1 < args.size():
+			shard_count = int(args[i + 1])
+
 func setup(main) -> void:
 	main_node = main
-	print("Starting Tactical Sim: Missile vs PD")
-	
+	_parse_cmdline_args()
+	print("Starting Tactical Sim: Missile vs PD (shard ", shard_index, "/", shard_count, ")")
+
+	var all_configs = []
 	for axis in axes:
 		for r in ranges:
 			for v in volleys:
-				configs.append({"axis": axis, "range": r, "volleys": v})
-				
-	log_file = FileAccess.open("res://tactical_analysis/data/missile_vs_pd_results.csv", FileAccess.WRITE)
+				all_configs.append({"axis": axis, "range": r, "volleys": v})
+
+	# Each shard owns the configs whose index in the full grid satisfies
+	# i % shard_count == shard_index, so shards partition the grid into
+	# disjoint, deterministic slices with no shared state between processes.
+	for i in range(all_configs.size()):
+		if i % shard_count == shard_index:
+			configs.append(all_configs[i])
+
+	var csv_path = "res://tactical_analysis/data/missile_vs_pd_results.csv"
+	if shard_count > 1:
+		csv_path = "res://tactical_analysis/data/missile_vs_pd_results.shard_%d.csv" % shard_index
+
+	log_file = FileAccess.open(csv_path, FileAccess.WRITE)
 	if not log_file:
 		printerr("Failed to open CSV for writing.")
 		get_tree().quit(1)
 		return
-		
+
 	log_file.store_line("run_id,num_missiles,engagement_range,axis,hits,destroyed,timeouts,ship_killed,hits_taken")
-	
+
 	_start_scenario()
 
 func _start_scenario() -> void:
