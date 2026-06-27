@@ -202,7 +202,7 @@ func _process(delta: float) -> void:
 			
 			if sign(old_diff) != sign(new_diff) and abs(old_diff) < 0.5:
 				new_angle = actual
-				_steer_detent_timer = 0.25
+				_steer_detent_timer = 0.1
 				Input.start_joy_vibration(0, 0.3, 0.3, 0.15)
 				
 			if heading_dial.target_angle != new_angle:
