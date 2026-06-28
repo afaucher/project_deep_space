@@ -299,6 +299,20 @@ func get_component(comp_id: String) -> Dictionary:
 func get_component_origin(comp: Dictionary) -> Vector2:
 	return comp["rect"].position
 
+func get_active_transponder_data() -> Dictionary:
+	for c in get_components_by_type("comms"):
+		if is_component_powered(c["id"]) and c.get("transponder_active", true):
+			var data = {
+				"name": c.get("transponder_custom_name", "") if c.get("transponder_custom_name", "") != "" else name,
+				"flag": c.get("flag", "")
+			}
+			if not c.get("transponder_share_name", true):
+				data["name"] = "UNKNOWN"
+			if c.get("transponder_share_location", true):
+				data["pos"] = position
+			return data
+	return {}
+
 # M1b: mass and power rating are summed from components instead of being flat
 # ship-level constants, so a "dual reactor"/"dual engine" ship degrades to
 # whatever's still alive instead of needing special-casing.
@@ -654,6 +668,21 @@ func _ready() -> void:
 	collision.shape = shape
 	add_child(collision)
 	
+	# Initialize component default states
+	for c in ship_components:
+		if c.get("powered_on") == null:
+			c["powered_on"] = true
+		if c.get("switchable") == null:
+			c["switchable"] = true # By default, all systems can be switched on/off
+			
+		# Initialize transponder fields for comms
+		if c.get("type") == "comms":
+			if not c.has("transponder_active"): c["transponder_active"] = true
+			if not c.has("transponder_share_name"): c["transponder_share_name"] = true
+			if not c.has("transponder_share_location"): c["transponder_share_location"] = true
+			if not c.has("transponder_custom_name"): c["transponder_custom_name"] = ""
+			if not c.has("flag"): c["flag"] = ""
+
 	sfx_engine = AudioStreamPlayer.new()
 	var e_stream = load("res://assets/audio/engine.wav")
 	if e_stream and e_stream is AudioStreamWAV: e_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
@@ -1054,18 +1083,25 @@ func _physics_process(delta: float) -> void:
 	# free -- a contact relayed into this ship's active_contacts this frame
 	# is available to relay onward to a third ship next frame, one tick of
 	# latency per hop instead of needing an explicitly modeled delay.
+	active_transponders.clear()
 	var self_comms_range = get_comms_range()
 	if self_comms_range > 0.0:
 		var space_state = get_world_2d().direct_space_state
 		for s in get_tree().get_nodes_in_group("ships"):
 			if s == self or s.is_dead: continue
-			if not _iff_tags_overlap(iff_tags, s.iff_tags): continue
 
 			var their_comms_range = s.get_comms_range()
 			if their_comms_range <= 0.0: continue
 
 			var link_range = min(self_comms_range, their_comms_range)
 			if position.distance_to(s.position) > link_range: continue
+
+			# Transponder receive logic (omni-directional radio, no IFF or LoS required)
+			var t_data = s.get_active_transponder_data()
+			if not t_data.is_empty():
+				active_transponders[s.get_instance_id()] = t_data
+
+			if not _iff_tags_overlap(iff_tags, s.iff_tags): continue
 
 			var ray_query = PhysicsRayQueryParameters2D.create(position, s.position)
 			ray_query.exclude = [self]
@@ -1358,6 +1394,47 @@ static func purge_despawned_contact(tree: SceneTree, instance_id: int, world_pos
 			if s._can_sense_point(world_pos):
 				s.active_contacts.erase(trk)
 				s._contact_tombstones[trk] = CONTACT_TIMEOUT
+
+@rpc("any_peer", "call_local")
+func set_transponder_active(active: bool) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	for c in ship_components:
+		if c["type"] == "comms":
+			c["transponder_active"] = active
+			break
+
+@rpc("any_peer", "call_local")
+func set_transponder_share_name(active: bool) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	for c in ship_components:
+		if c["type"] == "comms":
+			c["transponder_share_name"] = active
+			break
+
+@rpc("any_peer", "call_local")
+func set_transponder_share_location(active: bool) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	for c in ship_components:
+		if c["type"] == "comms":
+			c["transponder_share_location"] = active
+			break
+
+@rpc("any_peer", "call_local")
+func set_transponder_custom_name(new_name: String) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	
+	# Basic sanitization
+	if new_name.length() > 30:
+		new_name = new_name.substr(0, 30)
+		
+	for c in ship_components:
+		if c["type"] == "comms":
+			c["transponder_custom_name"] = new_name
+			break
 
 @rpc("any_peer", "call_local")
 func set_component_power(component_id: String, active: bool) -> void:

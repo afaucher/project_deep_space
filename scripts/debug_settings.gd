@@ -27,6 +27,12 @@ enum MissileCleanup { OFF, ALL, VISIBLE, DISPROVAL }
 #   shadowed and their tracks dead-reckon, so neither identity is ever corrupted.
 enum SignatureMerge { BLEND, NEAREST }
 
+# Missile terminal evasion. OFF = fly straight at the intercept (current). ON = weave
+# the steering aim by a random offset (re-rolled a few times a second) so the PD firing
+# solution, built on the missile's tracked heading, keeps going stale. A survivability
+# lever vs. overkill-buffed PD -- see warhead_laser_special_case.md.
+enum MissileJink { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -46,6 +52,14 @@ const OPTIONS := {
 			"Nearest-wins (no bleed)",         # NEAREST -- shadow farther objects
 		],
 		"default": SignatureMerge.NEAREST,
+	},
+	"missile_jink": {
+		"label": "Missile evasive jink",
+		"choices": [
+			"Off (fly straight)",              # OFF -- current behavior
+			"On (weave to spoil PD)",          # ON  -- terminal evasion
+		],
+		"default": MissileJink.OFF,
 	},
 }
 

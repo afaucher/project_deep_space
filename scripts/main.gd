@@ -168,13 +168,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if menu.visible and event.is_action_pressed("menu_start"):
 		_on_local_test_pressed()
 
-	if is_host and event.is_action_pressed("debug_spawn_enemy"):
+	if is_host and event.is_action_pressed("debug_spawn_enemy") and not event.is_echo():
 		_spawn_drone()
 
-	if is_host and event is InputEventKey and event.pressed:
-		if event.keycode == KEY_F3:
-			_spawn_drone()
-		elif event.keycode == KEY_F4:
+	if is_host and event is InputEventKey and event.pressed and not event.is_echo():
+		if event.keycode == KEY_F4:
 			_spawn_buoy()
 
 # ----------------------------------------------------
@@ -204,7 +202,10 @@ func _spawn_ship(ship_script: Script, team: int) -> Node:
 	add_child(ship)
 	players[spawn_id] = ship
 
-	ship.add_child(AITreeFactory.build_default())
+	if ship.ship_tier == ComponentSpec.Tier.STRUCTURE:
+		ship.add_child(AITreeFactory.build_station())
+	else:
+		ship.add_child(AITreeFactory.build_default())
 	print("Spawned ", ship_script.resource_path, " (id ", spawn_id, ", team ", team, ") at ", ship.position)
 	return ship
 
@@ -269,6 +270,11 @@ func _distribute_state() -> void:
 	# Host filters the world state on a per-client basis
 	for client_id in players.keys():
 		var ship = players[client_id]
+		# A vaporized player ship leaves a freed reference here; skip it so the
+		# host doesn't touch a dead instance. The client's terminal simply stops
+		# receiving packets (its view holds at the last frame) until respawn.
+		if not is_instance_valid(ship):
+			continue
 		var packet = {
 			"pos": ship.position,
 			"rot": ship.rotation,
@@ -279,6 +285,7 @@ func _distribute_state() -> void:
 			"sensors": ship.active_sensor_sweeps.duplicate(true),
 			"sensor_config": ship.get_components_by_type("sensors"),
 			"contacts": ship.active_contacts.duplicate(true),
+			"transponders": ship.active_transponders.duplicate(true),
 			"weapons": ship.get_components_by_type("weapons"),
 			"engineering": {
 				"ship_components": ship.ship_components.duplicate(true),

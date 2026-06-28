@@ -74,12 +74,12 @@ class EMPolarChart extends Control:
 						local_r += (s_power / SENSOR_EM_RADIUS_SCALE) * max_radius * (1.0 - diff/(s_arc/2.0))
 
 			var noise = _rng.randf_range(0.9, 1.1)
-			var r = min(max_radius, local_r * noise)
+			var r = max(0.1, min(max_radius, local_r * noise))
 			pts.append(center + Vector2(cos(a), sin(a)) * r)
 			
-		if pts.size() > 0:
-			pts.append(pts[0])
+		if pts.size() >= 3:
 			draw_polygon(pts, PackedColorArray([Color(0.2, 0.6, 1.0, 0.5)]))
+			pts.append(pts[0])
 			draw_polyline(pts, Color(0.2, 0.8, 1.0, 1.0), 2.0)
 
 class ComponentSpatialView extends Control:

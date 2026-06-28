@@ -3,16 +3,21 @@ extends Control
 const NavigationPanel = preload("res://scripts/ui/navigation_panel.gd")
 const HelmPanel = preload("res://scripts/ui/helm_panel.gd")
 const SensorPanel = preload("res://scripts/ui/sensor_panel.gd")
+const ContactsPanel = preload("res://scripts/ui/contacts_panel.gd")
 const WeaponsPanel = preload("res://scripts/ui/weapons_panel.gd")
 const EngineeringPanel = preload("res://scripts/ui/engineering_panel.gd")
+const CommsPanel = preload("res://scripts/ui/comms_panel.gd")
 const HelpOverlay = preload("res://scripts/ui/help_overlay.gd")
 
 var nav_panel: Control
 var helm_panel: Control
 var sensor_panel: Control
+var contacts_panel: Control
 var weapons_panel: Control
 var eng_panel: Control
+var comms_panel: Control
 var help_overlay: Control
+var sensor_container: PanelContainer
 
 var pinned_contacts: Array = []
 var current_ship_oriented: bool = false
@@ -128,10 +133,10 @@ func _ready() -> void:
 	nav_toggle.button_pressed = true
 	top_bar.add_child(nav_toggle)
 	
-	var sensor_toggle = CheckButton.new()
-	sensor_toggle.text = "Sensors"
-	sensor_toggle.button_pressed = true
-	top_bar.add_child(sensor_toggle)
+	var contacts_toggle = CheckButton.new()
+	contacts_toggle.text = "Contacts"
+	contacts_toggle.button_pressed = true
+	top_bar.add_child(contacts_toggle)
 	
 	var helm_toggle = CheckButton.new()
 	helm_toggle.text = "Helm"
@@ -147,6 +152,16 @@ func _ready() -> void:
 	eng_toggle.text = "Engineering"
 	eng_toggle.button_pressed = true
 	top_bar.add_child(eng_toggle)
+	
+	var comms_toggle = CheckButton.new()
+	comms_toggle.text = "Comms"
+	comms_toggle.button_pressed = false
+	top_bar.add_child(comms_toggle)
+	
+	var sensor_toggle = CheckButton.new()
+	sensor_toggle.text = "Sensors"
+	sensor_toggle.button_pressed = false
+	top_bar.add_child(sensor_toggle)
 	
 	var spacer = Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -189,6 +204,8 @@ func _ready() -> void:
 	ship_oriented_toggle.button_pressed = false
 	ship_oriented_toggle.toggled.connect(func(pressed): current_ship_oriented = pressed)
 	top_bar.add_child(ship_oriented_toggle)
+
+
 	
 	# --- Main Content Area ---
 	var content_hbox = HBoxContainer.new()
@@ -211,24 +228,23 @@ func _ready() -> void:
 	nav_container.add_child(nav_panel)
 	content_hbox.add_child(nav_container)
 	
-	# --- Sensor Panel ---
-	var sensor_container = PanelContainer.new()
-	sensor_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sensor_container.size_flags_stretch_ratio = 1.0
-	var sensor_style = StyleBoxFlat.new()
-	sensor_style.bg_color = Color(0.02, 0.05, 0.02)
-	sensor_style.border_width_right = 2
-	sensor_style.border_color = Color(0.2, 0.4, 0.2)
-	_add_margins(sensor_style)
-	sensor_container.add_theme_stylebox_override("panel", sensor_style)
+
+	# --- Contacts Panel ---
+	var contacts_container = PanelContainer.new()
+	contacts_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	contacts_container.size_flags_stretch_ratio = 1.0
+	var contacts_style = StyleBoxFlat.new()
+	contacts_style.bg_color = Color(0.02, 0.05, 0.02)
+	contacts_style.border_width_right = 2
+	contacts_style.border_color = Color(0.2, 0.4, 0.2)
+	_add_margins(contacts_style)
+	contacts_container.add_theme_stylebox_override("panel", contacts_style)
 	
-	sensor_panel = SensorPanel.new()
-	sensor_panel.contact_pin_toggled.connect(_on_contact_pin_toggled)
-	sensor_panel.selection_changed.connect(_on_selection_changed)
-	sensor_panel.sensor_state_changed.connect(_on_sensor_state_changed)
-	sensor_panel.all_sensors_state_changed.connect(_on_all_sensors_state_changed)
-	sensor_container.add_child(sensor_panel)
-	content_hbox.add_child(sensor_container)
+	contacts_panel = ContactsPanel.new()
+	contacts_panel.contact_pin_toggled.connect(_on_contact_pin_toggled)
+	contacts_panel.selection_changed.connect(_on_selection_changed)
+	contacts_container.add_child(contacts_panel)
+	content_hbox.add_child(contacts_container)
 	
 	# --- Right Panel Stack (Helm + Weapons) ---
 	var right_vbox = VBoxContainer.new()
@@ -281,14 +297,55 @@ func _ready() -> void:
 	eng_panel.component_power_toggled.connect(_on_component_power_toggled)
 	eng_container.add_child(eng_panel)
 	content_hbox.add_child(eng_container)
+	
+	# --- Comms Panel ---
+	var comms_container = PanelContainer.new()
+	comms_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	comms_container.size_flags_stretch_ratio = 1.0
+	var comms_style = StyleBoxFlat.new()
+	comms_style.bg_color = Color(0.05, 0.05, 0.1)
+	comms_style.border_width_left = 2
+	comms_style.border_color = Color(0.2, 0.6, 0.8)
+	_add_margins(comms_style)
+	comms_container.add_theme_stylebox_override("panel", comms_style)
+	
+	comms_panel = CommsPanel.new()
+	comms_panel.transponder_toggled.connect(_on_transponder_toggled)
+	comms_panel.transponder_share_name_toggled.connect(_on_transponder_share_name_toggled)
+	comms_panel.transponder_share_loc_toggled.connect(_on_transponder_share_loc_toggled)
+	comms_panel.transponder_custom_name_changed.connect(_on_transponder_custom_name_changed)
+	comms_container.add_child(comms_panel)
+	content_hbox.add_child(comms_container)
+	comms_container.visible = false
+	
+	# --- Sensor Panel ---
+	sensor_container = PanelContainer.new()
+	sensor_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sensor_container.size_flags_stretch_ratio = 1.0
+	var sensor_style = StyleBoxFlat.new()
+	sensor_style.bg_color = Color(0.02, 0.05, 0.02)
+	sensor_style.border_width_right = 2
+	sensor_style.border_color = Color(0.2, 0.4, 0.2)
+	_add_margins(sensor_style)
+	sensor_container.add_theme_stylebox_override("panel", sensor_style)
+	
+	sensor_panel = SensorPanel.new()
+	sensor_panel.selection_changed.connect(_on_selection_changed)
+	sensor_panel.sensor_state_changed.connect(_on_sensor_state_changed)
+	sensor_panel.all_sensors_state_changed.connect(_on_all_sensors_state_changed)
+	sensor_container.add_child(sensor_panel)
+	content_hbox.add_child(sensor_container)
+	sensor_container.visible = false
 	eng_container.visible = true
 	
 	# Connect toggles
 	nav_toggle.toggled.connect(func(pressed): nav_container.visible = pressed)
+	contacts_toggle.toggled.connect(func(pressed): contacts_container.visible = pressed)
 	sensor_toggle.toggled.connect(func(pressed): sensor_container.visible = pressed)
 	helm_toggle.toggled.connect(func(pressed): helm_container.visible = pressed)
 	weapons_toggle.toggled.connect(func(pressed): weapons_container.visible = pressed)
 	eng_toggle.toggled.connect(func(pressed): eng_container.visible = pressed)
+	comms_toggle.toggled.connect(func(pressed): comms_container.visible = pressed)
 
 	# Damage red-flash + overheat alert overlays. Added before the help overlay so it
 	# still draws on top; both ignore the mouse so they never eat clicks.
@@ -352,7 +409,7 @@ func update_data(packet: Dictionary) -> void:
 	packet["pinned_contacts"] = pinned_contacts
 	packet["is_ship_oriented"] = current_ship_oriented
 	
-	var selected_target = sensor_panel.get_selected_contact_id()
+	var selected_target = contacts_panel.get_selected_contact_id() if is_instance_valid(contacts_panel) else ""
 	packet["selected_contact_id"] = selected_target
 	
 	if nav_panel and nav_panel.has_method("update_data"):
@@ -361,10 +418,14 @@ func update_data(packet: Dictionary) -> void:
 		helm_panel.update_data(packet)
 	if sensor_panel and sensor_panel.has_method("update_data"):
 		sensor_panel.update_data(packet)
+	if contacts_panel and contacts_panel.has_method("update_data"):
+		contacts_panel.update_data(packet)
 	if weapons_panel and weapons_panel.has_method("update_data"):
 		weapons_panel.update_data(packet, selected_target)
 	if eng_panel and eng_panel.has_method("update_data"):
 		eng_panel.update_data(packet)
+	if comms_panel and comms_panel.has_method("update_data"):
+		comms_panel.update_data(packet)
 
 	if packet.has("transient_events"):
 		for ev in packet["transient_events"]:
@@ -380,7 +441,7 @@ func update_data(packet: Dictionary) -> void:
 	_update_overheat(_heat_fraction >= OVERHEAT_FRACTION)
 
 func _on_fire_weapon_requested(weapon_id: String) -> void:
-	var target_id = sensor_panel.get_selected_contact_id()
+	var target_id = contacts_panel.get_selected_contact_id() if is_instance_valid(contacts_panel) else ""
 	if target_id == "": return
 	var target_pos = Vector2.ZERO # The host will compute actual lead pos, we just send a zero vector for now
 
@@ -397,6 +458,8 @@ func _on_contact_pin_toggled(c_id: String, is_pinned: bool) -> void:
 func _on_selection_changed(c_id: String) -> void:
 	if sensor_panel and sensor_panel.has_method("set_selected_contact_id"):
 		sensor_panel.set_selected_contact_id(c_id)
+	if contacts_panel and contacts_panel.has_method("set_selected_contact_id"):
+		contacts_panel.set_selected_contact_id(c_id)
 
 	var ship_node = _get_my_ship()
 	if ship_node:
@@ -416,6 +479,26 @@ func _on_component_power_toggled(component_id: String, is_active: bool) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "set_component_power", component_id, is_active)
+
+func _on_transponder_toggled(is_active: bool) -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "set_transponder_active", is_active)
+
+func _on_transponder_share_name_toggled(share: bool) -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "set_transponder_share_name", share)
+
+func _on_transponder_share_loc_toggled(share: bool) -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "set_transponder_share_location", share)
+
+func _on_transponder_custom_name_changed(new_name: String) -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "set_transponder_custom_name", new_name)
 
 # ----------------------------------------------------
 # Player feedback: heat fan / overheat alert / damage punch

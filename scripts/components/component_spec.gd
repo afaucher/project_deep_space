@@ -6,7 +6,10 @@ class_name ComponentSpec
 # MEDIUM is ground truth -- derived from the frigate's real authored numbers.
 # DRONE/LIGHT/HEAVY/STRUCTURE bands are provisional first-cut scaffolding,
 # to be tuned in M9c when shuttle / light-attack-craft / destroyer are
-# authored. Tuning those tiers is a one-file edit here.
+# tuning those tiers is a one-file edit here.
+
+const AREA_PER_PERSON := 40.0
+const CARGO_AREA_PER_UNIT := 10.0
 
 enum Tier { UNVALIDATED = -1, DRONE = 0, LIGHT = 1, MEDIUM = 2, HEAVY = 3, STRUCTURE = 4 }
 
@@ -26,6 +29,8 @@ static func resolve_spec_class(comp: Dictionary) -> String:
 			return "reactor"
 		"engines":
 			return "engine"
+		"rcs":
+			return "rcs"
 		"comms":
 			return "comms"
 		"sensors":
@@ -37,6 +42,14 @@ static func resolve_spec_class(comp: Dictionary) -> String:
 			elif weapon_type == "missile":
 				return "missile"
 			return ""
+		"living_quarters":
+			return "living_quarters"
+		"cargo_bay":
+			return "cargo_bay"
+		"life_support":
+			return "life_support"
+		"docking_port":
+			return "docking_port"
 		_:
 			return ""
 
@@ -69,6 +82,13 @@ const COMPONENT_BANDS := {
 		Tier.HEAVY: {"thrust_rating": [10000.0, 32000.0], "torque_rating": [20000.0, 64000.0]},
 		# STRUCTURE: no entry -- STRUCTURE has no engines (§3a rule 6).
 	},
+	"rcs": {
+		Tier.DRONE: {"thrust_rating": [50.0, 500.0], "torque_rating": [50.0, 500.0]},
+		Tier.LIGHT: {"thrust_rating": [200.0, 2000.0], "torque_rating": [200.0, 2000.0]},
+		Tier.MEDIUM: {"thrust_rating": [500.0, 5000.0], "torque_rating": [500.0, 5000.0]},
+		Tier.HEAVY: {"thrust_rating": [1000.0, 10000.0], "torque_rating": [1000.0, 10000.0]},
+		Tier.STRUCTURE: {"thrust_rating": [5000.0, 50000.0], "torque_rating": [5000.0, 50000.0]},
+	},
 	"comms": {
 		Tier.DRONE: {"range": [0.0, 25000.0]},
 		Tier.LIGHT: {"range": [10000.0, 45000.0]},
@@ -97,6 +117,18 @@ const COMPONENT_BANDS := {
 		Tier.HEAVY: {"range": [28000.0, 60000.0], "cooldown_max": [1.0, 10.0]},
 		Tier.STRUCTURE: {"range": [20000.0, 60000.0], "cooldown_max": [1.0, 10.0]},
 	},
+	"living_quarters": {
+		Tier.STRUCTURE: {"health": [100.0, 10000.0]},
+	},
+	"cargo_bay": {
+		Tier.STRUCTURE: {"health": [100.0, 10000.0]},
+	},
+	"life_support": {
+		Tier.STRUCTURE: {"health": [100.0, 5000.0]},
+	},
+	"docking_port": {
+		Tier.STRUCTURE: {"health": [200.0, 8000.0]},
+	}
 }
 
 # ---------------------------------------------------------------------------

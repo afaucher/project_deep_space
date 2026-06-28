@@ -15,10 +15,14 @@ const SEEKER_EDGE_MARGIN := 10.0     # degrees of margin kept off the seeker's e
 const SEEKER_FALLBACK_HALF_ARC := PI / 3.0 # used only if no seeker component is found (shouldn't happen in practice)
 const PROXIMITY_FUSE_RANGE := 100.0  # distance at which the warhead detonates
 const WARHEAD_DAMAGE := 250.0
+const JINK_INTERVAL := 0.25          # seconds between evasive heading re-rolls (~4 Hz) -- DebugSettings.missile_jink
+const JINK_MAX_ANGLE := deg_to_rad(10.0) # max evasive offset from the target bearing
 
 var ship: RigidBody2D
 var target_id: String = ""
 var age: float = 0.0
+var _jink_timer: float = 0.0
+var _jink_offset: float = 0.0
 
 func _ready() -> void:
 	ship = get_parent()
@@ -31,6 +35,17 @@ func _physics_process(delta: float) -> void:
 	if ship.is_dead: return
 	
 	age += delta
+
+	# Evasive jink: periodically re-roll a small heading offset so the missile weaves,
+	# keeping the PD firing solution (built on our tracked heading) stale. Off by default.
+	if DebugSettings.get_choice("missile_jink") == DebugSettings.MissileJink.ON:
+		_jink_timer -= delta
+		if _jink_timer <= 0.0:
+			_jink_offset = randf_range(-JINK_MAX_ANGLE, JINK_MAX_ANGLE)
+			_jink_timer = JINK_INTERVAL
+	else:
+		_jink_offset = 0.0
+
 	if age > FUEL_LIFETIME:
 		# Run out of fuel, self-destruct or go inert
 		if COMBAT_DEBUG: print("[Missile] Out of fuel looking for target")
@@ -112,6 +127,9 @@ func _physics_process(delta: float) -> void:
 			break
 	var max_lead = max(0.1, seeker_half_arc - deg_to_rad(SEEKER_EDGE_MARGIN))
 	var lead_angle_diff = wrapf(desired_heading - angle_to_target, -PI, PI)
+	# Add the evasive jink here (before the clamp) so the weave is bounded by the
+	# seeker cone -- the target never falls out of FOV, so we keep lock while jinking.
+	lead_angle_diff += _jink_offset
 	lead_angle_diff = clampf(lead_angle_diff, -max_lead, max_lead)
 	desired_heading = angle_to_target + lead_angle_diff
 	
@@ -124,8 +142,16 @@ func _physics_process(delta: float) -> void:
 
 func detonate() -> void:
 	if ship.is_dead: return
-	
-	if target_id != "" and ship.active_contacts.has(target_id):
+
+	# A missile is only lethal if its warhead survived. PD that guts the "warhead"
+	# component duds the missile: it still expends itself on the proximity fuse
+	# below, but deals no damage. (A reactor/hull kill stops it even earlier via
+	# is_dead.) This makes the warhead a meaningful PD target instead of a decorative
+	# HP box -- see design_ideas/warhead_laser_special_case.md.
+	var warhead = ship.get_component("warhead")
+	var warhead_live = not warhead.is_empty() and warhead.get("health", 0.0) > 0.0
+
+	if warhead_live and target_id != "" and ship.active_contacts.has(target_id):
 		var target_pos = ship.active_contacts[target_id]["pos"]
 		var space_state = ship.get_world_2d().direct_space_state
 		var dir = (target_pos - ship.position).normalized()

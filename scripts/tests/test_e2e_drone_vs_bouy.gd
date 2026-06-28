@@ -31,16 +31,20 @@ func setup(main_node: Node) -> void:
 var frames = 0
 func _physics_process(delta: float) -> void:
 	frames += 1
+	# A vaporized buoy (reactor breach -> queue_free) is a freed instance -- that
+	# counts as destroyed, so guard before touching .is_dead/.health.
+	var bouy_destroyed = not is_instance_valid(bouy) or bouy.is_dead or bouy.health <= 0
+
 	# Run for up to 30 seconds (1800 frames at 60fps)
 	if frames >= 1800:
-		if bouy.is_dead or bouy.health <= 0:
+		if bouy_destroyed:
 			print(">>> [TEST PASSED] Bouy was destroyed by drone.")
 			get_tree().quit(0)
 		else:
 			print(">>> [TEST FAILED] Bouy survived after 30 seconds. Health: ", bouy.health)
 			get_tree().quit(1)
-			
+
 	# If buoy dies early, we win!
-	if bouy.is_dead or bouy.health <= 0:
+	if bouy_destroyed:
 		print(">>> [TEST PASSED] Bouy was destroyed early at frame ", frames)
 		get_tree().quit(0)

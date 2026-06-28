@@ -32,6 +32,13 @@ func _physics_process(_delta: float) -> void:
 	if not missile_scenario_started:
 		return
 
+	# A missile is genuinely neutralized in exactly these ways:
+	#   - freed / queued for deletion (already gone),
+	#   - is_dead (reactor or both hulls destroyed -> vaporize/hulk),
+	#   - warhead component destroyed -> dudded: missile_controller.detonate() gates
+	#     its damage on warhead health, so a warhead-dead missile expends harmlessly.
+	# (Before that detonate() gate existed, warhead_dead did NOT actually stop the
+	# missile and this check over-credited PD -- see warhead_laser_special_case.md.)
 	var warhead_dead = false
 	if is_instance_valid(e_missile):
 		for c in e_missile.ship_components:

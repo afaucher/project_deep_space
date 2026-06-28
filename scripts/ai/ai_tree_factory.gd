@@ -26,8 +26,10 @@ const ShouldDisengageLeaf = preload("res://scripts/ai/leaves/should_disengage_le
 const FleeLeaf = preload("res://scripts/ai/leaves/flee_leaf.gd")
 const AcquireTargetLeaf = preload("res://scripts/ai/leaves/acquire_target_leaf.gd")
 const SteerToTargetLeaf = preload("res://scripts/ai/leaves/steer_to_target_leaf.gd")
+const StationSteerToTargetLeaf = preload("res://scripts/ai/leaves/station_steer_to_target_leaf.gd")
 const FireOpportunityLeaf = preload("res://scripts/ai/leaves/fire_opportunity_leaf.gd")
 const IdleLeaf = preload("res://scripts/ai/leaves/idle_leaf.gd")
+const StationKeepingLeaf = preload("res://scripts/ai/leaves/station_keeping_leaf.gd")
 
 static func build_default() -> Node:
 	var tree = BeehaveTreeScript.new()
@@ -69,5 +71,35 @@ static func build_default() -> Node:
 	var idle = IdleLeaf.new()
 	idle.name = "Idle"
 	root.add_child(idle)
+
+	return tree
+
+static func build_station() -> Node:
+	var tree = BeehaveTreeScript.new()
+	tree.name = "AITree"
+
+	var root = SelectorScript.new()
+	root.name = "RootSelector"
+	tree.add_child(root)
+
+	var engage = SequenceScript.new()
+	engage.name = "Engage"
+	root.add_child(engage)
+
+	var acquire = AcquireTargetLeaf.new()
+	acquire.name = "AcquireTarget"
+	engage.add_child(acquire)
+
+	var steer_to_target = StationSteerToTargetLeaf.new()
+	steer_to_target.name = "StationSteerToTarget"
+	engage.add_child(steer_to_target)
+
+	var fire = FireOpportunityLeaf.new()
+	fire.name = "FireOpportunity"
+	engage.add_child(fire)
+
+	var keep_station_idle = StationKeepingLeaf.new()
+	keep_station_idle.name = "StationKeepingIdle"
+	root.add_child(keep_station_idle)
 
 	return tree

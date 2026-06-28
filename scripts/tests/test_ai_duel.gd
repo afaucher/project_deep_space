@@ -19,9 +19,15 @@ const START_RANGE := 8000.0       # the new AI's optimal broadside range
 # kill needs a missile to happen to destroy a critical component (stochastic even while
 # one ship is ground to dust), and absolute damage dealt in the time cap varies with PD
 # luck -- so we measure lopsidedness: the new AI must survive, inflict real damage, and
-# take far less than it deals. (Observed: new ends at ~full HP every trial; legacy loses
-# 2000-3500.)
-const MIN_DAMAGE_DEALT := 1000.0  # legacy must actually be hurt (a real fight happened)
+# take far less than it deals. The dominance RATIO + new's survival are the real
+# superiority signal; MIN_DAMAGE_DEALT is only a floor to reject "nothing happened".
+#
+# That floor was recalibrated down (1000 -> 500) after laser overkill made PD far more
+# lethal against missiles: the new AI's missile volleys now get intercepted much more, so
+# it lands ~750-1500 on the legacy ship per duel instead of the old 2000-3500 -- while
+# still ending at ~full HP itself (new_lost ~= 0, so the ratio is effectively infinite).
+# 500 still means a couple of missiles genuinely connected, i.e. a real exchange occurred.
+const MIN_DAMAGE_DEALT := 500.0   # legacy must actually be hurt (a real fight happened)
 const DOMINANCE_RATIO := 4.0      # legacy must lose at least this many times the new AI's loss
 
 var main_node
@@ -64,6 +70,10 @@ func _start_trial() -> void:
 		full_health = _total_health(ship_new)  # pristine, captured before any combat
 
 func _total_health(ship) -> float:
+	# A vaporized ship (reactor breach -> queue_free) is a freed instance: treat
+	# it as a total loss, since that's exactly what it is.
+	if not is_instance_valid(ship):
+		return 0.0
 	var h = 0.0
 	for c in ship.ship_components:
 		h += max(0.0, c["health"])
@@ -71,8 +81,9 @@ func _total_health(ship) -> float:
 
 func _physics_process(_delta: float) -> void:
 	frames += 1
-	var new_dead = ship_new.is_dead
-	var legacy_dead = ship_legacy.is_dead
+	# A vaporized ship is freed, so guard before touching it -- gone counts as dead.
+	var new_dead = not is_instance_valid(ship_new) or ship_new.is_dead
+	var legacy_dead = not is_instance_valid(ship_legacy) or ship_legacy.is_dead
 	if not (new_dead or legacy_dead or frames >= MAX_FRAMES):
 		return
 
@@ -90,8 +101,10 @@ func _physics_process(_delta: float) -> void:
 	print("Trial %d: winner=%s at frame %d (new lost %.0f, legacy lost %.0f)" % [
 		trial, outcome, frames, new_lost, legacy_lost])
 
-	ship_new.queue_free()
-	ship_legacy.queue_free()
+	if is_instance_valid(ship_new):
+		ship_new.queue_free()
+	if is_instance_valid(ship_legacy):
+		ship_legacy.queue_free()
 
 	trial += 1
 	global_trial += 1

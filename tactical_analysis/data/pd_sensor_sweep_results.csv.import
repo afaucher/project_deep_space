@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://oe4bvn0h3xbv"
+
+[deps]
+
+files=["res://tactical_analysis/data/pd_sensor_sweep_results.refresh.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.bins.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.engagement.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.volley.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.hits.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.destroyed.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.timeouts.translation"]
+
+source_file="res://tactical_analysis/data/pd_sensor_sweep_results.csv"
+dest_files=["res://tactical_analysis/data/pd_sensor_sweep_results.refresh.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.bins.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.engagement.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.volley.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.hits.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.destroyed.translation", "res://tactical_analysis/data/pd_sensor_sweep_results.timeouts.translation"]
+
+[params]
+
+compress=true
+delimiter=0

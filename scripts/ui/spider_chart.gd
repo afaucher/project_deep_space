@@ -64,7 +64,7 @@ func _draw() -> void:
 	var data_colors = PackedColorArray([Color(0.8, 0.2, 0.2, 0.4)])
 	
 	for i in range(4):
-		var frac = current_values[i] / max_values[i]
+		var frac = max(0.01, current_values[i] / max_values[i])
 		var angle = -PI/2.0 + float(i) * angle_step
 		var pt = center + Vector2(cos(angle), sin(angle)) * (radius * frac)
 		data_points.append(pt)

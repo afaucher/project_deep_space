@@ -48,8 +48,14 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 	var has_hull := false
 	var has_reactor := false
 	var has_engines := false
+	var has_rcs := false
 	var has_sensors := false
 	var has_powered_non_reactor := false
+	var has_living_quarters := false
+	var has_cargo_bay := false
+	
+	var total_living_area := 0.0
+	var total_cargo_area := 0.0
 
 	for comp in components:
 		var comp_id: String = comp.get("id", "<missing id>")
@@ -104,8 +110,24 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 			has_engines = true
 			if not (comp.get("thrust_rating", 0.0) > 0):
 				violations.append({"component_id": comp_id, "field": "thrust_rating", "reason": "engine must have thrust_rating > 0, got " + str(comp.get("thrust_rating", 0.0)), "severity": "error"})
+		elif type == "rcs":
+			has_rcs = true
+			if not (comp.get("thrust_rating", 0.0) > 0):
+				violations.append({"component_id": comp_id, "field": "thrust_rating", "reason": "rcs must have thrust_rating > 0, got " + str(comp.get("thrust_rating", 0.0)), "severity": "error"})
+			if not (comp.get("torque_rating", 0.0) > 0):
+				violations.append({"component_id": comp_id, "field": "torque_rating", "reason": "rcs must have torque_rating > 0, got " + str(comp.get("torque_rating", 0.0)), "severity": "error"})
 		elif type == "sensors":
 			has_sensors = true
+		elif type == "living_quarters":
+			has_living_quarters = true
+			if comp.has("rect"):
+				var r: Rect2 = comp["rect"]
+				total_living_area += r.size.x * r.size.y
+		elif type == "cargo_bay":
+			has_cargo_bay = true
+			if comp.has("rect"):
+				var r: Rect2 = comp["rect"]
+				total_cargo_area += r.size.x * r.size.y
 
 		# Rule 8 bookkeeping: any powered component type other than hull/reactor.
 		if type != "hull" and type != "reactor":
@@ -120,10 +142,23 @@ static func _check_structural(components: Array, tier: int, violations: Array) -
 		violations.append({"component_id": "<ship>", "field": "reactor", "reason": "ship has no component of type 'reactor' with power_rating > 0", "severity": "error"})
 
 	# Rule 6: mobility -- DRONE..HEAVY need engines; STRUCTURE is exempt (and
-	# having engines at all is itself a violation for STRUCTURE).
+	# having engines at all is itself a violation for STRUCTURE). STRUCTURE also
+	# requires capacity components (living quarters, cargo).
 	if tier == ComponentSpec.Tier.STRUCTURE:
 		if has_engines:
 			violations.append({"component_id": "<ship>", "field": "engines", "reason": "STRUCTURE-tier ship must not have any 'engines' component (immobile by design)", "severity": "error"})
+		if not has_rcs:
+			violations.append({"component_id": "<ship>", "field": "rcs", "reason": "STRUCTURE-tier ship must have an 'rcs' component for station keeping", "severity": "error"})
+		if not has_living_quarters:
+			violations.append({"component_id": "<ship>", "field": "living_quarters", "reason": "STRUCTURE-tier ship must have a 'living_quarters' component", "severity": "error"})
+		if not has_cargo_bay:
+			violations.append({"component_id": "<ship>", "field": "cargo_bay", "reason": "STRUCTURE-tier ship must have a 'cargo_bay' component", "severity": "error"})
+		
+		# Log a warning if capacity is unusually small (e.g. 0)
+		var human_capacity = total_living_area / ComponentSpec.AREA_PER_PERSON
+		var cargo_capacity = total_cargo_area / ComponentSpec.CARGO_AREA_PER_UNIT
+		if human_capacity < 1.0:
+			violations.append({"component_id": "<ship>", "field": "capacity", "reason": "STRUCTURE-tier ship has less than 1 person capacity", "severity": "warning"})
 	else:
 		if not has_engines:
 			violations.append({"component_id": "<ship>", "field": "engines", "reason": "ship has no component of type 'engines' with thrust_rating > 0", "severity": "error"})
