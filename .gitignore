@@ -11,6 +11,7 @@ export_presets.cfg
 *.bak
 *.sav
 *.log
+test_logs/
 
 # Windows specific
 desktop.ini

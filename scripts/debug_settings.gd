@@ -42,10 +42,10 @@ const OPTIONS := {
 	"signature_merge": {
 		"label": "Co-bearing bin merge",
 		"choices": [
-			"Blend (max heat/EM, sum CS)",     # BLEND   -- current shipped behavior
+			"Blend (max heat/EM, sum CS)",     # BLEND   -- old behavior; bleeds signatures
 			"Nearest-wins (no bleed)",         # NEAREST -- shadow farther objects
 		],
-		"default": SignatureMerge.BLEND,
+		"default": SignatureMerge.NEAREST,
 	},
 }
 

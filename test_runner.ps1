@@ -33,8 +33,10 @@ if ($TestName -eq "") {
 # 2. Run Specific Test Scenario
 Write-Host "`n[2] Running Test Scenario: $TestName" -ForegroundColor Yellow
 
-$logFile = "$PSScriptRoot\$TestName.log"
-$errFile = "$PSScriptRoot\$TestName.err.log"
+$logDir = "$PSScriptRoot\test_logs"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+$logFile = "$logDir\$TestName.log"
+$errFile = "$logDir\$TestName.err.log"
 if (Test-Path $logFile) { Remove-Item $logFile }
 if (Test-Path $errFile) { Remove-Item $errFile }
 

@@ -15,8 +15,9 @@ The pipeline, host-side, per ship, every physics tick (`ship.gd`):
 1. **Sweep** — `_run_sensor_sweep()` does a physics shape-query out to sensor range,
    filtered by arc and a line-of-sight raycast. Hits are dropped into **angular bins**
    (one wedge per `bin_idx`). Multiple objects in one bin **merge** into a single
-   cross-section-weighted centroid blip (the default `BLEND` policy — see the signature-bleed
-   subsection in §2 for the alternative). Position/velocity get noise added
+   cross-section-weighted centroid blip under the `BLEND` policy — but the **default is now
+   `NEAREST`** (keep the nearest object's clean signature, shadow the rest); see the
+   signature-bleed subsection in §2. Position/velocity get noise added
    (`SENSOR_POS_NOISE`, `SENSOR_VELOCITY_NOISE`).
 2. **Correlate** — each fresh bin is matched into the persistent `active_contacts`
    dictionary. Match is by `instance_id`-derived track id (`TRK-%03d` from
@@ -114,9 +115,9 @@ The merge itself is *intended* (limited angular resolution genuinely can't separ
 things at one bearing), so the fix is "don't let a lossy merge corrupt a confident track,"
 not "stop merging":
 
-- **`BLEND` (default, current):** max heat/EM, sum CS, largest object owns the id. Models a
+- **`BLEND` (old behavior):** max heat/EM, sum CS, largest object owns the id. Models a
   fat ambiguous return — and bleeds identity.
-- **`NEAREST` (the fix):** don't blend. Keep only the **nearest** object's clean signature +
+- **`NEAREST` (the fix, now default):** don't blend. Keep only the **nearest** object's clean signature +
   real id; farther objects are **shadowed** (their tracks dead-reckon, untouched). Neither
   identity is ever corrupted, so each snaps back the instant it's individually resolved, and
   the resolution-gate trap can't arise (there's no bad write to get stuck on). The blip also
@@ -291,9 +292,9 @@ The natural progression:
   `missile_controller.detonate()`. Default = **Purge all immediately**.
 - **Option 3** — menu item present but maps to no-op (falls back to timeout); design only.
 - **Signature-bleed merge** (`DebugSettings.signature_merge`, see §2) — `BLEND` /
-  `NEAREST` toggle in the bin-aggregation loop of `_run_sensor_sweep`. Default = **`BLEND`**
-  (unchanged behavior). `NEAREST` keeps the nearest object's clean signature and shadows the
-  rest. Regression: `scripts/tests/test_signature_bleed.gd`.
+  `NEAREST` toggle in the bin-aggregation loop of `_run_sensor_sweep`. Default = **`NEAREST`**
+  (no-bleed; keeps the nearest object's clean signature and shadows the rest); flip to
+  `BLEND` for the old bleeding behavior. Regression: `scripts/tests/test_signature_bleed.gd`.
 
 ### Known caveat (Option 1/2)
 `queue_free()` defers actual deletion to frame end, so a ship whose sensor sweep runs

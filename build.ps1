@@ -36,8 +36,10 @@ $testsPassed = $true
 # once -RedirectStandardOutput/-Error is also set -- use raw .NET Process
 # objects instead, which track exit codes correctly.
 $runners = foreach ($file in $testFiles) {
-    $runnerLog = "$PSScriptRoot\$($file.BaseName).runner.log"
-    $runnerErr = "$PSScriptRoot\$($file.BaseName).runner.err.log"
+    $logDir = "$PSScriptRoot\test_logs"
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+    $runnerLog = "$logDir\$($file.BaseName).runner.log"
+    $runnerErr = "$logDir\$($file.BaseName).runner.err.log"
     if (Test-Path $runnerLog) { Remove-Item $runnerLog -Force }
     if (Test-Path $runnerErr) { Remove-Item $runnerErr -Force }
     Write-Host "Launching $($file.BaseName)..."
