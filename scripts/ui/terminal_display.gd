@@ -1,11 +1,11 @@
 extends Control
 
-const NavigationPanel = preload("res://scripts/panels/navigation_panel.gd")
-const HelmPanel = preload("res://scripts/panels/helm_panel.gd")
-const SensorPanel = preload("res://scripts/panels/sensor_panel.gd")
-const WeaponsPanel = preload("res://scripts/panels/weapons_panel.gd")
-const EngineeringPanel = preload("res://scripts/panels/engineering_panel.gd")
-const HelpOverlay = preload("res://scripts/panels/help_overlay.gd")
+const NavigationPanel = preload("res://scripts/ui/navigation_panel.gd")
+const HelmPanel = preload("res://scripts/ui/helm_panel.gd")
+const SensorPanel = preload("res://scripts/ui/sensor_panel.gd")
+const WeaponsPanel = preload("res://scripts/ui/weapons_panel.gd")
+const EngineeringPanel = preload("res://scripts/ui/engineering_panel.gd")
+const HelpOverlay = preload("res://scripts/ui/help_overlay.gd")
 
 var nav_panel: Control
 var helm_panel: Control
@@ -39,6 +39,44 @@ const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 var spawn_hull_dropdown: OptionButton
 var spawn_team_dropdown: OptionButton
 var ship_oriented_toggle: CheckButton
+
+# Debug menu plumbing: each popup item id is an index into _debug_menu_items, which
+# records which DebugSettings key + choice that row represents. Auto-built from the
+# DebugSettings.OPTIONS registry, so new debug knobs need zero UI code here.
+var _debug_popup: PopupMenu
+var _debug_menu_items: Array = []  # [{key, choice}], parallel to popup item ids
+
+# Builds the top-bar "Debug" MenuButton from the DebugSettings.OPTIONS registry. Every
+# option becomes a labelled section of radio items; picking one writes straight to the
+# global DebugSettings singleton. Adding a new knob is purely a registry edit.
+func _build_debug_menu() -> MenuButton:
+	var mb := MenuButton.new()
+	mb.text = "Debug"
+	_debug_popup = mb.get_popup()
+	_debug_popup.hide_on_checkable_item_selection = false
+	_rebuild_debug_popup()
+	_debug_popup.id_pressed.connect(_on_debug_menu_id_pressed)
+	return mb
+
+func _rebuild_debug_popup() -> void:
+	_debug_popup.clear()
+	_debug_menu_items.clear()
+	for key in DebugSettings.OPTIONS:
+		var opt = DebugSettings.OPTIONS[key]
+		_debug_popup.add_separator(opt["label"])
+		var current = DebugSettings.get_choice(key)
+		for choice_idx in range(opt["choices"].size()):
+			var id = _debug_menu_items.size()
+			_debug_menu_items.append({"key": key, "choice": choice_idx})
+			_debug_popup.add_radio_check_item(opt["choices"][choice_idx], id)
+			_debug_popup.set_item_checked(_debug_popup.get_item_index(id), choice_idx == current)
+
+func _on_debug_menu_id_pressed(id: int) -> void:
+	if id < 0 or id >= _debug_menu_items.size():
+		return
+	var entry = _debug_menu_items[id]
+	DebugSettings.set_choice(entry["key"], entry["choice"])
+	_rebuild_debug_popup()  # refresh radio checks
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("help_toggle") and help_overlay:
@@ -144,6 +182,8 @@ func _ready() -> void:
 	spacer3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_bar.add_child(spacer3)
 	
+	top_bar.add_child(_build_debug_menu())
+
 	ship_oriented_toggle = CheckButton.new()
 	ship_oriented_toggle.text = "Ship Oriented"
 	ship_oriented_toggle.button_pressed = false

@@ -76,12 +76,12 @@ func _ready() -> void:
 	charts_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vbox.add_child(charts_hbox)
 
-	spider_chart = load("res://scripts/spider_chart.gd").new()
+	spider_chart = load("res://scripts/ui/spider_chart.gd").new()
 	spider_chart.custom_minimum_size = Vector2(160, 160)
 	charts_hbox.add_child(spider_chart)
 	spider_chart.hide()
 
-	history_graph = load("res://scripts/timeseries_graph.gd").new()
+	history_graph = load("res://scripts/ui/timeseries_graph.gd").new()
 	history_graph.custom_minimum_size = Vector2(220, 160)
 	charts_hbox.add_child(history_graph)
 	history_graph.hide()

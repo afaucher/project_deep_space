@@ -145,6 +145,9 @@ func detonate() -> void:
 			# Missiles are laser-heads, so they deal laser damage (which applies extreme heat)
 			result.collider.take_damage(WARHEAD_DAMAGE, result.position, hit_dir, "laser")
 			
-	# Destroy missile
+	# Destroy missile. Before it's freed, clean up observers' tracks of it per the
+	# selected debug cleanup mode -- otherwise every ship that saw it keeps a
+	# dead-reckoned ghost gliding on for the full CONTACT_TIMEOUT.
+	Ship.purge_despawned_contact(ship.get_tree(), ship.get_instance_id(), ship.position)
 	ship.hulk()
 	ship.queue_free()

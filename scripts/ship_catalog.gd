@@ -13,6 +13,7 @@ const SPAWNABLE := [
 	{ "name": "Cargo Shuttle", "script": preload("res://scripts/ships/cargo_shuttle.gd") },
 	{ "name": "Light Attack Craft", "script": preload("res://scripts/ships/light_attack_craft.gd") },
 	{ "name": "Destroyer", "script": preload("res://scripts/ships/destroyer.gd") },
+	{ "name": "Buoy", "script": preload("res://scripts/ships/buoy.gd") },
 ]
 
 enum Team { FRIENDLY, ENEMY, PIRATE }

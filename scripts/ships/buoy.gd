@@ -1,46 +1,23 @@
-extends RigidBody2D
+extends "res://scripts/ships/ship.gd"
 class_name Buoy
 
-var cross_section: float = 10.0
-var base_heat: float = 50.0 # High heat so it looks like a ship to sensors
-var em_noise: float = 50.0
-var density: float = 20.0
-var health: float = 100.0
-var is_dead: bool = false
-
-func get_signature() -> Dictionary:
-	return {
-		"cross_section": cross_section,
-		"heat": base_heat,
-		"em_noise": em_noise,
-		"density": density,
-		"pos": position,
-		"vel": linear_velocity,
-		"owner_id": 999 # Hostile/Neutral IFF
-	}
-
-func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic") -> void:
-	if is_dead: return
-	health -= amount
-	if health <= 0:
-		hulk()
-
-func hulk() -> void:
-	is_dead = true
-	base_heat = 0.0
-	em_noise = 0.0
-
-func _ready() -> void:
-	mass = 50.0
-	inertia = 100.0
-	gravity_scale = 0.0
-	linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
-	linear_damp = 0.0
-	angular_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
-	angular_damp = 0.0
+func _init() -> void:
+	ship_tier = ComponentSpec.Tier.STRUCTURE
+	max_speed = 0.0
+	max_omega = 0.0
+	owner_id = 999 # Hostile/Neutral IFF
 	
-	var collision = CollisionShape2D.new()
-	var shape = CircleShape2D.new()
-	shape.radius = 10.0
-	collision.shape = shape
-	add_child(collision)
+	ship_components = [
+		{"id": "hull_port", "type": "hull", "rect": Rect2(-7.5, -7.5, 15.0, 5.0), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+		{"id": "hull_stbd", "type": "hull", "rect": Rect2(-7.5, 2.5, 15.0, 5.0), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+		
+		# Active face of sensor is at X=-7.5, flush with aft edge.
+		{"id": "sensor", "type": "sensors", "rect": Rect2(-7.5, -2.5, 5.0, 5.0), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 50.0, "em_emission": 50.0, "switchable": true, "powered_on": true, "sensor_type": "active", "active": true, "range": 5000.0, "arc_width": TAU, "num_bins": 8, "refresh_interval": 1.0, "heading": 0.0, "timer": 0.0},
+
+		
+		# Core protected on all sides
+		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-2.5, -2.5, 5.0, 5.0), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 20.0},
+		
+		{"id": "hull_fwd", "type": "hull", "rect": Rect2(2.5, -2.5, 5.0, 5.0), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
+	]
+	super()

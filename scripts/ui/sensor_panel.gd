@@ -59,7 +59,7 @@ func _input(event: InputEvent) -> void:
 			
 		set_selected_contact_id(contact_list[idx])
 
-const SensorModuleUI = preload("res://scripts/sensor_module_ui.gd")
+const SensorModuleUI = preload("res://scripts/ui/sensor_module_ui.gd")
 
 func _ready() -> void:
 	clip_contents = true
@@ -298,8 +298,12 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var vel = c.get("vel", Vector2.ZERO)
 		var speed = vel.length()
 		var sig = c.get("signature", {})
-		info.text = "Dist: %s | Spd: %.1f m/s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
-			Utils.format_dist(dist), speed, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
+		# Track age = whole seconds since the last real detection (it's been
+		# dead-reckoned since). 0s = measured this frame; a climbing number flags a
+		# stale/coasting contact without dimming the row.
+		var age_s = int(c.get("last_seen_timer", 0.0))
+		info.text = "Dist: %s | Spd: %.1f m/s | Age: %ds\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
+			Utils.format_dist(dist), speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
 		]
 
 func _draw() -> void:

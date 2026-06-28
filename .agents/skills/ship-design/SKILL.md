@@ -224,6 +224,16 @@ The tube's outboard edge sits at the hull's outer Y boundary. Hull covers above,
   ├──────┴─────┴───────┤
   │     hull_aft       │
   └────────────────────┘
+
+**Tapered Frame** (avoiding perfect rectangles):
+```
+  _┌────────┐_
+  ┌┴────────┴┐
+  │ mid_hull │  ← corners stepped in to create a natural ship shape
+  └┬────────┬┘
+  _└────────┘_
+```
+Avoid designing ships as perfect rectangular "buildings in space." Pull in the extreme corner blocks of the bow and stern to create a stepped or tapered profile, which adds visual interest and avoids a blocky appearance.
 ```
 
 ---

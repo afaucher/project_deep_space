@@ -5,6 +5,25 @@ class_name Utils
 # silently drift onto different ids if the ship's sensor loadout ever changes.
 const HIGHLIGHT_SENSOR_ID := "dir_high_res"
 
+# Contact confidence-by-age. A tracked contact carries `last_seen_timer` (seconds
+# since the last *real* sensor detection; ship.gd dead-reckons its position in the
+# meantime and only drops it at CONTACT_TIMEOUT = 20s). A freshly-measured contact
+# and one coasting on 15s-old data are otherwise drawn identically, so stale
+# dead-reckoned blips read as solid as real ones -- the core "too many ghosts"
+# problem. These map age -> a 0..1 confidence so every view can dim old contacts:
+# bright = just seen, faint = coasting on stale extrapolation. Age only for now
+# (resolution/cross-section could fold in later); see the fusion-grade discussion.
+const CONTACT_FADE_FULL := 8.0          # seconds of no detection to dim from full to the floor
+const CONTACT_CONFIDENCE_FLOOR := 0.2   # dimmest a still-tracked (not yet dropped) contact gets
+
+static func contact_confidence(contact: Dictionary) -> float:
+	var age = contact.get("last_seen_timer", 0.0)
+	return clampf(1.0 - age / CONTACT_FADE_FULL, CONTACT_CONFIDENCE_FLOOR, 1.0)
+
+# Scale a base color's alpha by confidence (keeps hue/value, just dims it).
+static func fade_color(base: Color, confidence: float) -> Color:
+	return Color(base.r, base.g, base.b, base.a * confidence)
+
 static func format_dist(meters: float) -> String:
 	if meters < 1000.0:
 		return "%.0f m" % meters

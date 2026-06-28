@@ -4,7 +4,7 @@ extends Node
 # as textures, the layout builds without API errors, and it starts hidden. The visual
 # appearance still needs a human eye, but this guards the build (wrong glyph paths, bad
 # TextureRect/StyleBox property names, etc.).
-const HelpOverlay = preload("res://scripts/panels/help_overlay.gd")
+const HelpOverlay = preload("res://scripts/ui/help_overlay.gd")
 
 func setup(main) -> void:
 	print("Test test_help_overlay initialized.")

@@ -497,5 +497,9 @@ func _draw() -> void:
 			draw_string(font, label_pos, c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
 
 func _get_contact_color(c: Dictionary) -> Color:
-	return Utils.classification_color(c.get("classification", ""))
+	# Dim by confidence-from-age so stale dead-reckoned contacts fade toward ghosts
+	# instead of reading as solid as freshly-measured ones. Every blip/label/vector/
+	# off-screen-indicator path goes through here, so they all inherit the fade.
+	var base = Utils.classification_color(c.get("classification", ""))
+	return Utils.fade_color(base, Utils.contact_confidence(c))
 

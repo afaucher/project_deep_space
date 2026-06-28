@@ -11,7 +11,7 @@ const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
-const MenuCompass = preload("res://scripts/menu_compass.gd")
+const MenuCompass = preload("res://scripts/ui/menu_compass.gd")
 
 var is_host: bool = false
 var players = {}
@@ -144,6 +144,8 @@ func _on_peer_connected(id: int) -> void:
 
 func _spawn_player_ship(id: int) -> void:
 	var selected_idx = ship_select.selected if is_instance_valid(ship_select) else 0
+	if selected_idx < 0 or selected_idx >= ShipCatalog.SPAWNABLE.size():
+		selected_idx = 0
 	var ship_script = ShipCatalog.SPAWNABLE[selected_idx]["script"]
 	var ship = ship_script.new()
 	ship.name = "Ship_" + str(id)

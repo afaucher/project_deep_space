@@ -678,6 +678,12 @@ var active_sensor_sweeps = {} # Map of id -> bins
 var active_contacts = {}
 var next_contact_id: int = 1
 
+# Contact-cleanup tombstones (DebugSettings.MissileCleanup.VISIBLE). When a despawned
+# entity's track is purged from this ship, we remember its id here for a suppression
+# window so the datalink relay can't immediately re-import the same ghost from a linked
+# teammate who couldn't see the despawn. Maps trk_id -> seconds of suppression left.
+var _contact_tombstones := {}
+
 var _high_res_target_idx: int = 0
 var _high_res_target_timer: float = 0.0
 
@@ -845,7 +851,18 @@ func _physics_process(delta: float) -> void:
 			to_remove.append(c_id)
 	for c_id in to_remove:
 		active_contacts.erase(c_id)
-	
+
+	# Age out contact tombstones (VISIBLE cleanup). Once expired, the relay may
+	# import the id again -- by then any teammate's stale copy has also aged out.
+	if not _contact_tombstones.is_empty():
+		var ts_expired = []
+		for t_id in _contact_tombstones:
+			_contact_tombstones[t_id] -= delta
+			if _contact_tombstones[t_id] <= 0.0:
+				ts_expired.append(t_id)
+		for t_id in ts_expired:
+			_contact_tombstones.erase(t_id)
+
 	var bins_this_frame = []
 
 	# --- Heat & Engineering Logic ---
@@ -1080,6 +1097,10 @@ func _physics_process(delta: float) -> void:
 			}
 
 			for c_id in relayed_contacts:
+				# Suppressed: we purged this despawned track and a teammate who
+				# couldn't see the despawn is trying to relay the ghost back in.
+				if _contact_tombstones.has(c_id):
+					continue
 				var external_contact = relayed_contacts[c_id]
 				if not active_contacts.has(c_id):
 					active_contacts[c_id] = external_contact.duplicate(true)
@@ -1183,12 +1204,25 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 				bins[bin_idx].append(sig)
 	
 	var sweep_output = []
-	
+	var merge_mode = DebugSettings.get_choice("signature_merge")
+
 	# Aggregate bins
 	for bin_idx in bins.keys():
 		var objects = bins[bin_idx]
+		var raw_count = objects.size()
+		# NEAREST-wins: don't blend co-bearing objects. Keep only the nearest one's
+		# clean signature + instance_id; the rest are shadowed (their tracks
+		# dead-reckon untouched). Prevents a hot enemy bleeding onto an asteroid at
+		# the same bearing -- see DebugSettings.SignatureMerge.
+		if merge_mode == DebugSettings.SignatureMerge.NEAREST and objects.size() > 1:
+			var nearest = objects[0]
+			for obj in objects:
+				if obj["_raw_dist"] < nearest["_raw_dist"]:
+					nearest = obj
+			objects = [nearest]
 		var merged = {
-			"count": objects.size()
+			"count": objects.size(),
+			"shadowed": raw_count - objects.size(),  # >0 only in NEAREST mode; UI hint
 		}
 		
 		var total_cs = 0.0
@@ -1261,8 +1295,69 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 		merged["instance_id"] = primary_instance_id
 		
 		sweep_output.append(merged)
-		
+
 	return sweep_output
+
+# True if this ship has an ACTIVE sensor that currently covers `point` -- in range,
+# within arc, and with clear line of sight. Used by the VISIBLE contact-cleanup mode to
+# decide whether this ship is entitled to "know" a despawn happened there. Active-only:
+# a passive EM sensor detects emissions, so it can't confirm an *empty* patch of space.
+func _can_sense_point(point: Vector2) -> bool:
+	var space_state = get_world_2d().direct_space_state
+	for sensor in get_components_by_type("sensors"):
+		if sensor.get("sensor_type", "active") != "active":
+			continue
+		if not is_component_powered(sensor["id"]):
+			continue
+		if not sensor.get("active", true):
+			continue
+		var health_ratio = get_component_health_ratio(sensor["id"])
+		if health_ratio <= 0.0:
+			continue
+		var origin = position + get_component_origin(sensor).rotated(rotation)
+		var dist = origin.distance_to(point)
+		if dist > sensor["range"] * health_ratio:
+			continue
+		var arc_width = sensor["arc_width"]
+		if arc_width < TAU - 0.01:
+			var rel = wrapf((point - origin).angle() - (rotation + sensor["heading"]), -PI, PI)
+			if abs(rel) > arc_width / 2.0:
+				continue
+		# Line of sight: an occluder noticeably closer than the point blocks the view.
+		var rq = PhysicsRayQueryParameters2D.create(origin, point)
+		rq.exclude = [self]
+		var rr = space_state.intersect_ray(rq)
+		if rr and origin.distance_to(rr.position) < dist - 5.0:
+			continue
+		return true
+	return false
+
+# Despawn-triggered contact cleanup (DebugSettings.missile_cleanup). Called the instant
+# an entity is about to be freed (e.g. a missile detonating) so observers don't keep a
+# dead-reckoned ghost of it for the full CONTACT_TIMEOUT. The track id is deterministic
+# from the instance id (same formula the sensor correlation uses), so we can target the
+# right track without a handle to the now-doomed node. Host-only; see the contact-
+# tracing design doc for the option trade-offs and the same-frame re-detect caveat.
+static func purge_despawned_contact(tree: SceneTree, instance_id: int, world_pos: Vector2) -> void:
+	var mode = DebugSettings.get_choice("missile_cleanup")
+	# OFF: rely on the 20s timeout. DISPROVAL: not a despawn action at all -- it's a
+	# continuous sensor-coverage test (design doc), so there's nothing to do here.
+	if mode == DebugSettings.MissileCleanup.OFF or mode == DebugSettings.MissileCleanup.DISPROVAL:
+		return
+	var trk = "TRK-%03d" % (abs(instance_id) % 1000)
+	for s in tree.get_nodes_in_group("ships"):
+		if not is_instance_valid(s) or not (s is Ship):
+			continue
+		if mode == DebugSettings.MissileCleanup.ALL:
+			# Purge everywhere at once -> no teammate is left holding it, so the relay
+			# can't reintroduce the ghost. No tombstone needed.
+			s.active_contacts.erase(trk)
+		elif mode == DebugSettings.MissileCleanup.VISIBLE:
+			# Only ships that could see the despawn drop it; a tombstone stops a blind
+			# teammate from relaying the ghost back until their copy also ages out.
+			if s._can_sense_point(world_pos):
+				s.active_contacts.erase(trk)
+				s._contact_tombstones[trk] = CONTACT_TIMEOUT
 
 @rpc("any_peer", "call_local")
 func set_component_power(component_id: String, active: bool) -> void:
