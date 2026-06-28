@@ -7,8 +7,8 @@ var current_state: Dictionary = {}
 var contact_panels: Dictionary = {}
 
 var main_vbox: VBoxContainer
-var contact_list_vbox: VBoxContainer
-var contact_filter_dropdown: OptionButton
+var section_vboxes: Dictionary = {}
+var section_buttons: Dictionary = {}
 
 var selected_contact_id: String = ""
 
@@ -26,22 +26,34 @@ func _input(event: InputEvent) -> void:
 		var contacts = current_state.get("contacts", {})
 		if contacts.is_empty(): return
 		
-		var filter_idx = 0
-		if is_instance_valid(contact_filter_dropdown):
-			filter_idx = contact_filter_dropdown.selected
-			
-		var contact_list = []
+		var pos = current_state.get("pos", Vector2.ZERO)
+		
+		var enemies = []
+		var ships = []
+		var others = []
+		
 		for c_id in contacts.keys():
-			var classification = contacts[c_id].get("classification", "UNKNOWN")
-			if filter_idx == 1 and classification == "ASTEROID": continue
-			if filter_idx == 2 and classification != "UNIDENTIFIED VESSEL": continue
-			contact_list.append(c_id)
+			var c = contacts[c_id]
+			var classification = c.get("classification", "UNKNOWN")
+			var dist = pos.distance_to(c.get("pos", Vector2.ZERO))
+			
+			if classification == "UNIDENTIFIED VESSEL":
+				enemies.append({"id": c_id, "dist": dist})
+			elif classification == "FRIENDLY VESSEL":
+				ships.append({"id": c_id, "dist": dist})
+			else:
+				others.append({"id": c_id, "dist": dist})
+				
+		enemies.sort_custom(func(a, b): return a["dist"] < b["dist"])
+		ships.sort_custom(func(a, b): return a["dist"] < b["dist"])
+		others.sort_custom(func(a, b): return a["dist"] < b["dist"])
+		
+		var contact_list = []
+		for x in enemies: contact_list.append(x["id"])
+		for x in ships: contact_list.append(x["id"])
+		for x in others: contact_list.append(x["id"])
 			
 		if contact_list.is_empty(): return
-		
-		var pos = current_state.get("pos", Vector2.ZERO)
-		# Sort by distance
-		contact_list.sort_custom(func(a, b): return contacts[a]["pos"].distance_to(pos) < contacts[b]["pos"].distance_to(pos))
 		
 		var idx = contact_list.find(selected_contact_id)
 		if idx == -1:
@@ -66,27 +78,34 @@ func _ready() -> void:
 	title.add_theme_color_override("font_color", Color.GREEN)
 	main_vbox.add_child(title)
 	
-	contact_filter_dropdown = OptionButton.new()
-	contact_filter_dropdown.add_item("All Contacts")
-	contact_filter_dropdown.add_item("All Ships")
-	contact_filter_dropdown.add_item("Enemies Only")
-	contact_filter_dropdown.select(2) # Default to All Ships
-	contact_filter_dropdown.item_selected.connect(_on_filter_selected)
-	main_vbox.add_child(contact_filter_dropdown)
-	
 	main_vbox.add_child(HSeparator.new())
 	
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main_vbox.add_child(scroll)
 	
-	contact_list_vbox = VBoxContainer.new()
-	contact_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(contact_list_vbox)
-
-func _on_filter_selected(idx: int) -> void:
-	if current_state.has("contacts"):
-		_update_contact_list(current_state["contacts"])
+	var content_vbox = VBoxContainer.new()
+	content_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(content_vbox)
+	
+	var sections = ["Enemies", "Ships", "All Contacts"]
+	for s_name in sections:
+		var btn = Button.new()
+		btn.text = s_name + " (-)"
+		btn.toggle_mode = true
+		content_vbox.add_child(btn)
+		
+		var vbox = VBoxContainer.new()
+		vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		content_vbox.add_child(vbox)
+		
+		section_vboxes[s_name] = vbox
+		section_buttons[s_name] = btn
+		
+		btn.toggled.connect(func(pressed):
+			vbox.visible = not pressed
+			btn.text = s_name + (" (+)" if pressed else " (-)")
+		)
 
 func _on_contact_selected(c_id: String) -> void:
 	if selected_contact_id == c_id:
@@ -110,11 +129,11 @@ func update_data(packet: Dictionary) -> void:
 
 func _update_contact_list(contacts: Dictionary) -> void:
 	var my_pos = current_state.get("pos", Vector2.ZERO)
-	var filter_idx = 0
-	if is_instance_valid(contact_filter_dropdown):
-		filter_idx = contact_filter_dropdown.selected
 		
-	var sorted_contacts = []
+	var enemies = []
+	var ships = []
+	var others = []
+	
 	var transponders = current_state.get("transponders", {})
 	
 	for c_id in contacts.keys():
@@ -128,15 +147,26 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			c["transponder_name"] = t_data.get("name", "")
 			c["transponder_flag"] = t_data.get("flag", "")
 		
-		# Filtering
-		if filter_idx == 1 and classification == "ASTEROID": continue # All Ships
-		if filter_idx == 2 and classification != "UNIDENTIFIED VESSEL": continue # Enemies Only
-		
 		c["_id"] = c_id
 		c["_dist"] = my_pos.distance_to(c.get("pos", Vector2.ZERO))
-		sorted_contacts.append(c)
 		
-	sorted_contacts.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
+		if classification == "UNIDENTIFIED VESSEL":
+			enemies.append(c)
+		elif classification == "FRIENDLY VESSEL":
+			ships.append(c)
+		else:
+			others.append(c)
+			
+	enemies.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
+	ships.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
+	others.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
+	
+	# Update button headers with counts
+	section_buttons["Enemies"].text = "Enemies (" + str(enemies.size()) + ")" + (" (+)" if section_buttons["Enemies"].button_pressed else " (-)")
+	section_buttons["Ships"].text = "Ships (" + str(ships.size()) + ")" + (" (+)" if section_buttons["Ships"].button_pressed else " (-)")
+	section_buttons["All Contacts"].text = "All Contacts (" + str(others.size()) + ")" + (" (+)" if section_buttons["All Contacts"].button_pressed else " (-)")
+	
+	var sorted_contacts = enemies + ships + others
 	
 	# Keep track of which IDs are currently valid
 	var active_ids = []
@@ -196,15 +226,30 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			info.add_theme_font_size_override("font_size", 12)
 			vbox.add_child(info)
 
-			contact_list_vbox.add_child(panel)
 			contact_panels[c_id] = {"panel": panel, "style": p_style, "header": header, "pin_btn": pin_btn, "info": info}
 
-		# Reorder to keep sorted
-		panel.get_parent().move_child(panel, idx)
-		idx += 1
+		# Parent to the correct section
+		var classification = c.get("classification", "UNKNOWN")
+		var target_vbox: VBoxContainer
+		if classification == "UNIDENTIFIED VESSEL":
+			target_vbox = section_vboxes["Enemies"]
+		elif classification == "FRIENDLY VESSEL":
+			target_vbox = section_vboxes["Ships"]
+		else:
+			target_vbox = section_vboxes["All Contacts"]
+			
+		if panel.get_parent() != target_vbox:
+			if panel.get_parent():
+				panel.get_parent().remove_child(panel)
+			target_vbox.add_child(panel)
+
+		# Reorder to keep sorted within section (since we add them in sorted order, we can just use move_child)
+		# Wait, idx is global. We need a per-section index.
+		# But since we clear/move them, the order inside target_vbox is preserved by simply doing:
+		target_vbox.move_child(panel, target_vbox.get_child_count() - 1)
 		
 		# Update visual properties
-		var classification_str = c.get("classification", "UNKNOWN")
+		var classification_str = classification
 		if c_id == selected_contact_id:
 			p_style.bg_color = Color(0.2, 0.4, 0.2, 0.8)
 		else:

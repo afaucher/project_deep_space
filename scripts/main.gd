@@ -276,6 +276,7 @@ func _distribute_state() -> void:
 		if not is_instance_valid(ship):
 			continue
 		var packet = {
+			"ship_name": ship.ship_name,
 			"pos": ship.position,
 			"rot": ship.rotation,
 			"vel": ship.linear_velocity,

@@ -313,7 +313,6 @@ func _ready() -> void:
 	comms_panel.transponder_toggled.connect(_on_transponder_toggled)
 	comms_panel.transponder_share_name_toggled.connect(_on_transponder_share_name_toggled)
 	comms_panel.transponder_share_loc_toggled.connect(_on_transponder_share_loc_toggled)
-	comms_panel.transponder_custom_name_changed.connect(_on_transponder_custom_name_changed)
 	comms_container.add_child(comms_panel)
 	content_hbox.add_child(comms_container)
 	comms_container.visible = false
@@ -494,11 +493,6 @@ func _on_transponder_share_loc_toggled(share: bool) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "set_transponder_share_location", share)
-
-func _on_transponder_custom_name_changed(new_name: String) -> void:
-	var ship_node = _get_my_ship()
-	if ship_node:
-		ship_node.rpc_id(1, "set_transponder_custom_name", new_name)
 
 # ----------------------------------------------------
 # Player feedback: heat fan / overheat alert / damage punch

@@ -9,7 +9,7 @@ var transponder_panels: Dictionary = {}
 var btn_active: CheckButton
 var btn_share_name: CheckButton
 var btn_share_loc: CheckButton
-var custom_name_edit: LineEdit
+var ship_name_label: RichTextLabel
 
 signal transponder_toggled(active: bool)
 signal transponder_share_name_toggled(share: bool)
@@ -37,9 +37,12 @@ func _ready() -> void:
 	var my_vbox = VBoxContainer.new()
 	my_panel.add_child(my_vbox)
 	
-	var my_title = Label.new()
-	my_title.text = "My Transponder Settings"
-	my_vbox.add_child(my_title)
+	ship_name_label = RichTextLabel.new()
+	ship_name_label.bbcode_enabled = true
+	ship_name_label.text = "[b]My Ship[/b]"
+	ship_name_label.fit_content = true
+	ship_name_label.name = "ShipNameLabel"
+	my_vbox.add_child(ship_name_label)
 	
 	btn_active = CheckButton.new()
 	btn_active.text = "Broadcast Active"
@@ -58,16 +61,6 @@ func _ready() -> void:
 	hbox1.add_child(btn_share_loc)
 	my_vbox.add_child(hbox1)
 	
-	var hbox2 = HBoxContainer.new()
-	var name_label = Label.new()
-	name_label.text = "Custom Name: "
-	hbox2.add_child(name_label)
-	custom_name_edit = LineEdit.new()
-	custom_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	custom_name_edit.text_submitted.connect(func(text): emit_signal("transponder_custom_name_changed", text))
-	hbox2.add_child(custom_name_edit)
-	my_vbox.add_child(hbox2)
-	
 	main_vbox.add_child(HSeparator.new())
 	
 	var scroll = ScrollContainer.new()
@@ -81,6 +74,10 @@ func _ready() -> void:
 func update_data(packet: Dictionary) -> void:
 	current_state = packet
 	
+	if current_state.has("ship_name"):
+		if ship_name_label:
+			ship_name_label.text = "[b]" + current_state["ship_name"] + "[/b]"
+
 	# Update my transponder state from engineering packet if available
 	if current_state.has("engineering"):
 		var eng = current_state["engineering"]
@@ -89,9 +86,7 @@ func update_data(packet: Dictionary) -> void:
 			if c.get("type") == "comms":
 				btn_active.set_pressed_no_signal(c.get("transponder_active", true))
 				btn_share_name.set_pressed_no_signal(c.get("transponder_share_name", true))
-				btn_share_loc.set_pressed_no_signal(c.get("transponder_share_location", true))
-				if not custom_name_edit.has_focus():
-					custom_name_edit.text = c.get("transponder_custom_name", "")
+				btn_share_loc.set_pressed_no_signal(c.get("transponder_share_location", false))
 				break
 				
 	if current_state.has("transponders"):

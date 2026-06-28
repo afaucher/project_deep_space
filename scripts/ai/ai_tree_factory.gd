@@ -77,10 +77,18 @@ static func build_default() -> Node:
 static func build_station() -> Node:
 	var tree = BeehaveTreeScript.new()
 	tree.name = "AITree"
+	
+	var root_seq = SequenceScript.new()
+	root_seq.name = "RootSequence"
+	tree.add_child(root_seq)
+	
+	var transponder = load("res://scripts/ai/leaves/broadcast_transponder_leaf.gd").new()
+	transponder.name = "BroadcastTransponder"
+	root_seq.add_child(transponder)
 
 	var root = SelectorScript.new()
-	root.name = "RootSelector"
-	tree.add_child(root)
+	root.name = "ActionSelector"
+	root_seq.add_child(root)
 
 	var engage = SequenceScript.new()
 	engage.name = "Engage"

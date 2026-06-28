@@ -283,6 +283,7 @@ func _ready() -> void:
 	
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	list_vbox.add_child(scroll)
 	
 	components_vbox = VBoxContainer.new()

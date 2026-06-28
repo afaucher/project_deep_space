@@ -101,12 +101,24 @@ const RCS_SFX_TORQUE_THRESHOLD := 100.0 # torque above this plays the RCS thrust
 
 const HIT_TRACE_DURATION := 3.0 # seconds a damage-raymarch trace lingers for the engineering panel's spatial view to fade out
 
+const NAME_ADJECTIVES = [
+	"Silent", "Swift", "Crimson", "Azure", "Golden", "Obsidian", "Astral", "Solar", "Lunar", "Quantum",
+	"Ghost", "Shadow", "Storm", "Iron", "Steel", "Silver", "Void", "Star", "Cosmic", "Nebula"
+]
+const NAME_VERBS = [
+	"Runner", "Striker", "Voyager", "Nomad", "Drifter", "Hunter", "Seeker", "Wanderer", "Strider", "Tracer",
+	"Watcher", "Ranger", "Cruiser", "Raider", "Phantom", "Wraith", "Spirit", "Comet", "Meteor", "Falcon"
+]
+
+var ship_name: String = ""
 var owner_id: int = -1
 
 func _init() -> void:
+	ship_name = "HMM " + NAME_ADJECTIVES[randi() % NAME_ADJECTIVES.size()] + " " + NAME_VERBS[randi() % NAME_VERBS.size()]
 	ship_components = ship_components.duplicate(true)
 	iff_tags = iff_tags.duplicate(true)
 	active_contacts = {}
+	active_transponders = {}
 
 var target_thrust: float = 0.0
 var target_velocity: float = 0.0
@@ -303,12 +315,12 @@ func get_active_transponder_data() -> Dictionary:
 	for c in get_components_by_type("comms"):
 		if is_component_powered(c["id"]) and c.get("transponder_active", true):
 			var data = {
-				"name": c.get("transponder_custom_name", "") if c.get("transponder_custom_name", "") != "" else name,
+				"name": ship_name,
 				"flag": c.get("flag", "")
 			}
 			if not c.get("transponder_share_name", true):
 				data["name"] = "UNKNOWN"
-			if c.get("transponder_share_location", true):
+			if c.get("transponder_share_location", false):
 				data["pos"] = position
 			return data
 	return {}
@@ -679,7 +691,7 @@ func _ready() -> void:
 		if c.get("type") == "comms":
 			if not c.has("transponder_active"): c["transponder_active"] = true
 			if not c.has("transponder_share_name"): c["transponder_share_name"] = true
-			if not c.has("transponder_share_location"): c["transponder_share_location"] = true
+			if not c.has("transponder_share_location"): c["transponder_share_location"] = false
 			if not c.has("transponder_custom_name"): c["transponder_custom_name"] = ""
 			if not c.has("flag"): c["flag"] = ""
 
@@ -705,6 +717,7 @@ func _ready() -> void:
 
 var active_sensor_sweeps = {} # Map of id -> bins
 var active_contacts = {}
+var active_transponders = {}
 var next_contact_id: int = 1
 
 # Contact-cleanup tombstones (DebugSettings.MissileCleanup.VISIBLE). When a despawned
@@ -1420,20 +1433,6 @@ func set_transponder_share_location(active: bool) -> void:
 	for c in ship_components:
 		if c["type"] == "comms":
 			c["transponder_share_location"] = active
-			break
-
-@rpc("any_peer", "call_local")
-func set_transponder_custom_name(new_name: String) -> void:
-	if not is_multiplayer_authority() or is_dead: return
-	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
-	
-	# Basic sanitization
-	if new_name.length() > 30:
-		new_name = new_name.substr(0, 30)
-		
-	for c in ship_components:
-		if c["type"] == "comms":
-			c["transponder_custom_name"] = new_name
 			break
 
 @rpc("any_peer", "call_local")
