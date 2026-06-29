@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="NPCProfile" load_steps=3 format=3 uid="uid://dq30x6m3f3a1k"]
+
+[ext_resource type="Script" path="res://scripts/comms/npc_profile.gd" id="1_x"]
+[ext_resource type="Resource" path="res://dialogue/test.dialogue" id="2_y"]
+
+[resource]
+script = ExtResource("1_x")
+character_name = "Test Contact"
+faction = "Test Faction"
+tier = 0
+default_dialogue = ExtResource("2_y")

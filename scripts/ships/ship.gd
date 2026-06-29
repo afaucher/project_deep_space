@@ -9,6 +9,8 @@ const WeaponBehaviorRegistry = preload("res://scripts/components/weapon_behavior
 # The const resolves regardless of cache state and is inherited by subclasses
 # (Frigate uses it for ship_tier). See implementation_plans/m9b_spec_chart_design.md.
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
+const CommsLedger = preload("res://scripts/comms/comms_ledger.gd")
+const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
 
 # Mass is derived from each component's rect area x density, not authored directly.
 # Calibrated so the default Frigate loadout (total area 2775 x density 20.0)
@@ -129,6 +131,8 @@ var linear_mode: int = 0 # 0 = Throttle, 1 = Velocity
 var max_omega: float = 2.0
 var max_speed: float = 1000.0
 var iff_tags: Array = []
+var available_npcs: Array[Resource] = []
+var comms_ledger: Node
 
 # M9b: declared spec-chart tier for ShipDesignValidator. Ships left at
 # UNVALIDATED are skipped by the validator (opt-out, not a failure) -- see
@@ -660,6 +664,8 @@ func get_signature() -> Dictionary:
 	}
 
 func _ready() -> void:
+	comms_ledger = CommsLedger.new()
+	add_child(comms_ledger)
 	if owner_id == -1:
 		owner_id = int(name.replace("Ship_", ""))
 		
@@ -1393,20 +1399,30 @@ static func purge_despawned_contact(tree: SceneTree, instance_id: int, world_pos
 	# continuous sensor-coverage test (design doc), so there's nothing to do here.
 	if mode == DebugSettings.MissileCleanup.OFF or mode == DebugSettings.MissileCleanup.DISPROVAL:
 		return
-	var trk = "TRK-%03d" % (abs(instance_id) % 1000)
+	
 	for s in tree.get_nodes_in_group("ships"):
 		if not is_instance_valid(s) or not (s is Ship):
 			continue
-		if mode == DebugSettings.MissileCleanup.ALL:
-			# Purge everywhere at once -> no teammate is left holding it, so the relay
-			# can't reintroduce the ghost. No tombstone needed.
-			s.active_contacts.erase(trk)
-		elif mode == DebugSettings.MissileCleanup.VISIBLE:
-			# Only ships that could see the despawn drop it; a tombstone stops a blind
-			# teammate from relaying the ghost back until their copy also ages out.
-			if s._can_sense_point(world_pos):
-				s.active_contacts.erase(trk)
-				s._contact_tombstones[trk] = CONTACT_TIMEOUT
+			
+		var keys_to_purge = []
+		for c_id in s.active_contacts.keys():
+			var c = s.active_contacts[c_id]
+			if c.get("instance_id", -1) == instance_id:
+				keys_to_purge.append(c_id)
+			elif c.get("instance_id", -1) == -1 and c.get("pos", Vector2.ZERO).distance_to(world_pos) < 500.0:
+				keys_to_purge.append(c_id)
+				
+		for k in keys_to_purge:
+			if mode == DebugSettings.MissileCleanup.ALL:
+				# Purge everywhere at once -> no teammate is left holding it, so the relay
+				# can't reintroduce the ghost. No tombstone needed.
+				s.active_contacts.erase(k)
+			elif mode == DebugSettings.MissileCleanup.VISIBLE:
+				# Only ships that could see the despawn drop it; a tombstone stops a blind
+				# teammate from relaying the ghost back until their copy also ages out.
+				if s._can_sense_point(world_pos):
+					s.active_contacts.erase(k)
+					s._contact_tombstones[k] = CONTACT_TIMEOUT
 
 @rpc("any_peer", "call_local")
 func set_transponder_active(active: bool) -> void:

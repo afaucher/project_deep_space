@@ -138,22 +138,22 @@ func _init() -> void:
 		# --- Hull Armor Flanks (Sides of the arms) ---
 		{
 			"id": "hull_fwd_port_flank", "type": "hull",
-			"rect": Rect2(20, -30, 40, 10),
+			"rect": Rect2(30, -30, 30, 10),
 			"health": 2000.0, "max_health": 2000.0, "density": 20.0,
 		},
 		{
 			"id": "hull_fwd_stbd_flank", "type": "hull",
-			"rect": Rect2(20, 20, 40, 10),
+			"rect": Rect2(30, 20, 30, 10),
 			"health": 2000.0, "max_health": 2000.0, "density": 20.0,
 		},
 		{
 			"id": "hull_aft_port_flank", "type": "hull",
-			"rect": Rect2(-60, -30, 40, 10),
+			"rect": Rect2(-60, -30, 30, 10),
 			"health": 2000.0, "max_health": 2000.0, "density": 20.0,
 		},
 		{
 			"id": "hull_aft_stbd_flank", "type": "hull",
-			"rect": Rect2(-60, 20, 40, 10),
+			"rect": Rect2(-60, 20, 30, 10),
 			"health": 2000.0, "max_health": 2000.0, "density": 20.0,
 		},
 		{

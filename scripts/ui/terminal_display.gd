@@ -204,6 +204,11 @@ func _ready() -> void:
 	ship_oriented_toggle.button_pressed = false
 	ship_oriented_toggle.toggled.connect(func(pressed): current_ship_oriented = pressed)
 	top_bar.add_child(ship_oriented_toggle)
+	
+	# Prevent top bar buttons from stealing focus and consuming the spacebar hotkey
+	for child in top_bar.get_children():
+		if child is BaseButton:
+			child.focus_mode = Control.FOCUS_NONE
 
 
 	

@@ -287,6 +287,7 @@ func _distribute_state() -> void:
 			"sensor_config": ship.get_components_by_type("sensors"),
 			"contacts": ship.active_contacts.duplicate(true),
 			"transponders": ship.active_transponders.duplicate(true),
+			"comms_ledger": ship.comms_ledger.get_packet_data(),
 			"weapons": ship.get_components_by_type("weapons"),
 			"engineering": {
 				"ship_components": ship.ship_components.duplicate(true),

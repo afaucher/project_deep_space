@@ -2,14 +2,25 @@ extends Control
 
 var current_state: Dictionary = {}
 
+var vsplit: VSplitContainer
 var comms_list_vbox: VBoxContainer
-var transponder_panels: Dictionary = {}
+var npc_buttons: Dictionary = {}
 
 # Controls for our own transponder
 var btn_active: CheckButton
 var btn_share_name: CheckButton
 var btn_share_loc: CheckButton
 var ship_name_label: RichTextLabel
+
+# Chat UI
+var chat_panel: VBoxContainer
+var chat_header: Label
+var chat_log: RichTextLabel
+var responses_vbox: VBoxContainer
+
+# Active Chat State
+var active_dialogue_resource: Resource
+var active_chat_contact: String = ""
 
 signal transponder_toggled(active: bool)
 signal transponder_share_name_toggled(share: bool)
@@ -18,21 +29,28 @@ signal transponder_custom_name_changed(new_name: String)
 
 func _ready() -> void:
 	clip_contents = true
-	var main_vbox = VBoxContainer.new()
-	main_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(main_vbox)
+	
+	vsplit = VSplitContainer.new()
+	vsplit.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(vsplit)
+	
+	# === TOP PANE: CONTROLS & CONTACTS ===
+	var top_pane = VBoxContainer.new()
+	top_pane.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	top_pane.custom_minimum_size.y = 200
+	vsplit.add_child(top_pane)
 	
 	var title = Label.new()
 	title.text = "COMMS & TRANSPONDERS"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_color_override("font_color", Color.CYAN)
-	main_vbox.add_child(title)
+	top_pane.add_child(title)
 	
 	var my_panel = PanelContainer.new()
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.1, 0.2, 0.3, 0.8)
 	my_panel.add_theme_stylebox_override("panel", style)
-	main_vbox.add_child(my_panel)
+	top_pane.add_child(my_panel)
 	
 	var my_vbox = VBoxContainer.new()
 	my_panel.add_child(my_vbox)
@@ -61,15 +79,65 @@ func _ready() -> void:
 	hbox1.add_child(btn_share_loc)
 	my_vbox.add_child(hbox1)
 	
-	main_vbox.add_child(HSeparator.new())
+	top_pane.add_child(HSeparator.new())
+	
+	var title2 = Label.new()
+	title2.text = "LOCAL CONTACTS"
+	title2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title2.add_theme_color_override("font_color", Color.CYAN)
+	top_pane.add_child(title2)
 	
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main_vbox.add_child(scroll)
+	top_pane.add_child(scroll)
 	
 	comms_list_vbox = VBoxContainer.new()
 	comms_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(comms_list_vbox)
+	
+	var btn_broadcast = Button.new()
+	btn_broadcast.text = "[ OPEN BROADCAST CHANNEL ]"
+	btn_broadcast.add_theme_color_override("font_color", Color.ORANGE)
+	btn_broadcast.custom_minimum_size.y = 40
+	btn_broadcast.pressed.connect(_open_broadcast)
+	comms_list_vbox.add_child(btn_broadcast)
+	
+	# === BOTTOM PANE: CHAT UI ===
+	chat_panel = VBoxContainer.new()
+	chat_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chat_panel.custom_minimum_size.y = 200
+	vsplit.add_child(chat_panel)
+	
+	var chat_panel_bg = PanelContainer.new()
+	var chat_style = StyleBoxFlat.new()
+	chat_style.bg_color = Color(0.05, 0.05, 0.05, 0.9)
+	chat_style.border_width_top = 2
+	chat_style.border_color = Color.CYAN
+	chat_panel_bg.add_theme_stylebox_override("panel", chat_style)
+	chat_panel_bg.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chat_panel.add_child(chat_panel_bg)
+	
+	var chat_vbox = VBoxContainer.new()
+	chat_panel_bg.add_child(chat_vbox)
+	
+	chat_header = Label.new()
+	chat_header.text = "CHAT: OFFLINE"
+	chat_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chat_header.add_theme_color_override("font_color", Color.CYAN)
+	chat_vbox.add_child(chat_header)
+	
+	chat_vbox.add_child(HSeparator.new())
+	
+	chat_log = RichTextLabel.new()
+	chat_log.bbcode_enabled = true
+	chat_log.scroll_following = true
+	chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chat_vbox.add_child(chat_log)
+	
+	chat_vbox.add_child(HSeparator.new())
+	
+	responses_vbox = VBoxContainer.new()
+	chat_vbox.add_child(responses_vbox)
 
 func update_data(packet: Dictionary) -> void:
 	current_state = packet
@@ -78,7 +146,6 @@ func update_data(packet: Dictionary) -> void:
 		if ship_name_label:
 			ship_name_label.text = "[b]" + current_state["ship_name"] + "[/b]"
 
-	# Update my transponder state from engineering packet if available
 	if current_state.has("engineering"):
 		var eng = current_state["engineering"]
 		var comps = eng.get("ship_components", [])
@@ -89,63 +156,113 @@ func update_data(packet: Dictionary) -> void:
 				btn_share_loc.set_pressed_no_signal(c.get("transponder_share_location", false))
 				break
 				
-	if current_state.has("transponders"):
-		_update_transponder_list(current_state["transponders"])
+	_update_contacts_list()
 
-func _update_transponder_list(transponders: Dictionary) -> void:
+func _update_contacts_list() -> void:
+	var transponders = current_state.get("transponders", {})
+	var ledger = current_state.get("comms_ledger", {"vouched": [], "ephemeral": []})
 	var my_pos = current_state.get("pos", Vector2.ZERO)
-	var active_ids = []
+	
+	var active_keys = []
 	
 	for t_id in transponders.keys():
-		active_ids.append(t_id)
 		var t_data = transponders[t_id]
+		var npcs = t_data.get("npcs", [])
 		
-		var panel: PanelContainer
-		var header: Label
-		var info: Label
+		for npc in npcs:
+			var is_known = false
+			if npc.get("tier", 0) == 0:
+				is_known = true
+			else:
+				for v in ledger["vouched"]:
+					if v["name"] == npc["name"]: is_known = true
+				for e in ledger["ephemeral"]:
+					if e["name"] == npc["name"]: is_known = true
+					
+			if not is_known:
+				continue
+				
+			var char_name = npc.get("name", "Unknown")
+			var uid = str(t_id) + "_" + char_name
+			active_keys.append(uid)
+			
+			if not npc_buttons.has(uid):
+				var btn = Button.new()
+				btn.custom_minimum_size.y = 40
+				btn.text = char_name + " (" + npc.get("faction", "") + ")"
+				btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+				
+				var path = npc.get("dialogue_path", "")
+				btn.pressed.connect(func(): _start_dialogue(path, char_name))
+				
+				comms_list_vbox.add_child(btn)
+				npc_buttons[uid] = btn
+	
+	for k in npc_buttons.keys():
+		if not k in active_keys:
+			var btn = npc_buttons[k]
+			if is_instance_valid(btn):
+				btn.queue_free()
+			npc_buttons.erase(k)
+
+func _open_broadcast() -> void:
+	active_chat_contact = "BROADCAST"
+	active_dialogue_resource = null
+	chat_header.text = "CHAT: OPEN BROADCAST CHANNEL"
+	chat_log.text = "[color=orange]-- MONITORING OPEN FREQUENCIES --[/color]\n"
+	_clear_responses()
+	
+	var btn_disconnect = Button.new()
+	btn_disconnect.text = "[ DISCONNECT ]"
+	btn_disconnect.pressed.connect(_disconnect_chat)
+	responses_vbox.add_child(btn_disconnect)
+
+func _start_dialogue(path: String, char_name: String) -> void:
+	if path == "" or not ResourceLoader.exists(path):
+		return
 		
-		if transponder_panels.has(t_id):
-			var refs = transponder_panels[t_id]
-			panel = refs["panel"]
-			header = refs["header"]
-			info = refs["info"]
-		else:
-			panel = PanelContainer.new()
-			var p_style = StyleBoxFlat.new()
-			p_style.border_width_left = 4
-			p_style.bg_color = Color(0.1, 0.1, 0.1, 0.8)
-			p_style.border_color = Color(0.2, 0.8, 0.8)
-			panel.add_theme_stylebox_override("panel", p_style)
-			
-			var vbox = VBoxContainer.new()
-			panel.add_child(vbox)
-			
-			header = Label.new()
-			header.add_theme_color_override("font_color", Color(0.2, 0.8, 0.8))
-			vbox.add_child(header)
-			
-			info = Label.new()
-			info.add_theme_font_size_override("font_size", 12)
-			vbox.add_child(info)
-			
-			comms_list_vbox.add_child(panel)
-			transponder_panels[t_id] = {"panel": panel, "header": header, "info": info}
-			
-		header.text = t_data.get("name", "UNKNOWN")
-		var flag = t_data.get("flag", "")
-		if flag != "":
-			header.text += " (Flag: " + flag + ")"
-			
-		if t_data.has("pos"):
-			var dist_km = my_pos.distance_to(t_data["pos"]) / 1000.0
-			info.text = "Distance: %.1f km" % [dist_km]
-		else:
-			info.text = "Distance: UNKNOWN (Location hidden)"
-			
-	# Remove old panels
-	for t_id in transponder_panels.keys():
-		if not t_id in active_ids:
-			var old_panel = transponder_panels[t_id]["panel"]
-			if is_instance_valid(old_panel):
-				old_panel.queue_free()
-			transponder_panels.erase(t_id)
+	active_chat_contact = char_name
+	active_dialogue_resource = load(path)
+	chat_header.text = "CHAT: " + char_name.to_upper()
+	chat_log.text = "[color=cyan]-- ENCRYPTED LINK ESTABLISHED --[/color]\n"
+	
+	_process_dialogue("start")
+
+func _process_dialogue(node_id: String) -> void:
+	_clear_responses()
+	
+	if not Engine.has_singleton("DialogueManager"):
+		chat_log.text += "\n[color=red]Error: Comms system failure.[/color]\n"
+		return
+		
+	var dm = Engine.get_singleton("DialogueManager")
+	var line = await dm.get_next_dialogue_line(active_dialogue_resource, node_id)
+	
+	if line != null:
+		chat_log.text += "\n[color=cyan][b]" + line.character + ":[/b][/color] " + line.text + "\n"
+		for resp in line.responses:
+			var btn = Button.new()
+			btn.text = resp.text
+			btn.pressed.connect(func(): _on_response_clicked(resp))
+			responses_vbox.add_child(btn)
+	else:
+		chat_log.text += "\n[color=gray]-- LINK TERMINATED BY REMOTE USER --[/color]\n"
+		var btn_end = Button.new()
+		btn_end.text = "[ END TRANSMISSION ]"
+		btn_end.pressed.connect(_disconnect_chat)
+		responses_vbox.add_child(btn_end)
+
+func _on_response_clicked(resp) -> void:
+	chat_log.text += "\n[color=gray]> " + resp.text + "[/color]\n"
+	_process_dialogue(resp.next_id)
+
+func _clear_responses() -> void:
+	for child in responses_vbox.get_children():
+		child.queue_free()
+
+func _disconnect_chat() -> void:
+	active_chat_contact = ""
+	active_dialogue_resource = null
+	chat_header.text = "CHAT: OFFLINE"
+	chat_log.text = ""
+	_clear_responses()
