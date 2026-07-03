@@ -21,6 +21,7 @@ var policy = null                # a LivenessPolicy; defaults to a bubble
 var viewpoint: Vector2 = Vector2.ZERO
 var live_parent: Node = null     # where live bodies are added (defaults to self)
 var viewpoint_node: Node = null  # if set, the live game drives viewpoint from it each frame
+var cluster_def = null           # the authored ClusterDef (for the nav computer's beacon graph)
 
 func _init() -> void:
 	policy = LivenessPolicy.new()

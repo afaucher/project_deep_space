@@ -15,6 +15,8 @@ const MenuCompass = preload("res://scripts/ui/menu_compass.gd")
 const ClusterManager = preload("res://scripts/cluster/cluster_manager.gd")
 const ClusterLoader = preload("res://scripts/cluster/cluster_loader.gd")
 const HomeCluster = preload("res://scripts/cluster/home_cluster.gd")
+const NavComputer = preload("res://scripts/nav/nav_computer.gd")
+const NavAutopilot = preload("res://scripts/nav/nav_autopilot.gd")
 
 enum GameMode { SANDBOX, CAMPAIGN }
 
@@ -24,6 +26,7 @@ var players = {}
 var asteroids = []
 var _next_sandbox_id: int = 900
 var menu_compass: Node2D
+var cluster_manager = null   # the live campaign ClusterManager (null in sandbox)
 
 func _ready() -> void:
 	# Check for automated tests
@@ -200,8 +203,38 @@ func _bootstrap_campaign() -> void:
 
 	manager.viewpoint_node = players[pid]
 	manager.viewpoint = def.player_start
+	manager.cluster_def = def
+	cluster_manager = manager
+
+	# Nav autopilot on the player -- the destination picker (UI) calls
+	# set_nav_destination() to route + engage it.
+	var autopilot = NavAutopilot.new()
+	autopilot.name = "NavAutopilot"
+	players[pid].add_child(autopilot)
+
 	manager.tick(0.0)   # initial promote around the player before the first frame
 	print("Campaign '", def.name, "': loaded ", manager.records.size(), " entities; player at ", def.player_start)
+
+# Nav hooks for the destination-picker UI. nav_destinations() lists named targets;
+# set_nav_destination() routes from the player's current position over the beacon
+# graph and engages the autopilot.
+func nav_destinations() -> Array:
+	if cluster_manager == null or cluster_manager.cluster_def == null:
+		return []
+	return NavComputer.destinations(cluster_manager.cluster_def)
+
+func set_nav_destination(dest_name: String) -> bool:
+	if cluster_manager == null or cluster_manager.cluster_def == null or not players.has(1):
+		return false
+	var player = players[1]
+	var autopilot = player.get_node_or_null("NavAutopilot")
+	if autopilot == null:
+		return false
+	for d in NavComputer.destinations(cluster_manager.cluster_def):
+		if d["name"] == dest_name:
+			autopilot.engage(NavComputer.route(cluster_manager.cluster_def, player.position, d["pos"]))
+			return true
+	return false
 
 func _on_peer_disconnected(id: int) -> void:
 	print("Peer disconnected: ", id)

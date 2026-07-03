@@ -54,6 +54,16 @@ func setup(main) -> void:
 		_assert(ironhold != null and ironhold.is_live(), "bootstrap: adjacent hub (Ironhold) should be live")
 		_assert(drift != null and not drift.is_live(), "bootstrap: distant hub (Drift Market) should be dormant")
 
+	# M17 nav integration through the real main hooks: destinations + route/engage.
+	var nav_dests = main.nav_destinations()
+	_assert(nav_dests.size() > 0, "nav: nav_destinations() should list targets after bootstrap")
+	_assert(_has_dest(nav_dests, "Nexus Wormhole"), "nav: destinations should include the wormhole")
+	if main.players.has(1):
+		var engaged = main.set_nav_destination("Drift Market")
+		_assert(engaged, "nav: set_nav_destination('Drift Market') should route and engage")
+		var ap = main.players[1].get_node_or_null("NavAutopilot")
+		_assert(ap != null and ap.active and ap.route.size() > 0, "nav: player autopilot should be engaged with a route")
+
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_campaign_bootstrap <<<")
 		get_tree().quit(0)
@@ -68,3 +78,9 @@ func _rec(mgr, id: int):
 		if r.id == id:
 			return r
 	return null
+
+func _has_dest(dests: Array, dname: String) -> bool:
+	for d in dests:
+		if d["name"] == dname:
+			return true
+	return false
