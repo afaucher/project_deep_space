@@ -711,6 +711,19 @@ func _ready() -> void:
 			if not c.has("cooldown"): c["cooldown"] = 0.0
 			if not c.has("ammo"):
 				c["ammo"] = 999 if c.get("weapon_type", "") == "laser" else 0
+			# Laser EM scratch: laser_behavior.tick() bracket-reads these every
+			# frame (em_emission = base_em_emission + em_pulse). Station PD lasers
+			# never authored them, so the read aborted the station's weapon tick.
+			if not c.has("base_em_emission"): c["base_em_emission"] = 0.0
+			if not c.has("em_pulse"): c["em_pulse"] = 0.0
+
+		# Sensor runtime scratch. timer is the per-sweep countdown, bracket-read in
+		# _physics_process (sensor["timer"] -= delta); the stations' search dishes
+		# never authored it, aborting the whole sweep loop. base_em_emission is read
+		# for passive EM (safely, via .get) -- defaulted here too for consistency.
+		if c.get("type") == "sensors":
+			if not c.has("timer"): c["timer"] = 0.0
+			if not c.has("base_em_emission"): c["base_em_emission"] = 0.0
 
 	sfx_engine = AudioStreamPlayer.new()
 	var e_stream = load("res://assets/audio/engine.wav")
@@ -886,6 +899,20 @@ func _physics_process(delta: float) -> void:
 		
 		apply_torque(torque)
 	
+	# RCS translation/rotation (omnidirectional). Stations have no engines, so this
+	# is how they arrest drift and hold heading; also fine-control for any hull with
+	# rcs components. Applied as force so it integrates in the physics step
+	# regardless of when the AI issued the command.
+	if not is_dead:
+		if rcs_translation_cmd != Vector2.ZERO:
+			var rcs_thrust = get_max_rating("rcs", "thrust_rating")
+			if rcs_thrust > 0.0:
+				apply_central_force(rcs_translation_cmd * rcs_thrust)
+		if rcs_rotation_cmd != 0.0:
+			var rcs_torque = get_max_rating("rcs", "torque_rating")
+			if rcs_torque > 0.0:
+				apply_torque(rcs_rotation_cmd * rcs_torque)
+
 	if abs(torque) > RCS_SFX_TORQUE_THRESHOLD:
 		if is_my_ship and not sfx_rcs.playing:
 			sfx_rcs.play()
@@ -1674,6 +1701,20 @@ func _process_point_defense() -> void:
 					break
 
 
+
+# RCS translation/rotation command, set by apply_rcs_input and integrated in
+# _physics_process. Separate from engine thrust so a station (RCS, no engines) can
+# arrest drift and hold heading. `direction` is world-space; its magnitude is a
+# 0..1 throttle of the summed RCS rating (clamped if the caller passes >1). Only
+# the station AI leaves issue this; every other hull leaves it at zero.
+var rcs_translation_cmd: Vector2 = Vector2.ZERO
+var rcs_rotation_cmd: float = 0.0
+
+func apply_rcs_input(direction: Vector2, rot: float) -> void:
+	if direction.length_squared() > 1.0:
+		direction = direction.normalized()
+	rcs_translation_cmd = direction
+	rcs_rotation_cmd = clampf(rot, -1.0, 1.0)
 
 func apply_control_input(thrust: float, t_vel: float, heading: float, s_mode: int, l_mode: int) -> void:
 	target_thrust = clampf(thrust, -1.0, 1.0)
