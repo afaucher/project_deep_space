@@ -30,6 +30,7 @@ const StationSteerToTargetLeaf = preload("res://scripts/ai/leaves/station_steer_
 const FireOpportunityLeaf = preload("res://scripts/ai/leaves/fire_opportunity_leaf.gd")
 const IdleLeaf = preload("res://scripts/ai/leaves/idle_leaf.gd")
 const StationKeepingLeaf = preload("res://scripts/ai/leaves/station_keeping_leaf.gd")
+const FollowRouteLeaf = preload("res://scripts/ai/leaves/follow_route_leaf.gd")
 
 static func build_default() -> Node:
 	var tree = BeehaveTreeScript.new()
@@ -109,5 +110,55 @@ static func build_station() -> Node:
 	var keep_station_idle = StationKeepingLeaf.new()
 	keep_station_idle.name = "StationKeepingIdle"
 	root.add_child(keep_station_idle)
+
+	return tree
+
+# M18 patrol tree: same combat priority as the default, but the no-target
+# fallback follows the hull's patrol_route (looping) instead of idling. FollowRoute
+# fails when there is no route, so a route-less hull still falls through to Idle.
+#
+#   Selector
+#   |-- Disengage (flee when crippled)
+#   |-- Engage (acquire -> steer -> fire; a hostile preempts the patrol)
+#   |-- FollowRoute (cruise the waypoints; SUCCESS while patrolling)
+#   +-- Idle (no route -> hold heading)
+static func build_patrol() -> Node:
+	var tree = BeehaveTreeScript.new()
+	tree.name = "AITree"
+
+	var root = SelectorScript.new()
+	root.name = "RootSelector"
+	tree.add_child(root)
+
+	var disengage = SequenceScript.new()
+	disengage.name = "Disengage"
+	root.add_child(disengage)
+	var should_disengage = ShouldDisengageLeaf.new()
+	should_disengage.name = "ShouldDisengage"
+	disengage.add_child(should_disengage)
+	var flee = FleeLeaf.new()
+	flee.name = "Flee"
+	disengage.add_child(flee)
+
+	var engage = SequenceScript.new()
+	engage.name = "Engage"
+	root.add_child(engage)
+	var acquire = AcquireTargetLeaf.new()
+	acquire.name = "AcquireTarget"
+	engage.add_child(acquire)
+	var steer = SteerToTargetLeaf.new()
+	steer.name = "SteerToTarget"
+	engage.add_child(steer)
+	var fire = FireOpportunityLeaf.new()
+	fire.name = "FireOpportunity"
+	engage.add_child(fire)
+
+	var patrol = FollowRouteLeaf.new()
+	patrol.name = "FollowRoute"
+	root.add_child(patrol)
+
+	var idle = IdleLeaf.new()
+	idle.name = "Idle"
+	root.add_child(idle)
 
 	return tree

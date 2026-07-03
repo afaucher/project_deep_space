@@ -13,6 +13,7 @@ const MediumStation = preload("res://scripts/ships/medium_station.gd")
 const SmallStation = preload("res://scripts/ships/small_station.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
 const Wormhole = preload("res://scripts/wormhole.gd")
+const LightAttackCraft = preload("res://scripts/ships/light_attack_craft.gd")
 
 # Home faction shares the player's tag so hubs read friendly and their station AI
 # never targets the player. Faction modelling proper is a later concern.
@@ -61,6 +62,10 @@ static func build() -> ClusterDef:
 		"iff_tags": [], "is_static": true,
 	})
 
+	# --- Light-attack-craft patrols (loop a diamond around a hub) ---
+	_patrol(def, 600, "Patrol Alpha", LightAttackCraft, Vector2(0, 0), 12000.0)         # Ironhold
+	_patrol(def, 601, "Patrol Bravo", LightAttackCraft, Vector2(200000, 40000), 12000.0) # Drift Market
+
 	return def
 
 static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String) -> void:
@@ -75,4 +80,19 @@ static func _beacon(def, id: int, name: String, pos: Vector2) -> void:
 		"id": id, "name": name, "hull": Buoy,
 		"kind": ClusterEntity.Kind.BEACON, "pos": pos, "comms_range": BEACON_RANGE,
 		"iff_tags": HOME_IFF, "is_static": true,
+	})
+
+# A patrol hull that loops a diamond of `radius` around `center`. Mobile traffic
+# (is_static false) so the bubble dead-reckons it while dormant; the FollowRoute
+# leaf is wired from the behavior route on promote.
+static func _patrol(def, id: int, name: String, hull: Script, center: Vector2, radius: float) -> void:
+	var route := [
+		center + Vector2(radius, 0), center + Vector2(0, radius),
+		center + Vector2(-radius, 0), center + Vector2(0, -radius),
+	]
+	def.add_entity({
+		"id": id, "name": name, "hull": hull,
+		"kind": ClusterEntity.Kind.TRAFFIC, "pos": route[0],
+		"iff_tags": HOME_IFF, "is_static": false,
+		"behavior": {"route": route, "loop": true},
 	})

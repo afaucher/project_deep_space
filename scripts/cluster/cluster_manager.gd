@@ -90,11 +90,29 @@ func _promote(rec) -> void:
 func _attach_ai(rec, node) -> void:
 	# Only autonomous hulls get a brain. The player flies itself; asteroids,
 	# beacons and the wormhole have no behavior.
-	if rec.kind == ClusterEntity.Kind.TRAFFIC or rec.kind == ClusterEntity.Kind.STATION:
-		if node.ship_tier == ComponentSpec.Tier.STRUCTURE:
-			node.add_child(AITreeFactory.build_station())
-		else:
-			node.add_child(AITreeFactory.build_default())
+	if rec.kind != ClusterEntity.Kind.TRAFFIC and rec.kind != ClusterEntity.Kind.STATION:
+		return
+	if node.ship_tier == ComponentSpec.Tier.STRUCTURE:
+		node.add_child(AITreeFactory.build_station())
+		return
+	# Mobile hull: patrol if it was handed a route (via behavior), else combat AI.
+	var route = _route_from(rec.behavior)
+	if route != null and route.size() > 0:
+		node.patrol_route = route
+		node.patrol_loop = _loop_from(rec.behavior)
+		node.add_child(AITreeFactory.build_patrol())
+	else:
+		node.add_child(AITreeFactory.build_default())
+
+func _route_from(behavior):
+	if typeof(behavior) == TYPE_DICTIONARY and behavior.has("route"):
+		return behavior["route"]
+	return null
+
+func _loop_from(behavior) -> bool:
+	if typeof(behavior) == TYPE_DICTIONARY:
+		return behavior.get("loop", true)
+	return true
 
 func _demote(rec) -> void:
 	var node = rec.live_node

@@ -122,6 +122,13 @@ var dockable: bool = false
 var wants_dock: bool = false
 var docking_bay = null   # the DockingBay currently claiming this hull, else null (one bay per hull)
 
+# Patrol/route (M18). patrol_route = world-space waypoints the FollowRoute leaf
+# steers along; patrol_loop wraps at the end; patrol_index is the current target
+# (the leaf advances it).
+var patrol_route: Array = []
+var patrol_loop: bool = true
+var patrol_index: int = 0
+
 # Berth poses this hull offers to docking traffic, each { pos:Vector2 (local),
 # heading:float (local), capture_radius:float (optional) }. Stations override;
 # every other hull offers none. Bays are grown from these in _ready().
@@ -339,6 +346,17 @@ func get_active_transponder_data() -> Dictionary:
 				data["name"] = "UNKNOWN"
 			if c.get("transponder_share_location", false):
 				data["pos"] = position
+				
+			var public_npcs = []
+			for npc in available_npcs:
+				if npc.tier == 0:
+					public_npcs.append({
+						"name": npc.character_name,
+						"faction": npc.faction
+					})
+			if not public_npcs.is_empty():
+				data["npcs"] = public_npcs
+				
 			return data
 	return {}
 
