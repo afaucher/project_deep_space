@@ -11,6 +11,7 @@ func _init() -> void:
 	max_speed = 1000.0
 	max_omega = 2.0
 	max_heat = 150.0
+	dockable = true   # M19: civilian hauler -- can be captured by a station berth
 	ship_components = [
 		# Layout relative to center (0,0). Forward +X, Right +Y
 		{"id": "hull_port", "type": "hull", "rect": Rect2(-15, -15, 30, 10), "health": 180.0, "max_health": 180.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},

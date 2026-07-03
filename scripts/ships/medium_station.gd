@@ -262,3 +262,8 @@ func _init() -> void:
 		},
 	]
 	super()
+
+# One berth below the station, clear of the hull collision circle (~210u) so
+# force-capture doesn't fight the physics body. Nose faces the station.
+func get_berths() -> Array:
+	return [{"pos": Vector2(0, 340), "heading": -PI / 2.0}]

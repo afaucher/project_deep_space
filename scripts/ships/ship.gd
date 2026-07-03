@@ -11,6 +11,7 @@ const WeaponBehaviorRegistry = preload("res://scripts/components/weapon_behavior
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 const CommsLedger = preload("res://scripts/comms/comms_ledger.gd")
 const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
+const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 
 # Mass is derived from each component's rect area x density, not authored directly.
 # Calibrated so the default Frigate loadout (total area 2775 x density 20.0)
@@ -112,6 +113,20 @@ const NAME_VERBS = [
 
 var ship_name: String = ""
 var owner_id: int = -1
+
+# Docking (M19). `dockable` = this hull can be captured by a station bay (civilian
+# haulers set it); `wants_dock` = it is actively requesting a berth (raised by the
+# route AI on arrival, cleared by the bay on release). A bay only captures a hull
+# that is both.
+var dockable: bool = false
+var wants_dock: bool = false
+var docking_bay = null   # the DockingBay currently claiming this hull, else null (one bay per hull)
+
+# Berth poses this hull offers to docking traffic, each { pos:Vector2 (local),
+# heading:float (local), capture_radius:float (optional) }. Stations override;
+# every other hull offers none. Bays are grown from these in _ready().
+func get_berths() -> Array:
+	return []
 
 func _init() -> void:
 	ship_name = "HMM " + NAME_ADJECTIVES[randi() % NAME_ADJECTIVES.size()] + " " + NAME_VERBS[randi() % NAME_VERBS.size()]
@@ -724,6 +739,15 @@ func _ready() -> void:
 		if c.get("type") == "sensors":
 			if not c.has("timer"): c["timer"] = 0.0
 			if not c.has("base_em_emission"): c["base_em_emission"] = 0.0
+
+	# M19: stations (any hull that defines berths) grow their docking bays.
+	for berth in get_berths():
+		var bay = DockingBay.new()
+		bay.position = berth.get("pos", Vector2.ZERO)
+		bay.rotation = berth.get("heading", 0.0)
+		if berth.has("capture_radius"):
+			bay.capture_radius = berth["capture_radius"]
+		add_child(bay)
 
 	sfx_engine = AudioStreamPlayer.new()
 	var e_stream = load("res://assets/audio/engine.wav")
