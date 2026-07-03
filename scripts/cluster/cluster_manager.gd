@@ -20,6 +20,7 @@ var records: Array = []          # all ClusterEntity, live or dormant
 var policy = null                # a LivenessPolicy; defaults to a bubble
 var viewpoint: Vector2 = Vector2.ZERO
 var live_parent: Node = null     # where live bodies are added (defaults to self)
+var viewpoint_node: Node = null  # if set, the live game drives viewpoint from it each frame
 
 func _init() -> void:
 	policy = LivenessPolicy.new()
@@ -28,6 +29,13 @@ func _init() -> void:
 func _ready() -> void:
 	if live_parent == null:
 		live_parent = self
+
+# In the live game the player ship is the viewpoint, so self-tick each frame.
+# Tests leave viewpoint_node null and drive tick() manually for determinism.
+func _physics_process(delta: float) -> void:
+	if viewpoint_node != null and is_instance_valid(viewpoint_node):
+		viewpoint = viewpoint_node.position
+		tick(delta)
 
 func add_record(rec) -> void:
 	records.append(rec)

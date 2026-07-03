@@ -12,8 +12,14 @@ const Asteroid = preload("res://scripts/asteroid.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 const MenuCompass = preload("res://scripts/ui/menu_compass.gd")
+const ClusterManager = preload("res://scripts/cluster/cluster_manager.gd")
+const ClusterLoader = preload("res://scripts/cluster/cluster_loader.gd")
+const HomeCluster = preload("res://scripts/cluster/home_cluster.gd")
+
+enum GameMode { SANDBOX, CAMPAIGN }
 
 var is_host: bool = false
+var game_mode: int = GameMode.SANDBOX
 var players = {}
 var asteroids = []
 var _next_sandbox_id: int = 900
@@ -41,6 +47,15 @@ func _ready() -> void:
 	menu.get_node("HostButton").pressed.connect(_on_host_pressed)
 	menu.get_node("JoinButton").pressed.connect(_on_join_pressed)
 	menu.get_node("LocalTestButton").pressed.connect(_on_local_test_pressed)
+
+	# Campaign entry -- added in code so no .tscn edit is needed (mirrors how the
+	# menu compass is added). Placed just under the ship dropdown, above Sandbox.
+	var campaign_button := Button.new()
+	campaign_button.name = "CampaignButton"
+	campaign_button.text = "CAMPAIGN"
+	campaign_button.pressed.connect(_on_campaign_pressed)
+	menu.add_child(campaign_button)
+	menu.move_child(campaign_button, 1)
 	
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
@@ -89,6 +104,12 @@ func _on_host_pressed() -> void:
 
 func _on_local_test_pressed() -> void:
 	# Offline local singleplayer / testing mode
+	game_mode = GameMode.SANDBOX
+	_on_connection_established(true)
+
+func _on_campaign_pressed() -> void:
+	# Offline single-player campaign (the bubble is one-viewpoint; co-op deferred).
+	game_mode = GameMode.CAMPAIGN
 	_on_connection_established(true)
 
 func _on_join_pressed() -> void:
@@ -111,9 +132,12 @@ func _on_connection_established(hosting: bool) -> void:
 	
 	if is_host:
 		print("I am the authoritative host.")
-		_spawn_asteroids()
-		#_spawn_bouys() # Temporarily disabled
-		_spawn_player_ship(multiplayer.get_unique_id())
+		if game_mode == GameMode.CAMPAIGN:
+			_bootstrap_campaign()
+		else:
+			_spawn_asteroids()
+			#_spawn_bouys() # Temporarily disabled
+			_spawn_player_ship(multiplayer.get_unique_id())
 	else:
 		print("I am a client terminal.")
 
@@ -142,7 +166,7 @@ func _on_peer_connected(id: int) -> void:
 	if is_host:
 		_spawn_player_ship(id)
 
-func _spawn_player_ship(id: int) -> void:
+func _spawn_player_ship(id: int, at = null) -> void:
 	var selected_idx = ship_select.selected if is_instance_valid(ship_select) else 0
 	if selected_idx < 0 or selected_idx >= ShipCatalog.SPAWNABLE.size():
 		selected_idx = 0
@@ -151,9 +175,33 @@ func _spawn_player_ship(id: int) -> void:
 	ship.name = "Ship_" + str(id)
 	ship.owner_id = id
 	ship.iff_tags = ["TEAM_PLAYER"]
-	ship.position = Vector2(randf_range(-100, 100), randf_range(-100, 100))
+	if at != null:
+		ship.position = at
+	else:
+		ship.position = Vector2(randf_range(-100, 100), randf_range(-100, 100))
 	add_child(ship)
 	players[id] = ship
+
+# Campaign bootstrap: load the home cluster into a self-ticking ClusterManager,
+# spawn the player at the authored start, and point the bubble's viewpoint at it.
+# The tested loader does the work (see test_cluster_loader); this is thin glue.
+func _bootstrap_campaign() -> void:
+	var def = HomeCluster.build()
+	var manager = ClusterManager.new()
+	manager.name = "ClusterManager"
+	# Live entities parent to main (where sandbox ships live) so transforms and
+	# rendering match exactly; the manager node just bookkeeps.
+	manager.live_parent = self
+	add_child(manager)
+	ClusterLoader.load_into(def, manager)
+
+	var pid = multiplayer.get_unique_id()
+	_spawn_player_ship(pid, def.player_start)
+
+	manager.viewpoint_node = players[pid]
+	manager.viewpoint = def.player_start
+	manager.tick(0.0)   # initial promote around the player before the first frame
+	print("Campaign '", def.name, "': loaded ", manager.records.size(), " entities; player at ", def.player_start)
 
 func _on_peer_disconnected(id: int) -> void:
 	print("Peer disconnected: ", id)
