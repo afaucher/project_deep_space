@@ -7,6 +7,8 @@ class_name NavAutopilot
 # code. The player's helm should clear `active` on manual input (UI hook). See
 # implementation_plans/m17_nav_routing_design.md.
 
+const Steering = preload("res://scripts/ai/steering.gd")
+
 const ARRIVAL_RADIUS := 800.0
 const CRUISE_SPEED := 700.0
 
@@ -43,7 +45,9 @@ func _physics_process(_delta: float) -> void:
 	var desired: Vector2 = wp - ship.position
 	if desired.length() > 0.01:
 		desired = desired.normalized()
-	var desired_vel: Vector2 = desired * CRUISE_SPEED
+	# Avoid obstacles en route, but never the destination we're steering to.
+	var avoided: Vector2 = Steering.steer(ship, desired, route[route.size() - 1])
+	var desired_vel: Vector2 = avoided.normalized() * CRUISE_SPEED
 	var steer: Vector2 = desired_vel - ship.linear_velocity
 	if steer.length() < 10.0:
 		steer = desired_vel

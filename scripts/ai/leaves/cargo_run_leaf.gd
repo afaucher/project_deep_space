@@ -6,6 +6,8 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # it captures/holds/releases us). Returns FAILURE with no route so the selector
 # falls through to Idle. See implementation_plans/m20_traffic_wiring_design.md.
 
+const Steering = preload("res://scripts/ai/steering.gd")
+
 const DOCK_REQUEST_RADIUS := 4000.0   # raise the dock request within this of the station
 const CARGO_CRUISE := 700.0           # transit speed
 
@@ -53,7 +55,9 @@ func _cruise_to(actor: Node, target: Vector2) -> void:
 	var desired: Vector2 = target - actor.position
 	if desired.length() > 0.01:
 		desired = desired.normalized()
-	var desired_vel: Vector2 = desired * CARGO_CRUISE
+	# Avoid obstacles in transit, but not the destination station itself.
+	var avoided: Vector2 = Steering.steer(actor, desired, target)
+	var desired_vel: Vector2 = avoided.normalized() * CARGO_CRUISE
 	var steer: Vector2 = desired_vel - actor.linear_velocity
 	if steer.length() < 10.0:
 		steer = desired_vel

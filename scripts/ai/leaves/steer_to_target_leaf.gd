@@ -20,6 +20,7 @@ const OPTIMAL_RANGE := 8000.0       # preferred broadside firing distance (outsi
 const RANGE_BAND := 2000.0          # +/- hysteresis: inside this, present + drift
 const REPOSITION_GAIN := 0.5        # arrival: target speed per unit of range error
 const MAX_REPOSITION_SPEED := 800.0
+const Steering = preload("res://scripts/ai/steering.gd")
 
 func tick(actor: Node, blackboard) -> int:
 	if not blackboard.has_value("target_pos"):
@@ -34,7 +35,10 @@ func tick(actor: Node, blackboard) -> int:
 		# Reposition nose-on. Arrival profile: speed decays as the error shrinks so the
 		# ship settles into the band rather than barrelling through it. Negative = reverse.
 		var spd = clampf(range_error * REPOSITION_GAIN, -MAX_REPOSITION_SPEED, MAX_REPOSITION_SPEED)
-		actor.apply_control_input(0.0, spd, bearing, 1, 1)
+		# Ease around obstacles while closing (weight < 1 so it doesn't jerk the
+		# firing run); never dodge the target we're attacking.
+		var avoided = Steering.steer(actor, to_target.normalized(), target_pos, 0.4)
+		actor.apply_control_input(0.0, spd, avoided.angle(), 1, 1)
 	else:
 		# At range: present the heaviest broadside and drift (linear_mode 0 + zero throttle
 		# applies no force, so the hull coasts instead of braking).

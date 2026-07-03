@@ -4,6 +4,7 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # away so thrust drives the ship clear. If nothing hostile is in range there is nothing
 # to flee, so just coast. Reached only when should_disengage has fired, so the ship is
 # deliberately NOT firing here -- it is breaking off, not fighting.
+const Steering = preload("res://scripts/ai/steering.gd")
 const FLEE_SPEED := 900.0
 
 func tick(actor: Node, _blackboard) -> int:
@@ -11,8 +12,10 @@ func tick(actor: Node, _blackboard) -> int:
 	if threat_pos == null:
 		actor.apply_control_input(0.0, 0.0, actor.rotation, 1, 0) # nothing to flee; coast
 		return SUCCESS
-	var away = (actor.position - threat_pos).angle()
-	actor.apply_control_input(0.0, FLEE_SPEED, away, 1, 1) # nose away, full velocity
+	# Run from the threat, but dodge rather than flee straight into an obstacle.
+	var away_dir: Vector2 = (actor.position - threat_pos).normalized()
+	var avoided: Vector2 = Steering.steer(actor, away_dir, null)
+	actor.apply_control_input(0.0, FLEE_SPEED, avoided.angle(), 1, 1) # nose away, full velocity
 	return SUCCESS
 
 func _nearest_hostile_pos(actor: Node):
