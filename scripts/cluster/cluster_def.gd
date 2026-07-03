@@ -16,6 +16,13 @@ var bounds: Rect2 = Rect2()          # must sit inside the +/-500k budget
 var player_start: Vector2 = Vector2.ZERO
 var entities: Array = []
 var beacon_edges: Array = []         # each: [beacon_id_a, beacon_id_b] -- the routing graph
+# Asteroid fields, each a Dictionary { center:Vector2, radius:float, count:int,
+# seed:int }. ClusterLoader expands each into `count` individual Asteroid records
+# via a seeded RNG (deterministic); the bubble LODs them like any other entity.
+var asteroid_fields: Array = []
 
 func add_entity(d: Dictionary) -> void:
 	entities.append(d)
+
+func add_field(d: Dictionary) -> void:
+	asteroid_fields.append(d)

@@ -1,23 +1,23 @@
 extends RefCounted
 class_name HomeCluster
 
-# M15 -- the authored home cluster: The Sovereign Drift. Three medium-station
-# hubs spread across tens of thousands of units, three small-station mining
-# outposts, a four-beacon road linking two hubs, and a scatter of sample
-# asteroids by an outpost. The wormhole and real (procedural) asteroid fields
-# arrive in M16; this is the navigable skeleton. All coordinates sit well inside
-# the +/-500k float32 budget. See implementation_plans/m15_cluster_loader_design.md.
+# M15/M16 -- the authored home cluster: The Sovereign Drift. Three medium-station
+# hubs spread across the cluster, three small-station mining outposts each sitting
+# on an asteroid field, a seven-beacon road linking the two main hubs, and the
+# Nexus wormhole out in dark space away from the road. All coordinates sit well
+# inside the +/-500k float32 budget. See implementation_plans/m16_static_landmarks_design.md.
 
 const ClusterDef = preload("res://scripts/cluster/cluster_def.gd")
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 const MediumStation = preload("res://scripts/ships/medium_station.gd")
 const SmallStation = preload("res://scripts/ships/small_station.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
-const Asteroid = preload("res://scripts/asteroid.gd")
+const Wormhole = preload("res://scripts/wormhole.gd")
 
 # Home faction shares the player's tag so hubs read friendly and their station AI
 # never targets the player. Faction modelling proper is a later concern.
 const HOME_IFF := ["TEAM_PLAYER"]
+const BEACON_RANGE := 50000.0   # matches Buoy's comms range
 
 static func build() -> ClusterDef:
 	var def = ClusterDef.new()
@@ -26,51 +26,53 @@ static func build() -> ClusterDef:
 	def.player_start = Vector2(3000, 0)
 
 	# --- Hubs (medium stations) ---
-	_station(def, 1, "Ironhold", MediumStation, Vector2(0, 0))
-	_station(def, 2, "Drift Market", MediumStation, Vector2(120000, 40000))
-	_station(def, 3, "Refinery Prime", MediumStation, Vector2(60000, -110000))
+	_station(def, 1, "Ironhold", MediumStation, Vector2(0, 0), "hub")
+	_station(def, 2, "Drift Market", MediumStation, Vector2(200000, 40000), "hub")
+	_station(def, 3, "Refinery Prime", MediumStation, Vector2(40000, -150000), "hub")
 
-	# --- Mining outposts (small stations) ---
-	_station(def, 10, "Slag Bay", SmallStation, Vector2(150000, 95000))
-	_station(def, 11, "Coldreach", SmallStation, Vector2(-40000, 70000))
-	_station(def, 12, "Deepcut", SmallStation, Vector2(95000, -165000))
+	# --- Mining outposts (small stations), each parked on a field ---
+	_station(def, 10, "Slag Bay", SmallStation, Vector2(150000, 110000), "outpost")
+	_station(def, 11, "Coldreach", SmallStation, Vector2(-70000, 90000), "outpost")
+	_station(def, 12, "Deepcut", SmallStation, Vector2(90000, -170000), "outpost")
 
-	# --- Beacon road: Ironhold (0,0) -> Drift Market (120000,40000) ---
+	# --- Asteroid fields on the outposts (loader expands into individual rocks) ---
+	def.add_field({"center": Vector2(150000, 110000), "radius": 10000.0, "count": 18, "seed": 1})
+	def.add_field({"center": Vector2(-70000, 90000), "radius": 12000.0, "count": 22, "seed": 2})
+	def.add_field({"center": Vector2(90000, -170000), "radius": 9000.0, "count": 15, "seed": 3})
+
+	# --- Beacon road: Ironhold (0,0) -> Drift Market (200000,40000) ---
+	# Seven interior beacons at ~25k spacing (well inside the 50k comms range, so
+	# their lit zones overlap the whole way). Chained into one routing path.
 	var a := Vector2(0, 0)
-	var b := Vector2(120000, 40000)
-	for i in range(4):
-		var f: float = 0.2 + 0.2 * i        # f = 0.2, 0.4, 0.6, 0.8
+	var b := Vector2(200000, 40000)
+	var beacon_count := 7
+	for i in range(beacon_count):
+		var f: float = float(i + 1) / float(beacon_count + 1)   # interior fractions
 		_beacon(def, 100 + i, "Beacon " + str(i + 1), a.lerp(b, f))
-	def.beacon_edges = [[100, 101], [101, 102], [102, 103]]
+	var edges: Array = []
+	for i in range(beacon_count - 1):
+		edges.append([100 + i, 100 + i + 1])
+	def.beacon_edges = edges
 
-	# --- Sample asteroids near Coldreach (M16 replaces these with a field) ---
-	var field_center := Vector2(-40000, 70000)
-	var offsets := [
-		Vector2(2000, 1500), Vector2(-3000, 2500), Vector2(1000, -2000),
-		Vector2(3500, 500), Vector2(-2500, -3000), Vector2(500, 3200),
-	]
-	for i in range(offsets.size()):
-		_asteroid(def, 200 + i, field_center + offsets[i])
+	# --- Nexus wormhole, out in dark space (no beacons out here) ---
+	def.add_entity({
+		"id": 500, "name": "Nexus Wormhole", "hull": Wormhole,
+		"kind": ClusterEntity.Kind.WORMHOLE, "pos": Vector2(-130000, -110000),
+		"iff_tags": [], "is_static": true,
+	})
 
 	return def
 
-static func _station(def, id: int, name: String, hull: Script, pos: Vector2) -> void:
+static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String) -> void:
 	def.add_entity({
 		"id": id, "name": name, "hull": hull,
-		"kind": ClusterEntity.Kind.STATION, "pos": pos,
+		"kind": ClusterEntity.Kind.STATION, "pos": pos, "role": role,
 		"iff_tags": HOME_IFF, "is_static": true,
 	})
 
 static func _beacon(def, id: int, name: String, pos: Vector2) -> void:
 	def.add_entity({
 		"id": id, "name": name, "hull": Buoy,
-		"kind": ClusterEntity.Kind.BEACON, "pos": pos,
+		"kind": ClusterEntity.Kind.BEACON, "pos": pos, "comms_range": BEACON_RANGE,
 		"iff_tags": HOME_IFF, "is_static": true,
-	})
-
-static func _asteroid(def, id: int, pos: Vector2) -> void:
-	def.add_entity({
-		"id": id, "name": "Asteroid", "hull": Asteroid,
-		"kind": ClusterEntity.Kind.ASTEROID, "pos": pos,
-		"iff_tags": [], "is_static": true,
 	})

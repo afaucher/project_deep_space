@@ -89,12 +89,28 @@ func _test_loader_populates() -> void:
 	main_node.add_child(m)
 	ClusterLoader.load_into(def, m)
 
-	_assert(m.records.size() == def.entities.size(),
-		"loader: record count should match entity count (%d vs %d)" % [m.records.size(), def.entities.size()])
-	_assert(_count_kind(m, ClusterEntity.Kind.STATION) == 6, "loader: expected 6 stations")
-	_assert(_count_kind(m, ClusterEntity.Kind.BEACON) == 4, "loader: expected 4 beacons")
-	_assert(_count_kind(m, ClusterEntity.Kind.ASTEROID) == 6, "loader: expected 6 asteroids")
+	# Expected counts derived from the def (robust to layout changes): loaded
+	# records = authored entities + the asteroids each field expands into.
+	var exp_stations: int = _count_def_kind(def, ClusterEntity.Kind.STATION)
+	var exp_beacons: int = _count_def_kind(def, ClusterEntity.Kind.BEACON)
+	var exp_field_asteroids: int = 0
+	for f in def.asteroid_fields:
+		exp_field_asteroids += int(f["count"])
+	var exp_total: int = def.entities.size() + exp_field_asteroids
+
+	_assert(m.records.size() == exp_total,
+		"loader: records should be entities + field asteroids (%d vs %d)" % [m.records.size(), exp_total])
+	_assert(_count_kind(m, ClusterEntity.Kind.STATION) == exp_stations, "loader: station count mismatch")
+	_assert(_count_kind(m, ClusterEntity.Kind.BEACON) == exp_beacons, "loader: beacon count mismatch")
+	_assert(_count_kind(m, ClusterEntity.Kind.ASTEROID) == exp_field_asteroids, "loader: asteroid count should equal sum of field counts")
 	m.queue_free()
+
+func _count_def_kind(def, kind: int) -> int:
+	var n: int = 0
+	for e in def.entities:
+		if e.get("kind") == kind:
+			n += 1
+	return n
 
 # ---------------------------------------------------------------------------
 # Bootstrap logic: place the viewpoint at player_start, tick, and the adjacent

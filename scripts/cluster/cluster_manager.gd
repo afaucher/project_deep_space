@@ -78,8 +78,11 @@ func _promote(rec) -> void:
 	node.position = rec.pos
 	node.rotation = rec.rot
 	live_parent.add_child(node)
-	node.linear_velocity = rec.vel
-	node.angular_velocity = rec.ang_vel
+	# Velocities only apply to physics bodies; landmarks (e.g. Wormhole, a Node2D)
+	# are transform-only.
+	if node is RigidBody2D:
+		node.linear_velocity = rec.vel
+		node.angular_velocity = rec.ang_vel
 	rec.live_node = node
 	if is_ship:
 		_attach_ai(rec, node)
@@ -99,7 +102,8 @@ func _demote(rec) -> void:
 	# the record must become the source of truth this same frame.
 	rec.pos = node.position
 	rec.rot = node.rotation
-	rec.vel = node.linear_velocity
-	rec.ang_vel = node.angular_velocity
+	if node is RigidBody2D:
+		rec.vel = node.linear_velocity
+		rec.ang_vel = node.angular_velocity
 	rec.live_node = null
 	node.queue_free()
