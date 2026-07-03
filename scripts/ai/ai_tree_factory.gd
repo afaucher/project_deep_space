@@ -31,6 +31,7 @@ const FireOpportunityLeaf = preload("res://scripts/ai/leaves/fire_opportunity_le
 const IdleLeaf = preload("res://scripts/ai/leaves/idle_leaf.gd")
 const StationKeepingLeaf = preload("res://scripts/ai/leaves/station_keeping_leaf.gd")
 const FollowRouteLeaf = preload("res://scripts/ai/leaves/follow_route_leaf.gd")
+const CargoRunLeaf = preload("res://scripts/ai/leaves/cargo_run_leaf.gd")
 
 static func build_default() -> Node:
 	var tree = BeehaveTreeScript.new()
@@ -156,6 +157,41 @@ static func build_patrol() -> Node:
 	var patrol = FollowRouteLeaf.new()
 	patrol.name = "FollowRoute"
 	root.add_child(patrol)
+
+	var idle = IdleLeaf.new()
+	idle.name = "Idle"
+	root.add_child(idle)
+
+	return tree
+
+# M20 cargo tree: an unarmed hauler. Flees when attacked, otherwise runs its lane
+# (CargoRun docks at each station and moves on). No Engage -- civilians don't fight.
+#
+#   Selector
+#   |-- Disengage (flee when crippled/attacked)
+#   |-- CargoRun (transit -> dock -> depart around the lane)
+#   +-- Idle (no lane -> hold heading)
+static func build_cargo() -> Node:
+	var tree = BeehaveTreeScript.new()
+	tree.name = "AITree"
+
+	var root = SelectorScript.new()
+	root.name = "RootSelector"
+	tree.add_child(root)
+
+	var disengage = SequenceScript.new()
+	disengage.name = "Disengage"
+	root.add_child(disengage)
+	var should_disengage = ShouldDisengageLeaf.new()
+	should_disengage.name = "ShouldDisengage"
+	disengage.add_child(should_disengage)
+	var flee = FleeLeaf.new()
+	flee.name = "Flee"
+	disengage.add_child(flee)
+
+	var cargo = CargoRunLeaf.new()
+	cargo.name = "CargoRun"
+	root.add_child(cargo)
 
 	var idle = IdleLeaf.new()
 	idle.name = "Idle"

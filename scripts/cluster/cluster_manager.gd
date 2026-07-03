@@ -100,7 +100,10 @@ func _attach_ai(rec, node) -> void:
 	if route != null and route.size() > 0:
 		node.patrol_route = route
 		node.patrol_loop = _loop_from(rec.behavior)
-		node.add_child(AITreeFactory.build_patrol())
+		if _is_cargo(rec.behavior):
+			node.add_child(AITreeFactory.build_cargo())
+		else:
+			node.add_child(AITreeFactory.build_patrol())
 	else:
 		node.add_child(AITreeFactory.build_default())
 
@@ -113,6 +116,9 @@ func _loop_from(behavior) -> bool:
 	if typeof(behavior) == TYPE_DICTIONARY:
 		return behavior.get("loop", true)
 	return true
+
+func _is_cargo(behavior) -> bool:
+	return typeof(behavior) == TYPE_DICTIONARY and behavior.get("cargo", false)
 
 func _demote(rec) -> void:
 	var node = rec.live_node

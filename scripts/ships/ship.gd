@@ -129,6 +129,12 @@ var patrol_route: Array = []
 var patrol_loop: bool = true
 var patrol_index: int = 0
 
+# Cargo-run state (M20): cargo_docking = at a station, waiting through its dock
+# cycle; cargo_captured_seen = the berth has captured us this stop (so a later
+# release completes the dock). The lane itself reuses patrol_route/patrol_index.
+var cargo_docking: bool = false
+var cargo_captured_seen: bool = false
+
 # Berth poses this hull offers to docking traffic, each { pos:Vector2 (local),
 # heading:float (local), capture_radius:float (optional) }. Stations override;
 # every other hull offers none. Bays are grown from these in _ready().
