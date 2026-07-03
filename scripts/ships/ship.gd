@@ -67,14 +67,12 @@ const REACTOR_HEAT_FLOOR := 10.0      # a reactor's own resting heat even with n
 const SENSOR_HEAT_FLOOR := 5.0        # an active sensor's own resting heat even with no load
 const PASSIVE_HEAT_DISSIPATION_RATE := 2.0 # radiative cooling that applies even with the reactor off/dead -- without it, a hulk's current_heat freezes forever at whatever it was the instant it died, since active dissipation is reactor-pumped
 
-# classify_contact() thresholds. cross-section splits "small" (ordnance-sized)
-# from "large" (vessel-sized) contacts; vessels get a higher heat bar than
-# ordnance because a cold-running missile/torpedo should still read as a
-# threat at a lower heat signature than a cold-running ship would need to.
+# classify_contact() thresholds. EM_NOISE is the activity discriminator (powered
+# vs inert); cross-section then splits "small" (ordnance-sized) from "large"
+# (vessel-sized) active contacts. Heat is intentionally NOT a classifier input --
+# see classify_contact() for why residual combat heat must not read as "alive".
 const ORDNANCE_CS_THRESHOLD := 10.0    # cross_section below this reads as ordnance, not a vessel
 const ACTIVE_EM_THRESHOLD := 5.0       # em_noise above this means "powered and active" for any object class
-const ORDNANCE_HEAT_THRESHOLD := 5.0   # heat above this flags a small (ordnance-sized) contact as active
-const VESSEL_HEAT_THRESHOLD := 10.0    # heat above this flags a large (vessel-sized) contact as active
 const ASTEROID_DENSITY_THRESHOLD := 250.0 # denser than this (and big enough) reads as rock, not dead metal
 const ASTEROID_CS_THRESHOLD := 50.0    # minimum size to be called an asteroid rather than wreckage debris
 const UNKNOWN_DENSITY_DEFAULT := 500.0 # density assumed when a signature omits the field entirely
@@ -229,31 +227,31 @@ static func classify_contact(signature: Dictionary, observer_iff_tags: Array) ->
 	var is_friendly = _iff_tags_overlap(signature.get("iff_tags", []), observer_iff_tags)
 
 	var cs = signature.get("cross_section", 0.0)
-	var heat = signature.get("heat", 0.0)
 	var em = signature.get("em_noise", 0.0)
 	var density = signature.get("density", UNKNOWN_DENSITY_DEFAULT)
 
-	# 1. Size check (Ordnance)
-	if cs < ORDNANCE_CS_THRESHOLD and (em > ACTIVE_EM_THRESHOLD or heat > ORDNANCE_HEAT_THRESHOLD):
-		if is_friendly:
-			return "FRIENDLY ORDNANCE"
-		else:
-			return "INCOMING ORDNANCE"
+	# EM is the sole "is it powered / active" test. Heat is deliberately NOT used
+	# here. Combat hits dump a large residual heat burst that bleeds off only
+	# slowly (PASSIVE_HEAT_DISSIPATION_RATE), so gating activity on heat kept a
+	# freshly-killed ship reading as a live VESSEL for a minute-plus until it
+	# cooled -- the "takes forever to become wreckage" gap. A live ship or missile
+	# always broadcasts EM well above the floor (reactor + active seeker/sensors);
+	# a hulk broadcasts zero. So an EM-dark contact is INACTIVE regardless of heat,
+	# which gives the two dead states the user asked for -- both classify the same:
+	#   cold inactive (no EM, cooled)     -> wreckage / rock
+	#   hot  inactive (no EM, still hot)  -> wreckage / rock  (was mis-read as a vessel)
+	if em > ACTIVE_EM_THRESHOLD:
+		# Active: size splits ordnance from vessel.
+		if cs < ORDNANCE_CS_THRESHOLD:
+			return "FRIENDLY ORDNANCE" if is_friendly else "INCOMING ORDNANCE"
+		return "FRIENDLY VESSEL" if is_friendly else "UNIDENTIFIED VESSEL"
 
-	# 2. Emission check (Vessels)
-	if cs >= ORDNANCE_CS_THRESHOLD and (em > ACTIVE_EM_THRESHOLD or heat > VESSEL_HEAT_THRESHOLD):
-		if is_friendly:
-			return "FRIENDLY VESSEL"
-		else:
-			return "UNIDENTIFIED VESSEL"
+	# Inactive (EM-dark): density separates rock from dead metal; heat is irrelevant.
+	if density > ASTEROID_DENSITY_THRESHOLD and cs > ASTEROID_CS_THRESHOLD:
+		return "ASTEROID"
+	elif density <= ASTEROID_DENSITY_THRESHOLD:
+		return "WRECKAGE"
 
-	# 3. Density check (Dead objects / Cold ships)
-	if em <= ACTIVE_EM_THRESHOLD and heat <= VESSEL_HEAT_THRESHOLD:
-		if density > ASTEROID_DENSITY_THRESHOLD and cs > ASTEROID_CS_THRESHOLD:
-			return "ASTEROID"
-		elif density <= ASTEROID_DENSITY_THRESHOLD:
-			return "WRECKAGE"
-			
 	return "UNKNOWN ANOMALY"
 
 func get_sys_max_health(sys_type: String) -> float:
@@ -701,6 +699,19 @@ func _ready() -> void:
 			if not c.has("transponder_custom_name"): c["transponder_custom_name"] = ""
 			if not c.has("flag"): c["flag"] = ""
 
+		# Weapon runtime scratch fields. cooldown is pure state (always starts
+		# ready); ammo is required by the fire path. Authoring these per-weapon is
+		# boilerplate that stations forgot, which silently aborted their whole
+		# _physics_process at the cooldown read every frame (no heat/EM sim, no PD,
+		# permanently reading as cold wreckage). Default them here so a missing
+		# field can never take a ship's physics down again. Lasers are energy
+		# weapons -> effectively unlimited ammo (matches the authored 999); missile
+		# tubes must author finite ammo, so default them to empty.
+		if c.get("type") == "weapons":
+			if not c.has("cooldown"): c["cooldown"] = 0.0
+			if not c.has("ammo"):
+				c["ammo"] = 999 if c.get("weapon_type", "") == "laser" else 0
+
 	sfx_engine = AudioStreamPlayer.new()
 	var e_stream = load("res://assets/audio/engine.wav")
 	if e_stream and e_stream is AudioStreamWAV: e_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
@@ -796,7 +807,10 @@ func set_sensor_target(target_id: String) -> void:
 func _physics_process(delta: float) -> void:
 	if is_multiplayer_authority():
 		for w in get_components_by_type("weapons"):
-			if w["cooldown"] > 0:
+			# .get() guard: a weapon missing "cooldown" must not abort the entire
+			# physics frame (heat/EM sim, PD, steering all live below this). _ready()
+			# normalizes the field, so this is belt-and-suspenders for that failure.
+			if w.get("cooldown", 0.0) > 0:
 				var cooldown_rate = 1.0
 				var ratio = get_component_health_ratio(w["id"])
 				if ratio > 0.0:
@@ -979,7 +993,9 @@ func _physics_process(delta: float) -> void:
 			elif comp["type"] == "weapons":
 				comp["heat"] = b_heat + _decay_damage_heat(comp, delta)
 				WeaponBehaviorRegistry.get_behavior(comp["weapon_type"]).tick(self, comp, delta)
-				comp["em_emission"] += b_em
+				# += (not =) so a firing pulse just set by tick() survives; .get()
+				# because tick() only sets em_emission on fire, so it may be absent.
+				comp["em_emission"] = comp.get("em_emission", 0.0) + b_em
 			else:
 				# Hull and other non-generating types have no steady-state heat
 				# of their own, but still carry combat-damage burst + decay.

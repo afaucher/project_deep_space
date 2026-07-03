@@ -35,6 +35,7 @@ static func validate(ship) -> Dictionary:
 	_check_handling(ship, tier, violations)
 	_check_overlaps(components, violations)
 	_check_connectivity(components, violations)
+	_check_pd_coherence(components, violations)
 
 	var has_error := violations.any(func(v): return v["severity"] == "error")
 	return {"ok": not has_error, "tier": tier, "violations": violations}
@@ -310,4 +311,54 @@ static func _check_connectivity(components: Array, violations: Array) -> void:
 				"reason": "component '" + with_rects[k]["id"] + "' is not adjacent to any other component (disconnected)",
 				"severity": "error",
 			})
+
+# ---------------------------------------------------------------------------
+# 3f. PD coherence (warning) -- ship lasers auto-fire at ordnance, so any laser
+# weapon is a point-defense mount, and those turrets are only as good as the
+# sensor feeding their firing solution. Too slow a refresh and they aim at
+# second-stale positions and miss fast ordnance; too coarse a bin count and the
+# tracked bearing is too imprecise to hit. Flag a ship that carries lasers but
+# has no active sensor quick and fine enough to track ordnance.
+#
+# Warning, not error: deliberate low-end designs are allowed (the light attack
+# craft's single forward laser off a 0.5s dish passes at the threshold). This
+# only catches "turrets with no eyes" -- the failure that had stations firing
+# four PD turrets off a 1.0s strategic search dish. Arc-coverage geometry (does
+# the sensor cone actually cover each turret's arc?) is a deliberate v1 scope
+# cut; this just asks whether a PD-capable sensor exists at all.
+# ---------------------------------------------------------------------------
+
+const PD_SENSOR_MAX_REFRESH := 0.5   # seconds between sweeps; slower can't aim at ordnance
+const PD_SENSOR_MIN_BINS := 36       # angular bins; coarser can't resolve a firing solution
+
+static func _check_pd_coherence(components: Array, violations: Array) -> void:
+	var has_laser := false
+	for comp in components:
+		if comp.get("type", "") == "weapons" and comp.get("weapon_type", "") == "laser":
+			has_laser = true
+			break
+	if not has_laser:
+		return
+
+	var has_pd_sensor := false
+	for comp in components:
+		if comp.get("type", "") != "sensors":
+			continue
+		if comp.get("active", true) == false:
+			continue
+		# passive_em senses bearing/EM only, not the resolved position a firing
+		# solution needs, so it never counts as a PD tracker.
+		if comp.get("sensor_type", "active") == "passive_em":
+			continue
+		if comp.get("refresh_interval", 0.0) <= PD_SENSOR_MAX_REFRESH and comp.get("num_bins", 0) >= PD_SENSOR_MIN_BINS:
+			has_pd_sensor = true
+			break
+
+	if not has_pd_sensor:
+		violations.append({
+			"component_id": "<ship>",
+			"field": "pd_sensor",
+			"reason": "ship has laser (point-defense) weapons but no active sensor fast/fine enough to aim them (need refresh_interval <= " + str(PD_SENSOR_MAX_REFRESH) + "s and num_bins >= " + str(PD_SENSOR_MIN_BINS) + ")",
+			"severity": "warning",
+		})
 

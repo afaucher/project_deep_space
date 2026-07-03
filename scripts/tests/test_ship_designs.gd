@@ -24,6 +24,7 @@ func setup(_main: Node) -> void:
 	_test_malformed_fixture_fails()
 	_test_unvalidated_opt_out()
 	_test_catalog_ships_validate_structurally()
+	_test_pd_coherence()
 
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_ship_designs <<<")
@@ -136,3 +137,31 @@ func _test_catalog_ships_validate_structurally() -> void:
 
 		_assert(error_violations.is_empty(), "Case 4: " + ship_name + " should have zero error-severity violations, got " + str(error_violations.size()))
 		_assert(r["ok"] == true, "Case 4: " + ship_name + " should validate ok=true")
+
+# ---------------------------------------------------------------------------
+# Case 5: PD coherence -- a ship with laser (PD) weapons but every sensor too
+# slow to aim them gets a warning-severity pd_sensor violation (the "turrets
+# with no eyes" case that had stations firing off a 1.0s search dish). It's a
+# warning, so ok stays true; and a clean frigate (Case 1) must NOT warn.
+# ---------------------------------------------------------------------------
+
+func _test_pd_coherence() -> void:
+	# Positive: slow every sensor below the PD-tracking threshold. The frigate
+	# keeps its lasers, so it should now warn about having nothing to aim them.
+	var ship = Frigate.new()
+	ship.ship_tier = ComponentSpec.Tier.MEDIUM
+	for c in ship.ship_components:
+		if c["type"] == "sensors":
+			c["refresh_interval"] = 1.0
+	var r = ShipDesignValidator.validate(ship)
+
+	var pd_warnings: Array = r["violations"].filter(func(v): return v["field"] == "pd_sensor" and v["severity"] == "warning")
+	var pd_errors: Array = r["violations"].filter(func(v): return v["field"] == "pd_sensor" and v["severity"] == "error")
+	_assert(not pd_warnings.is_empty(), "Case 5: frigate with only slow sensors + lasers should warn about no PD-capable sensor")
+	_assert(pd_errors.is_empty(), "Case 5: pd_sensor violation must be warning severity, not error")
+
+	# Negative: a stock frigate has its 0.1s PD dish, so it must NOT warn.
+	var clean = Frigate.new()
+	var rc = ShipDesignValidator.validate(clean)
+	var clean_pd: Array = rc["violations"].filter(func(v): return v["field"] == "pd_sensor")
+	_assert(clean_pd.is_empty(), "Case 5: stock frigate should have no pd_sensor violation")

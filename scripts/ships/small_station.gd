@@ -36,7 +36,24 @@ func _init() -> void:
 			"refresh_interval": 1.0,
 			"heading": 0.0,
 		},
-		
+
+		# Dedicated short-range point-defense tracker. sensors_1 (36 bins / 1.0s)
+		# is a strategic search dish -- far too coarse and slow to aim the four PD
+		# turrets, which fire at whatever this feeds them. One grade below the
+		# frigate's PD sensor (720 bins / 0.25s vs 3600 / 0.1): this is a civilian
+		# outpost, not a dedicated war station (that'd be its own class). Range-
+		# bounded to 5000 so the resolution stays a close-in defensive tool.
+		{
+			"id": "omni_short_pd",
+			"type": "sensors",
+			"rect": Rect2(30, -40, 10, 10),
+			"health": 500.0, "max_health": 500.0, "density": 20.0,
+			"base_em_emission": 5.0, "em_emission": 5.0,
+			"sensor_type": "active", "active": true,
+			"range": 5000.0, "arc_width": TAU, "num_bins": 720, "refresh_interval": 0.25,
+			"timer": 0.0, "heading": 0.0,
+		},
+
 		# --- Port Arm (X=-20..20, Y=-120..-20) ---
 		{
 			"id": "living_quarters_1",

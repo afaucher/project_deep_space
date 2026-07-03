@@ -41,7 +41,21 @@ func _init() -> void:
 			"refresh_interval": 1.0,
 			"heading": 0.0,
 		},
-		
+
+		# Dedicated short-range point-defense tracker (see small_station.gd). The
+		# 72-bin / 1.0s search dishes are far too coarse and slow to aim the PD
+		# turrets. One grade below the frigate's PD sensor (720 bins / 0.25s vs
+		# 3600 / 0.1) -- an outpost, not a war station. Range-bounded to 5000.
+		{
+			"id": "omni_short_pd",
+			"type": "sensors",
+			"rect": Rect2(70, -50, 20, 20),
+			"health": 800.0, "max_health": 800.0, "density": 20.0,
+			"base_em_emission": 5.0, "em_emission": 5.0,
+			"sensor_type": "active", "active": true,
+			"range": 5000.0, "arc_width": TAU, "num_bins": 720, "refresh_interval": 0.25,
+			"timer": 0.0, "heading": 0.0,
+		},
 
 		# --- Aft Arm (X=-130..-50, Y=-20..20) ---
 		{

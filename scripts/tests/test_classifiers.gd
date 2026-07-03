@@ -9,14 +9,21 @@ func setup(main) -> void:
 	var failed = 0
 	
 	# Test Cases: [Signature Dictionary, Observer IFF Tags, Expected Output]
+	# Activity is keyed on EM, not heat: a live ship/missile is EM-loud, a hulk is
+	# EM-dark whether it's cold or still glowing from the hit that killed it.
 	var test_cases = [
-		[{"cross_section": 2.0, "heat": 10.0, "em_noise": 0.0, "iff_tags": ["TEAM_A"]}, ["TEAM_A"], "FRIENDLY ORDNANCE"],
+		# --- Active contacts (EM above the floor) ---
+		[{"cross_section": 2.0, "heat": 10.0, "em_noise": 10.0, "iff_tags": ["TEAM_A"]}, ["TEAM_A"], "FRIENDLY ORDNANCE"],
 		[{"cross_section": 2.0, "heat": 0.0, "em_noise": 10.0, "iff_tags": ["TEAM_B"]}, ["TEAM_A"], "INCOMING ORDNANCE"],
-		[{"cross_section": 10.0, "heat": 15.0, "em_noise": 0.0, "iff_tags": ["TEAM_A"]}, ["TEAM_A"], "FRIENDLY VESSEL"],
+		[{"cross_section": 200.0, "heat": 300.0, "em_noise": 120.0, "iff_tags": ["TEAM_A"]}, ["TEAM_A"], "FRIENDLY VESSEL"], # hot AND EM-loud -> still a live vessel
 		[{"cross_section": 200.0, "heat": 0.0, "em_noise": 500.0, "iff_tags": ["TEAM_C"]}, ["TEAM_A"], "UNIDENTIFIED VESSEL"],
-		[{"cross_section": 250.0, "heat": 0.0, "em_noise": 0.0, "density": 90.0}, ["TEAM_A"], "WRECKAGE"],
+
+		# --- Inactive contacts (EM-dark): heat must NOT keep them reading as alive ---
+		[{"cross_section": 250.0, "heat": 0.0, "em_noise": 0.0, "density": 90.0}, ["TEAM_A"], "WRECKAGE"],   # cold inactive ship hulk
+		[{"cross_section": 250.0, "heat": 400.0, "em_noise": 0.0, "density": 20.0}, ["TEAM_A"], "WRECKAGE"], # HOT inactive ship hulk (the gap: was mis-read as VESSEL)
+		[{"cross_section": 2.0, "heat": 350.0, "em_noise": 0.0, "density": 20.0}, ["TEAM_A"], "WRECKAGE"],   # hot inactive missile hulk
 		[{"cross_section": 250.0, "heat": 0.0, "em_noise": 0.0, "density": 800.0}, ["TEAM_A"], "ASTEROID"],
-		[{"cross_section": 2.0, "heat": 0.0, "em_noise": 0.0, "density": 90.0}, ["TEAM_A"], "WRECKAGE"], # Cold missile wreckage
+		[{"cross_section": 2.0, "heat": 0.0, "em_noise": 0.0, "density": 90.0}, ["TEAM_A"], "WRECKAGE"],     # cold missile wreckage
 	]
 	
 	for i in range(test_cases.size()):
