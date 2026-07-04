@@ -22,8 +22,18 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Running Automated Tests for Project Deep Space " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
-# 1. Syntax Validation Skipped (Currently flaky with Godot 4)
-Write-Host "`n[1] Skipping GDScript syntax validation..." -ForegroundColor Yellow
+# 1. Syntax Validation
+Write-Host "`n[1] Running GDScript syntax validation..." -ForegroundColor Yellow
+$scriptFiles = Get-ChildItem -Path "$PSScriptRoot\scripts" -Recurse -Filter *.gd | Select-Object -ExpandProperty FullName
+$godotConsolePath = "$PSScriptRoot\Godot_v4.4.1-stable_win64_console.exe"
+if ($scriptFiles.Count -gt 0) {
+    & $godotConsolePath --headless --check-only $scriptFiles 2>&1 | Out-String | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ">>> [TEST FAILED] GDScript syntax validation failed <<<" -ForegroundColor Red
+        exit 1
+    }
+}
+Write-Host ">>> [TEST PASSED] GDScript syntax validation passed <<<" -ForegroundColor Green
 
 if ($TestName -eq "") {
     Write-Host "`n[2] No specific test provided. Orchestration ready." -ForegroundColor Green
