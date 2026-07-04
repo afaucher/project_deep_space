@@ -69,7 +69,11 @@ func _test_simple_body_outline() -> void:
 
 	var rock_contact := {"instance_id": rock.get_instance_id(), "pos": Vector2.ZERO}
 	_assert(NavigationPanel._is_simple_body(rock_contact), "Simple-body: an asteroid contact should classify as a simple body")
-	_assert(is_equal_approx(NavigationPanel._bounds_radius_for(rock_contact), 300.0), "Simple-body: asteroid bounds radius should be its 300u collision circle, got %s" % NavigationPanel._bounds_radius_for(rock_contact))
+	# Rocks now carry position-seeded size variance -- assert the band, and
+	# that the panel reads the rock's OWN radius (not the base constant).
+	var rock_r: float = NavigationPanel._bounds_radius_for(rock_contact)
+	_assert(rock_r >= 300.0 * 0.8 - 0.01 and rock_r <= 300.0 * 1.15 + 0.01, "Simple-body: asteroid bounds radius should sit in the seeded variance band [240, 345], got %s" % rock_r)
+	_assert(is_equal_approx(rock_r, rock.get_bounding_radius()), "Simple-body: panel radius should equal the rock instance's own get_bounding_radius(), got %s vs %s" % [rock_r, rock.get_bounding_radius()])
 	_assert(NavigationPanel._outline_draw_list(rock_contact) == [], "Simple-body: an asteroid must produce NO silhouette loops (no rects to leak), got %s" % str(NavigationPanel._outline_draw_list(rock_contact)))
 
 	# Rock outline shape: deterministic per seed, jagged (not a circle), and
