@@ -12,6 +12,7 @@ const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 const CommsLedger = preload("res://scripts/comms/comms_ledger.gd")
 const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
+const SilhouetteSampler = preload("res://scripts/sensors/silhouette_sampler.gd")
 
 # Mass is derived from each component's rect area x density, not authored directly.
 # Calibrated so the default Frigate loadout (total area 2775 x density 20.0)
@@ -87,6 +88,17 @@ const PASSIVE_EM_NOISE_FLOOR := 15.0   # received EM (after range/direction fall
 const EM_FALLOFF_REFERENCE_DISTANCE := 10000.0 # distance at which received EM starts dropping below the broadcast value
 const SENSOR_VELOCITY_NOISE := 0.05    # +/- fractional magnitude and +/- radian jitter applied to a sensor's reported target velocity
 const SENSOR_POS_NOISE := 0.005        # +/- fractional distance noise and bin fraction noise applied to reported target position
+
+# M26 -- sensor-dot silhouette outlines (design_ideas/ship_outline_rendering.md
+# "v2"; implementation_plans/m26_sensor_dot_outlines_design.md). OUTLINE_FADE_START
+# duplicates navigation_panel.gd's OUTLINE_FADE_START (ship_outline_rendering.md's
+# "roughly the shortest laser range" distance) -- kept as a separate local const
+# rather than importing the panel (ship.gd is server/sim-side, the panel is
+# client UI; a shared const would be a layering inversion) but the two MUST be
+# changed together if the fade window is ever retuned.
+const OUTLINE_DOT_RANGE := 3000.0
+const MAX_OUTLINE_DOTS := 192           # ring-buffer cap per contact -- overwrite oldest
+const OUTLINE_DOT_TTL := 1.5            # seconds (same delta-accumulated clock as last_seen_timer) before a dot prunes
 
 
 # take_damage() raymarch / damage-soak constants.
@@ -987,7 +999,24 @@ func _physics_process(delta: float) -> void:
 		var c = active_contacts[c_id]
 		c["last_seen_timer"] = c.get("last_seen_timer", 0.0) + delta
 		c["pos_timer"] = c.get("pos_timer", 0.0) + delta
-		
+
+		# M26: age + prune outline dots on the SAME delta-accumulated clock as
+		# last_seen_timer above (not wall-clock) -- a dot's "stamp" counts UP
+		# from 0.0 at creation, same convention, so staleness reads the same
+		# way for both. No sensor refresh has to run for dots to age out here
+		# -- if sensors go dark (powered off), _sample_outline_dots simply
+		# stops being called and stamps keep aging until TTL prunes them, so
+		# there is no immortal-ghost-outline path.
+		if c.has("outline_dots"):
+			var dots: Array = c["outline_dots"]
+			var kept: Array = []
+			for dot in dots:
+				var stamp: float = dot.get("stamp", 0.0) + delta
+				if stamp <= OUTLINE_DOT_TTL:
+					dot["stamp"] = stamp
+					kept.append(dot)
+			c["outline_dots"] = kept
+
 		# Dead-reckon their position based on velocity
 		if c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2:
 			c["pos"] += c["vel"] * delta
@@ -1194,7 +1223,25 @@ func _physics_process(delta: float) -> void:
 				"last_seen_timer": 0.0,
 				"classification": classification
 			}
-			
+			closest_contact_id = new_id
+
+		# M26: sample outline dots for this bin's target, on this sensor's own
+		# refresh tick (bins_this_frame only contains bins from sensors whose
+		# timer just fired this frame -- see the sweep loop above), only for
+		# the bins subtending the target (_sample_outline_dots computes that
+		# range itself via SilhouetteSampler.subtense_bins). .get() defaults
+		# throughout -- a bin/contact/sensor missing an expected field must
+		# not abort the rest of this frame's correlate-tracks loop.
+		if bin_instance_id != -1 and closest_contact_id != "":
+			var target = instance_from_id(bin_instance_id)
+			if is_instance_valid(target):
+				var sensor_id: String = bin.get("sensor_id", "")
+				var sensor_comp: Dictionary = get_component(sensor_id)
+				if not sensor_comp.is_empty():
+					var sensor_origin: Vector2 = position + get_component_origin(sensor_comp).rotated(rotation)
+					var sensor_range_effective: float = bin.get("sensor_range", sensor_comp.get("range", 0.0))
+					_sample_outline_dots(sensor_comp, sensor_range_effective, sensor_origin, active_contacts[closest_contact_id], target)
+
 	# Datalink Relay: friendly ships in mutual comms range and line-of-sight
 	# share active_contacts via freshest-wins. This reruns from scratch every
 	# tick (no persistent link graph), so multi-hop propagation falls out for
@@ -1455,6 +1502,101 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 		sweep_output.append(merged)
 
 	return sweep_output
+
+# M26 -- sample outline dots for one bin's target, called once per sensor per
+# refresh tick (the sensor's own timer <= 0.0 branch in _physics_process),
+# only for the bins subtending the target -- NOT one raycast per bin in the
+# whole sweep. Appends {"pos_local": Vector2, "stamp": 0.0} entries (target-
+# local space, so a rotating target's dots ride the hull) into
+# contact["outline_dots"] as a ring buffer capped at MAX_OUTLINE_DOTS.
+#
+# Transform chain (explicit, since this crosses three frames):
+#   1. `origin` (world space) = this ship's sensor mount, already computed by
+#      the caller the same way _run_sensor_sweep computes it
+#      (position + get_component_origin(sensor).rotated(rotation)).
+#   2. For each subtended bin, the bin's center bearing (world-space angle,
+#      same convention as _run_sensor_sweep's bin_center_angle) gives a world-
+#      space ray direction `dir_world = Vector2.RIGHT.rotated(bin_center_angle)`.
+#   3. The sampler operates in the TARGET's local frame (its component rects
+#      are authored there), so both the ray origin and direction must be
+#      re-expressed relative to the target: `origin_local = target.to_local(origin)`
+#      (handles both the translation and the -target.rotation un-rotate in one
+#      call), `dir_local = dir_world.rotated(-target.rotation)` (direction only
+#      un-rotates, no translation).
+#   4. SilhouetteSampler.sample() slab-tests every one of the target's
+#      component rects against that local ray and returns the nearest entry
+#      point, still in target-local space -- exactly the space outline_dots
+#      are stored in, so the nav panel only needs to re-apply the contact's
+#      CURRENT drawn rotation to render them (dots ride the hull as it turns).
+func _sample_outline_dots(sensor: Dictionary, sensor_range: float, origin: Vector2, contact: Dictionary, target) -> void:
+	if not is_instance_valid(target):
+		return
+	var target_comps = target.get("ship_components")
+	if target_comps == null or target_comps.is_empty():
+		return
+
+	var target_dist: float = origin.distance_to(target.position)
+	if target_dist > OUTLINE_DOT_RANGE:
+		return
+	if target_dist > sensor_range:
+		return
+
+	var num_bins: int = sensor.get("num_bins", 0)
+	var arc_width: float = sensor.get("arc_width", TAU)
+	if num_bins <= 0 or arc_width <= 0.0:
+		return
+
+	var sensor_heading: float = rotation + sensor.get("heading", 0.0)
+	var bin_angle: float = arc_width / float(num_bins)
+
+	var target_radius: float = 50.0
+	if target.has_method("get_bounding_radius"):
+		target_radius = target.get_bounding_radius()
+
+	var bearing_to_target: float = (target.position - origin).angle()
+	var rel_angle: float = wrapf(bearing_to_target - sensor_heading, -PI, PI)
+
+	var bin_range: Dictionary = SilhouetteSampler.subtense_bins(rel_angle, num_bins, arc_width, max(target_dist, 0.001), target_radius)
+	var lo: int = bin_range.get("lo", 0)
+	var hi: int = bin_range.get("hi", -1)
+	if hi < lo:
+		return # target's subtense didn't resolve to any bin (degenerate/empty range)
+
+	var target_rotation: float = target.rotation
+
+	if not contact.has("outline_dots"):
+		contact["outline_dots"] = []
+	var dots: Array = contact["outline_dots"]
+
+	for bin_idx in range(lo, hi + 1):
+		var bin_center_angle: float = sensor_heading - (arc_width / 2.0) + (bin_idx * bin_angle) + (bin_angle / 2.0)
+		var dir_world: Vector2 = Vector2.RIGHT.rotated(bin_center_angle)
+
+		# Step 3 of the chain above: re-express origin + direction in the
+		# target's local frame before handing off to the analytic sampler.
+		var origin_local: Vector2 = target.to_local(origin)
+		var dir_local: Vector2 = dir_world.rotated(-target_rotation)
+
+		var hit_point = SilhouetteSampler.sample(target_comps, origin_local, dir_local.angle())
+		if hit_point == null:
+			continue
+
+		var dot := {"pos_local": hit_point, "stamp": 0.0}
+		if dots.size() < MAX_OUTLINE_DOTS:
+			dots.append(dot)
+		else:
+			# Ring-buffer overwrite: evict the oldest (highest "stamp", since
+			# stamp counts UP from 0.0 -- see the decay pass) to make room.
+			var oldest_idx := 0
+			var oldest_stamp := -1.0
+			for i in range(dots.size()):
+				var s: float = dots[i].get("stamp", 0.0)
+				if s > oldest_stamp:
+					oldest_stamp = s
+					oldest_idx = i
+			dots[oldest_idx] = dot
+
+	contact["outline_dots"] = dots
 
 # True if this ship has an ACTIVE sensor that currently covers `point` -- in range,
 # within arc, and with clear line of sight. Used by the VISIBLE contact-cleanup mode to

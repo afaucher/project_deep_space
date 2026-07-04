@@ -44,6 +44,25 @@ const COMPONENT_TYPE_COLORS := {
 }
 const COMPONENT_TYPE_COLOR_DEFAULT := Color(0.7, 0.7, 0.7)
 
+# M26 -- sensor-dot silhouette outlines (design_ideas/ship_outline_rendering.md
+# "v2"; implementation_plans/m26_sensor_dot_outlines_design.md). Dots ride the
+# same fade window/LOD gate as the v1 static rects (_draw_contact_outline
+# computes alpha/bounds once and now drives both draw paths); this is just the
+# dot color/size.
+const OUTLINE_DOT_COLOR := Color(0.9, 0.9, 0.9)
+const OUTLINE_DOT_RADIUS_PX := 1.5
+
+# The friendly-identification convention this whole file already uses:
+# Utils.classification_color/_get_contact_color key off classify_contact()'s
+# string output, and "FRIENDLY VESSEL"/"FRIENDLY ORDNANCE" are the only two
+# strings that mean "one of ours" (see ship.gd's classify_contact() and
+# utils.gd's classification_color()). Reused here, not reinvented, so the
+# demotion rule can never disagree with what the blip color already tells
+# the player.
+static func _is_friendly_contact(contact: Dictionary) -> bool:
+	var classification: String = contact.get("classification", "")
+	return classification == "FRIENDLY VESSEL" or classification == "FRIENDLY ORDNANCE"
+
 # Pure fade function -- alpha 1.0 at/inside `full`, 0.0 at/beyond `start`,
 # linear between, clamped both sides. Kept as a static pure function (no draw
 # calls, no node state) so it's directly unit-testable per the M25 plan.
@@ -110,6 +129,45 @@ static func _outline_draw_list(contact: Dictionary) -> Array:
 			"rotation": ship_rot,
 			"type": c.get("type", ""),
 		})
+	return out
+
+# M26 -- parallel seam to _outline_draw_list, deliberately NOT collapsed into
+# it (see the M26 plan: "extend _outline_draw_list or add a parallel
+# _dot_draw_list(contact) seam ... don't collapse them" -- v1's rects and v2's
+# dots are demoted/promoted independently per contact, so keeping them as two
+# testable pure functions lets the no-leak check assert on each in isolation).
+#
+# Returns the contact's outline_dots translated into world space using the
+# SAME rotation-resolution convention _outline_draw_list already uses (the
+# live instance's actual current rotation) -- consistent with how v1 always
+# rendered "true" rotation and only the shape became measured in v2. Each dot
+# is stored in TARGET-local space (ship.gd's _sample_outline_dots comment
+# explains why), so it rides the hull as the target turns: world_pos =
+# c_pos (the contact's DRAWN/fused position, not the live instance's true
+# position -- same anchor-to-blip rule _draw_contact_outline already follows
+# for the v1 rects) + pos_local.rotated(current rotation).
+#
+# Pure: no draw_* calls. Returns [] for a stale/freed/missing instance or a
+# contact with no outline_dots yet (a legitimate "sensors haven't touched it"
+# state, not an error).
+static func _dot_draw_list(contact: Dictionary, c_pos: Vector2) -> Array:
+	var out: Array = []
+	var dots = contact.get("outline_dots", [])
+	if dots == null or dots.is_empty():
+		return out
+
+	var instance_id: int = contact.get("instance_id", -1)
+	if instance_id == -1:
+		return out
+	var inst = instance_from_id(instance_id)
+	if inst == null or not is_instance_valid(inst):
+		return out
+
+	var ship_rot: float = inst.get("rotation") if inst.get("rotation") != null else 0.0
+
+	for dot in dots:
+		var pos_local: Vector2 = dot.get("pos_local", Vector2.ZERO)
+		out.append(c_pos + pos_local.rotated(ship_rot))
 	return out
 
 var current_state: Dictionary = {
@@ -617,13 +675,24 @@ func _get_contact_color(c: Dictionary) -> Color:
 	var base = Utils.classification_color(c.get("classification", ""))
 	return Utils.fade_color(base, Utils.contact_confidence(c))
 
-# M25 outline v1 -- thin rendering wrapper. All the actual math (fade window
-# selection, alpha, per-component world transforms) lives in the pure/static
-# helpers above so it's directly testable; this just turns _outline_draw_list's
-# entries into draw_rect calls, gated by distance-fade alpha and the existing
-# zoom-LOD pixel threshold. Called from inside the world-space transform (see
+# M25 outline v1 / M26 sensor-dots v2 -- thin rendering wrapper. All the actual
+# math (fade window selection, alpha, per-component world transforms, dot
+# transforms) lives in the pure/static helpers above so it's directly
+# testable; this just turns _outline_draw_list's/_dot_draw_list's entries into
+# draw calls, gated by distance-fade alpha and the existing zoom-LOD pixel
+# threshold. Called from inside the world-space transform (see
 # draw_set_transform_matrix above the Contacts loop), same as the rest of the
 # per-contact drawing.
+#
+# M26 demotion rule: the v1 static per-component RECTS (ground-truth layout --
+# a datalink leak for anyone not "ours") are drawn only for identified
+# friendlies (_is_friendly_contact -- the same FRIENDLY VESSEL/FRIENDLY
+# ORDNANCE classification test _get_contact_color already keys off, so this
+# can never disagree with the blip color). Hostile/unidentified contacts get
+# ONLY the measured sensor dots -- honest, sensor-quality-gated shape info,
+# no ground-truth leak. Own-ship's outline is a separate always-on path
+# earlier in _draw (not through active_contacts at all), so it isn't touched
+# by this demotion.
 func _draw_contact_outline(contact: Dictionary, c_pos: Vector2) -> void:
 	var bounds_radius: float = _bounds_radius_for(contact)
 	if bounds_radius * map_zoom < OUTLINE_LOD_MIN_PX:
@@ -642,26 +711,29 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2) -> void:
 	if alpha <= 0.0:
 		return
 
-	var entries: Array = _outline_draw_list(contact)
-	if entries.is_empty():
-		return
-
-	for entry in entries:
-		var rect: Rect2 = entry["rect"]
-		var rot: float = entry["rotation"]
-		# All four corners anchor to c_pos (the contact's DRAWN position), not
-		# entry.world_pos (the ship's true position) -- mixing the two skews the
-		# quad whenever the fused estimate drifts from truth (M25 validation
-		# catch). The outline rides the blip; truth only supplies shape+rotation.
-		var corners := [
-			c_pos + rect.position.rotated(rot),
-			c_pos + (rect.position + Vector2(rect.size.x, 0)).rotated(rot),
-			c_pos + (rect.position + rect.size).rotated(rot),
-			c_pos + (rect.position + Vector2(0, rect.size.y)).rotated(rot),
-		]
-		var poly := PackedVector2Array(corners)
-		poly.append(corners[0])
-		var base_color: Color = COMPONENT_TYPE_COLORS.get(entry.get("type", ""), COMPONENT_TYPE_COLOR_DEFAULT)
-		var draw_color := Color(base_color.r, base_color.g, base_color.b, base_color.a * alpha)
-		draw_polyline(poly, draw_color, 1.0 / map_zoom)
+	if _is_friendly_contact(contact):
+		var entries: Array = _outline_draw_list(contact)
+		for entry in entries:
+			var rect: Rect2 = entry["rect"]
+			var rot: float = entry["rotation"]
+			# All four corners anchor to c_pos (the contact's DRAWN position), not
+			# entry.world_pos (the ship's true position) -- mixing the two skews the
+			# quad whenever the fused estimate drifts from truth (M25 validation
+			# catch). The outline rides the blip; truth only supplies shape+rotation.
+			var corners := [
+				c_pos + rect.position.rotated(rot),
+				c_pos + (rect.position + Vector2(rect.size.x, 0)).rotated(rot),
+				c_pos + (rect.position + rect.size).rotated(rot),
+				c_pos + (rect.position + Vector2(0, rect.size.y)).rotated(rot),
+			]
+			var poly := PackedVector2Array(corners)
+			poly.append(corners[0])
+			var base_color: Color = COMPONENT_TYPE_COLORS.get(entry.get("type", ""), COMPONENT_TYPE_COLOR_DEFAULT)
+			var draw_color := Color(base_color.r, base_color.g, base_color.b, base_color.a * alpha)
+			draw_polyline(poly, draw_color, 1.0 / map_zoom)
+	else:
+		var dot_points: Array = _dot_draw_list(contact, c_pos)
+		var dot_color := Color(OUTLINE_DOT_COLOR.r, OUTLINE_DOT_COLOR.g, OUTLINE_DOT_COLOR.b, OUTLINE_DOT_COLOR.a * alpha)
+		for pt in dot_points:
+			draw_circle(pt, OUTLINE_DOT_RADIUS_PX / map_zoom, dot_color)
 

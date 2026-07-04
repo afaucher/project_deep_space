@@ -73,9 +73,11 @@ separate change but is where the destroyer's mismatch eventually points.
    by health. Cheap, maximally data-faithful, reuses the loadout, and doubles as
    a **damage visualization** (a destroyed component dims/vanishes). Reads as
    "the ship is its parts."
-2. **Hull silhouette** — one outline polygon = convex hull (or just the AABB) of
-   the component rects. Cleaner, reads as a ship shape, less busy. Good for
-   farther/zoomed-out LOD.
+2. **Hull silhouette** — one outline polygon derived from the component rects.
+   Cleaner, reads as a ship shape, less busy. Good for farther/zoomed-out LOD.
+   NOTE: "convex hull" was the original sketch here, but it's only faithful
+   for compact hulls — see "Silhouette LOD: beyond the convex hull" below for
+   the real shape menu and the auto-selection rule.
 3. **Wireframe** — silhouette outline + internal component edges. Middle ground.
 
 **Recommendation:** start with **(1) per-component rects colored by type/health**
@@ -299,8 +301,81 @@ The ray–rect math is the damage raymarch's geometry reused at coarser grain.
 4. **M26:** v2 sensor-dot sweep extension + dot rendering; demote the v1
    static outline to friendlies/own-ship only (they datalink their true
    layout), hostiles get dots only.
-5. Then, independently: silhouette LOD, facing-side cull, Option C signature
-   work (unscheduled).
+5. Then, independently: silhouette LOD (see "Silhouette LOD: beyond the
+   convex hull" below), facing-side cull, Option C signature work
+   (unscheduled).
+
+## Silhouette LOD: beyond the convex hull
+
+The mid-range LOD wants ONE clean shape per ship instead of v1's per-component
+rects. The original sketch said "convex hull" — that's wrong as a default,
+because the hull-shape grammar's variety primitives (`hull_shape_grammar.md`
+§2) ARE concavity: notch, arm, pod, hole. A convex hull erases exactly what
+the grammar builds:
+
+- Plus/X station → diamond blob (the four inner corners bridge over).
+- Ring defence pod → solid square (the hole — the dock! — disappears).
+- Spine+pods freighter → one fat slab (the gap between pods bridges).
+- Asymmetric L → its notch, the thing that reads "industrial," fills in.
+
+Convex hull is only faithful for compact box-ish hulls (frigate, shuttle,
+LAC) — where it's also the cheapest and smoothest-looking choice. So: a menu,
+not a single style, selected automatically.
+
+### The shape menu
+
+1. **AABB** — cheapest; the far-LOD box before dropping to a blip.
+2. **Convex hull** — compact hulls only. Smooth, closed, reads "warship."
+3. **Exact rectilinear union contour** — all component rects are axis-aligned,
+   so their union's boundary is a rectilinear polygon (plus interior hole
+   polygons). Godot has this built in: fold `Geometry2D.merge_polygons()`
+   over the rects (Clipper-based). Exact, preserves every notch/arm/hole.
+   Geometry is static per ship class → compute once, cache per script.
+4. **Simplified contour (recommended mid-LOD default)** — take (3), merge
+   collinear runs, and collapse boundary steps shorter than ~5u (the 2.5u
+   fill shims etc.). The result looks like a naval recognition-manual
+   silhouette: keeps the plus-shape, drops the pixel noise.
+5. **Marching-squares / bitmap trace** — rasterize rects to a coarse grid and
+   trace. Chunkier look; keep only as a fallback if (3) hits polygon-merge
+   robustness issues with edge-touching rects (inflate rects by ~0.01 before
+   merging first — coincident edges are the common case here).
+6. **Concave hull / alpha shapes** — rejected: approximate and tuning-fiddly
+   when the exact union is available for free.
+
+### Auto-selection (measure, don't author)
+
+`concavity_ratio = area(convex_hull) / area(rect_union)`.
+- ratio < ~1.15 AND the union has no holes → **convex hull** (style 2).
+- otherwise → **simplified contour** (style 4).
+
+Frigate/LAC/shuttle land at ~1.0 → smooth convex silhouettes. The plus
+station lands near ~2 → stepped contour. A ring's hole forces contour
+regardless. One tunable threshold const; a per-ship override field is
+possible but shouldn't be needed. Using both styles IS the variety payoff:
+compact warships read as smooth closed shapes, stations and industrial hulls
+read as stepped machinery — at a glance, before any label.
+
+### LOD chain (consolidated)
+
+hostile: sensor dots (M26) → reported-cross-section blob (far).
+friendly/own: per-component rects (close, v1) → convex-hull-or-contour
+silhouette (mid, auto-selected) → AABB box → blip.
+
+### Implementation notes
+
+- Cache the computed silhouette per ship class (keyed by script path or a
+  static on the class); never per frame, never per instance.
+- `merge_polygons` returns hole polygons alongside the outer boundary — draw
+  holes as separate inner polylines (the defence pod's dock ring).
+- Simplification is axis-aligned-aware: only collapse steps, never introduce
+  diagonals — the rectilinear look is the art style, not a limitation.
+
+### Open decisions (silhouette LOD)
+
+- Step-collapse threshold (~5u?) and the concavity-ratio threshold (~1.15?) —
+  tune with real ships once M27's concave hulls exist (they're the test set).
+- Whether the mid-LOD silhouette ever renders for hostiles (sensor-gated), or
+  stays friendly/own-only with dots covering hostiles at all ranges.
 
 ## Open decisions
 - ~~Per-component rects vs silhouette as the default close-range style~~ —

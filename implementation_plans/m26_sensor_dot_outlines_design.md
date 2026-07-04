@@ -1,8 +1,23 @@
 # M26 — Sensor-dot outlines (v2: the outline is measured, not given)
 
-Status: PLANNED. Depends on: M25 (renders through the outline pass; uses the
-geometry helpers). Design: `design_ideas/ship_outline_rendering.md` —
-"Decided path", v2 section.
+Status: DONE (2026-07-04). Depends on: M25. Design:
+`design_ideas/ship_outline_rendering.md` — "Decided path", v2 section.
+
+Shipped: `scripts/sensors/silhouette_sampler.gd` (pure analytic slab test
+with pinned contracts, nearest-entry sample, subtense-bin math),
+`_sample_outline_dots` in the sweep's correlate-tracks path (refresh-tick
+only, subtended bins only, target-local dots, 192-dot ring buffer, TTL
+pruning on the contact-decay clock — sensors going dark cannot leave ghost
+outlines), nav-panel `_dot_draw_list` seam + demotion rule (identified
+friendlies keep v1 rects, hostiles get dots only, keyed off the SAME
+classification strings the blip colors use), `test_sensor_dots.gd` (all 11
+items). Executed across two agents (the first died at a session limit after
+completing the implementation; a finisher verified/fixed the tests). Three
+test-file-only fixes, none weakening assertions (verified): a phase-driver
+dead-end, a missing sensor_heading term in the item-5 harness, and an
+even-bin-count seam degeneracy (target sat exactly on a bin boundary for
+8 bins — fixed by a half-bin heading offset). Avoidance clearance still
+662u, unchanged through M25+M26.
 
 ## Goal
 
