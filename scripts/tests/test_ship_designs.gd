@@ -25,6 +25,7 @@ func setup(_main: Node) -> void:
 	_test_unvalidated_opt_out()
 	_test_catalog_ships_validate_structurally()
 	_test_pd_coherence()
+	_test_layout_warnings_ratchet()
 
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_ship_designs <<<")
@@ -37,17 +38,28 @@ func setup(_main: Node) -> void:
 
 # ---------------------------------------------------------------------------
 # Case 1: Frigate validates clean.
+#
+# M23 note: the frigate's weapon sponsons predate the ship-design skill's
+# hull-first rule (SKILL.md 4a) -- it's the skill's own "BAD" example -- so
+# the two new layout checks (hull_coverage/active_surface) now legitimately
+# warn on it. That's the ratchet in Case 6/_test_layout_warnings_ratchet's
+# job (ok stays true; the exact warning set is frozen and reviewed there per
+# the plan's DONE-note default: accept as historical). This case's original
+# "zero violations of any kind" guarantee is preserved for every OTHER field/
+# severity by filtering out just the two new layout fields here -- nothing
+# this case previously exercised has been weakened.
 # ---------------------------------------------------------------------------
 
 func _test_frigate_validates_clean() -> void:
 	var ship = Frigate.new()
 	var r = ShipDesignValidator.validate(ship)
-	if not r["ok"] or not r["violations"].is_empty():
+	var non_layout_violations: Array = r["violations"].filter(func(v): return v["field"] != "hull_coverage" and v["field"] != "active_surface")
+	if not r["ok"] or not non_layout_violations.is_empty():
 		print("Frigate did NOT validate clean -- violations:")
 		for v in r["violations"]:
 			print("  component_id=", v["component_id"], " field=", v["field"], " reason=", v["reason"], " severity=", v["severity"])
 	_assert(r["ok"] == true, "Case 1: Frigate.new() should validate ok=true, got false")
-	_assert(r["violations"].is_empty(), "Case 1: Frigate.new() should have no violations, got " + str(r["violations"].size()))
+	_assert(non_layout_violations.is_empty(), "Case 1: Frigate.new() should have no non-layout violations, got " + str(non_layout_violations.size()))
 
 # ---------------------------------------------------------------------------
 # Case 2: Malformed fixture fails with a distinct violation per broken rule.
@@ -165,3 +177,127 @@ func _test_pd_coherence() -> void:
 	var rc = ShipDesignValidator.validate(clean)
 	var clean_pd: Array = rc["violations"].filter(func(v): return v["field"] == "pd_sensor")
 	_assert(clean_pd.is_empty(), "Case 5: stock frigate should have no pd_sensor violation")
+
+# ---------------------------------------------------------------------------
+# Case 6/M23: Fleet-audit ratchet for the two layout checks (hull_coverage +
+# active_surface) added in ship_design_validator.gd. See
+# implementation_plans/m23_layout_coverage_checks_design.md items 9-10.
+#
+# EXPECTED_LAYOUT_WARNINGS is a per-ship (by ShipCatalog.SPAWNABLE "name")
+# FROZEN set of {component_id, field} pairs -- enumerated by actually running
+# the validator against the current fleet, then reviewed line-by-line against
+# the plan's sanity anchors before being accepted here. Any future change to a
+# ship's layout (or to the check logic) that adds/removes a warning must
+# update this registry explicitly -- that's the ratchet: warnings can neither
+# silently appear nor silently vanish.
+#
+# Sanity-anchor review notes (plan's three anchors):
+#  - Frigate: port/stbd tubes + broadside lasers DO flag exposed faces (the
+#    sponson layout predates the hull-first skill rule; it's the skill's own
+#    "BAD" example). Confirmed below -- 8 weapon components flagged, plus the
+#    engine (exposed +Y/-Y, the frigate's engine box is narrower than its
+#    aft hull) and the forward laser/missile (each missing one Y flank).
+#  - Small/medium station PD turrets: the plan anchor guessed "~3-face
+#    exposure". Actual ray tracing finds 2 faces exposed per turret (+Y/-Y),
+#    NOT 3 -- the turret's inboard face (toward the arm) DOES touch the hull
+#    cap (e.g. small station's pd_fwd at x 70-90 vs hull_fwd_cap at x 60-70,
+#    which is adjacent, not gapped), so only the two flank faces are exposed,
+#    plus the arm's flank hull (30 wide) doesn't reach the turret's outboard
+#    x-extent at all. Investigated and confirmed correct given the authored
+#    geometry (not a check bug) -- see M23 report.
+#  - Destroyer: near-clean, confirmed -- only 2 warnings total on a ~50
+#    component ship (one aft PD turret's -Y flank exposed, and the forward
+#    fire-control dish masked by a hull plate directly in front of it,
+#    `hull_spine_mid3`, since the dish sits recessed in the spine rather than
+#    flush with the true bow at hull_bow_main).
+# ---------------------------------------------------------------------------
+
+const EXPECTED_LAYOUT_WARNINGS := {
+	"Frigate": [
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "hp_fwd_laser", "field": "hull_coverage"},
+		{"component_id": "hp_fwd_missile", "field": "hull_coverage"},
+		{"component_id": "hp_fwd_missile", "field": "hull_coverage"},
+		{"component_id": "hp_port_laser_1", "field": "hull_coverage"},
+		{"component_id": "hp_port_tube_1", "field": "hull_coverage"},
+		{"component_id": "hp_port_tube_3", "field": "hull_coverage"},
+		{"component_id": "hp_port_laser_2", "field": "hull_coverage"},
+		{"component_id": "hp_stbd_laser_1", "field": "hull_coverage"},
+		{"component_id": "hp_stbd_tube_1", "field": "hull_coverage"},
+		{"component_id": "hp_stbd_tube_3", "field": "hull_coverage"},
+		{"component_id": "hp_stbd_laser_2", "field": "hull_coverage"},
+	],
+	"Cargo Shuttle": [
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+	],
+	"Light Attack Craft": [],
+	"Destroyer": [
+		{"component_id": "hp_aft_pd", "field": "hull_coverage"},
+		{"component_id": "dir_high_res", "field": "active_surface"},
+	],
+	"Buoy": [],
+	"Small Station": [
+		{"component_id": "omni_short_pd", "field": "hull_coverage"},
+		{"component_id": "omni_short_pd", "field": "hull_coverage"},
+		{"component_id": "pd_fwd", "field": "hull_coverage"},
+		{"component_id": "pd_fwd", "field": "hull_coverage"},
+		{"component_id": "pd_aft", "field": "hull_coverage"},
+		{"component_id": "pd_aft", "field": "hull_coverage"},
+		{"component_id": "pd_port", "field": "hull_coverage"},
+		{"component_id": "pd_port", "field": "hull_coverage"},
+		{"component_id": "pd_stbd", "field": "hull_coverage"},
+		{"component_id": "pd_stbd", "field": "hull_coverage"},
+	],
+	"Medium Station": [
+		{"component_id": "omni_short_pd", "field": "hull_coverage"},
+		{"component_id": "omni_short_pd", "field": "hull_coverage"},
+		{"component_id": "pd_fwd", "field": "hull_coverage"},
+		{"component_id": "missile_fwd", "field": "hull_coverage"},
+		{"component_id": "pd_aft", "field": "hull_coverage"},
+		{"component_id": "missile_aft", "field": "hull_coverage"},
+		{"component_id": "pd_port", "field": "hull_coverage"},
+		{"component_id": "missile_port", "field": "hull_coverage"},
+		{"component_id": "pd_stbd", "field": "hull_coverage"},
+		{"component_id": "missile_stbd", "field": "hull_coverage"},
+	],
+}
+
+# Multiset key: "component_id|field" repeated per occurrence (a component can
+# legitimately rack up more than one warning of the same field, e.g. two
+# exposed flank faces), so plain Dictionary-of-pairs set equality would
+# under-count duplicates. Sort both sides' key lists and compare as multisets.
+func _layout_warning_keys(violations: Array) -> Array:
+	var keys: Array = []
+	for v in violations:
+		if v["field"] == "hull_coverage" or v["field"] == "active_surface":
+			keys.append(str(v["component_id"]) + "|" + str(v["field"]))
+	keys.sort()
+	return keys
+
+func _test_layout_warnings_ratchet() -> void:
+	for entry in ShipCatalog.SPAWNABLE:
+		var ship_name: String = entry["name"]
+		var ship = entry["script"].new()
+		var r: Dictionary = ShipDesignValidator.validate(ship)
+
+		_assert(r["ok"] == true, "Case 6: " + ship_name + " should still validate ok=true with layout checks active")
+
+		if not EXPECTED_LAYOUT_WARNINGS.has(ship_name):
+			_assert(false, "Case 6: no EXPECTED_LAYOUT_WARNINGS entry registered for catalog ship '" + ship_name + "'")
+			continue
+
+		var expected_keys: Array = []
+		for pair in EXPECTED_LAYOUT_WARNINGS[ship_name]:
+			expected_keys.append(str(pair["component_id"]) + "|" + str(pair["field"]))
+		expected_keys.sort()
+
+		var actual_keys: Array = _layout_warning_keys(r["violations"])
+
+		if actual_keys != expected_keys:
+			print("Case 6: layout-warning mismatch for ", ship_name, ":")
+			print("  expected: ", expected_keys)
+			print("  actual:   ", actual_keys)
+
+		_assert(actual_keys == expected_keys, "Case 6: " + ship_name + " actual layout-warning set must exactly match EXPECTED_LAYOUT_WARNINGS (both directions)")

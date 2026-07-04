@@ -1,7 +1,25 @@
 # M23 — Mechanized layout checks (hull coverage + active surfaces)
 
-Status: PLANNED. Depends on: nothing (validator-only). Ordered before M24/M27
+Status: DONE (2026-07-04). Depends on: nothing (validator-only). Ordered before M24/M27
 so shape generation never outruns review capacity.
+
+Shipped: `_check_hull_coverage` + `_check_active_surface` in the validator
+(ray march at the damage-raymarch step 2.0 so verdicts agree with real damage
+propagation; omnis coverage-checked on all four faces; engines' active face
+always −X), `scripts/tests/test_layout_checks.gd` (fixture items 1–8), and the
+`EXPECTED_LAYOUT_WARNINGS` ratchet in `test_ship_designs.gd` (multiset, both
+directions, unregistered catalog ships fail). Registry reviewed line-by-line
+in validation phase — anchor notes: frigate 13 warnings (all 4 end-of-row
+sponson weapons flag; middle tubes are genuinely covered by neighboring
+tubes); station PD turrets flag 2 faces, not the guessed ~3 (inboard face
+really touches the arm cap — verified by independent re-trace); destroyer
+near-clean at 2, one of which is a REAL find: `dir_high_res` fire-control
+dish is masked by `hull_spine_mid3` directly in front of it. Decisions:
+frigate sponsons accepted as historical (re-wrap is an M24-style refit
+candidate); destroyer dish flagged as a future fix candidate (harmless today
+— sensors don't raycast yet — but M26 sensor-dot work is where it would start
+to matter). Case 1 of test_ship_designs now filters only the two new layout
+fields; all prior coverage intact.
 Design: `design_ideas/hull_shape_grammar.md` §6; rules being mechanized:
 `.agents/skills/ship-design/SKILL.md` §4a (hull-first) and §4e (active surfaces).
 

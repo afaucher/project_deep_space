@@ -36,6 +36,8 @@ static func validate(ship) -> Dictionary:
 	_check_overlaps(components, violations)
 	_check_connectivity(components, violations)
 	_check_pd_coherence(components, violations)
+	_check_hull_coverage(components, violations)
+	_check_active_surface(components, violations)
 
 	var has_error := violations.any(func(v): return v["severity"] == "error")
 	return {"ok": not has_error, "tier": tier, "violations": violations}
@@ -374,4 +376,199 @@ static func _check_pd_coherence(components: Array, violations: Array) -> void:
 			"reason": "ship has laser (point-defense) weapons but no active sensor fast/fine enough to aim them (need refresh_interval <= " + str(PD_SENSOR_MAX_REFRESH) + "s and num_bins >= " + str(PD_SENSOR_MIN_BINS) + ")",
 			"severity": "warning",
 		})
+
+# ---------------------------------------------------------------------------
+# 3g/3h. M23 -- mechanized layout checks (hull coverage + active surfaces).
+# See implementation_plans/m23_layout_coverage_checks_design.md and
+# design_ideas/hull_shape_grammar.md section 6. These mechanize the
+# ship-design skill's two human-eyeball checklist items (SKILL.md 4a/4e) as
+# validator WARNINGS -- ok stays true regardless, deliberate glass-cannon
+# designs remain legal, the point is visibility not prohibition.
+#
+# Both checks operate purely on the components array (no Ship instance) and
+# reuse the exact geometry semantics of ship.gd's damage raymarch
+# (DAMAGE_RAYMARCH_STEP, Rect2.has_point containment, get_local_aabb's
+# min/max-over-rects) so a check's verdict agrees with how damage actually
+# propagates through the hull.
+# ---------------------------------------------------------------------------
+
+# Mirrors ship.gd's DAMAGE_RAYMARCH_STEP (2.0) -- kept as an independent const
+# (this file must not depend on a Ship instance/autoload) but MUST be kept in
+# sync with ship.gd if that constant ever changes.
+const LAYOUT_RAYMARCH_STEP := 2.0
+const LAYOUT_RAY_START_OFFSET := 0.5  # start the ray this far outside the face, per the plan
+
+# Types the two layout checks apply to. Comms/reactor/hull (and rcs, cargo,
+# living quarters, docking ports) are exempt from both -- only components with
+# a directional purpose (weapon/sensor/engine) have an "active surface" or a
+# coverage expectation in the skill's rules.
+const LAYOUT_CHECKED_TYPES := ["weapons", "sensors", "engines"]
+
+# Cardinal face directions, keyed by name for violation messages.
+const _FACE_DIRS := {
+	"+X": Vector2(1, 0),
+	"-X": Vector2(-1, 0),
+	"+Y": Vector2(0, 1),
+	"-Y": Vector2(0, -1),
+}
+
+# Ship AABB from the components array alone -- same min/max-over-rects
+# construction as ship.gd's get_local_aabb(), so face-exit tests agree with
+# the real ship bounding box the damage raymarch clips rays against.
+static func _components_aabb(components: Array) -> Rect2:
+	var min_x := INF
+	var max_x := -INF
+	var min_y := INF
+	var max_y := -INF
+	for comp in components:
+		if not comp.has("rect"):
+			continue
+		var r: Rect2 = comp["rect"]
+		min_x = min(min_x, r.position.x)
+		max_x = max(max_x, r.position.x + r.size.x)
+		min_y = min(min_y, r.position.y)
+		max_y = max(max_y, r.position.y + r.size.y)
+	if min_x == INF:
+		return Rect2(-10, -10, 20, 20)
+	return Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+
+# Nearest-cardinal mapping for a heading angle, per the plan: 0 -> +X,
+# PI/-PI -> -X, -PI/2 -> -Y, +PI/2 -> +Y. Ties (exactly PI/4 etc.) fall to
+# whichever quadrant wrapf lands closest to; component headings in this
+# codebase are always authored at exact cardinal/intercardinal-safe angles.
+static func _nearest_cardinal(heading: float) -> String:
+	var h := wrapf(heading, -PI, PI)
+	if abs(h) <= PI / 4.0:
+		return "+X"
+	if abs(h) >= 3.0 * PI / 4.0:
+		return "-X"
+	if h > 0.0:
+		return "+Y"
+	return "-Y"
+
+# True if this component's arc is omnidirectional -- no active face concept
+# applies (matches the ship.gd convention at line ~1472: arc_width < TAU-0.01
+# means "not omni").
+static func _is_omni(comp: Dictionary) -> bool:
+	var arc: float = comp.get("arc_width", 0.0)
+	return arc >= TAU - 0.01
+
+# The center point of one cardinal face of a rect.
+static func _face_center(rect: Rect2, dir_name: String) -> Vector2:
+	match dir_name:
+		"+X":
+			return Vector2(rect.position.x + rect.size.x, rect.position.y + rect.size.y * 0.5)
+		"-X":
+			return Vector2(rect.position.x, rect.position.y + rect.size.y * 0.5)
+		"+Y":
+			return Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y + rect.size.y)
+		"-Y":
+			return Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y)
+		_:
+			return rect.get_center()
+
+# March outward from `start` in direction `dir_vec`, at the damage-raymarch
+# step size, until either (a) leaving the ship AABB -- exposed, returns true --
+# or (b) entering some OTHER component's rect -- covered, returns false.
+# `self_id` is excluded from the "crossed a component" test (a component can't
+# cover its own face).
+static func _ray_exits_aabb_uncovered(start: Vector2, dir_vec: Vector2, aabb: Rect2, components: Array, self_id: String) -> bool:
+	var pos := start
+	# Bound the march so a pathological/empty AABB can't spin forever --
+	# the ship's own diagonal is always a safe upper bound on how far a ray
+	# inside (or just outside) the AABB needs to travel to exit it.
+	var max_dist: float = aabb.size.length() + LAYOUT_RAY_START_OFFSET + LAYOUT_RAYMARCH_STEP * 2.0
+	var max_steps: int = int(ceil(max_dist / LAYOUT_RAYMARCH_STEP)) + 2
+
+	for i in range(max_steps):
+		if not aabb.has_point(pos):
+			return true # exited the ship's own bounding box -- exposed
+
+		for comp in components:
+			if comp.get("id", "") == self_id:
+				continue
+			if not comp.has("rect"):
+				continue
+			var r: Rect2 = comp["rect"]
+			if r.has_point(pos):
+				return false # covered -- another component's rect stops the ray
+
+		pos += dir_vec * LAYOUT_RAYMARCH_STEP
+
+	# Ran out of steps without leaving the AABB or hitting a component -- treat
+	# as covered (shouldn't happen given the max_dist bound, but fail closed
+	# rather than false-flagging a warning).
+	return false
+
+# _check_hull_coverage -- for each weapon/sensor/engine, cast an outward ray
+# from the center of each NON-active face (omni components: all four faces,
+# since they have no active face). If the ray exits the ship's
+# component-union AABB without crossing any OTHER component's rect, the face
+# is unarmored from that direction -- warn "exposed face <dir>".
+static func _check_hull_coverage(components: Array, violations: Array) -> void:
+	var aabb := _components_aabb(components)
+
+	for comp in components:
+		var type: String = comp.get("type", "")
+		if not LAYOUT_CHECKED_TYPES.has(type):
+			continue
+		if not comp.has("rect") or not comp.has("id"):
+			continue
+
+		var comp_id: String = comp["id"]
+		var rect: Rect2 = comp["rect"]
+		var omni := _is_omni(comp)
+		var active_face := "" if omni else _active_face_dir(comp, type)
+
+		for dir_name in _FACE_DIRS.keys():
+			if not omni and dir_name == active_face:
+				continue # active face is the active-surface check's job, not coverage's
+
+			var dir_vec: Vector2 = _FACE_DIRS[dir_name]
+			var start: Vector2 = _face_center(rect, dir_name) + dir_vec * LAYOUT_RAY_START_OFFSET
+			if _ray_exits_aabb_uncovered(start, dir_vec, aabb, components, comp_id):
+				violations.append({
+					"component_id": comp_id,
+					"field": "hull_coverage",
+					"reason": "component '" + comp_id + "' has an exposed face (" + dir_name + ") -- no hull or other component covers it from that direction",
+					"severity": "warning",
+				})
+
+# The face in the component's heading direction, mapped to the nearest
+# cardinal. Engines are a special case: their active face is ALWAYS -X
+# (exhaust points aft) regardless of the authored heading field.
+static func _active_face_dir(comp: Dictionary, type: String) -> String:
+	if type == "engines":
+		return "-X"
+	return _nearest_cardinal(comp.get("heading", 0.0))
+
+# _check_active_surface -- the face in the component's active direction must
+# reach the ship AABB edge WITHOUT crossing another component's rect, else the
+# component's functional surface (barrel/dish/exhaust) is masked -- warn
+# "masked active face". Omni components are exempt (no active face concept).
+static func _check_active_surface(components: Array, violations: Array) -> void:
+	var aabb := _components_aabb(components)
+
+	for comp in components:
+		var type: String = comp.get("type", "")
+		if not LAYOUT_CHECKED_TYPES.has(type):
+			continue
+		if not comp.has("rect") or not comp.has("id"):
+			continue
+		if _is_omni(comp):
+			continue
+
+		var comp_id: String = comp["id"]
+		var rect: Rect2 = comp["rect"]
+		var dir_name := _active_face_dir(comp, type)
+		var dir_vec: Vector2 = _FACE_DIRS[dir_name]
+		var start: Vector2 = _face_center(rect, dir_name) + dir_vec * LAYOUT_RAY_START_OFFSET
+
+		if not _ray_exits_aabb_uncovered(start, dir_vec, aabb, components, comp_id):
+			violations.append({
+				"component_id": comp_id,
+				"field": "active_surface",
+				"reason": "component '" + comp_id + "' has a masked active face (" + dir_name + ") -- another component blocks its functional surface before reaching the hull edge",
+				"severity": "warning",
+			})
 
