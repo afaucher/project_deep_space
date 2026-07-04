@@ -5,6 +5,8 @@ const Ship = preload("res://scripts/ships/ship.gd")
 const ShipDesignValidator = preload("res://scripts/components/ship_design_validator.gd")
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
+const Freighter = preload("res://scripts/ships/freighter.gd")
+const Pinnace = preload("res://scripts/ships/pinnace.gd")
 
 # M9b: validates ShipDesignValidator against the spec chart in
 # component_spec.gd. Validation is synchronous/pure (reads ship_components +
@@ -26,6 +28,7 @@ func setup(_main: Node) -> void:
 	_test_catalog_ships_validate_structurally()
 	_test_pd_coherence()
 	_test_layout_warnings_ratchet()
+	_test_m27_parameter_table_conformance()
 
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_ship_designs <<<")
@@ -289,6 +292,32 @@ const EXPECTED_LAYOUT_WARNINGS := {
 		{"component_id": "engine_main", "field": "hull_coverage"},
 		{"component_id": "engine_main", "field": "hull_coverage"},
 	],
+	# M27 -- freighter (spine + cargo pods, HEAVY) and pinnace (tapered dart,
+	# LIGHT). Both frozen the same way as the rest of this table: enumerated
+	# by running the validator against the actual authored geometry, then
+	# reviewed line-by-line before being accepted here.
+	#  - Freighter: engine_main's flanks (+/-Y) are open to the side, same
+	#    idiom as cargo_shuttle/ore_shuttle's engine_main above (an engine
+	#    bolted onto the aft face of a frame, narrower than the frame's own
+	#    wall thickness on its sides) -- expected, not a design flaw.
+	"Freighter": [
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+	],
+	#  - Pinnace: unarmored dart per the M27 plan ("thin/no hull plating IS
+	#    the point") -- the bow sensor's tip (+X, nothing beyond the hull's
+	#    own nose) and both flanks (+/-Y, a 10x8 station with no side
+	#    coverage) are honestly exposed, plus the aft engine's flanks
+	#    (same idiom as every other hull's engine_main above). Accepted as
+	#    real, not re-wrapped -- per the plan's explicit "accept the honest
+	#    coverage warnings" option for this ship.
+	"Pinnace": [
+		{"component_id": "sensor_fwd", "field": "hull_coverage"},
+		{"component_id": "sensor_fwd", "field": "hull_coverage"},
+		{"component_id": "sensor_fwd", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+	],
 }
 
 # Multiset key: "component_id|field" repeated per occurrence (a component can
@@ -338,3 +367,43 @@ func _test_layout_warnings_ratchet() -> void:
 			print("  actual:   ", actual_keys)
 
 		_assert(actual_keys == expected_keys, "Case 6: " + ship_name + " actual layout-warning set must exactly match EXPECTED_LAYOUT_WARNINGS (both directions)")
+
+# ---------------------------------------------------------------------------
+# Case 7/M27: parameter-table conformance for the freighter + pinnace --
+# derived mass within +/-10% of the target row in
+# design_ideas/ship_parameter_table.md's M27 pre-step table, derived accel
+# within the row's stated band, and max_speed/max_omega inside the ship's
+# own tier's HANDLING_BANDS (a real assert, not just a printed warning, per
+# the M27 test plan item 2).
+# ---------------------------------------------------------------------------
+
+const M27_TARGETS := {
+	"Freighter": {"mass": 300.0, "mass_tolerance": 0.10, "accel_lo": 8.0, "accel_hi": 12.0, "tier": ComponentSpec.Tier.HEAVY},
+	"Pinnace": {"mass": 109.0, "mass_tolerance": 0.10, "accel_lo": 70.0, "accel_hi": 90.0, "tier": ComponentSpec.Tier.LIGHT},
+}
+
+func _test_m27_parameter_table_conformance() -> void:
+	for ship_name in M27_TARGETS.keys():
+		var target: Dictionary = M27_TARGETS[ship_name]
+		var ship = Freighter.new() if ship_name == "Freighter" else Pinnace.new()
+
+		var mass: float = ship.get_ship_mass()
+		var thrust: float = ship.get_ship_max_thrust()
+		var accel: float = thrust / mass if mass > 0.0 else 0.0
+
+		var target_mass: float = target["mass"]
+		var tolerance: float = target["mass_tolerance"]
+		var mass_lo: float = target_mass * (1.0 - tolerance)
+		var mass_hi: float = target_mass * (1.0 + tolerance)
+		_assert(mass >= mass_lo and mass <= mass_hi, "Case 7: " + ship_name + " mass=" + str(mass) + " should be within +/-" + str(tolerance * 100.0) + "% of target " + str(target_mass) + " (band [" + str(mass_lo) + ", " + str(mass_hi) + "])")
+
+		_assert(accel >= target["accel_lo"] and accel <= target["accel_hi"], "Case 7: " + ship_name + " accel=" + str(accel) + " should be within target band [" + str(target["accel_lo"]) + ", " + str(target["accel_hi"]) + "]")
+
+		var tier: int = target["tier"]
+		var handling: Dictionary = ComponentSpec.HANDLING_BANDS.get(tier, {})
+		var speed_band: Array = handling["max_speed"]
+		var omega_band: Array = handling["max_omega"]
+		_assert(ship.max_speed >= speed_band[0] and ship.max_speed <= speed_band[1], "Case 7: " + ship_name + " max_speed=" + str(ship.max_speed) + " should be inside tier " + str(tier) + " handling band " + str(speed_band))
+		_assert(ship.max_omega >= omega_band[0] and ship.max_omega <= omega_band[1], "Case 7: " + ship_name + " max_omega=" + str(ship.max_omega) + " should be inside tier " + str(tier) + " handling band " + str(omega_band))
+
+		print("[Case 7/M27] ", ship_name, ": mass=", mass, " accel=", accel, " max_speed=", ship.max_speed, " max_omega=", ship.max_omega)

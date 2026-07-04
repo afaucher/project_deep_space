@@ -118,9 +118,23 @@ const COMPONENT_BANDS := {
 		Tier.STRUCTURE: {"range": [20000.0, 60000.0], "cooldown_max": [1.0, 10.0]},
 	},
 	"living_quarters": {
+		# M27 -- LIGHT (pinnace passenger cabin) + HEAVY (freighter crew quarters)
+		# rows added so these components are banded, not band-skipped, at those
+		# tiers (see design_ideas/ship_parameter_table.md M27 pre-step and
+		# implementation_plans/m27_catalog_expansion_design.md). Sized off the
+		# same health-per-area discipline as the existing STRUCTURE row (small
+		# station: 4000 area / 4000 health = 1.0 hpa; medium station: 16000/12000
+		# = 0.75 hpa) applied at each tier's own expected compartment area, kept
+		# strictly narrower than STRUCTURE's ceiling (stations are the largest
+		# hulls in the fleet) while wide enough not to fight authoring.
+		Tier.LIGHT: {"health": [50.0, 3000.0]},
+		Tier.HEAVY: {"health": [300.0, 9000.0]},
 		Tier.STRUCTURE: {"health": [100.0, 10000.0]},
 	},
 	"cargo_bay": {
+		# M27 -- same rationale/derivation as living_quarters above.
+		Tier.LIGHT: {"health": [50.0, 3000.0]},
+		Tier.HEAVY: {"health": [300.0, 9000.0]},
 		Tier.STRUCTURE: {"health": [100.0, 10000.0]},
 	},
 	"life_support": {

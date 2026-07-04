@@ -26,6 +26,56 @@ are independent *caps* on top of that.
 | Light Attack Craft | T1 LIGHT | ~12 | ~120 | 55 | ~1500 | **~125** | 2200 | 4.0 | 1 laser (250/3k), 1 missile (12k) | 1–2 (25k) | 20k |
 | Destroyer | T3 HEAVY | ~220 | ~7000 | ~500 (dual) | ~5500 | **~25** | 700 | 1.2 | 5× laser, 10× missile tube (28k+) | 6 (80k+) | 60k |
 
+## M27 pre-step — target rows for the five unbuilt ships (DRAFT)
+
+Per `implementation_plans/m27_catalog_expansion_design.md`: targets first,
+authoring to targets, validation against targets (M9c discipline). Freighter
+and pinnace are authored THIS milestone; mine/defence pod/asteroid station are
+later stages authoring to these same rows. Derived-mass shortcut applies
+throughout (mass ≈ total_rect_area × 0.036 at density 20 — the STRUCTURE-tier
+rock shell of the asteroid station is the one exception, authored at much
+higher density on purpose, so its row's mass is *not* back-solvable from that
+shortcut).
+
+| Ship | Tier | Mass | Hull HP | Reactor pwr | Thrust | accel (T/m) | max_speed | max_omega | Weapons | Sensors | Comms |
+|------|------|------|---------|-------------|--------|-------------|-----------|-----------|---------|---------|-------|
+| Freighter | HEAVY | ~316 (authored) | ~500-1900/plate (spine+pod frames) | 260 | 3200 | **~10.1** | 400 | 0.8 | none (unarmed) | 1 omni (30k) | 42k |
+| Pinnace | LIGHT | ~109 (authored) | ~100-280/station (taper stations) | 55 | 8800 | **~80.7** | 2000 | 3.0 | none (unarmed) | 1 active (20k) | 20k |
+| Mine | DRONE | ~4 | ~60 | ~25 | ~700 (station-keeping only) | **~175** | 150 | 1.5 | 1× laser (DRONE STANDARD, 150/2200) | 1 active short + 1 passive_em | none |
+| Defence pod | STRUCTURE | ~900 | ~9000 | ~1500 | n/a (immobile) | n/a | 0 | 0 | 4-8× PD laser + missile tubes (all-around) | 2+ omni/PD (structure-band) | 90k |
+| Asteroid station | STRUCTURE | ~4000+ (density ≥300 shell) | ~20000 | ~1500 | n/a (immobile) | n/a | 0 | 0 | PD + missiles (embedded) | sensors OFF by default (cold posture) | 90k, transponder off |
+
+Notes on the derivation:
+- **Freighter** authored total rect area ≈ 8788 (spine frame + engine/nose +
+  two full cargo-pod frames + cargo_bay fill + living_quarters, mirrored
+  port/stbd) → mass ≈ 8788 × 0.036 ≈ 316, inside the plan's "~300" target
+  (±10%). accel ~10.1 sits at the low end of the plan's "~8–12" band — thrust
+  3200 is a raw-authored stat, well BELOW the HEAVY Parts engine bands (and
+  the component_spec.gd HEAVY engine band floor of 10000) since those were
+  calibrated against combat hulls, not a ponderous unarmed hauler an order of
+  magnitude lighter (expected WARNING, not an error — see freighter.gd's
+  grammar-friction note). HEAVY handling band is max_speed [300,900] /
+  max_omega [0.6,1.8] — 400/0.8 lands low in band, matching "ponderous
+  hauler." Bounding radius ≈ 95.5 — large enough that the docking-berth
+  standoff had to become bounding-radius-aware (see test_freighter_docking.gd).
+- **Pinnace** authored total rect area ≈ 3028 (ten 10-wide taper/function
+  stations spanning x -55..55, including the 1200-area/30-pax living_quarters
+  run) → mass ≈ 3028 × 0.036 ≈ 109 — heavier than the pre-authoring ~55
+  estimate because the 1200-area cabin alone contributes ~43 mass; the target
+  row above reflects the real authored geometry, not the earlier guess.
+  accel ~80.7 needs thrust ≈ 80 × 109 ≈ 8720 — authored at 8800, ABOVE the
+  LIGHT engine band ceiling (7000) on purpose (same "oversized engine for its
+  mass" pattern as the LAC, pushed further since "fast" is this hull's entire
+  role). LIGHT handling band is max_speed [1000,3000] / max_omega [2,6] —
+  2000/3.0 sits mid-band, "fast" without maxing the band.
+- **Mine** (later stage, row provided for authoring continuity): DRONE
+  handling band is [0,200]/[0,3] — 150/1.5 fits "slow" station-keeping per the
+  concept. Single laser at DRONE STANDARD mark (150 dmg/2200 range, per
+  `parts_catalog.gd`).
+- **Defence pod / asteroid station** (later stages): STRUCTURE handling band
+  is flat [0,0]/[0,0] (immobile), so max_speed/max_omega are both 0 by
+  construction, not a design choice.
+
 ## Patterns worth noting
 
 1. **accel is the spine.** The proposed accel column reads
@@ -90,6 +140,15 @@ classification at once. heat/EM output govern detectability and identity.
 | Cargo Shuttle | ~40 | moderate, civilian (not hiding) | VESSEL |
 | Light Attack Craft | ~22 | lower EM, wants to close unseen | small VESSEL |
 | Destroyer | ~75 | loud — big reactor + sensor suite, can't hide | large VESSEL |
+
+### M27 five — signature posture (pre-step)
+| Ship | cross_section | density | heat/EM posture | reads as |
+|------|---------------|---------|-----------------|----------|
+| Freighter | ~90 (large hull, not hiding) | 20 (civilian standard) | moderate — one omni search dish, civilian reactor floor | large VESSEL |
+| Pinnace | ~35 (small physical cross-section, thin dart) | 20 (unarmored — see design decision) | low-moderate — small reactor, one search dish, no PD emitters | small VESSEL |
+| Mine | ~8 (reads near ordnance, deliberately) | 20 | designed to run dark long-term (future work); this milestone's baseline still carries one small always-on active short-range sensor + passive_em to satisfy PD-coherence, so its EM floor is low-but-nonzero, not zero | small VESSEL (ORDNANCE-adjacent; cs sits just above the <10 line) |
+| Defence pod | ~90 (STRUCTURE, doesn't hide) | 20 | loud — heavy PD sensor suite, always-on | large VESSEL |
+| Asteroid station | ~120 (physically large) | ≥300 (rock shell, past the asteroid classifier line) | cold/dark by default (sensors + reactor posture OFF) → reads ASTEROID; powering up flips it to a loud VESSEL within the classification window | **ASTEROID** (default) / VESSEL (powered) |
 
 ### Signature observations
 7. **Apparent size ≠ physical size.** `cross_section` is authored, so we can
