@@ -436,7 +436,9 @@ silhouette (mid, auto-selected) → AABB box → blip.
 - ~~How much of a hostile's outline sensor resolution should reveal~~ —
   **decided: v2's dots make this mechanical** (you see where your rays landed),
   no separate gating policy needed.
-- Whether collision becomes non-circular now or stays a (size-correct) circle.
+- ~~Whether collision becomes non-circular~~ — **planned** as
+  `implementation_plans/m28_m30_collision_roadmap.md` (M28 kinetic damage →
+  M29 convex hulls → M30 decomposed concave, holes ignored).
   Findings (2026-07-04): Godot's broadphase already makes polygon collision
   "progressive" for free (AABB cull first, exact narrowphase only for
   near-contact pairs), so at bubble-scale live counts there is no perf case
