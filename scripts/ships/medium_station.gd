@@ -20,7 +20,6 @@ func _init() -> void:
 			"rect": Rect2(50, -20, 20, 40),
 			"health": 1500.0, "max_health": 1500.0, "density": 20.0,
 			"range": 200000.0,
-			"transponder_custom_name": "Medium Deep Space Station",
 		},
 		{
 			"id": "reactor_fwd",
@@ -262,6 +261,7 @@ func _init() -> void:
 		},
 	]
 	super()
+	ship_name = "Medium Deep Space Station"
 
 # One berth below the station, clear of the hull collision circle (~210u) so
 # force-capture doesn't fight the physics body. Nose faces the station.

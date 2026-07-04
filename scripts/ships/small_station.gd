@@ -11,7 +11,6 @@ func _init() -> void:
 			"rect": Rect2(-20, -20, 40, 40),
 			"health": 1500.0, "max_health": 1500.0, "density": 20.0,
 			"range": 100000.0,
-			"transponder_custom_name": "Small Outpost",
 		},
 		
 		# --- Forward Arm (X=20..60, Y=-20..20) ---
@@ -195,6 +194,7 @@ func _init() -> void:
 		},
 	]
 	super()
+	ship_name = "Small Outpost"
 
 # One berth below the station, clear of the hull collision circle (~150u) so
 # force-capture doesn't fight the physics body. Nose faces the station.

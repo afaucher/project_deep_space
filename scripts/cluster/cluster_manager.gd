@@ -25,7 +25,8 @@ var cluster_def = null           # the authored ClusterDef (for the nav computer
 
 func _init() -> void:
 	policy = LivenessPolicy.new()
-	policy.configure_bubble(45000.0, 60000.0)
+	# policy.configure_bubble(45000.0, 60000.0)
+	policy.configure_full_sim()
 
 func _ready() -> void:
 	if live_parent == null:
@@ -72,8 +73,9 @@ func _promote(rec) -> void:
 	# Ship by a method only it has, avoiding a bare `is Ship` class-name reference.
 	var is_ship: bool = node.has_method("get_ship_mass")
 	if is_ship:
-		node.owner_id = rec.id
+		node.owner_id = 0 # 0 means server-owned NPC; rec.id overlaps with peer IDs
 		node.iff_tags = rec.iff_tags.duplicate(true)
+		node.ship_name = rec.name
 	# Transform before add_child (body not yet in the physics world -> no teleport
 	# warning); velocities after, once it is registered.
 	node.position = rec.pos

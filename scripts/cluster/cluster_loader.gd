@@ -18,6 +18,7 @@ static func load_into(def, manager) -> void:
 	for e in def.entities:
 		var rec = ClusterEntity.new()
 		rec.id = e["id"]
+		rec.name = e.get("name", "")
 		rec.hull_script = e["hull"]
 		rec.kind = e.get("kind", ClusterEntity.Kind.TRAFFIC)
 		rec.pos = e["pos"]

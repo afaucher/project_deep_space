@@ -345,7 +345,7 @@ func get_active_transponder_data() -> Dictionary:
 	for c in get_components_by_type("comms"):
 		if is_component_powered(c["id"]) and c.get("transponder_active", true):
 			var data = {
-				"name": ship_name,
+				"name": c.get("transponder_custom_name", ship_name),
 				"flag": c.get("flag", "")
 			}
 			if not c.get("transponder_share_name", true):
@@ -1248,6 +1248,10 @@ func _physics_process(delta: float) -> void:
 				if _contact_tombstones.has(c_id):
 					continue
 				var external_contact = relayed_contacts[c_id]
+				# Do not merge contacts representing ourselves (avoids "ghosts" at our own position)
+				if external_contact.get("instance_id", -1) == get_instance_id():
+					continue
+				
 				if not active_contacts.has(c_id):
 					active_contacts[c_id] = external_contact.duplicate(true)
 				else:

@@ -16,6 +16,7 @@ enum Kind { STATION, ASTEROID, BEACON, TRAFFIC, WORMHOLE, PLAYER }
 
 # Identity / construction.
 var id: int = -1
+var name: String = ""
 var hull_script: Script = null      # res://scripts/ships/*.gd or asteroid.gd to instantiate on promote
 var iff_tags: Array = []
 var kind: int = Kind.TRAFFIC
