@@ -1,6 +1,8 @@
 # Close-range ship outline rendering & geometry consistency
 
-Status: design exploration. No implementation yet.
+Status: design — v1/v2 approach decided (see "Decided path" below). No
+implementation yet. Shape variety on the authoring side is the companion doc
+`hull_shape_grammar.md`; outlines are what make that variety visible.
 
 ## Motivation
 
@@ -19,13 +21,13 @@ This also forces a question we've quietly dodged: **do our collision and contact
 
 ## What we have to build on
 
-- The world is a top-down zoomable tactical map ([navigation_panel.gd](../scripts/panels/navigation_panel.gd),
-  world→screen transform, zoom 0.01–2.0).
+- The world is a top-down zoomable tactical map ([navigation_panel.gd](../scripts/ui/navigation_panel.gd),
+  world→screen transform, zoom 0.001–5.0 since the campaign-scale widening).
 - Ships are `RigidBody2D`s built from **component rects** (the loadout in each
   ship class). Those rects ARE the true geometry — position + size in ship-local
   space, forward = +X.
 - Component rects already partially flow to the client: the nav panel reads each
-  weapon's `rect` to draw firing arcs ([navigation_panel.gd:233](../scripts/panels/navigation_panel.gd:233)).
+  weapon's `rect` to draw firing arcs ([navigation_panel.gd](../scripts/ui/navigation_panel.gd)).
   So at least some rect data crosses the wire today; full-loadout availability
   for arbitrary contacts needs confirming/extending.
 
@@ -37,7 +39,7 @@ There are **four different notions of a ship's "size," and they don't agree:**
 |--------|--------|-------|------------------------------|
 | Component AABB | `_cached_bbox_min/max` ([ship.gd:461](../scripts/ships/ship.gd:461)) | per-ship, from rects | **Yes** — but used only for the damage raymarch |
 | Collision circle | `SHIP_COLLISION_RADIUS` ([ship.gd:601](../scripts/ships/ship.gd:601)) | **flat 50** for every ship | No |
-| Nav "physical bounds" ring | hardcoded `draw_arc(pos, 50.0, ...)` ([navigation_panel.gd:223](../scripts/panels/navigation_panel.gd:223)) | **literal 50** | No |
+| Nav "physical bounds" ring | hardcoded `draw_arc(pos, 50.0, ...)` ([navigation_panel.gd](../scripts/ui/navigation_panel.gd)) | **literal 50** | No |
 | `cross_section` | authored sensor scalar ([ship.gd:431](../scripts/ships/ship.gd:431)) | 50 / 75 / 10 / 2 | No — it's a sensor signature, not physical units |
 
 **Concrete mismatch, made worse by M9c:**
@@ -89,7 +91,7 @@ silhouette edge), for realism, cheapness, and a clearer sense of orientation.
   normal has positive dot with (viewer − target). For per-component rects, dim or
   drop the far-side components.
 - Honest caveat: in flat top-down with no lighting this is **subtle** — it mostly
-  conveys facing, which the existing rotation indicator ([navigation_panel.gd:218](../scripts/panels/navigation_panel.gd:218))
+  conveys facing, which the existing rotation indicator ([navigation_panel.gd](../scripts/ui/navigation_panel.gd))
   already hints at. It pays off more if we ever add shading/pseudo-3D. Treat as
   polish to layer *after* basic outlines work, not a first cut.
 
@@ -231,9 +233,83 @@ feeds facing-side rendering and nose-on tactics). Recommend shipping the scalar
 baseline first (Option C with projected-width `f`), and treating aspect-dependence
 as the natural follow-on once outline rendering and the facing-side cull exist.
 
+## Decided path: v1 static fade-in, v2 sensor-dot outlines
+
+Primary use case, decided: **close-range navigation** — running into something
+you can't see is bad. Stations on a docking approach, rocks in a field, a tiny
+shuttle crossing your bow. Differentiating a station from a shuttle at a finer
+grain than the cross_section scalar is the point; combat-intel gating is
+secondary and deferred to v2's mechanism.
+
+### v1 — static true outline, distance-gated (build first)
+
+Draw the contact's **actual component rects** (style 1 above), rotated to its
+heading, alpha-faded by distance. No sensor honesty yet — ground truth, gated
+only by range:
+
+- `OUTLINE_FADE_START := 3000.0` — roughly the shortest laser range; begin
+  fading in.
+- `OUTLINE_FULL := 1500.0` — matches the existing `omni_collision` sensor range
+  (frigate/destroyer carry one: 1500u, 8 bins, 0.1s), which is the in-fiction
+  instrument for "I can see its shape now."
+- Alpha = `1 - clamp((dist - FULL) / (START - FULL), 0, 1)`, on top of the
+  zoom-LOD pixel threshold above (no point drawing an outline 2px wide).
+- Stations use a much larger fade window (scale is the point — see above).
+
+Info-leak note: yes, this reveals a hostile's true layout inside 3000u. At that
+range you are *inside its laser envelope* — the fight is already at knife range
+and the leak is moot. Acceptable for v1; v2 replaces the leak with an honest
+mechanism rather than a gating policy.
+
+### v2 — sensor dots: the outline is measured, not given
+
+Each active sensor already sweeps angular bins. Extend the sweep: for a contact
+inside outline range, the bins that cover its angular subtense **raycast into
+the target's actual component-rect silhouette** (ray–AABB slab test per rect in
+the target's local frame; nearest entry point wins) and return a **surface
+point at measured distance** instead of just a center-of-mass blip. Those dots
+accumulate into a point cloud the nav panel renders — the outline is literally
+built from sensor returns.
+
+What this buys:
+- **Outline quality = sensor quality, for free.** The 8-bin collision sensor
+  paints ~8 blobby dots — enough to not hit the thing. The 3600-bin/0.1s
+  fire-control sensor paints a crisp hull trace inside 5000u — fire control
+  resolving fine shape is exactly the right fiction. A coarse 36-bin search
+  dish contributes almost nothing. No hand-authored "detail level" policy; the
+  existing bins/refresh/range stats *are* the policy.
+- **Honest hostiles.** No layout leak: you know the shape only where your rays
+  have touched it. A target showing you its nose keeps its broadside secret.
+- Dots age and fade like contacts do (~1–2s), so a rotating or maneuvering
+  target smears honestly instead of teleporting its outline.
+
+Cost is bounded: only contacts within outline range (a handful), only on that
+sensor's refresh tick, and only the bins subtending the target (a 60u-radius
+ship at 3000u subtends ~2.3° ≈ 23 bins of a 3600-bin sensor, not all 3600).
+The ray–rect math is the damage raymarch's geometry reused at coarser grain.
+
+### Build order (revised — planned as M25/M26, see
+`implementation_plans/m21_m27_shape_outline_roadmap.md`)
+
+1. **M25:** `Ship.get_local_aabb()` / `get_bounding_radius()` (unchanged from
+   above) — also fixes the bounds-ring/collision lies, which matter for the
+   same "don't hit what you can't see" reason.
+2. **M25:** v1 static outline pass in the nav panel, distance fade as spec'd.
+3. **M25:** Repoint the nav bounds ring at derived geometry.
+4. **M26:** v2 sensor-dot sweep extension + dot rendering; demote the v1
+   static outline to friendlies/own-ship only (they datalink their true
+   layout), hostiles get dots only.
+5. Then, independently: silhouette LOD, facing-side cull, Option C signature
+   work (unscheduled).
+
 ## Open decisions
-- Per-component rects vs silhouette as the *default* close-range style.
+- ~~Per-component rects vs silhouette as the default close-range style~~ —
+  **decided: per-component rects** (v1), sensor dots (v2).
+- ~~How much of a hostile's outline sensor resolution should reveal~~ —
+  **decided: v2's dots make this mechanical** (you see where your rays landed),
+  no separate gating policy needed.
 - Whether collision becomes non-circular now or stays a (size-correct) circle.
-- How much of a hostile's outline sensor resolution should reveal.
 - Contact dimension: scalar anchored baseline (Option C) now vs aspect-dependent
   signature later — and which `f(true size)` formula keeps the missile "ordnance."
+- v2: do dots persist per-contact in the fusion store (alongside the existing
+  contact fields) or in a separate render-side cache keyed by instance id?
