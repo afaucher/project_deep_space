@@ -2,7 +2,7 @@ extends Control
 
 signal contact_selected(c_id: String)
 
-const WORLD_HALF_EXTENT := 200000.0 # map clamps the camera/grid to +/- this on each axis
+const WORLD_HALF_EXTENT := 260000.0 # map clamps the camera/grid to +/- this on each axis -- matches the home cluster's +/-250k bounds with margin
 
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
@@ -40,9 +40,13 @@ func _ready() -> void:
 	overlay.add_child(zoom_label)
 	
 	zoom_slider = HSlider.new()
-	zoom_slider.min_value = 0.01
-	zoom_slider.max_value = 2.0
-	zoom_slider.step = 0.001
+	# Range widened for campaign scale (the home cluster spans ~500k units, well
+	# past what 0.01 could zoom out to show) -- a few more steps at both ends:
+	# out far enough to see the whole cluster, in tighter for close maneuvering
+	# (docking approaches etc).
+	zoom_slider.min_value = 0.001
+	zoom_slider.max_value = 5.0
+	zoom_slider.step = 0.0005
 	zoom_slider.exp_edit = true
 	zoom_slider.value = 0.5
 	zoom_slider.custom_minimum_size = Vector2(100, 20)
