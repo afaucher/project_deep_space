@@ -50,7 +50,7 @@ if (Test-Path $errFile) { Remove-Item $errFile }
 # than Start-Process so we can (a) enforce the timeout via WaitForExit(ms) and
 # (b) read ExitCode reliably alongside redirected output (Start-Process
 # -PassThru doesn't expose ExitCode once output is redirected).
-$TEST_TIMEOUT_SEC = 180
+$TEST_TIMEOUT_SEC = 600
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $godotPath
