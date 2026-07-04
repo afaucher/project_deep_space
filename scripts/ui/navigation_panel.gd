@@ -2,7 +2,115 @@ extends Control
 
 signal contact_selected(c_id: String)
 
+const ComponentSpec = preload("res://scripts/components/component_spec.gd")
+
 const WORLD_HALF_EXTENT := 260000.0 # map clamps the camera/grid to +/- this on each axis -- matches the home cluster's +/-250k bounds with margin
+
+# M25 -- close-range outline v1 (design_ideas/ship_outline_rendering.md "Decided
+# path"). Ships fade in between FADE_START (~shortest laser range) and FULL
+# (matches the omni_collision sensor range -- the in-fiction "I can see its
+# shape now" instrument). Stations get a much larger window since conveying
+# scale (a station dwarfing a frigate) is the whole point.
+const OUTLINE_FADE_START := 3000.0
+const OUTLINE_FULL := 1500.0
+const STATION_OUTLINE_FADE_START := 12000.0
+const STATION_OUTLINE_FULL := 6000.0
+
+# Below this many screen pixels of bounding radius, an outline is too small to
+# read -- keep the cheap blip/marker instead (matches the v1 design doc's LOD
+# gate, "~12px", applied here as a radius-in-pixels floor).
+const OUTLINE_LOD_MIN_PX := 6.0
+
+# Signature-scaled fallback for _bounds_radius_for when a contact's instance
+# isn't live/valid (dead-reckoned after a kill, or never resolvable). Keeps
+# the bounds ring's scale roughly honest (bigger cross_section -> bigger
+# ring) instead of collapsing to one flat guess for every unknown contact.
+const BOUNDS_FALLBACK_MIN := 50.0
+const BOUNDS_FALLBACK_CS_SCALE := 1.0
+
+# Component-type -> outline color. Falls back to a neutral gray for any type
+# not listed (new component families shouldn't silently fail to draw).
+const COMPONENT_TYPE_COLORS := {
+	"hull": Color(0.6, 0.6, 0.6),
+	"weapons": Color(1.0, 0.3, 0.0),
+	"sensors": Color(0.2, 0.8, 0.8),
+	"engines": Color(0.3, 0.6, 1.0),
+	"reactor": Color(1.0, 0.8, 0.0),
+	"rcs": Color(0.5, 0.5, 1.0),
+	"comms": Color(0.8, 0.4, 1.0),
+	"docking_port": Color(0.4, 1.0, 0.4),
+	"cargo_bay": Color(0.7, 0.5, 0.3),
+	"living_quarters": Color(0.9, 0.9, 0.6),
+}
+const COMPONENT_TYPE_COLOR_DEFAULT := Color(0.7, 0.7, 0.7)
+
+# Pure fade function -- alpha 1.0 at/inside `full`, 0.0 at/beyond `start`,
+# linear between, clamped both sides. Kept as a static pure function (no draw
+# calls, no node state) so it's directly unit-testable per the M25 plan.
+static func outline_alpha(dist: float, full: float, start: float) -> float:
+	if start <= full:
+		return 1.0 if dist <= full else 0.0
+	return 1.0 - clampf((dist - full) / (start - full), 0.0, 1.0)
+
+# True if this ship instance should use the station (much larger) fade window
+# -- STRUCTURE tier is the fleet's established "is a station" test (see
+# main.gd/_spawn_ship and cluster_manager.gd, both gate on the same field).
+static func _is_station_ship(ship_instance) -> bool:
+	if ship_instance == null or not is_instance_valid(ship_instance):
+		return false
+	return ship_instance.get("ship_tier") == ComponentSpec.Tier.STRUCTURE
+
+# Live/valid target's true get_bounding_radius() when resolvable; otherwise a
+# signature-scaled default that at least tracks cross_section instead of one
+# flat guess for every unknown contact. Never returns 0 -- repoints the old
+# hardcoded 50-radius "physical bounds" ring at real geometry (or an honest
+# stand-in) instead of a flat lie for every hull size.
+static func _bounds_radius_for(contact: Dictionary) -> float:
+	var instance_id: int = contact.get("instance_id", -1)
+	if instance_id != -1:
+		var inst = instance_from_id(instance_id)
+		if inst != null and is_instance_valid(inst) and inst.has_method("get_bounding_radius"):
+			return inst.get_bounding_radius()
+
+	var cross_section: float = contact.get("signature", {}).get("cross_section", 0.0)
+	return max(BOUNDS_FALLBACK_MIN, cross_section * BOUNDS_FALLBACK_CS_SCALE)
+
+# Testable seam: builds the per-component draw entries for a contact's outline
+# WITHOUT issuing any draw_* calls, so the transform math (rotate-to-heading +
+# translate-to-world) can be asserted directly. Entries: {rect: Rect2 (ship-
+# local, unrotated -- caller/tests do the rotate+translate), world_pos:
+# Vector2 (rect corner-min after rotate+translate, i.e. the rect's authored
+# position mapped into world space), rotation: float (the ship's heading, for
+# the caller to apply), type: String}. A freed/stale/unresolvable instance
+# (dead-reckoned contact after a kill -- a hot path) returns [] without
+# erroring; uses is_instance_valid + .get() defensively throughout per
+# CLAUDE.md's missing-key/freed-instance frame-abort warning.
+static func _outline_draw_list(contact: Dictionary) -> Array:
+	var out: Array = []
+	var instance_id: int = contact.get("instance_id", -1)
+	if instance_id == -1:
+		return out
+
+	var inst = instance_from_id(instance_id)
+	if inst == null or not is_instance_valid(inst):
+		return out
+
+	var comps = inst.get("ship_components")
+	if comps == null:
+		return out
+
+	var ship_rot: float = inst.get("rotation") if inst.get("rotation") != null else 0.0
+	var ship_pos: Vector2 = inst.get("position") if inst.get("position") != null else Vector2.ZERO
+
+	for c in comps:
+		var rect: Rect2 = c.get("rect", Rect2())
+		out.append({
+			"rect": rect,
+			"world_pos": ship_pos + rect.position.rotated(ship_rot),
+			"rotation": ship_rot,
+			"type": c.get("type", ""),
+		})
+	return out
 
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
@@ -334,17 +442,19 @@ func _draw() -> void:
 		var color = _get_contact_color(c)
 		var cross_section = c.get("signature", {}).get("cross_section", 0.0)
 		var screen_radius = (cross_section / 2.0) * map_zoom
-		
+
 		if screen_radius > 15.0:
 			# Draw the radar cross section circle when zoomed in enough
 			draw_arc(c_pos, cross_section / 2.0, 0, TAU, 16, color, 2.0 / map_zoom)
 		else:
 			# Just draw a solid blip
 			draw_circle(c_pos, 8.0 / map_zoom, color)
-			
+
 		# Draw velocity vector
 		if show_velocity_vectors and c.get("vel", Vector2.ZERO).length() > 0:
 			draw_line(c_pos, c_pos + c.get("vel", Vector2.ZERO) * 2.0, color, 1.0 / map_zoom)
+
+		_draw_contact_outline(c, c_pos)
 
 	# Contact labels are drawn later, after the transform reset below --
 	# world-space text would scale with map_zoom otherwise.
@@ -506,4 +616,52 @@ func _get_contact_color(c: Dictionary) -> Color:
 	# off-screen-indicator path goes through here, so they all inherit the fade.
 	var base = Utils.classification_color(c.get("classification", ""))
 	return Utils.fade_color(base, Utils.contact_confidence(c))
+
+# M25 outline v1 -- thin rendering wrapper. All the actual math (fade window
+# selection, alpha, per-component world transforms) lives in the pure/static
+# helpers above so it's directly testable; this just turns _outline_draw_list's
+# entries into draw_rect calls, gated by distance-fade alpha and the existing
+# zoom-LOD pixel threshold. Called from inside the world-space transform (see
+# draw_set_transform_matrix above the Contacts loop), same as the rest of the
+# per-contact drawing.
+func _draw_contact_outline(contact: Dictionary, c_pos: Vector2) -> void:
+	var bounds_radius: float = _bounds_radius_for(contact)
+	if bounds_radius * map_zoom < OUTLINE_LOD_MIN_PX:
+		return
+
+	var instance_id: int = contact.get("instance_id", -1)
+	var inst = instance_from_id(instance_id) if instance_id != -1 else null
+	var is_station: bool = _is_station_ship(inst)
+
+	var full: float = STATION_OUTLINE_FULL if is_station else OUTLINE_FULL
+	var start: float = STATION_OUTLINE_FADE_START if is_station else OUTLINE_FADE_START
+
+	var self_pos: Vector2 = current_state.get("pos", Vector2.ZERO)
+	var dist: float = self_pos.distance_to(c_pos)
+	var alpha: float = outline_alpha(dist, full, start)
+	if alpha <= 0.0:
+		return
+
+	var entries: Array = _outline_draw_list(contact)
+	if entries.is_empty():
+		return
+
+	for entry in entries:
+		var rect: Rect2 = entry["rect"]
+		var rot: float = entry["rotation"]
+		# All four corners anchor to c_pos (the contact's DRAWN position), not
+		# entry.world_pos (the ship's true position) -- mixing the two skews the
+		# quad whenever the fused estimate drifts from truth (M25 validation
+		# catch). The outline rides the blip; truth only supplies shape+rotation.
+		var corners := [
+			c_pos + rect.position.rotated(rot),
+			c_pos + (rect.position + Vector2(rect.size.x, 0)).rotated(rot),
+			c_pos + (rect.position + rect.size).rotated(rot),
+			c_pos + (rect.position + Vector2(0, rect.size.y)).rotated(rot),
+		]
+		var poly := PackedVector2Array(corners)
+		poly.append(corners[0])
+		var base_color: Color = COMPONENT_TYPE_COLORS.get(entry.get("type", ""), COMPONENT_TYPE_COLOR_DEFAULT)
+		var draw_color := Color(base_color.r, base_color.g, base_color.b, base_color.a * alpha)
+		draw_polyline(poly, draw_color, 1.0 / map_zoom)
 

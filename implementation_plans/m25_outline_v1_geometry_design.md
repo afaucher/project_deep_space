@@ -1,8 +1,27 @@
 # M25 — Geometry unification + static outline v1
 
-Status: PLANNED. Depends on: nothing upstream (independent chain; can be pulled
-earlier if close-range navigation pain demands). Design:
-`design_ideas/ship_outline_rendering.md` — "Decided path", v1 section.
+Status: DONE (2026-07-04). Depends on: nothing upstream (independent chain).
+Design: `design_ideas/ship_outline_rendering.md` — "Decided path", v1 section.
+
+Shipped: `get_local_aabb`/`get_bounding_radius` were already public on Ship
+(promotion had landed earlier) — added the missing empty-components fallback
+(returns `SHIP_COLLISION_RADIUS`); nav panel gained the v1 outline pass
+(fade 3000→1500, stations 12000→6000, zoom-LOD floor), `outline_alpha()` +
+`_outline_draw_list()` testable seams, `_bounds_radius_for()` and a
+contact-side bounds treatment; `test_ship_geometry.gd` (items 1–9 green).
+Avoidance item 10: clearance 662u — IDENTICAL to the pre-M25 baseline (rock
+radius + MARGIN dominate that scenario), so no Steering radius floor was
+added. Validation-phase catch: the outline quad's first corner anchored to
+the ship's TRUE position while the other three anchored to the contact's
+drawn position — skewed quads under estimate drift; fixed so all corners ride
+`c_pos` (truth supplies only shape+rotation). Known-red set, verified
+PRE-EXISTING via stash-baseline: `test_campaign_bootstrap`,
+`test_cluster_loader`, `test_static_landmarks` — all dormancy/demotion
+assertions broken by the editor-WIP full-sim default policy (commit 6533676),
+not by M25; they go green if/when the bubble default returns. Follow-up noted:
+the OWN-ship bounds ring reads `current_state.bounding_radius`, which main.gd
+never sets (silent 50 fallback) — one-line state-packet fix, deferred (main.gd
+out of this milestone's file scope).
 
 ## Goal
 

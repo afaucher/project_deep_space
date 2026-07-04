@@ -192,6 +192,14 @@ func get_local_aabb() -> Rect2:
 	return _cached_aabb
 
 func get_bounding_radius() -> float:
+	# A rect-less ship (empty ship_components) has no real geometry to measure --
+	# fall back to the pre-M25 flat SHIP_COLLISION_RADIUS default (50.0) rather
+	# than the tiny placeholder AABB's own corner distance, so an edge-case hull
+	# with no authored parts doesn't shrink to a near-invisible collision/bounds
+	# footprint.
+	if ship_components.is_empty():
+		return SHIP_COLLISION_RADIUS
+
 	var aabb = get_local_aabb()
 	var corners = [
 		aabb.position,
