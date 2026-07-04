@@ -118,6 +118,9 @@ func _test_fields_expand() -> void:
 func _test_wormhole_promotes() -> void:
 	var def = HomeCluster.build()
 	var m = ClusterManager.new()
+	var pol = LivenessPolicy.new()
+	pol.configure_bubble(45000.0, 60000.0)
+	m.policy = pol
 	main_node.add_child(m)
 	ClusterLoader.load_into(def, m)
 
