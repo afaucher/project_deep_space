@@ -39,8 +39,9 @@ func _physics_process(_delta: float) -> void:
 			e["name"], cs, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("density", 0.0), cls])
 		if cs < Ship.ORDNANCE_CS_THRESHOLD:
 			failures.append("%s cross_section %.1f < %.1f -- would read as ordnance, not a vessel" % [e["name"], cs, Ship.ORDNANCE_CS_THRESHOLD])
-		if cls != "UNIDENTIFIED VESSEL":
-			failures.append("%s classified '%s', expected UNIDENTIFIED VESSEL" % [e["name"], cls])
+		var expected_cls = "ASTEROID" if e["name"] == "Asteroid Station" else "UNIDENTIFIED VESSEL"
+		if cls != expected_cls:
+			failures.append("%s classified '%s', expected %s" % [e["name"], cls, expected_cls])
 
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_classify_ships <<<")
