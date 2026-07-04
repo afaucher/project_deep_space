@@ -54,7 +54,7 @@ static func design() -> Array:
 
 	comps.append({"id": "reactor_core", "type": "reactor", "rect": Rect2(-24, -5, 12, 10), "health": 260.0, "max_health": 260.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 260.0})
 
-	comps.append({"id": "comms_array", "type": "comms", "rect": Rect2(-12, -5, 6, 10), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 42000.0})
+	comps.append({"id": "comms_array", "type": "comms", "rect": Rect2(-12, -5, 6, 10), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0})
 
 	comps.append({"id": "omni_main", "type": "sensors", "rect": Rect2(-6, -5, 6, 10), "health": 90.0, "max_health": 90.0, "density": 20.0, "heat": 0.0, "base_em_emission": 9.0, "em_emission": 9.0, "switchable": true, "powered_on": true,
 		"sensor_type": "active", "active": true, "range": 30000.0, "arc_width": TAU, "num_bins": 40, "refresh_interval": 1.5, "timer": 0.0, "heading": 0.0})

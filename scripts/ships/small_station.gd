@@ -10,7 +10,7 @@ func _init() -> void:
 			"type": "comms",
 			"rect": Rect2(-20, -20, 40, 40),
 			"health": 1500.0, "max_health": 1500.0, "density": 20.0,
-			"range": 100000.0,
+			"range": 30000.0,
 		},
 		
 		# --- Forward Arm (X=20..60, Y=-20..20) ---

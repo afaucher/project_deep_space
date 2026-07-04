@@ -16,7 +16,7 @@ func _init() -> void:
 		{"id": "hull_stbd", "type": "hull", "rect": Rect2(8, -8, 2, 16), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
 		# Interior: (-8,-8) to (8,8) = 16x16, tiled into quadrants.
 		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-8, -8, 8, 8), "health": 100.0, "max_health": 100.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "power_rating": 100.0},
-		{"id": "comms_array", "type": "comms", "rect": Rect2(0, -8, 8, 8), "health": 40.0, "max_health": 40.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 50000.0},
+		{"id": "comms_array", "type": "comms", "rect": Rect2(0, -8, 8, 8), "health": 40.0, "max_health": 40.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0},
 		{"id": "omni_main", "type": "sensors", "rect": Rect2(-8, 0, 16, 8), "health": 50.0, "max_health": 50.0, "density": 20.0,
 			"heat": 0.0, "base_em_emission": 10.0, "em_emission": 10.0,
 			"sensor_type": "active", "active": true, "heading": 0.0, "arc_width": TAU,

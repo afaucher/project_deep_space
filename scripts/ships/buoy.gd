@@ -11,7 +11,7 @@ func _init() -> void:
 		{"id": "hull_port", "type": "hull", "rect": Rect2(-7.5, -7.5, 15.0, 5.0), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hull_stbd", "type": "hull", "rect": Rect2(-7.5, 2.5, 15.0, 5.0), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		
-		{"id": "comms", "type": "comms", "rect": Rect2(-2.5, 2.5, 5.0, 5.0), "health": 20.0, "max_health": 20.0, "density": 20.0, "range": 50000.0},
+		{"id": "comms", "type": "comms", "rect": Rect2(-2.5, 2.5, 5.0, 5.0), "health": 20.0, "max_health": 20.0, "density": 20.0, "range": 30000.0},
 		
 		# Active face of sensor is at X=-7.5, flush with aft edge.
 		{"id": "sensor", "type": "sensors", "rect": Rect2(-7.5, -2.5, 5.0, 5.0), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "base_em_emission": 50.0, "em_emission": 50.0, "switchable": true, "powered_on": true, "sensor_type": "passive", "active": true, "range": 5000.0, "arc_width": TAU, "num_bins": 8, "refresh_interval": 1.0, "heading": 0.0, "timer": 0.0},

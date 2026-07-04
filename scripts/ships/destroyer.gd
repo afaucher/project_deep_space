@@ -83,7 +83,7 @@ func _init() -> void:
 		{"id": "hull_spine_bot1", "type": "hull", "rect": Rect2(-15, 5, 15, 5), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		
 		{"id": "hull_spine_top2", "type": "hull", "rect": Rect2(0, -10, 20, 7), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-		{"id": "comms_array", "type": "comms", "rect": Rect2(0, -3, 6, 6), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 60000.0},
+		{"id": "comms_array", "type": "comms", "rect": Rect2(0, -3, 6, 6), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0},
 		{"id": "hull_spine_mid1", "type": "hull", "rect": Rect2(6, -3, 14, 0.5), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "dir_high_res", "type": "sensors", "rect": Rect2(6, -2.5, 5, 5), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "base_em_emission": 20.0, "em_emission": 20.0, "switchable": true, "powered_on": true, "sensor_type": "active", "active": true, "range": 40000.0, "arc_width": PI / 6.0, "num_bins": 30, "refresh_interval": 0.5, "timer": 0.0, "heading": 0.0},
 		{"id": "hull_spine_mid3", "type": "hull", "rect": Rect2(11, -2.5, 9, 5), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},

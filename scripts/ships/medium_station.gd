@@ -19,7 +19,7 @@ func _init() -> void:
 			"type": "comms",
 			"rect": Rect2(50, -20, 20, 40),
 			"health": 1500.0, "max_health": 1500.0, "density": 20.0,
-			"range": 200000.0,
+			"range": 30000.0,
 		},
 		{
 			"id": "reactor_fwd",
@@ -62,7 +62,7 @@ func _init() -> void:
 			"type": "comms",
 			"rect": Rect2(-70, -20, 20, 40),
 			"health": 1500.0, "max_health": 1500.0, "density": 20.0,
-			"range": 200000.0,
+			"range": 30000.0,
 		},
 		{
 			"id": "reactor_aft",

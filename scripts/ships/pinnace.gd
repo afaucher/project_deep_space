@@ -56,7 +56,7 @@ static func design() -> Array:
 	comps.append({"id": "living_quarters_3", "type": "living_quarters", "rect": Rect2(-5, -20, 10, 40), "health": 512.0, "max_health": 512.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false})
 
 	# --- COMMS station ------------------------------------------------------
-	comps.append({"id": "comms_array", "type": "comms", "rect": Rect2(-15, -17, 10, 34), "health": 90.0, "max_health": 90.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 20000.0})
+	comps.append({"id": "comms_array", "type": "comms", "rect": Rect2(-15, -17, 10, 34), "health": 90.0, "max_health": 90.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0})
 
 	# --- REACTOR station ------------------------------------------------------
 	comps.append({"id": "reactor_core", "type": "reactor", "rect": Rect2(-25, -15, 10, 30), "health": 140.0, "max_health": 140.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 55.0})

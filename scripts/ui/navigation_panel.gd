@@ -185,6 +185,7 @@ var active_lasers: Array = []
 # Toggles
 var show_weapon_arcs: bool = true
 var show_sensor_arcs: bool = false
+var show_comms_range: bool = false
 var show_contact_labels: bool = true
 var show_velocity_vectors: bool = true
 var show_grid: bool = true
@@ -224,6 +225,7 @@ func _ready() -> void:
 	
 	_add_toggle(overlay, "Weapon Arcs", "show_weapon_arcs")
 	_add_toggle(overlay, "Sensor Arcs", "show_sensor_arcs")
+	_add_toggle(overlay, "Comms Range", "show_comms_range")
 	_add_toggle(overlay, "Contact Labels", "show_contact_labels")
 	_add_toggle(overlay, "Velocity Vectors", "show_velocity_vectors")
 	_add_toggle(overlay, "Grid", "show_grid")
@@ -461,15 +463,11 @@ func _draw() -> void:
 				
 	# Draw sensor arcs and wedges
 	if show_sensor_arcs:
-		var sensors_dict = current_state.get("sensors", {})
-		for sensor_id in sensors_dict.keys():
-			var bins = sensors_dict[sensor_id]
-			if bins.size() == 0: continue
-			
-			var s_heading = bins[0].get("sensor_heading", 0.0)
-			var s_arc_width = bins[0].get("sensor_arc_width", TAU)
-			var s_range = bins[0].get("sensor_range", 40000.0)
-			var bin_angle = bins[0].get("bin_angle", TAU/36.0)
+		var sensor_config = current_state.get("sensor_config", [])
+		for sensor in sensor_config:
+			var s_heading = rot + sensor.get("heading", 0.0)
+			var s_arc_width = sensor.get("arc_width", TAU)
+			var s_range = sensor.get("range", 40000.0)
 			
 			if s_arc_width >= TAU - 0.01:
 				draw_arc(pos, s_range, 0, TAU, 64, Color(0.2, 0.8, 0.8, 0.4), 2.0 / map_zoom)
@@ -480,6 +478,15 @@ func _draw() -> void:
 				draw_line(pos, pos + Vector2(s_range, 0).rotated(s_start), Color(0.2, 0.8, 0.8, 0.4), 2.0 / map_zoom)
 				draw_line(pos, pos + Vector2(s_range, 0).rotated(s_end), Color(0.2, 0.8, 0.8, 0.4), 2.0 / map_zoom)
 				
+		var sensors_dict = current_state.get("sensors", {})
+		for sensor_id in sensors_dict.keys():
+			var bins = sensors_dict[sensor_id]
+			if bins.size() == 0: continue
+			
+			var s_heading = bins[0].get("sensor_heading", 0.0)
+			var s_arc_width = bins[0].get("sensor_arc_width", TAU)
+			var bin_angle = bins[0].get("bin_angle", TAU/36.0)
+			
 			var s_start_angle = s_heading - (s_arc_width / 2.0)
 			for sig in bins:
 				var b_idx = sig.get("bin_idx", 0)
@@ -491,6 +498,12 @@ func _draw() -> void:
 				var dot_pos = pos + Vector2(dist, 0).rotated(b_center)
 
 				draw_circle(dot_pos, 4.0 / map_zoom, Color.CYAN)
+	
+	if show_comms_range:
+		var comms = current_state.get("ship_components", [])
+		for c in comms:
+			if c.get("type", "") == "comms" and c.has("range"):
+				draw_arc(pos, c["range"], 0, TAU, 64, Color(0.8, 0.4, 1.0, 0.4), 2.0 / map_zoom)
 	
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
@@ -626,7 +639,10 @@ func _draw() -> void:
 	draw_string(font, Vector2(10, size.y - 20), "SPD: %.2f HDG: %.2f" % [vel.length(), wrapf(rad_to_deg(rot) + 90.0, 0.0, 360.0)], HORIZONTAL_ALIGNMENT_LEFT, -1, default_font_size, Color.GREEN)
 
 	# Draw Pinned Contact Off-screen Indicators
-	var pinned_contacts = current_state.get("pinned_contacts", [])
+	var pinned_contacts = current_state.get("pinned_contacts", []).duplicate()
+	if selected_id != "" and not pinned_contacts.has(selected_id):
+		pinned_contacts.append(selected_id)
+		
 	var rect = Rect2(Vector2.ZERO, size)
 	var margin = 30.0
 	var safe_rect = rect.grow(-margin)

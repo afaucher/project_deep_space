@@ -25,7 +25,7 @@ static func design() -> Array:
 		{"id": "reactor_core", "type": "reactor", "rect": Rect2(-15, -5, 10, 10), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false, "power_rating": 50.0},
 		{"id": "engine_main", "type": "engines", "rect": Rect2(-25, -10, 10, 20), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 40.0, "thrust_rating": 2500.0, "torque_rating": 6000.0},
 
-		{"id": "comms_array", "type": "comms", "rect": Rect2(-5, -5, 5, 10), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 22000.0},
+		{"id": "comms_array", "type": "comms", "rect": Rect2(-5, -5, 5, 10), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "range": 30000.0},
 
 		{"id": "omni_main", "type": "sensors", "rect": Rect2(0, -2.5, 5, 5), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "base_em_emission": 8.0, "em_emission": 8.0, "switchable": true, "powered_on": true,
 			"sensor_type": "active", "active": true, "range": 22000.0, "arc_width": TAU, "num_bins": 36, "refresh_interval": 1.5, "timer": 0.0, "heading": 0.0},

@@ -271,10 +271,11 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var vel = c.get("vel", Vector2.ZERO)
 		var speed = vel.length()
 		var age_s = int(c.get("last_seen_timer", 0.0))
+		var hdg = wrapf(rad_to_deg(c.get("rot", 0.0)) + 90.0, 0.0, 360.0)
 		
 		var sig = c.get("signature", {})
-		info.text = "Dist: %s | Spd: %.1f m/s | Age: %ds\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
-			Utils.format_dist(dist), speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
+		info.text = "Dist: %s | Hdg: %03d | Spd: %.1f m/s | Age: %ds\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
+			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
 		]
 		
 		# Update state without emitting signal
