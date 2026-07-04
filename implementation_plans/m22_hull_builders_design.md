@@ -1,7 +1,22 @@
 # M22 — Hull builders (the grammar ops)
 
-Status: PLANNED. Depends on: M21 (re-expression proof uses catalog parts).
+Status: DONE (2026-07-04). Depends on: M21 (re-expression proof uses catalog parts).
 Design: `design_ideas/hull_shape_grammar.md` §4.
+
+Shipped: `scripts/components/hull_builder.gd` (frame/taper/arm/armor_box/
+zipper/mirror_y/mirror_x/rotate_90, all pure statics, ids derived from an
+`id_prefix` opt + role/index — a first-draft shared counter was caught by the
+determinism gate and removed), `scripts/tests/test_hull_builders.gd` (all 8
+items green; re-verified in validation phase). Both gates passed: LAC
+re-expressed from builders + M21 parts with exact (type,rect) multiset, mass,
+AABB, and validator-verdict equality; small station's 12-piece hull shell
+reproduced from two `arm()` shells via `mirror_x`/`mirror_y`. Grammar friction
+recorded (also in grammar doc §9): (1) LAC's `omni_fwd_fc` fits none of the 5
+sensor kinds (wide-arc PI/1.5 forward FC) — needed raw opts overrides;
+candidate 6th kind. (2) Tiny hull shims (5×2.5) fall under the LIGHT hull band
+floor via `health_per_area` — fleet authors a flat 80; needed overrides.
+(3) `zipper()` carries an unused `hp` param — clean up when the destroyer/M27
+first consumes it.
 
 ## Goal
 

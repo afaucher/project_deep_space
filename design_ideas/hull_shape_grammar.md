@@ -196,6 +196,16 @@ chain (see `ship_outline_rendering.md`).
 
 ## 9. Open decisions
 
+Friction found by M22's re-expression proof (the feedback loop working as
+intended):
+- The 5 sensor sub-kinds don't cover a wide-arc forward fire-control sensor
+  (LAC's `omni_fwd_fc`, arc PI/1.5) — expressible only via raw opts overrides.
+  Decide: add a 6th kind (`fwd_fc`?) or bless overrides as the escape hatch.
+- `health_per_area` under-healths tiny hull shims (5×2.5 fill pieces land
+  below the LIGHT band floor; the fleet authors a flat 80). The band floor is
+  effectively a per-piece minimum — consider `max(band_floor, area × hpa)` in
+  the hull mark, or a `min_health` field.
+
 - Marks: three named marks (compact/standard/heavy) vs. a continuous size↔spec
   formula. Start with named marks — a formula invites false precision before we
   have enough parts to fit one.
