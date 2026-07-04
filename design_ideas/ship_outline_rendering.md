@@ -437,6 +437,19 @@ silhouette (mid, auto-selected) → AABB box → blip.
   **decided: v2's dots make this mechanical** (you see where your rays landed),
   no separate gating policy needed.
 - Whether collision becomes non-circular now or stays a (size-correct) circle.
+  Findings (2026-07-04): Godot's broadphase already makes polygon collision
+  "progressive" for free (AABB cull first, exact narrowphase only for
+  near-contact pairs), so at bubble-scale live counts there is no perf case
+  for keeping circles on concave hulls. Recommended shape policy: always-on
+  `CollisionPolygon2D` from the cached ShipSilhouette loops (engine
+  auto-decomposes to convex; plus-station ≈ 3 pieces, ring ≈ 4) for
+  stations / defence pod / freighter — the hulls whose circumscribed circle
+  visibly lies (notches, ring hole, pod gap); keep circles for compact ships
+  and rocks (a rock's circle IS its truth). A manual proximity-LOD (sentinel
+  Area2D toggling `CollisionShape2D.disabled`, swap BEFORE contact at ~1.5×
+  combined radii, never revert while anything is inside the circle — the
+  fatten-around-occupant case ejects violently) is documented but deferred
+  until profiling ever demands it.
 - Contact dimension: scalar anchored baseline (Option C) now vs aspect-dependent
   signature later — and which `f(true size)` formula keeps the missile "ordnance."
 - v2: do dots persist per-contact in the fusion store (alongside the existing
