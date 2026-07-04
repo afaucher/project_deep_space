@@ -40,6 +40,8 @@ func setup(main) -> void:
 			mgr = c
 	_assert(mgr != null, "bootstrap: a ClusterManager should be added to main")
 	if mgr != null:
+		mgr.policy.configure_bubble(45000.0, 60000.0)
+		mgr.tick(0.0)
 		var exp_total: int = def.entities.size()
 		for f in def.asteroid_fields:
 			exp_total += int(f["count"])

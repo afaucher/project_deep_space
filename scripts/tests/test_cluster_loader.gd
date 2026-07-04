@@ -120,6 +120,7 @@ func _count_def_kind(def, kind: int) -> int:
 func _test_bootstrap_promotes_neighbour() -> void:
 	var def = HomeCluster.build()
 	var m = ClusterManager.new()
+	m.policy.configure_bubble(45000.0, 60000.0)
 	main_node.add_child(m)
 	ClusterLoader.load_into(def, m)
 
