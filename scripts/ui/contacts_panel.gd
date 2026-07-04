@@ -272,7 +272,6 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var speed = vel.length()
 		var age_s = c.get("last_seen_timer", 0.0)
 		
-		var my_pos = current_state.get("pos", Vector2.ZERO)
 		var their_pos = c.get("pos", Vector2.ZERO)
 		var hdg = wrapf(rad_to_deg((their_pos - my_pos).angle()) + 90.0, 0.0, 360.0)
 		
