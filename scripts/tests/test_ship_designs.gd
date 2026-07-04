@@ -9,6 +9,7 @@ const Freighter = preload("res://scripts/ships/freighter.gd")
 const Pinnace = preload("res://scripts/ships/pinnace.gd")
 const Mine = preload("res://scripts/ships/mine.gd")
 const DefencePod = preload("res://scripts/ships/defence_pod.gd")
+const AsteroidStation = preload("res://scripts/ships/asteroid_station.gd")
 
 # M9b: validates ShipDesignValidator against the spec chart in
 # component_spec.gd. Validation is synchronous/pure (reads ship_components +
@@ -355,6 +356,23 @@ const EXPECTED_LAYOUT_WARNINGS := {
 		{"component_id": "pd_port", "field": "hull_coverage"},
 		{"component_id": "missile_port", "field": "hull_coverage"},
 	],
+	#  - Asteroid Station: only the two PD lasers (pd_north/pd_south) flag --
+	#    each is an 8-wide turret flush-mounted against the 30-wide core
+	#    column's N/S rock face, so its two SIDE faces (+X/-X, perpendicular
+	#    to its outward heading) project past the narrower turret footprint
+	#    with nothing beside it -- same "turret projecting past the hull"
+	#    pattern already accepted for every station/pod's PD turrets above.
+	#    Every embedded module (reactor/cargo_bay/living_quarters/comms/
+	#    sensor_search/rcs/sensor_pd) is fully enclosed by its sandwiching
+	#    rock column and neighboring columns -- zero warnings on any of them,
+	#    confirming the modules really are embedded IN the rock, not merely
+	#    adjacent to it (the plan's explicit sanity check for this archetype).
+	"Asteroid Station": [
+		{"component_id": "pd_north", "field": "hull_coverage"},
+		{"component_id": "pd_north", "field": "hull_coverage"},
+		{"component_id": "pd_south", "field": "hull_coverage"},
+		{"component_id": "pd_south", "field": "hull_coverage"},
+	],
 }
 
 # Multiset key: "component_id|field" repeated per occurrence (a component can
@@ -425,6 +443,15 @@ const M27_TARGETS := {
 	# skipped below rather than asserted against a fabricated number.
 	"Mine": {"mass": 4.0, "mass_tolerance": 1.0, "accel_lo": 0.0, "accel_hi": INF, "tier": ComponentSpec.Tier.DRONE},
 	"Defence Pod": {"mass": 900.0, "mass_tolerance": 0.5, "accel_lo": null, "accel_hi": null, "tier": ComponentSpec.Tier.STRUCTURE},
+	# Asteroid Station: the parameter table's row is explicitly "~4000+
+	# (density >= 300 shell)" and explicitly NOT back-solvable from the
+	# fleet's usual density-20 area*0.036 shortcut (see that doc's M27
+	# pre-step note) -- so this uses a wide asymmetric tolerance expressed as
+	# an explicit floor via a generous mass_tolerance around a midpoint,
+	# same rough order-of-magnitude treatment as Mine/Defence Pod above
+	# rather than a tight +/-10% band. STRUCTURE tier -- accel is n/a
+	# (immobile by construction), same as Defence Pod.
+	"Asteroid Station": {"mass": 5000.0, "mass_tolerance": 0.3, "accel_lo": null, "accel_hi": null, "tier": ComponentSpec.Tier.STRUCTURE},
 }
 
 func _ship_for_m27_name(ship_name: String):
@@ -437,6 +464,8 @@ func _ship_for_m27_name(ship_name: String):
 			return Mine.new()
 		"Defence Pod":
 			return DefencePod.new()
+		"Asteroid Station":
+			return AsteroidStation.new()
 	return null
 
 func _test_m27_parameter_table_conformance() -> void:

@@ -1,9 +1,32 @@
 # M27 — Catalog expansion (the five unbuilt ships)
 
-Status: PLANNED. Depends on: M21 (parts), M22 (builders), M23 (mechanized
-checks). M24 optional; M25/M26 make the payoff visible but are not
-dependencies. Design: `design_ideas/hull_shape_grammar.md` §2/§8 phase E;
-concepts: `design_ideas/ship_designs.md`.
+Status: DONE (2026-07-04, three staged agents). Depends on: M21 (parts), M22
+(builders), M23 (mechanized checks). Design:
+`design_ideas/hull_shape_grammar.md` §2/§8 phase E; concepts:
+`design_ideas/ship_designs.md`.
+
+Shipped, stage 1: parameter-table pre-step (all five target rows),
+living_quarters/cargo_bay LIGHT+HEAVY bands, freighter (spine+pods, mass 317,
+accel 10) + pinnace (tapered dart, 30-pax, accel 81; real mass ~109 — the
+table was corrected to the derived truth), `test_freighter_docking`. Follow-on
+landed separately: radius-aware berth standoff in DockingBay (user-requested
+"dock whole freighters") — stations seat big hulls at
+station_r + ship_r + margin; shuttles unaffected. Stage 2: mine (5-rect plus,
+rotate_90's first real consumer — needed two core shims to square mixed-size
+parts) + defence pod (ring via frame()×2, 5–6/6 salvo intercepts with a
+3600-bin/0.08s PD dish), plus a latent-bug fix: station AI trees read a
+blackboard key nothing wrote, so no station-tree hull ever engaged hostile
+VESSELS — stations/mine/pod all actually fight now. Stage 3: asteroid station
+(cluster shell at density 300, modules embedded with ZERO layout warnings)
+and the marquee test: cold-and-dark reads `ASTEROID`, powered reads
+`UNIDENTIFIED VESSEL`, flip settles within one sweep window — no
+classify_contact changes needed (note: the classifier reads the SHIP-level
+`density` var, not component densities; the station sets both). Grammar
+friction accumulated for §9: no parts factory for quarters/cargo; taper()
+can't interleave functional components; frame() wants a `frame_with_slots()`;
+rotate_90 needs a square core. Tactical mini-sims for mine/pod: covered by
+the behavior smokes; full sim-runner scenarios deferred until a balance pass
+asks for them.
 
 ## Goal
 
