@@ -23,6 +23,7 @@ const LightAttackCraft = preload("res://scripts/ships/light_attack_craft.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 const NavigationPanel = preload("res://scripts/ui/navigation_panel.gd")
+const ShipSilhouette = preload("res://scripts/components/ship_silhouette.gd")
 
 var failures: Array = []
 
@@ -42,6 +43,7 @@ func setup(_main: Node) -> void:
 	_test_stale_contact_safety()
 	_test_bounds_ring()
 	_test_station_gating()
+	_test_simple_body_outline()
 
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_ship_geometry <<<")
@@ -51,6 +53,33 @@ func setup(_main: Node) -> void:
 			printerr("  FAIL: ", f)
 		printerr(">>> [TEST FAILED] test_ship_geometry <<<")
 		get_tree().quit(1)
+
+# ---------------------------------------------------------------------------
+# v1.1 asteroid path: a simple body (no ship_components) refines to its TRUE
+# BOUNDING CIRCLE, not dots (nothing for the sampler to touch) and not rect
+# loops (no rects). Asteroids are the original "don't hit what you can't see"
+# case -- they must not be left as unrefinable blips.
+# ---------------------------------------------------------------------------
+
+func _test_simple_body_outline() -> void:
+	var Asteroid = preload("res://scripts/asteroid.gd")
+	var rock = Asteroid.new()
+	rock.name = "GeomTestRock"
+	add_child(rock)
+
+	var rock_contact := {"instance_id": rock.get_instance_id(), "pos": Vector2.ZERO}
+	_assert(NavigationPanel._is_simple_body(rock_contact), "Simple-body: an asteroid contact should classify as a simple body")
+	_assert(is_equal_approx(NavigationPanel._bounds_radius_for(rock_contact), 300.0), "Simple-body: asteroid bounds radius should be its 300u collision circle, got %s" % NavigationPanel._bounds_radius_for(rock_contact))
+	_assert(NavigationPanel._outline_draw_list(rock_contact) == [], "Simple-body: an asteroid must produce NO silhouette loops (no rects to leak), got %s" % str(NavigationPanel._outline_draw_list(rock_contact)))
+
+	var frigate = Frigate.new()
+	frigate.name = "GeomTestNotSimple"
+	add_child(frigate)
+	var ship_contact := {"instance_id": frigate.get_instance_id(), "pos": Vector2.ZERO}
+	_assert(not NavigationPanel._is_simple_body(ship_contact), "Simple-body: a ship (has ship_components) must NOT take the circle path")
+
+	rock.queue_free()
+	frigate.queue_free()
 
 # ---------------------------------------------------------------------------
 # Helper: independently recompute the union AABB of a ship's component rects,
@@ -194,14 +223,14 @@ func _test_outline_alpha_battery() -> void:
 		prev_alpha = a
 
 # ---------------------------------------------------------------------------
-# Item 6: Draw-list correctness. Fake contact backed by a live frigate at
-# distance 1000, rotation PI/4: _outline_draw_list returns one entry per
-# component; every entry's rect is in the frigate's authored rect set;
-# spot-check hull_fwd's four world-space corners against hand-computed
-# rotate+translate values. forward = +X (ship.gd's own convention, see
-# frigate.gd's "Layout relative to center (0,0). Forward +X, Right +Y") --
-# the engineering panel's 90-degree display convention must NOT leak into
-# this world-space math.
+# Item 6 (v1.1): Draw-list correctness. Fake contact backed by a live frigate
+# at rotation PI/4: _outline_draw_list returns SILHOUETTE loops (union
+# contour, cached per class -- ship_outline_rendering.md "first-playtest
+# revision"), NOT per-component rects. Oracle: ShipSilhouette.compute() run
+# directly on the components. The frigate is a solid hull -> exactly one
+# outer loop, no holes; its loop bbox must match the M25 AABB (grown by the
+# weld inflate) and its area must track the component-area sum -- a
+# convex-hull-style bridge or per-component regression both fail those.
 # ---------------------------------------------------------------------------
 
 func _test_draw_list_correctness() -> void:
@@ -217,54 +246,52 @@ func _test_draw_list_correctness() -> void:
 	}
 
 	var entries: Array = NavigationPanel._outline_draw_list(contact)
-	_assert(entries.size() == ship.ship_components.size(), "Item 6: _outline_draw_list should return one entry per component, got %d expected %d" % [entries.size(), ship.ship_components.size()])
+	var oracle: Array = ShipSilhouette.compute(ship.ship_components)
+	_assert(entries.size() == oracle.size(), "Item 6: _outline_draw_list should return one entry per silhouette loop, got %d expected %d" % [entries.size(), oracle.size()])
+	_assert(entries.size() == 1, "Item 6: the frigate (solid hull) should silhouette to exactly ONE loop, got %d" % entries.size())
 
-	var authored_rects: Array = []
-	for c in ship.ship_components:
-		authored_rects.append(c["rect"])
+	if entries.size() == 1:
+		var entry: Dictionary = entries[0]
+		_assert(entry["is_hole"] == false, "Item 6: the frigate's single loop must be an outer boundary, not a hole")
+		_assert(is_equal_approx(entry["rotation"], PI / 4.0), "Item 6: entry rotation should be the ship's heading PI/4, got %s" % entry["rotation"])
 
-	for entry in entries:
-		var r: Rect2 = entry["rect"]
-		_assert(authored_rects.has(r), "Item 6: entry rect %s should be one of the frigate's authored rects" % r)
+		var pts: PackedVector2Array = entry["points"]
+		_assert(pts.size() >= 4, "Item 6: silhouette loop needs >= 4 points, got %d" % pts.size())
 
-	# Spot-check hull_fwd: Rect2(15, -15, 15, 30) at ship rotation PI/4,
-	# position (1000, 0). Hand-computed rotate(PI/4) + translate corners:
-	var hull_fwd_rect := Rect2(15, -15, 15, 30)
-	var hull_fwd_entry = null
-	for entry in entries:
-		if entry["rect"] == hull_fwd_rect:
-			hull_fwd_entry = entry
-			break
-	_assert(hull_fwd_entry != null, "Item 6: hull_fwd's rect %s should appear in the draw list" % hull_fwd_rect)
+		# Loop bbox == M25 AABB grown by the weld inflate (ties the silhouette
+		# to the same canonical geometry the bounds ring / avoidance use).
+		var min_p := Vector2(INF, INF)
+		var max_p := Vector2(-INF, -INF)
+		var area := 0.0
+		for i in range(pts.size()):
+			min_p = min_p.min(pts[i])
+			max_p = max_p.max(pts[i])
+			var a: Vector2 = pts[i]
+			var b: Vector2 = pts[(i + 1) % pts.size()]
+			area += a.x * b.y - b.x * a.y
+		area = absf(area * 0.5)
+		var expected_bbox: Rect2 = ship.get_local_aabb().grow(0.1)
+		var loop_bbox := Rect2(min_p, max_p - min_p)
+		_assert(loop_bbox.position.is_equal_approx(expected_bbox.position) and loop_bbox.size.is_equal_approx(expected_bbox.size), "Item 6: silhouette bbox %s should equal the ship AABB grown by the weld inflate %s" % [loop_bbox, expected_bbox])
 
-	if hull_fwd_entry != null:
-		var rot: float = hull_fwd_entry["rotation"]
-		_assert(is_equal_approx(rot, PI / 4.0), "Item 6: entry rotation should be the ship's heading PI/4, got %s" % rot)
+		var rect_area_sum := 0.0
+		for c in ship.ship_components:
+			var r: Rect2 = c["rect"]
+			rect_area_sum += r.size.x * r.size.y
+		_assert(absf(area - rect_area_sum) < rect_area_sum * 0.15, "Item 6: silhouette area %.0f should track the component-area sum %.0f (a convex-hull-like bridge reads far larger)" % [area, rect_area_sum])
 
-		var expected_world_pos: Vector2 = ship.position + hull_fwd_rect.position.rotated(PI / 4.0)
-		_assert(hull_fwd_entry["world_pos"].is_equal_approx(expected_world_pos), "Item 6: hull_fwd world_pos %s should equal hand-computed rotate+translate %s" % [hull_fwd_entry["world_pos"], expected_world_pos])
-
-		# Full four-corner hand computation (caller applies rotate+translate to
-		# all four corners the same way world_pos does for the min corner).
-		var local_corners = [
-			hull_fwd_rect.position,
-			hull_fwd_rect.position + Vector2(hull_fwd_rect.size.x, 0),
-			hull_fwd_rect.position + hull_fwd_rect.size,
-			hull_fwd_rect.position + Vector2(0, hull_fwd_rect.size.y),
-		]
-		var expected_world_corners: Array = []
-		for lc in local_corners:
-			expected_world_corners.append(ship.position + lc.rotated(PI / 4.0))
-
-		# hand-computed numeric check (rotate(PI/4): x' = x*cos - y*sin, y' = x*sin + y*cos)
+		# Caller-transform convention check: local points rotate by the SHIP's
+		# heading, no stray 90-degree engineering-panel offset. Verified via a
+		# manual rotation-matrix computation on the first point.
+		var p0: Vector2 = pts[0]
 		var cos45 := cos(PI / 4.0)
 		var sin45 := sin(PI / 4.0)
-		var manual_min_corner := Vector2(
-			ship.position.x + (hull_fwd_rect.position.x * cos45 - hull_fwd_rect.position.y * sin45),
-			ship.position.y + (hull_fwd_rect.position.x * sin45 + hull_fwd_rect.position.y * cos45)
+		var manual := Vector2(
+			ship.position.x + (p0.x * cos45 - p0.y * sin45),
+			ship.position.y + (p0.x * sin45 + p0.y * cos45)
 		)
-		_assert(hull_fwd_entry["world_pos"].is_equal_approx(manual_min_corner), "Item 6: hull_fwd world_pos %s should equal fully-manual rotation-matrix computation %s (checks no stray 90-degree/engineering-panel convention leaked in)" % [hull_fwd_entry["world_pos"], manual_min_corner])
-		_assert(not hull_fwd_entry["world_pos"].is_equal_approx(ship.position + hull_fwd_rect.position.rotated(PI / 4.0 + PI / 2.0)), "Item 6: hull_fwd world_pos must NOT match a world_pos computed with an extra +90-degree offset (the engineering panel's display convention leaking in)")
+		var via_api: Vector2 = ship.position + p0.rotated(entry["rotation"])
+		_assert(via_api.is_equal_approx(manual), "Item 6: caller transform (c_pos + p.rotated(rot)) must equal the manual rotation matrix, got %s vs %s" % [via_api, manual])
 
 	ship.queue_free()
 
@@ -331,30 +358,38 @@ func _test_bounds_ring() -> void:
 	destroyer.queue_free()
 
 # ---------------------------------------------------------------------------
-# Item 9: Station gating. A station contact at 8000 has alpha 0 under ship
-# thresholds but > 0 under station thresholds -- asserts the type switch works.
+# Item 9 (v1.1): Size-proportional fade window. The old two-case ship/station
+# threshold switch is gone -- the window derives from bounding radius
+# (start = OUTLINE_START_RADII * r, full = OUTLINE_FULL_RADII * r), so a
+# station resolves from much further out than a frigate PURELY because it is
+# bigger, and a contact at 8000u resolves for the station but not the frigate.
 # ---------------------------------------------------------------------------
 
 func _test_station_gating() -> void:
 	var dist := 8000.0
 
-	var ship_alpha: float = NavigationPanel.outline_alpha(dist, NavigationPanel.OUTLINE_FULL, NavigationPanel.OUTLINE_FADE_START)
-	_assert(is_equal_approx(ship_alpha, 0.0), "Item 9: a contact at 8000u should read alpha 0 under SHIP thresholds (full=%s start=%s), got %s" % [NavigationPanel.OUTLINE_FULL, NavigationPanel.OUTLINE_FADE_START, ship_alpha])
-
-	var station_alpha: float = NavigationPanel.outline_alpha(dist, NavigationPanel.STATION_OUTLINE_FULL, NavigationPanel.STATION_OUTLINE_FADE_START)
-	_assert(station_alpha > 0.0, "Item 9: the same contact at 8000u should read alpha > 0 under STATION thresholds (full=%s start=%s), got %s" % [NavigationPanel.STATION_OUTLINE_FULL, NavigationPanel.STATION_OUTLINE_FADE_START, station_alpha])
-
-	# Also exercise the type-switch helper directly: a STRUCTURE-tier ship
-	# instance must be classified as a station; an ordinary ship must not.
-	var station = ShipCatalog.SPAWNABLE.filter(func(e): return e["name"] == "Small Station")[0]["script"].new()
+	var station = ShipCatalog.SPAWNABLE.filter(func(e): return e["name"] == "Medium Station")[0]["script"].new()
 	station.name = "GatingTestStation"
 	add_child(station)
-	_assert(NavigationPanel._is_station_ship(station) == true, "Item 9: a STRUCTURE-tier ship instance should be classified as a station")
-
 	var frigate = Frigate.new()
 	frigate.name = "GatingTestFrigate"
 	add_child(frigate)
-	_assert(NavigationPanel._is_station_ship(frigate) == false, "Item 9: a non-STRUCTURE ship instance should NOT be classified as a station")
+
+	var frig_r: float = frigate.get_bounding_radius()
+	var stn_r: float = station.get_bounding_radius()
+	_assert(stn_r > frig_r * 3.0, "Item 9: sanity -- the station should be much bigger than the frigate (%.0f vs %.0f)" % [stn_r, frig_r])
+
+	var frig_alpha: float = NavigationPanel.outline_alpha(dist, NavigationPanel.OUTLINE_FULL_RADII * frig_r, NavigationPanel.OUTLINE_START_RADII * frig_r)
+	_assert(is_equal_approx(frig_alpha, 0.0), "Item 9: a frigate-sized contact at 8000u should read alpha 0 (start=%.0f), got %s" % [NavigationPanel.OUTLINE_START_RADII * frig_r, frig_alpha])
+
+	var stn_alpha: float = NavigationPanel.outline_alpha(dist, NavigationPanel.OUTLINE_FULL_RADII * stn_r, NavigationPanel.OUTLINE_START_RADII * stn_r)
+	_assert(stn_alpha > 0.0, "Item 9: a station-sized contact at 8000u should read alpha > 0 (start=%.0f), got %s" % [NavigationPanel.OUTLINE_START_RADII * stn_r, stn_alpha])
+
+	# Anchor the constants roughly to the old hand-tuned feel: a frigate
+	# resolves fully somewhere inside 1000-2000u, starts resolving inside
+	# 2000-4000u.
+	_assert(NavigationPanel.OUTLINE_FULL_RADII * frig_r > 1000.0 and NavigationPanel.OUTLINE_FULL_RADII * frig_r < 2000.0, "Item 9: frigate full-resolve distance should land in 1000-2000u, got %.0f" % (NavigationPanel.OUTLINE_FULL_RADII * frig_r))
+	_assert(NavigationPanel.OUTLINE_START_RADII * frig_r > 2000.0 and NavigationPanel.OUTLINE_START_RADII * frig_r < 4000.0, "Item 9: frigate fade-start distance should land in 2000-4000u, got %.0f" % (NavigationPanel.OUTLINE_START_RADII * frig_r))
 
 	station.queue_free()
 	frigate.queue_free()

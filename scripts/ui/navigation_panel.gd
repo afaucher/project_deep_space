@@ -6,15 +6,16 @@ const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 
 const WORLD_HALF_EXTENT := 260000.0 # map clamps the camera/grid to +/- this on each axis -- matches the home cluster's +/-250k bounds with margin
 
-# M25 -- close-range outline v1 (design_ideas/ship_outline_rendering.md "Decided
-# path"). Ships fade in between FADE_START (~shortest laser range) and FULL
-# (matches the omni_collision sensor range -- the in-fiction "I can see its
-# shape now" instrument). Stations get a much larger window since conveying
-# scale (a station dwarfing a frigate) is the whole point.
-const OUTLINE_FADE_START := 3000.0
-const OUTLINE_FULL := 1500.0
-const STATION_OUTLINE_FADE_START := 12000.0
-const STATION_OUTLINE_FULL := 6000.0
+# v1.1 outline revision (design_ideas/ship_outline_rendering.md "first-
+# playtest revision"): the fade window is SIZE-PROPORTIONAL -- an angular-
+# resolution model where shape resolves when the target subtends enough of
+# your view. fade_start = START_RADII * bounding_radius, full = FULL_RADII *
+# radius. Reproduces the old hand-picked constants at both scales (frigate
+# ~54r -> 2700/1350 vs old 3000/1500; medium station ~264r -> 13200/6600 vs
+# old 12000/6000) while scaling continuously to mines and asteroid stations.
+# Replaces the old two-case ship/station window switch.
+const OUTLINE_START_RADII := 50.0
+const OUTLINE_FULL_RADII := 25.0
 
 # Below this many screen pixels of bounding radius, an outline is too small to
 # read -- keep the cheap blip/marker instead (matches the v1 design doc's LOD
@@ -28,29 +29,13 @@ const OUTLINE_LOD_MIN_PX := 6.0
 const BOUNDS_FALLBACK_MIN := 50.0
 const BOUNDS_FALLBACK_CS_SCALE := 1.0
 
-# Component-type -> outline color. Falls back to a neutral gray for any type
-# not listed (new component families shouldn't silently fail to draw).
-const COMPONENT_TYPE_COLORS := {
-	"hull": Color(0.6, 0.6, 0.6),
-	"weapons": Color(1.0, 0.3, 0.0),
-	"sensors": Color(0.2, 0.8, 0.8),
-	"engines": Color(0.3, 0.6, 1.0),
-	"reactor": Color(1.0, 0.8, 0.0),
-	"rcs": Color(0.5, 0.5, 1.0),
-	"comms": Color(0.8, 0.4, 1.0),
-	"docking_port": Color(0.4, 1.0, 0.4),
-	"cargo_bay": Color(0.7, 0.5, 0.3),
-	"living_quarters": Color(0.9, 0.9, 0.6),
-}
-const COMPONENT_TYPE_COLOR_DEFAULT := Color(0.7, 0.7, 0.7)
-
-# M26 -- sensor-dot silhouette outlines (design_ideas/ship_outline_rendering.md
-# "v2"; implementation_plans/m26_sensor_dot_outlines_design.md). Dots ride the
-# same fade window/LOD gate as the v1 static rects (_draw_contact_outline
-# computes alpha/bounds once and now drives both draw paths); this is just the
-# dot color/size.
-const OUTLINE_DOT_COLOR := Color(0.9, 0.9, 0.9)
+# v1.1: outlines and dots draw in the CONTACT's color (_get_contact_color --
+# classification x confidence), the same channel as the blip they replace.
+# The old component-type color table left the panel with the per-component
+# boxes (that detail belongs to the engineering panel, not the tactical map).
 const OUTLINE_DOT_RADIUS_PX := 1.5
+
+const ShipSilhouette = preload("res://scripts/components/ship_silhouette.gd")
 
 # The friendly-identification convention this whole file already uses:
 # Utils.classification_color/_get_contact_color key off classify_contact()'s
@@ -71,14 +56,6 @@ static func outline_alpha(dist: float, full: float, start: float) -> float:
 		return 1.0 if dist <= full else 0.0
 	return 1.0 - clampf((dist - full) / (start - full), 0.0, 1.0)
 
-# True if this ship instance should use the station (much larger) fade window
-# -- STRUCTURE tier is the fleet's established "is a station" test (see
-# main.gd/_spawn_ship and cluster_manager.gd, both gate on the same field).
-static func _is_station_ship(ship_instance) -> bool:
-	if ship_instance == null or not is_instance_valid(ship_instance):
-		return false
-	return ship_instance.get("ship_tier") == ComponentSpec.Tier.STRUCTURE
-
 # Live/valid target's true get_bounding_radius() when resolvable; otherwise a
 # signature-scaled default that at least tracks cross_section instead of one
 # flat guess for every unknown contact. Never returns 0 -- repoints the old
@@ -94,15 +71,14 @@ static func _bounds_radius_for(contact: Dictionary) -> float:
 	var cross_section: float = contact.get("signature", {}).get("cross_section", 0.0)
 	return max(BOUNDS_FALLBACK_MIN, cross_section * BOUNDS_FALLBACK_CS_SCALE)
 
-# Testable seam: builds the per-component draw entries for a contact's outline
-# WITHOUT issuing any draw_* calls, so the transform math (rotate-to-heading +
-# translate-to-world) can be asserted directly. Entries: {rect: Rect2 (ship-
-# local, unrotated -- caller/tests do the rotate+translate), world_pos:
-# Vector2 (rect corner-min after rotate+translate, i.e. the rect's authored
-# position mapped into world space), rotation: float (the ship's heading, for
-# the caller to apply), type: String}. A freed/stale/unresolvable instance
-# (dead-reckoned contact after a kill -- a hot path) returns [] without
-# erroring; uses is_instance_valid + .get() defensively throughout per
+# Testable seam, v1.1: builds SILHOUETTE draw entries for a contact -- the
+# ship's union contour loops (ShipSilhouette, cached per class), NOT
+# per-component rects (those leaked module layout and read as clutter; see
+# ship_outline_rendering.md "first-playtest revision"). Entries:
+# {points: PackedVector2Array (ship-local loop), is_hole: bool, rotation:
+# float (the ship's current heading -- caller/tests apply rotate+translate)}.
+# A freed/stale/unresolvable instance (dead-reckoned contact after a kill --
+# a hot path) returns [] without erroring; .get() defensively throughout per
 # CLAUDE.md's missing-key/freed-instance frame-abort warning.
 static func _outline_draw_list(contact: Dictionary) -> Array:
 	var out: Array = []
@@ -113,21 +89,16 @@ static func _outline_draw_list(contact: Dictionary) -> Array:
 	var inst = instance_from_id(instance_id)
 	if inst == null or not is_instance_valid(inst):
 		return out
-
-	var comps = inst.get("ship_components")
-	if comps == null:
+	if inst.get("ship_components") == null:
 		return out
 
 	var ship_rot: float = inst.get("rotation") if inst.get("rotation") != null else 0.0
-	var ship_pos: Vector2 = inst.get("position") if inst.get("position") != null else Vector2.ZERO
 
-	for c in comps:
-		var rect: Rect2 = c.get("rect", Rect2())
+	for loop in ShipSilhouette.loops_for(inst):
 		out.append({
-			"rect": rect,
-			"world_pos": ship_pos + rect.position.rotated(ship_rot),
+			"points": loop["points"],
+			"is_hole": loop["is_hole"],
 			"rotation": ship_rot,
-			"type": c.get("type", ""),
 		})
 	return out
 
@@ -514,18 +485,26 @@ func _draw() -> void:
 		var cross_section = c.get("signature", {}).get("cross_section", 0.0)
 		var screen_radius = (cross_section / 2.0) * map_zoom
 
-		if screen_radius > 15.0:
-			# Draw the radar cross section circle when zoomed in enough
-			draw_arc(c_pos, cross_section / 2.0, 0, TAU, 16, color, 2.0 / map_zoom)
-		else:
-			# Just draw a solid blip
-			draw_circle(c_pos, 8.0 / map_zoom, color)
+		# v1.1: blip and outline are ONE footprint channel -- the bubble
+		# crossfades out exactly as the resolved shape fades in, so closing on
+		# a contact reads as refining its footprint, not gaining a second
+		# overlay (ship_outline_rendering.md "first-playtest revision").
+		var outline_a: float = _outline_alpha_for(c, c_pos)
+		if outline_a < 1.0:
+			var blip_color := Color(color.r, color.g, color.b, color.a * (1.0 - outline_a))
+			if screen_radius > 15.0:
+				# Draw the radar cross section circle when zoomed in enough
+				draw_arc(c_pos, cross_section / 2.0, 0, TAU, 16, blip_color, 2.0 / map_zoom)
+			else:
+				# Just draw a solid blip
+				draw_circle(c_pos, 8.0 / map_zoom, blip_color)
 
-		# Draw velocity vector
+		# Draw velocity vector (full color -- velocity knowledge doesn't fade
+		# with the footprint refinement)
 		if show_velocity_vectors and c.get("vel", Vector2.ZERO).length() > 0:
 			draw_line(c_pos, c_pos + c.get("vel", Vector2.ZERO) * 2.0, color, 1.0 / map_zoom)
 
-		_draw_contact_outline(c, c_pos)
+		_draw_contact_outline(c, c_pos, outline_a)
 
 	# Contact labels are drawn later, after the transform reset below --
 	# world-space text would scale with map_zoom otherwise.
@@ -691,65 +670,83 @@ func _get_contact_color(c: Dictionary) -> Color:
 	var base = Utils.classification_color(c.get("classification", ""))
 	return Utils.fade_color(base, Utils.contact_confidence(c))
 
-# M25 outline v1 / M26 sensor-dots v2 -- thin rendering wrapper. All the actual
-# math (fade window selection, alpha, per-component world transforms, dot
-# transforms) lives in the pure/static helpers above so it's directly
-# testable; this just turns _outline_draw_list's/_dot_draw_list's entries into
-# draw calls, gated by distance-fade alpha and the existing zoom-LOD pixel
-# threshold. Called from inside the world-space transform (see
-# draw_set_transform_matrix above the Contacts loop), same as the rest of the
-# per-contact drawing.
-#
-# M26 demotion rule: the v1 static per-component RECTS (ground-truth layout --
-# a datalink leak for anyone not "ours") are drawn only for identified
-# friendlies (_is_friendly_contact -- the same FRIENDLY VESSEL/FRIENDLY
-# ORDNANCE classification test _get_contact_color already keys off, so this
-# can never disagree with the blip color). Hostile/unidentified contacts get
-# ONLY the measured sensor dots -- honest, sensor-quality-gated shape info,
-# no ground-truth leak. Own-ship's outline is a separate always-on path
-# earlier in _draw (not through active_contacts at all), so it isn't touched
-# by this demotion.
-func _draw_contact_outline(contact: Dictionary, c_pos: Vector2) -> void:
+# v1.1: the outline is a REFINED FOOTPRINT -- the same knowledge channel as
+# the blip, not extra intel. This helper computes how far along that
+# refinement is [0..1]; the contact loop draws the blip at (1 - this) and the
+# outline at (this), so the bubble crossfades OUT as the shape fades IN.
+# Returns 0 when there is nothing to refine INTO (no silhouette resolvable
+# for a friendly; no/few dots yet for a hostile -- dots ramp the fade by
+# coverage so a two-dot contact doesn't lose its bubble).
+func _outline_alpha_for(contact: Dictionary, c_pos: Vector2) -> float:
 	var bounds_radius: float = _bounds_radius_for(contact)
 	if bounds_radius * map_zoom < OUTLINE_LOD_MIN_PX:
-		return
+		return 0.0
 
-	var instance_id: int = contact.get("instance_id", -1)
-	var inst = instance_from_id(instance_id) if instance_id != -1 else null
-	var is_station: bool = _is_station_ship(inst)
-
-	var full: float = STATION_OUTLINE_FULL if is_station else OUTLINE_FULL
-	var start: float = STATION_OUTLINE_FADE_START if is_station else OUTLINE_FADE_START
+	# Size-proportional window (see OUTLINE_START_RADII comment).
+	var full: float = OUTLINE_FULL_RADII * bounds_radius
+	var start: float = OUTLINE_START_RADII * bounds_radius
 
 	var self_pos: Vector2 = current_state.get("pos", Vector2.ZERO)
 	var dist: float = self_pos.distance_to(c_pos)
 	var alpha: float = outline_alpha(dist, full, start)
 	if alpha <= 0.0:
-		return
+		return 0.0
 
 	if _is_friendly_contact(contact):
-		var entries: Array = _outline_draw_list(contact)
-		for entry in entries:
-			var rect: Rect2 = entry["rect"]
+		return alpha if not _outline_draw_list(contact).is_empty() else 0.0
+	if _is_simple_body(contact):
+		# An asteroid (or any non-ship body) has no component rects for the
+		# dot sampler to touch, but its true shape IS its bounding circle --
+		# the refined footprint is just that circle, always drawable.
+		return alpha
+	var dots = contact.get("outline_dots", [])
+	var dot_count: int = dots.size() if dots is Array else 0
+	return alpha * clampf(dot_count / 16.0, 0.0, 1.0)
+
+# A live instance with real bounds but NO ship_components -- an asteroid or
+# similar simple obstacle. Its outline is its bounding circle (see
+# _outline_alpha_for); ships (including dead hulks, which keep their rects)
+# never take this path.
+static func _is_simple_body(contact: Dictionary) -> bool:
+	var instance_id: int = contact.get("instance_id", -1)
+	if instance_id == -1:
+		return false
+	var inst = instance_from_id(instance_id)
+	if inst == null or not is_instance_valid(inst):
+		return false
+	return inst.get("ship_components") == null and inst.has_method("get_bounding_radius")
+
+# Thin rendering wrapper (math lives in the pure/static helpers above).
+# Demotion rule (M26): identified friendlies get the true SILHOUETTE
+# (_outline_draw_list -- union contour only, v1.1, no per-component boxes);
+# hostile/unidentified contacts get ONLY measured sensor dots. Both draw in
+# the CONTACT's color -- the refinement never changes the color story the
+# blip already told. Called inside the world-space transform, same as the
+# rest of the per-contact drawing.
+func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) -> void:
+	if alpha <= 0.0:
+		return
+	var base_color: Color = _get_contact_color(contact)
+	var draw_color := Color(base_color.r, base_color.g, base_color.b, base_color.a * alpha)
+
+	if _is_friendly_contact(contact):
+		for entry in _outline_draw_list(contact):
+			var pts_local: PackedVector2Array = entry["points"]
 			var rot: float = entry["rotation"]
-			# All four corners anchor to c_pos (the contact's DRAWN position), not
-			# entry.world_pos (the ship's true position) -- mixing the two skews the
-			# quad whenever the fused estimate drifts from truth (M25 validation
-			# catch). The outline rides the blip; truth only supplies shape+rotation.
-			var corners := [
-				c_pos + rect.position.rotated(rot),
-				c_pos + (rect.position + Vector2(rect.size.x, 0)).rotated(rot),
-				c_pos + (rect.position + rect.size).rotated(rot),
-				c_pos + (rect.position + Vector2(0, rect.size.y)).rotated(rot),
-			]
-			var poly := PackedVector2Array(corners)
-			poly.append(corners[0])
-			var base_color: Color = COMPONENT_TYPE_COLORS.get(entry.get("type", ""), COMPONENT_TYPE_COLOR_DEFAULT)
-			var draw_color := Color(base_color.r, base_color.g, base_color.b, base_color.a * alpha)
-			draw_polyline(poly, draw_color, 1.0 / map_zoom)
+			if pts_local.size() < 2:
+				continue
+			# Anchor to c_pos (the contact's DRAWN position) -- the outline
+			# rides the blip; truth supplies only shape + rotation (M25 rule).
+			var poly := PackedVector2Array()
+			for p in pts_local:
+				poly.append(c_pos + p.rotated(rot))
+			poly.append(poly[0])
+			draw_polyline(poly, draw_color, 1.5 / map_zoom)
+	elif _is_simple_body(contact):
+		# Asteroid/simple body: the refined footprint is its true bounding
+		# circle -- the thing collision actually cares about in a rock field.
+		draw_arc(c_pos, _bounds_radius_for(contact), 0, TAU, 32, draw_color, 1.5 / map_zoom)
 	else:
-		var dot_points: Array = _dot_draw_list(contact, c_pos)
-		var dot_color := Color(OUTLINE_DOT_COLOR.r, OUTLINE_DOT_COLOR.g, OUTLINE_DOT_COLOR.b, OUTLINE_DOT_COLOR.a * alpha)
-		for pt in dot_points:
-			draw_circle(pt, OUTLINE_DOT_RADIUS_PX / map_zoom, dot_color)
+		for pt in _dot_draw_list(contact, c_pos):
+			draw_circle(pt, OUTLINE_DOT_RADIUS_PX / map_zoom, draw_color)
 

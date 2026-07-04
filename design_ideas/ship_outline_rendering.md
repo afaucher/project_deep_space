@@ -263,6 +263,52 @@ range you are *inside its laser envelope* — the fight is already at knife rang
 and the leak is moot. Acceptable for v1; v2 replaces the leak with an honest
 mechanism rather than a gating policy.
 
+### v1.1 — first-playtest revision (2026-07-04): silhouette, not x-ray
+
+Playtest finding (Ironhold approach): v1's per-component rects on the nav map
+read as an information leak and as clutter — the player sees the boxes around
+every module of a station they've merely flown near. Component-level detail
+belongs to the engineering panel; the tactical map wants a *footprint*.
+Decisions:
+
+1. **Silhouette only.** The close-range outline is the rectilinear union
+   contour of the component rects (see "Silhouette LOD: beyond the convex
+   hull" below — pulled forward from 'later LOD' to THE primary close-range
+   shape). Holes (ring hulls) render as extra loops; they're rare and cheap.
+   No per-component boxes on the nav map, for anyone, ever. v1.1 always uses
+   the exact contour; the convex-hull/concavity-ratio auto-selection and step
+   simplification stay future refinements.
+2. **Contact color, not component colors.** The outline draws in
+   `_get_contact_color()` (classification color × confidence fade) — the same
+   color channel as the blip. The component-type color table leaves the nav
+   panel.
+3. **The outline REPLACES the bubble.** Blip/cross-section circle and outline
+   crossfade: `blip_alpha = 1 − outline_alpha`. One footprint channel that
+   refines as you close — never two shapes for one contact. "It should look
+   like we refined our contact footprint, not gained some other knowledge."
+4. **Pop-in distance is size-proportional** (angular-resolution model — you
+   resolve shape when it subtends enough of your sensor's view):
+   `fade_start = K_START × bounding_radius`, `full = K_FULL × radius`,
+   K_START ≈ 50, K_FULL ≈ 25. Reproduces the old hand-picked constants
+   (frigate ~54r → 2700/1350 vs old 3000/1500; medium station ~264r →
+   13200/6600 vs old 12000/6000) while scaling continuously: a mine (~10r)
+   resolves only at ~500, an asteroid station earlier than anything. Replaces
+   the two-case ship/station switch. The zoom-LOD pixel floor stays.
+5. Hostile sensor dots (v2 below) recolor to the contact color as well.
+6. **Asteroids/simple bodies refine to their true bounding circle.** They
+   have no component rects for the dot sampler, but their physics shape IS a
+   circle — so the refined footprint is that circle, same crossfade, contact
+   color. Rock fields (the original close-navigation motivation) get honest
+   collision extents instead of unrefinable blips. Dead ship hulks keep
+   their rects and stay on the dots path.
+
+Test impact: the panel's draw-list seams switch from per-component entries to
+silhouette loops; `test_ship_geometry` item 6 and `test_sensor_dots`' no-leak
+item assert the new seam (friendly = silhouette loops, hostile = dots only).
+The silhouette helper (merge_polygons fold, cached per ship class) gets its
+own unit battery: touching-rects union, plus-shape contour, ring-with-hole
+loop count, cache behavior.
+
 ### v2 — sensor dots: the outline is measured, not given
 
 Each active sensor already sweeps angular bins. Extend the sweep: for a contact
@@ -307,8 +353,12 @@ The ray–rect math is the damage raymarch's geometry reused at coarser grain.
 
 ## Silhouette LOD: beyond the convex hull
 
-The mid-range LOD wants ONE clean shape per ship instead of v1's per-component
-rects. The original sketch said "convex hull" — that's wrong as a default,
+(Status update: the v1.1 playtest revision above pulled this forward — the
+union contour is now THE close-range shape, not a mid-range LOD. The shape
+menu and auto-selection below remain the roadmap for refinements on top.)
+
+The close-range outline wants ONE clean shape per ship instead of v1's
+per-component rects. The original sketch said "convex hull" — that's wrong as a default,
 because the hull-shape grammar's variety primitives (`hull_shape_grammar.md`
 §2) ARE concavity: notch, arm, pod, hole. A convex hull erases exactly what
 the grammar builds:

@@ -261,10 +261,18 @@ func _test_quality_scales_with_sensor() -> void:
 # ---------------------------------------------------------------------------
 func _test_range_honesty() -> void:
 	var Ship = preload("res://scripts/ships/ship.gd")
-	# The ship.gd-side range gate: OUTLINE_DOT_RANGE mirrors the nav panel's
-	# OUTLINE_FADE_START (both 3000.0 -- see ship.gd's comment on the const).
-	_assert(is_equal_approx(Ship.OUTLINE_DOT_RANGE, 3000.0), "Item 6: Ship.OUTLINE_DOT_RANGE should be 3000.0 (mirrors nav panel OUTLINE_FADE_START), got %s" % Ship.OUTLINE_DOT_RANGE)
-	_assert(is_equal_approx(Ship.OUTLINE_DOT_RANGE, NavigationPanel.OUTLINE_FADE_START), "Item 6: Ship.OUTLINE_DOT_RANGE should equal NavigationPanel.OUTLINE_FADE_START (coupled consts), got %s vs %s" % [Ship.OUTLINE_DOT_RANGE, NavigationPanel.OUTLINE_FADE_START])
+	# The ship.gd-side range gate stays a flat 3000. Since the outline v1.1
+	# revision the PANEL's fade window is size-proportional
+	# (OUTLINE_START_RADII * bounding_radius), so the coupling contract is now:
+	# the sim-side dot range must COVER a frigate-scale visual fade-start
+	# (~2700), so dots exist by the time a typical hull's outline resolves.
+	# (Bigger hulls' windows open further out than 3000 -- their dot outlines
+	# honestly resolve late; the blip crossfade handles the gap.)
+	_assert(is_equal_approx(Ship.OUTLINE_DOT_RANGE, 3000.0), "Item 6: Ship.OUTLINE_DOT_RANGE should be 3000.0, got %s" % Ship.OUTLINE_DOT_RANGE)
+	var frig = preload("res://scripts/ships/frigate.gd").new()
+	var frig_start: float = NavigationPanel.OUTLINE_START_RADII * frig.get_bounding_radius()
+	frig.free()
+	_assert(Ship.OUTLINE_DOT_RANGE >= frig_start, "Item 6: Ship.OUTLINE_DOT_RANGE (%s) should cover a frigate-scale fade-start window (%.0f)" % [Ship.OUTLINE_DOT_RANGE, frig_start])
 
 	# A sensor whose range < target distance: the sample() call itself doesn't
 	# know about range (that's ship.gd's job, tested via the integration
