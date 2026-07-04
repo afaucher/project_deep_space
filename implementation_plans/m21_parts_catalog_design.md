@@ -1,6 +1,19 @@
 # M21 — Parts catalog
 
-Status: PLANNED. Depends on: nothing. Design: `design_ideas/hull_shape_grammar.md` §3.
+Status: DONE (2026-07-04). Depends on: nothing. Design: `design_ideas/hull_shape_grammar.md` §3.
+
+Shipped: `scripts/components/parts_catalog.gd` (PARTS table, 8 families ×
+tiers × 3 marks; sensor sub-kinds via `opts.sensor_kind`; hull density grades
+15/20/35 with `opts.size` + per-tier `HULL_REFERENCE_AREA` calibration),
+`ShipDesignValidator.check_component_bands()` extraction (behavior-identical —
+`test_ship_designs` output unchanged), `scripts/tests/test_parts_catalog.gd`
+(all 8 items green; re-verified in validation phase). Accepted deviations:
+(1) sensor primary stat is `sensor_quality_score()` (bins/refresh) since the
+spec bands only cover sensor health; (2) scratch-key policing scoped to weapon
+`cooldown` + sensor `timer` — `powered_on` stays authored, matching fleet
+convention (frigate/LAC author it; the plan over-specified); (3) the
+integration smoke asserts heat/sensor-timer progression as the proxy for "no
+silent frame-abort" per CLAUDE.md's Dictionary-access trap.
 
 ## Goal
 

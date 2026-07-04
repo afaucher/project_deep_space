@@ -181,30 +181,43 @@ static func _check_banded_stats(components: Array, tier: int, violations: Array)
 		if not (comp.has("id") and comp.has("type")):
 			continue # already flagged by the schema check above
 
-		var spec_class: String = ComponentSpec.resolve_spec_class(comp)
-		if spec_class == "":
-			continue # no banded spec class for this component
+		violations.append_array(check_component_bands(comp, tier))
 
-		var class_bands: Dictionary = ComponentSpec.COMPONENT_BANDS.get(spec_class, {})
-		if not class_bands.has(tier):
-			continue # this spec class has no entry for this tier -- skip, not a violation
+# M21 -- extracted from the loop above so the parts catalog test (and any
+# future caller) can band-check a single component dict without going through
+# a whole ship. Behavior is unchanged from the inline version: same lookups,
+# same skip rules, same violation dict shape. comp is assumed to already have
+# "id"/"type" (callers that skip that check, e.g. the loop above, do so
+# before calling this).
+static func check_component_bands(comp: Dictionary, tier: int) -> Array:
+	var violations: Array = []
 
-		var tier_bands: Dictionary = class_bands[tier]
-		var comp_id: String = comp["id"]
-		for field in tier_bands.keys():
-			if not comp.has(field):
-				continue
-			var value = comp[field]
-			var band: Array = tier_bands[field]
-			var lo = band[0]
-			var hi = band[1]
-			if not (value >= lo and value <= hi):
-				violations.append({
-					"component_id": comp_id,
-					"field": field,
-					"reason": str(field) + "=" + str(value) + " outside " + spec_class + " band for tier " + str(tier) + " [" + str(lo) + ", " + str(hi) + "]",
-					"severity": "warning",
-				})
+	var spec_class: String = ComponentSpec.resolve_spec_class(comp)
+	if spec_class == "":
+		return violations # no banded spec class for this component
+
+	var class_bands: Dictionary = ComponentSpec.COMPONENT_BANDS.get(spec_class, {})
+	if not class_bands.has(tier):
+		return violations # this spec class has no entry for this tier -- skip, not a violation
+
+	var tier_bands: Dictionary = class_bands[tier]
+	var comp_id: String = comp.get("id", "<missing id>")
+	for field in tier_bands.keys():
+		if not comp.has(field):
+			continue
+		var value = comp[field]
+		var band: Array = tier_bands[field]
+		var lo = band[0]
+		var hi = band[1]
+		if not (value >= lo and value <= hi):
+			violations.append({
+				"component_id": comp_id,
+				"field": field,
+				"reason": str(field) + "=" + str(value) + " outside " + spec_class + " band for tier " + str(tier) + " [" + str(lo) + ", " + str(hi) + "]",
+				"severity": "warning",
+			})
+
+	return violations
 
 # ---------------------------------------------------------------------------
 # 3c. Handling check (§4.3)
