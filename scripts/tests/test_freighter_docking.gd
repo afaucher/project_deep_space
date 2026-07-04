@@ -5,25 +5,18 @@ extends Node
 # test_docking.gd's harness (M19). Run:
 #   ./Godot_v4.4.1-stable_win64.exe --headless --run-test test_freighter_docking
 #
-# CRITICAL WATCH (per the M27 plan): MediumStation's own bounding radius
-# (~264) plus the freighter's (~95.5) exceeds the station's default berth
-# distance (340, authored for a much smaller shuttle) -- 264+95.5 = 359.5 >
-# 340, so the two hulls' CIRCLE collision shapes (ship.gd uses
-# get_bounding_radius() for the physics CollisionShape2D, not the true
-# rotated AABB) would overlap at the default berth pose. The fix here is a
-# bounding-radius-aware berth STANDOFF: a second, custom-positioned
-# DockingBay added as a child of the station (same mechanism
-# test_docking_multi.gd uses for its extra berths), placed further out along
-# the SAME heading/direction as the station's default berth, at distance
-# station_radius + freighter_radius + a safety margin. This is a per-ship
-# offset, not a pos_tolerance/settle_speed tweak -- the station's own
-# get_berths() (medium_station.gd) is untouched.
-#
-# The station's own AUTO-GROWN default berth (grown in Ship._ready() from
-# get_berths(), at the un-adjusted distance) is freed immediately after the
-# station enters the tree -- left in place, it would race the custom berth to
-# capture the freighter at the too-close pose. Test-side cleanup only;
-# medium_station.gd is untouched.
+# MediumStation's bounding radius (~264) plus the freighter's (~95.5) exceeds
+# the station's authored berth distance (340, sized for a shuttle) -- so a
+# naive capture would overlap the two hulls' circle collision shapes. The
+# PRODUCTION fix (M27, user-requested: "medium stations dock whole
+# freighters") lives in DockingBay._berth_pos_for(): the effective berth pose
+# for a captured ship stands off outward along the station->berth direction
+# to station_radius + ship_radius + CLEARANCE_MARGIN whenever the authored
+# distance is too close. This test therefore uses the station's OWN
+# auto-grown default bay -- no test-side workaround -- and asserts the
+# settled seat lands in the standoff band, proving the real docking path
+# handles big hulls out of the box (shuttles are unaffected: their required
+# distance sits inside the authored berth distance, see test_docking).
 
 const MediumStation = preload("res://scripts/ships/medium_station.gd")
 const Freighter = preload("res://scripts/ships/freighter.gd")
@@ -55,7 +48,6 @@ var max_velocity_delta: float = 0.0
 
 const APPROACH_TIMEOUT := 20.0
 const START_OFFSET := Vector2(400, 700)
-const STANDOFF_MARGIN := 25.0  # extra clearance beyond the sum of both bounding radii
 
 var max_observed_speed: float = 0.0
 
@@ -82,36 +74,26 @@ func setup(main) -> void:
 	freighter.iff_tags = ["TEAM_PLAYER"]   # friendly so station PD ignores it
 	freighter.wants_dock = true
 
-	# Bounding-radius-aware berth standoff (see file header). Reuse the
-	# station's default berth's direction/heading (get_berths()[0]) but push
-	# the distance out to station_radius + freighter_radius + margin so the
-	# two hulls' collision circles never overlap at the docked pose.
-	var default_berth: Dictionary = station.get_berths()[0]
-	var berth_dir: Vector2 = default_berth["pos"].normalized()
-	var standoff_dist: float = station.get_bounding_radius() + freighter.get_bounding_radius() + STANDOFF_MARGIN
-	var berth_pos: Vector2 = berth_dir * standoff_dist
-
 	main_node.add_child(station)   # _ready grows the station's own (default) bay
 
-	# Free the auto-grown default bay -- see file header. It would otherwise
-	# claim the freighter into the too-close default pose in a race against
-	# the custom berth below.
+	# Use the station's OWN auto-grown default bay -- the production path.
+	# The bounding-radius-aware standoff is DockingBay's job now, not the
+	# test's (see file header).
 	for c in station.get_children():
 		if c is DockingBay:
-			station.remove_child(c)
-			c.queue_free()
+			bay = c
+			break
+	_assert(bay != null, "station should auto-grow a DockingBay from get_berths()")
+	if bay == null:
+		_finalize()
+		return
 
-	bay = DockingBay.new()
-	bay.position = berth_pos
-	bay.rotation = default_berth["heading"]
-	station.add_child(bay)
+	print("[M27] station_radius=", station.get_bounding_radius(), " freighter_radius=", freighter.get_bounding_radius(), " authored_berth=", bay.position)
 
-	print("[M27] station_radius=", station.get_bounding_radius(), " freighter_radius=", freighter.get_bounding_radius(), " standoff_berth_pos=", berth_pos)
-
-	freighter.position = berth_pos + START_OFFSET
+	freighter.position = bay.global_position + START_OFFSET
 	main_node.add_child(freighter)
 
-	start_dist = freighter.position.distance_to(berth_pos)
+	start_dist = freighter.position.distance_to(bay.global_position)
 	prev_velocity = freighter.linear_velocity
 
 func _physics_process(delta: float) -> void:
@@ -134,17 +116,19 @@ func _physics_process(delta: float) -> void:
 
 		if bay.state == DockingBay.State.DOCKED:
 			dock_time = t
-			var err: float = bay.global_position.distance_to(freighter.position)
 			var spd: float = freighter.linear_velocity.length()
 			_assert(start_dist > 500.0, "freighter should start well off the berth (was %.0f)" % start_dist)
-			_assert(err < bay.pos_tolerance, "docked pose should be within tolerance (err=%.1f)" % err)
 			_assert(spd < bay.settle_speed, "docked freighter should be settled/slow (spd=%.1f)" % spd)
 			_assert(is_finite(freighter.position.x) and is_finite(freighter.position.y), "docked position must be finite")
-			# Bounding-radius-aware standoff: the two hulls' collision circles
-			# must not overlap at the settled pose.
+			# The production standoff must seat the freighter in the band
+			# [no-overlap floor, standoff seat + tolerance]: collision circles
+			# never overlap, AND the ship actually sits at the pushed-out seat
+			# rather than drifting somewhere merely non-overlapping.
 			var center_dist: float = station.global_position.distance_to(freighter.position)
 			var radius_sum: float = station.get_bounding_radius() + freighter.get_bounding_radius()
+			var required: float = radius_sum + DockingBay.CLEARANCE_MARGIN
 			_assert(center_dist >= radius_sum, "docked freighter's collision circle should not overlap the station's (center_dist=%.1f, radius_sum=%.1f)" % [center_dist, radius_sum])
+			_assert(center_dist <= required + bay.pos_tolerance, "docked freighter should sit AT the standoff seat (center_dist=%.1f, seat=%.1f, tol=%.1f)" % [center_dist, required, bay.pos_tolerance])
 			phase = 1
 		elif t > APPROACH_TIMEOUT:
 			var d: float = bay.global_position.distance_to(freighter.position)

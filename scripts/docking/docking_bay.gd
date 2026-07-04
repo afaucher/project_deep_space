@@ -22,6 +22,15 @@ var pos_tolerance := 60.0     # settled when within this of the berth...
 var settle_speed := 25.0      # ...and slower than this
 var dock_duration := 1.5      # seconds held at berth before release
 
+# M27 -- whole-freighter docking: the authored berth pose is fixed (e.g. 340u
+# below a medium station, sized for shuttles), but capture must never pull a
+# big hull into the station's own bounding circle. The effective berth pose
+# for the captured ship stands the authored pose off outward (along the
+# station->berth direction) until station_radius + ship_radius + margin fits.
+# Small hulls are unaffected -- their required distance already sits inside
+# the authored berth distance.
+const CLEARANCE_MARGIN := 25.0
+
 var state: int = State.EMPTY
 var captured = null
 var _dock_timer := 0.0
@@ -39,7 +48,7 @@ func _physics_process(delta: float) -> void:
 				_release()
 			else:
 				_servo(captured)
-				var pos_err: float = global_position.distance_to(captured.position)
+				var pos_err: float = _berth_pos_for(captured).distance_to(captured.position)
 				if pos_err < pos_tolerance and captured.linear_velocity.length() < settle_speed:
 					state = State.DOCKED
 					_dock_timer = dock_duration
@@ -68,12 +77,30 @@ func _try_capture() -> void:
 		state = State.CAPTURING
 
 func _servo(ship) -> void:
-	var pos_err: Vector2 = global_position - ship.position
+	var pos_err: Vector2 = _berth_pos_for(ship) - ship.position
 	var accel: Vector2 = K_SPRING * pos_err - K_DAMP * ship.linear_velocity
 	ship.apply_central_force(accel * ship.mass)
 	var ang_err: float = wrapf(global_rotation - ship.rotation, -PI, PI)
 	var alpha: float = K_ROT * ang_err - K_ROT_DAMP * ship.angular_velocity
 	ship.apply_torque(alpha * ship.inertia)
+
+# The effective berth position for THIS ship (see CLEARANCE_MARGIN comment):
+# the authored pose, pushed outward along the station->berth direction when the
+# ship's bounding radius wouldn't clear the station's. Recomputed per call so
+# it tracks a (slowly) rotating/drifting station. Heading is unchanged -- the
+# standoff moves the seat, not the facing.
+func _berth_pos_for(ship) -> Vector2:
+	var host = get_parent()
+	if host == null or not host.has_method("get_bounding_radius") or not ship.has_method("get_bounding_radius"):
+		return global_position
+	var out_vec: Vector2 = global_position - host.global_position
+	var berth_dist: float = out_vec.length()
+	if berth_dist < 0.001:
+		return global_position
+	var required: float = host.get_bounding_radius() + ship.get_bounding_radius() + CLEARANCE_MARGIN
+	if required <= berth_dist:
+		return global_position
+	return host.global_position + out_vec / berth_dist * required
 
 func _release() -> void:
 	if _valid(captured):
