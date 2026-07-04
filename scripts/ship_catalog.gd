@@ -18,6 +18,53 @@ const SPAWNABLE := [
 	{ "name": "Medium Station", "script": preload("res://scripts/ships/medium_station.gd") },
 ]
 
+# M24 -- delta variants: skins of a validated base hull (see
+# design_ideas/hull_shape_grammar.md §5/§7 and
+# implementation_plans/m24_delta_variants_design.md). Structurally validated
+# the same way as SPAWNABLE (test_ship_designs.gd auto-enumerates this list),
+# but variants are deliberately NOT added to SPAWNABLE -- they don't need a
+# separate sandbox-spawn slot to be tested, and keeping the two lists distinct
+# is what makes the promotion rule below legible (SPAWNABLE = roles that have
+# earned a tactical-sweep verdict; VARIANTS = skins that inherit one).
+#
+# PROMOTION RULE (design doc §7): a variant only "promotes" into the tactical
+# sweeps (and SPAWNABLE) if it changes:
+#   (a) tier -- e.g. a variant that becomes MEDIUM instead of LIGHT,
+#   (b) weapon-class mix -- e.g. a variant that swaps a laser for a missile
+#       tube, or adds/removes an entire weapon class, or
+#   (c) accel band -- leaves the base's thrust/mass ratio by more than +/-20%.
+# A skin that fails all three inherits its base's tactical verdict for free --
+# that's the point: sweep count tracks *roles* (a handful), not *hulls*
+# (dozens of repaints). Every entry below carries a role_key documenting which
+# base archetype's verdict it inherits, and a promotes_tactical_sweep flag
+# recording that this milestone's audit found it does NOT promote.
+#
+# Neither v1 variant promotes:
+#   - Pirate LAC: same tier (LIGHT), same weapon-class mix (laser + missile,
+#     one of each, same as the base), and its accel change stays inside the
+#     +/-20% band -- see the design's own gated assertion (thrust strictly up,
+#     mass strictly down from the removed plate, accel strictly up) exercised
+#     by test_ship_variants.gd item 6, but the tune-based engine bump (same
+#     rect, HEAVY-mark stats) plus one dropped plate is a tune within the
+#     LIGHT-tier envelope, not a new role.
+#   - Ore shuttle: same tier (LIGHT), still unarmed (no weapon-class change),
+#     and the density/comms tunes don't touch thrust or mass in any way that
+#     shifts accel at all (accel is unchanged from the base shuttle).
+const VARIANTS := [
+	{
+		"name": "Pirate LAC",
+		"script": preload("res://scripts/ships/pirate_lac.gd"),
+		"role_key": "light_attack_craft",
+		"promotes_tactical_sweep": false,
+	},
+	{
+		"name": "Ore Shuttle",
+		"script": preload("res://scripts/ships/ore_shuttle.gd"),
+		"role_key": "cargo_shuttle",
+		"promotes_tactical_sweep": false,
+	},
+]
+
 enum Team { FRIENDLY, ENEMY, PIRATE }
 
 # Team -> iff_tags mapping. The whole sandbox-team mechanic falls out of this:

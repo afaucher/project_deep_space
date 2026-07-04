@@ -1,8 +1,23 @@
 # M24 — Delta variants (skins of validated hulls)
 
-Status: PLANNED. Depends on: M21 (swaps pull catalog parts); M23 desirable
+Status: DONE (2026-07-04). Depends on: M21 (swaps pull catalog parts); M23 desirable
 (variants inherit the mechanized checks). Design:
 `design_ideas/hull_shape_grammar.md` §5, §7.
+
+Shipped: `ship_variants.gd` (apply/classify; size-mismatched swap is a hard
+error), `design()` extraction on LAC + cargo shuttle (verbatim; the other
+ships wait until they have variants), `pirate_lac.gd` + `ore_shuttle.gd`,
+`ShipCatalog.VARIANTS` with the promotion rule documented (neither variant
+promotes), `test_ship_variants.gd` (9 items), and variant enumeration wired
+into `test_ship_designs`' structural + ratchet cases. Plan deviation
+(anticipated in execution brief): the literal engine/LIGHT/HEAVY swap can't
+fit the LAC's 10×10 slot (HEAVY rect is 12×14) — resolved as tune ops that
+look the HEAVY mark's thrust/torque up from the catalog live, so the variant
+tracks the catalog. Validation-phase catch: the ore shuttle's comms was tuned
+to 9000, under the LIGHT comms band floor of 10000 — a band-violation warning
+no gate asserted against. Fixed to 12000 and both variant gates now assert
+band-cleanliness (`_assert_only_layout_warnings`), so an out-of-band tune can
+never ship silently again.
 
 ## Goal
 

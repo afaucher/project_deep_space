@@ -6,13 +6,15 @@ class_name CargoShuttle
 # design_ideas/ship_parameter_table.md for targets (mass ~40, accel ~25).
 # Follows the frigate.gd structural template: set ship_components and
 # ship_tier BEFORE super() so Ship._init()'s duplicate(true) deep-copies it.
-func _init() -> void:
-	ship_tier = ComponentSpec.Tier.LIGHT
-	max_speed = 1000.0
-	max_omega = 2.0
-	max_heat = 150.0
-	dockable = true   # M19: civilian hauler -- can be captured by a station berth
-	ship_components = [
+#
+# M24: design() extracted so variants (see ore_shuttle.gd) can compose this
+# hull's loadout via Variants.apply() without inheriting CargoShuttle's _init
+# directly (GDScript parent-_init ordering makes subclass mutation fragile --
+# see ship_variants.gd file header). design() returns the exact authored
+# component array verbatim (copy-pasted, not retyped) -- the fidelity guard is
+# test_ship_variants.gd item 5 plus test_ship_designs staying green.
+static func design() -> Array:
+	return [
 		# Layout relative to center (0,0). Forward +X, Right +Y
 		{"id": "hull_port", "type": "hull", "rect": Rect2(-15, -15, 30, 10), "health": 180.0, "max_health": 180.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hull_stbd", "type": "hull", "rect": Rect2(-15, 5, 30, 10), "health": 180.0, "max_health": 180.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
@@ -30,4 +32,12 @@ func _init() -> void:
 
 		# Unarmed -- the validator allows a ship with zero weapons components.
 	]
+
+func _init() -> void:
+	ship_tier = ComponentSpec.Tier.LIGHT
+	max_speed = 1000.0
+	max_omega = 2.0
+	max_heat = 150.0
+	dockable = true   # M19: civilian hauler -- can be captured by a station berth
+	ship_components = design()
 	super()

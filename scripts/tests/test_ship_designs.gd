@@ -120,10 +120,19 @@ func _test_unvalidated_opt_out() -> void:
 # and validates with zero error-severity (structural) violations. Warnings
 # (band/handling deviations) are allowed and printed, not asserted on, per
 # M9c's "don't band everything today."
+#
+# M24: extended additively to also iterate ShipCatalog.VARIANTS through the
+# same structural validation -- every future variant is validated by existing
+# without new test code (design doc's stated goal). Variants are skins of an
+# already-validated base, so they get no bypass: same zero-error-violations
+# gate as any SPAWNABLE hull.
 # ---------------------------------------------------------------------------
 
+func _all_catalog_entries() -> Array:
+	return ShipCatalog.SPAWNABLE + ShipCatalog.VARIANTS
+
 func _test_catalog_ships_validate_structurally() -> void:
-	for entry in ShipCatalog.SPAWNABLE:
+	for entry in _all_catalog_entries():
 		var ship_name: String = entry["name"]
 		var ship = entry["script"].new()
 		var r = ShipDesignValidator.validate(ship)
@@ -262,6 +271,24 @@ const EXPECTED_LAYOUT_WARNINGS := {
 		{"component_id": "pd_stbd", "field": "hull_coverage"},
 		{"component_id": "missile_stbd", "field": "hull_coverage"},
 	],
+	# M24 -- delta variants. Frozen the same way as the rest of this table:
+	# enumerated by running the validator against the actual variant geometry,
+	# then reviewed line-by-line before being accepted here.
+	#  - Pirate LAC: base LAC validates with ZERO layout warnings (see "Light
+	#    Attack Craft" above), so any warnings here are a direct consequence of
+	#    this variant's one GEOMETRY delta (removing hull_fwd_port). Filled in
+	#    below from an actual validator run against the variant's real
+	#    geometry (not guessed) -- see the M24 report for the run transcript.
+	#  - Ore Shuttle: STATS_ONLY deltas only (tune ops, no remove) -- so its
+	#    layout-warning set must be IDENTICAL to the base "Cargo Shuttle"
+	#    entry above (tunes never touch geometry).
+	"Pirate LAC": [
+		{"component_id": "hp_fwd_laser", "field": "hull_coverage"},
+	],
+	"Ore Shuttle": [
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+	],
 }
 
 # Multiset key: "component_id|field" repeated per occurrence (a component can
@@ -276,8 +303,18 @@ func _layout_warning_keys(violations: Array) -> Array:
 	keys.sort()
 	return keys
 
+# M24: extended additively to also iterate ShipCatalog.VARIANTS -- both new
+# variants get EXPECTED_LAYOUT_WARNINGS entries above, frozen the same way as
+# every SPAWNABLE hull's. This is also the auto-enumeration proof for
+# test_ship_variants.gd item 9: _all_catalog_entries()'s size is
+# SPAWNABLE.size() + VARIANTS.size(), so this loop demonstrably iterates more
+# ships than it did pre-M24, by exactly the variant count.
 func _test_layout_warnings_ratchet() -> void:
-	for entry in ShipCatalog.SPAWNABLE:
+	var pre_variant_count: int = ShipCatalog.SPAWNABLE.size()
+	var all_entries: Array = _all_catalog_entries()
+	_assert(all_entries.size() == pre_variant_count + ShipCatalog.VARIANTS.size(), "Case 6 (M24 auto-enumeration): combined catalog entry count should equal SPAWNABLE + VARIANTS")
+
+	for entry in all_entries:
 		var ship_name: String = entry["name"]
 		var ship = entry["script"].new()
 		var r: Dictionary = ShipDesignValidator.validate(ship)

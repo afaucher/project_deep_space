@@ -5,12 +5,15 @@ class_name LightAttackCraft
 # light missile. Engine is oversized for its mass on purpose -- that's what
 # makes it fast (see design_ideas/ship_parameter_table.md pattern #2).
 # Tier LIGHT. Targets: mass ~14, accel ~110.
-func _init() -> void:
-	ship_tier = ComponentSpec.Tier.LIGHT
-	max_speed = 2200.0
-	max_omega = 4.5
-	max_heat = 130.0
-	ship_components = [
+#
+# M24: design() extracted so variants (see pirate_lac.gd) can compose this
+# hull's loadout via Variants.apply() without inheriting LightAttackCraft's
+# _init directly (GDScript parent-_init ordering makes subclass mutation
+# fragile -- see ship_variants.gd file header). design() returns the exact
+# authored component array verbatim (copy-pasted, not retyped) -- the fidelity
+# guard is test_ship_variants.gd item 5 plus test_ship_designs staying green.
+static func design() -> Array:
+	return [
 		# Layout relative to center (0,0). Forward +X, Right +Y
 		{"id": "hull_port_wing", "type": "hull", "rect": Rect2(-15, -10, 25, 5), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hull_stbd_wing", "type": "hull", "rect": Rect2(-15, 5, 25, 5), "health": 80.0, "max_health": 80.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
@@ -32,4 +35,11 @@ func _init() -> void:
 		{"id": "hp_fwd_missile", "type": "weapons", "rect": Rect2(10, 2.5, 5, 5), "health": 55.0, "max_health": 55.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
 			"weapon_type": "missile", "ammo": 4, "cooldown": 0.0, "cooldown_max": 6.0, "range": 12000.0, "heading": 0.0, "arc_width": PI / 3.0},
 	]
+
+func _init() -> void:
+	ship_tier = ComponentSpec.Tier.LIGHT
+	max_speed = 2200.0
+	max_omega = 4.5
+	max_heat = 130.0
+	ship_components = design()
 	super()
