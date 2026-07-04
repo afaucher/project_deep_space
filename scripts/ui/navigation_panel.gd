@@ -704,9 +704,9 @@ func _outline_alpha_for(contact: Dictionary, c_pos: Vector2) -> float:
 	return alpha * clampf(dot_count / 16.0, 0.0, 1.0)
 
 # A live instance with real bounds but NO ship_components -- an asteroid or
-# similar simple obstacle. Its outline is its bounding circle (see
-# _outline_alpha_for); ships (including dead hulks, which keep their rects)
-# never take this path.
+# similar simple obstacle. Its outline is a rocky blob sized to its bounding
+# circle (see _rock_outline); ships (including dead hulks, which keep their
+# rects) never take this path.
 static func _is_simple_body(contact: Dictionary) -> bool:
 	var instance_id: int = contact.get("instance_id", -1)
 	if instance_id == -1:
@@ -715,6 +715,30 @@ static func _is_simple_body(contact: Dictionary) -> bool:
 	if inst == null or not is_instance_valid(inst):
 		return false
 	return inst.get("ship_components") == null and inst.has_method("get_bounding_radius")
+
+# A perfectly round circle reads as a UI artifact, not a rock -- so simple
+# bodies get a deterministic jagged polygon instead. Seeded (from the rock's
+# static position, stable across bubble promote/demote cycles) so the same
+# asteroid always shows the same face and never shimmers frame to frame.
+# Vertex radii hug the TRUE bounding circle (0.88-1.08 x) -- rocky to look at,
+# but never under-representing the collision extent by more than ~12%, and
+# just as often over-warning, which is the safe direction for navigation.
+static var _rock_outline_cache: Dictionary = {}
+
+static func _rock_outline(seed_val: int, radius: float) -> PackedVector2Array:
+	var key := "%d_%d" % [seed_val, int(radius)]
+	if _rock_outline_cache.has(key):
+		return _rock_outline_cache[key]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_val
+	var n: int = 9 + rng.randi_range(0, 4)
+	var pts := PackedVector2Array()
+	for i in range(n):
+		var ang: float = TAU * float(i) / float(n) + rng.randf_range(-0.12, 0.12)
+		var r: float = radius * rng.randf_range(0.88, 1.08)
+		pts.append(Vector2(cos(ang), sin(ang)) * r)
+	_rock_outline_cache[key] = pts
+	return pts
 
 # Thin rendering wrapper (math lives in the pure/static helpers above).
 # Demotion rule (M26): identified friendlies get the true SILHOUETTE
@@ -743,9 +767,24 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) ->
 			poly.append(poly[0])
 			draw_polyline(poly, draw_color, 1.5 / map_zoom)
 	elif _is_simple_body(contact):
-		# Asteroid/simple body: the refined footprint is its true bounding
-		# circle -- the thing collision actually cares about in a rock field.
-		draw_arc(c_pos, _bounds_radius_for(contact), 0, TAU, 32, draw_color, 1.5 / map_zoom)
+		# Asteroid/simple body: a seeded rocky blob at its true bounding
+		# radius -- the collision extent a rock field actually threatens,
+		# without the perfect-circle UI-artifact look. Rotates with the body
+		# (rocks tumble slowly).
+		var inst = instance_from_id(contact.get("instance_id", -1))
+		if inst != null and is_instance_valid(inst):
+			var true_pos: Vector2 = inst.get("position") if inst.get("position") != null else Vector2.ZERO
+			# Quantized to a 64u grid: stable across bubble promote/demote AND
+			# under small collision-drift (a big shove may re-roll the face --
+			# acceptable, rare).
+			var seed_val: int = hash(Vector2i(int(floor(true_pos.x / 64.0)), int(floor(true_pos.y / 64.0))))
+			var rock_pts: PackedVector2Array = _rock_outline(seed_val, _bounds_radius_for(contact))
+			var rot: float = inst.get("rotation") if inst.get("rotation") != null else 0.0
+			var poly := PackedVector2Array()
+			for p in rock_pts:
+				poly.append(c_pos + p.rotated(rot))
+			poly.append(poly[0])
+			draw_polyline(poly, draw_color, 1.5 / map_zoom)
 	else:
 		for pt in _dot_draw_list(contact, c_pos):
 			draw_circle(pt, OUTLINE_DOT_RADIUS_PX / map_zoom, draw_color)

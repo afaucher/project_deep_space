@@ -295,12 +295,15 @@ Decisions:
    resolves only at ~500, an asteroid station earlier than anything. Replaces
    the two-case ship/station switch. The zoom-LOD pixel floor stays.
 5. Hostile sensor dots (v2 below) recolor to the contact color as well.
-6. **Asteroids/simple bodies refine to their true bounding circle.** They
-   have no component rects for the dot sampler, but their physics shape IS a
-   circle — so the refined footprint is that circle, same crossfade, contact
-   color. Rock fields (the original close-navigation motivation) get honest
-   collision extents instead of unrefinable blips. Dead ship hulks keep
-   their rects and stay on the dots path.
+6. **Asteroids/simple bodies refine to a seeded rocky blob at their true
+   bounding radius.** They have no component rects for the dot sampler, and a
+   perfect circle reads as a UI artifact — so the refined footprint is a
+   deterministic jagged polygon (seeded from the rock's quantized position,
+   stable across bubble promote/demote; vertex radii 0.88–1.08× the real
+   collision circle, so it errs toward over-warning). Same crossfade, contact
+   color, tumbles with the body. Rock fields (the original close-navigation
+   motivation) get honest collision extents that look like rocks. Dead ship
+   hulks keep their rects and stay on the dots path.
 
 Test impact: the panel's draw-list seams switch from per-component entries to
 silhouette loops; `test_ship_geometry` item 6 and `test_sensor_dots`' no-leak

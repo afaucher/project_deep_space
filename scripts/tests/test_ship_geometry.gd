@@ -72,6 +72,26 @@ func _test_simple_body_outline() -> void:
 	_assert(is_equal_approx(NavigationPanel._bounds_radius_for(rock_contact), 300.0), "Simple-body: asteroid bounds radius should be its 300u collision circle, got %s" % NavigationPanel._bounds_radius_for(rock_contact))
 	_assert(NavigationPanel._outline_draw_list(rock_contact) == [], "Simple-body: an asteroid must produce NO silhouette loops (no rects to leak), got %s" % str(NavigationPanel._outline_draw_list(rock_contact)))
 
+	# Rock outline shape: deterministic per seed, jagged (not a circle), and
+	# every vertex hugs the true bounding radius (0.88-1.08 x band) so the
+	# drawn blob never lies about the collision extent by more than ~12%.
+	var a: PackedVector2Array = NavigationPanel._rock_outline(12345, 300.0)
+	var b: PackedVector2Array = NavigationPanel._rock_outline(12345, 300.0)
+	var c: PackedVector2Array = NavigationPanel._rock_outline(54321, 300.0)
+	_assert(a == b, "Rock outline: same seed must yield an identical shape (deterministic, no shimmer)")
+	_assert(a != c, "Rock outline: different seeds should yield different shapes")
+	_assert(a.size() >= 8, "Rock outline: needs enough vertices to read as a rock, got %d" % a.size())
+	var radii_ok := true
+	var all_equal := true
+	for p in a:
+		var r: float = p.length()
+		if r < 300.0 * 0.87 or r > 300.0 * 1.09:
+			radii_ok = false
+		if not is_equal_approx(r, a[0].length()):
+			all_equal = false
+	_assert(radii_ok, "Rock outline: every vertex radius must stay in the 0.88-1.08x band of the true radius")
+	_assert(not all_equal, "Rock outline: vertex radii must VARY (a perfect circle is the artifact look this replaces)")
+
 	var frigate = Frigate.new()
 	frigate.name = "GeomTestNotSimple"
 	add_child(frigate)
