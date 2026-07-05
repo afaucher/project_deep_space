@@ -1,7 +1,25 @@
 # M26 — Sensor-dot outlines (v2: the outline is measured, not given)
 
-Status: DONE (2026-07-04). Depends on: M25. Design:
+Status: DONE (2026-07-04); **DISABLED by default (2026-07-05)** — see fallback
+note below. Depends on: M25. Design:
 `design_ideas/ship_outline_rendering.md` — "Decided path", v2 section.
+
+## Fallback (2026-07-05): off by default, silhouette for everyone
+
+The dot sampler doesn't scale at close range: it's a per-frame ray-vs-AABB over
+the target's components for every subtended bin, per sensor, per ship — a close
+pass on a 34-component station spiked physics from ~1ms to 120+ms/frame and
+stalled the sim (the frigate's 3600-bin short-range sensor is the worst case).
+A bin-count cap (`MAX_DOT_BINS_PER_SAMPLE`) brought the peak to ~20ms, but the
+approach still samples on EVERY contact (only asteroids skip, lacking rects) —
+including friendlies whose dots the nav panel throws away in favour of the
+silhouette. So for now the whole path is gated OFF behind
+`DebugSettings.SensorDotOutlines` (default OFF): **every ship contact renders as
+the authoritative cached `ShipSilhouette`**, friendly or not (asteroids still
+get their rocky blob). The dot code is intact and re-enableable via the debug
+menu; `test_sensor_dots` / `test_collision_perf` flip it ON to keep testing it.
+Revisit needs a real fix (sample only dot-drawn contacts; decouple sample rate
+from sensor bin count; cheaper coverage) before it goes back on by default.
 
 Shipped: `scripts/sensors/silhouette_sampler.gd` (pure analytic slab test
 with pinned contracts, nearest-entry sample, subtense-bin math),

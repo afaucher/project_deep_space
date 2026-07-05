@@ -27,6 +27,11 @@ func setup(main: Node) -> void:
 	main_node = main
 	print("Starting Sensor Dot Outline (M26) Tests")
 
+	# The dot sampler is DebugSettings-gated OFF by default (perf fallback); this
+	# suite tests the sampler itself, so turn it ON for the run.
+	if DebugSettings:
+		DebugSettings.set_choice("sensor_dot_outlines", DebugSettings.SensorDotOutlines.ON)
+
 	# Pure-math battery -- synchronous, no physics needed.
 	_test_ray_rect_hit_analytic()
 	_test_nearest_entry()

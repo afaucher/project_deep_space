@@ -1654,6 +1654,12 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 #      are stored in, so the nav panel only needs to re-apply the contact's
 #      CURRENT drawn rotation to render them (dots ride the hull as it turns).
 func _sample_outline_dots(sensor: Dictionary, sensor_range: float, origin: Vector2, contact: Dictionary, target) -> void:
+	# Fallback (see DebugSettings.SensorDotOutlines): the dot sampler is OFF by
+	# default -- every contact renders as the authoritative cached silhouette
+	# instead, so we skip this whole per-frame ray-sampling path. Single gate
+	# here covers all callers.
+	if DebugSettings == null or DebugSettings.get_choice("sensor_dot_outlines") == DebugSettings.SensorDotOutlines.OFF:
+		return
 	if not is_instance_valid(target):
 		return
 	var target_comps = target.get("ship_components")

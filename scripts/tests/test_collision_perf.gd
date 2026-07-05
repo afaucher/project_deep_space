@@ -37,6 +37,11 @@ func _assert(condition: bool, msg: String) -> void:
 
 func setup(main) -> void:
 	main_node = main
+	# Force the dot sampler ON so this guards its worst case (bin-capped). It's
+	# OFF by default now, but the perf cliff was in this path, so the regression
+	# test must exercise it regardless of the default.
+	if DebugSettings:
+		DebugSettings.set_choice("sensor_dot_outlines", DebugSettings.SensorDotOutlines.ON)
 	print("=== collision perf: frigate -> medium station @ %.0f u/s ===" % RAM_SPEED)
 	station = MediumStation.new()
 	station.name = "PerfStation"

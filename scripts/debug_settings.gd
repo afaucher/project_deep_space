@@ -38,6 +38,13 @@ enum MissileJink { OFF, ON }
 # exists to let the effect be disabled outright, not to relax the threshold.
 enum CollisionDamage { ON, OFF }
 
+# Sensor-dot contact outlines (M26). Default OFF for now: the close-range dot
+# sampler is a per-frame ray-vs-AABB over the target's components for every
+# subtended bin, per sensor, per ship -- it does not yet scale, so we fall back
+# to the authoritative cached silhouette for every contact. Flip ON to re-enable
+# the measured-dot outline (bin-capped, but still the heavier path).
+enum SensorDotOutlines { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -73,6 +80,14 @@ const OPTIONS := {
 			"Off (no contact damage)",         # OFF -- playtesting / negative control
 		],
 		"default": CollisionDamage.ON,
+	},
+	"sensor_dot_outlines": {
+		"label": "Sensor-dot contact outlines",
+		"choices": [
+			"Off (authoritative silhouette for all)", # OFF -- current fallback
+			"On (measured dots for unidentified)",     # ON  -- the M26 dot sampler
+		],
+		"default": SensorDotOutlines.OFF,
 	},
 }
 

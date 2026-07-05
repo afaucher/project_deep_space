@@ -48,6 +48,15 @@ static func _is_friendly_contact(contact: Dictionary) -> bool:
 	var classification: String = contact.get("classification", "")
 	return classification == "FRIENDLY VESSEL" or classification == "FRIENDLY ORDNANCE"
 
+# The M26 measured-dot outline is a DebugSettings-gated fallback lever, OFF by
+# default (see DebugSettings.SensorDotOutlines). When off, EVERY ship contact --
+# friendly or not -- renders as the authoritative cached silhouette instead of
+# sampled dots. Kept as a toggle so the dot path stays live and re-enableable.
+static func _sensor_dots_enabled() -> bool:
+	if DebugSettings == null:
+		return false
+	return DebugSettings.get_choice("sensor_dot_outlines") == DebugSettings.SensorDotOutlines.ON
+
 # Pure fade function -- alpha 1.0 at/inside `full`, 0.0 at/beyond `start`,
 # linear between, clamped both sides. Kept as a static pure function (no draw
 # calls, no node state) so it's directly unit-testable per the M25 plan.
@@ -690,16 +699,21 @@ func _outline_alpha_for(contact: Dictionary, c_pos: Vector2) -> float:
 	if alpha <= 0.0:
 		return 0.0
 
-	if _is_friendly_contact(contact):
-		return alpha if not _outline_draw_list(contact).is_empty() else 0.0
 	if _is_simple_body(contact):
-		# An asteroid (or any non-ship body) has no component rects for the
-		# dot sampler to touch, but its true shape IS its bounding circle --
-		# the refined footprint is just that circle, always drawable.
+		# An asteroid (or any non-ship body) has no component rects, but its
+		# true shape IS its bounding circle -- the refined footprint is just
+		# that circle (a seeded rocky blob), always drawable.
 		return alpha
-	var dots = contact.get("outline_dots", [])
-	var dot_count: int = dots.size() if dots is Array else 0
-	return alpha * clampf(dot_count / 16.0, 0.0, 1.0)
+	if _sensor_dots_enabled() and not _is_friendly_contact(contact):
+		# Measured-dot outline for an unidentified/hostile contact: ramp the
+		# fade by how many dots we've accrued so a two-dot contact keeps its
+		# bubble.
+		var dots = contact.get("outline_dots", [])
+		var dot_count: int = dots.size() if dots is Array else 0
+		return alpha * clampf(dot_count / 16.0, 0.0, 1.0)
+	# Friendly, OR the dot sampler is off (fallback) -- the authoritative cached
+	# silhouette, resolvable for any ship we can currently see.
+	return alpha if not _outline_draw_list(contact).is_empty() else 0.0
 
 # A live instance with real bounds but NO ship_components -- an asteroid or
 # similar simple obstacle. Its outline is a rocky blob sized to its bounding
@@ -751,20 +765,7 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) ->
 	var base_color: Color = _get_contact_color(contact)
 	var draw_color := Color(base_color.r, base_color.g, base_color.b, base_color.a * alpha)
 
-	if _is_friendly_contact(contact):
-		for entry in _outline_draw_list(contact):
-			var pts_local: PackedVector2Array = entry["points"]
-			var rot: float = entry["rotation"]
-			if pts_local.size() < 2:
-				continue
-			# Anchor to c_pos (the contact's DRAWN position) -- the outline
-			# rides the blip; truth supplies only shape + rotation (M25 rule).
-			var poly := PackedVector2Array()
-			for p in pts_local:
-				poly.append(c_pos + p.rotated(rot))
-			poly.append(poly[0])
-			draw_polyline(poly, draw_color, 1.5 / map_zoom)
-	elif _is_simple_body(contact):
+	if _is_simple_body(contact):
 		# Asteroid/simple body: a seeded rocky blob at its true bounding
 		# radius -- the collision extent a rock field actually threatens,
 		# without the perfect-circle UI-artifact look. Rotates with the body
@@ -783,7 +784,22 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) ->
 				poly.append(c_pos + p.rotated(rot))
 			poly.append(poly[0])
 			draw_polyline(poly, draw_color, 1.5 / map_zoom)
-	else:
+	elif _sensor_dots_enabled() and not _is_friendly_contact(contact):
+		# Dot sampler ON + unidentified/hostile: draw the MEASURED dots.
 		for pt in _dot_draw_list(contact, c_pos):
 			draw_circle(pt, OUTLINE_DOT_RADIUS_PX / map_zoom, draw_color)
+	else:
+		# Friendly, OR dot sampler off (fallback): the authoritative silhouette.
+		for entry in _outline_draw_list(contact):
+			var pts_local: PackedVector2Array = entry["points"]
+			var rot: float = entry["rotation"]
+			if pts_local.size() < 2:
+				continue
+			# Anchor to c_pos (the contact's DRAWN position) -- the outline
+			# rides the blip; truth supplies only shape + rotation (M25 rule).
+			var poly := PackedVector2Array()
+			for p in pts_local:
+				poly.append(c_pos + p.rotated(rot))
+			poly.append(poly[0])
+			draw_polyline(poly, draw_color, 1.5 / map_zoom)
 
