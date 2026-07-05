@@ -366,6 +366,7 @@ func _distribute_state() -> void:
 			"linear_mode": ship.linear_mode,
 			"sensors": ship.active_sensor_sweeps.duplicate(true),
 			"sensor_config": ship.get_components_by_type("sensors"),
+			"comms_range": ship.get_comms_range(),
 			"contacts": ship.active_contacts.duplicate(true),
 			"transponders": ship.active_transponders.duplicate(true),
 			"comms_ledger": ship.comms_ledger.get_packet_data(),

@@ -156,7 +156,6 @@ var active_lasers: Array = []
 # Toggles
 var show_weapon_arcs: bool = true
 var show_sensor_arcs: bool = false
-var show_comms_range: bool = false
 var show_contact_labels: bool = true
 var show_velocity_vectors: bool = true
 var show_grid: bool = true
@@ -196,7 +195,6 @@ func _ready() -> void:
 	
 	_add_toggle(overlay, "Weapon Arcs", "show_weapon_arcs")
 	_add_toggle(overlay, "Sensor Arcs", "show_sensor_arcs")
-	_add_toggle(overlay, "Comms Range", "show_comms_range")
 	_add_toggle(overlay, "Contact Labels", "show_contact_labels")
 	_add_toggle(overlay, "Velocity Vectors", "show_velocity_vectors")
 	_add_toggle(overlay, "Grid", "show_grid")
@@ -469,13 +467,13 @@ func _draw() -> void:
 				var dot_pos = pos + Vector2(dist, 0).rotated(b_center)
 
 				draw_circle(dot_pos, 4.0 / map_zoom, Color.CYAN)
-	
-	if show_comms_range:
-		var comms = current_state.get("ship_components", [])
-		for c in comms:
-			if c.get("type", "") == "comms" and c.has("range"):
-				draw_arc(pos, c["range"], 0, TAU, 64, Color(0.8, 0.4, 1.0, 0.4), 2.0 / map_zoom)
-	
+
+		# One more sensor-range ring: comms range, folded into the Sensor Arcs
+		# toggle rather than its own checkbox (it's just another range line).
+		var comms_range: float = current_state.get("comms_range", 0.0)
+		if comms_range > 0.0:
+			draw_arc(pos, comms_range, 0, TAU, 64, Color(0.8, 0.4, 1.0, 0.4), 2.0 / map_zoom)
+
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
 	for c_id in contacts.keys():
