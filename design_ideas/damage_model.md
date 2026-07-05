@@ -28,26 +28,34 @@ Two rules produce "burn-through":
 
 ## Why lasers burn through but a ram (currently) doesn't
 
-Same code, different **packet size vs. that 2000/step cap**:
+Same code; the difference is that a **laser fires repeatedly** while a **ram is
+one event**, plus how each interacts with the per-step cap (which scales with
+the *target* component's health: `cap = max(5, 2000 × health_ratio)`).
 
-- **Laser** — `actual_damage = comp["damage"] × health_ratio` fired repeatedly on
-  cooldown; each packet (tens to low hundreds) is far below the cap, so it fully
-  deposits into the *first live* component and stops. Across many shots the
-  component chips down, dies, and the next shot's ray reaches the layer behind.
-  Sustained fire visibly eats inward, one layer at a time.
-- **Collision (M28)** — one big lump in a single call. A 400 u/s frigate head-on
-  is ~1407, which is **below** the 2000/step cap, so `min(1407, 2000) = 1407` —
-  the entire lump is absorbed **in the first step**, by the outermost component
-  the ray touches (on a frigate nose that's `dir_high_res`, a 50-HP sensor:
-  health goes to 50 − 1407 = −1357), then `remaining_damage` hits 0 and the loop
-  ends. No burn-through; ~1357 of the 1407 is wasted overkilling a sensor, so the
-  ship's clamped total only drops by that component's 50 HP.
+- **Laser** — `actual_damage = comp["damage"] × health_ratio`, fired each
+  cooldown. A frigate laser is **500/shot** (catalog weapons run 250–3200). On
+  **fresh, full-health armor** 500 < the 2000 cap, so the cap does **not** bind:
+  the shot deposits fully into the first live component, and burn-through to the
+  next layer happens **across shots via the skip-when-dead rule** — the cap is
+  irrelevant to this common case. The cap starts to matter in two situations:
+  (a) once the outer component is ablated below ~25% health, `2000 × ratio` drops
+  under 500, so a single shot finishes the dying layer **and** punches the
+  remainder into the component behind it in the same shot; and (b) heavy weapons
+  above 2000/shot (e.g. the 3200 laser) penetrate multiple full-health layers in
+  one shot. So the cap governs *single-shot penetration*, not the routine chip.
+- **Collision (M28)** — one lump, one chance, no follow-up shot. A 400 u/s
+  frigate head-on is ~1407, **below** the 2000 cap, so the cap doesn't bind here
+  either: `min(1407, 2000) = 1407` deposits **in the first step** into the
+  outermost component the ray touches (a frigate nose's `dir_high_res`, a 50-HP
+  sensor: 50 − 1407 = −1357), then `remaining_damage` hits 0. Because there's no
+  next shot to skip the now-dead sensor, it **stops there** — ~1357 of the 1407
+  is wasted, and the ship's clamped total drops by only that 50 HP.
 
-A collision lump *bigger* than the cap (> 2000 into a full-health face) would
-burn through in one call — 2000 in step 1, kill the outer component, march the
-remainder into the structure behind. M28's tuned `COLLISION_DAMAGE_K` just never
-produces a lump that large against a full-health face, so every ram clips exactly
-one outermost component.
+So the ram's weakness isn't the cap (1407 < 2000) — it's the lack of repetition.
+A collision lump *bigger* than the cap (> 2000 into a full-health face) *would*
+burn through in one call, exactly like the 3200 laser (2000 in step 1, kill the
+outer component, march the remainder inward). M28's tuned `COLLISION_DAMAGE_K`
+just never produces a lump that large against a full-health face.
 
 ## Decision: PARKED (accept M28 as-is, revisit)
 
