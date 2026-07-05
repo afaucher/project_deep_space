@@ -123,6 +123,17 @@ const COLLISION_DAMAGE_MIN_SPEED := 150.0 # u/s -- below this, contact is free (
 # requires ALL hull plates destroyed, see is_sys_destroyed). See
 # test_collision_damage.gd for the measurements that picked this value.
 const COLLISION_DAMAGE_K := 0.0005
+# Ceiling on a single collision's damage. Without it the quadratic term explodes
+# at speed (a ~550 u/s reverse ram into a station is ~7200, enough to burn
+# through 4 components -- engine/hull/reactor/sensor -- and hulk the ship from
+# any long-axis angle; at max_speed it is far worse). Since each full-health
+# component in the ray's path costs a flat ~2000 (one step at the density-20
+# cap), 4000 bounds a ram to ~2 outer components: a front/rear ram loses its
+# nose or its drive+rear-hull but the amidships reactor survives. A dead
+# BROADSIDE ram can still reach the reactor (only one hull layer deep on the
+# flank -- a ship-layout exposure, not a damage-scaling one). See
+# design_ideas/damage_model.md.
+const COLLISION_DAMAGE_MAX := 4000.0
 
 const RCS_SFX_TORQUE_THRESHOLD := 100.0 # torque above this plays the RCS thruster sound cue
 
@@ -745,6 +756,7 @@ func _on_body_entered(other: Node) -> void:
 
 	var excess_speed: float = v_impact - COLLISION_DAMAGE_MIN_SPEED
 	var damage: float = COLLISION_DAMAGE_K * reduced_mass * pow(excess_speed, 2.0)
+	damage = min(damage, COLLISION_DAMAGE_MAX)  # bound the high end (see COLLISION_DAMAGE_MAX)
 	if damage <= 0.0:
 		return
 

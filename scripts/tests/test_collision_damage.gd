@@ -501,7 +501,7 @@ func _phase_6_process(delta: float) -> void:
 # sub-runs (200, 300, 400) plus a threshold+epsilon sub-run (151), each a
 # fresh pair of frigates.
 # ---------------------------------------------------------------------------
-const PHASE7_SPEEDS := [151.0, 200.0, 300.0, 400.0] # combined closing speed; first is threshold+epsilon
+const PHASE7_SPEEDS := [151.0, 200.0, 300.0, 400.0, 1200.0] # combined closing speed; first is threshold+epsilon, last is far past the damage cap
 const PHASE7_APPROACH := 600.0
 const PHASE7_TIMEOUT := 12.0
 const PHASE7_SETTLE_AFTER_CONTACT := 1.0 # seconds to wait after first contact before sampling damage -- body_entered fires on the physics tick AFTER two shapes are found overlapping, not the instant "contact" (a proximity check with slack) goes true
@@ -570,6 +570,11 @@ func _finish_phase_7() -> void:
 	_assert(p7_damages[0] < 5.0, "phase 7: threshold+epsilon (151 u/s) should be near-zero damage (got %.3f)" % p7_damages[0])
 	_assert(p7_damages[1] < p7_damages[2], "phase 7: damage should strictly increase 200->300 (%.3f !< %.3f)" % [p7_damages[1], p7_damages[2]])
 	_assert(p7_damages[2] < p7_damages[3], "phase 7: damage should strictly increase 300->400 (%.3f !< %.3f)" % [p7_damages[2], p7_damages[3]])
+	# The 1200 u/s sub-run would deal ~24800 uncapped; COLLISION_DAMAGE_MAX
+	# clamps it. Raw absorbed should sit at ~the cap (the whole capped lump
+	# lands in the ~2 components the ray crosses), far below the uncapped value.
+	_assert(p7_damages[4] < p7_damages[3] * 3.0, "phase 7: the 1200 u/s hit should be clamped, not the ~24800 uncapped value (got %.1f)" % p7_damages[4])
+	_assert(abs(p7_damages[4] - ShipRef.COLLISION_DAMAGE_MAX) <= ShipRef.COLLISION_DAMAGE_MAX * 0.15, "phase 7: capped hit raw-absorbed (%.1f) should sit near COLLISION_DAMAGE_MAX (%.1f)" % [p7_damages[4], ShipRef.COLLISION_DAMAGE_MAX])
 	_start_phase_8()
 
 # ---------------------------------------------------------------------------

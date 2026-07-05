@@ -115,7 +115,10 @@ Implemented in `ship.gd` (`_on_body_entered`, `_prev_linear_velocity` cached at
 the top of `_physics_process`, `contact_monitor`/`max_contacts_reported` in
 `_ready`), `debug_settings.gd` (`collision_damage` ON/OFF knob), and
 `test_collision_damage.gd` (8 phases). **`COLLISION_DAMAGE_K = 0.0005`**,
-`COLLISION_DAMAGE_MIN_SPEED = 150.0`. Friction findings:
+`COLLISION_DAMAGE_MIN_SPEED = 150.0`, **`COLLISION_DAMAGE_MAX = 4000`** (high-end
+cap added 2026-07-05 after first playtest — bounds a ram to ~2 components so a
+fast hit isn't fatal from any long-axis angle; see `design_ideas/damage_model.md`).
+Friction findings:
 - **Damage direction:** `take_damage`'s `global_dir` must point INWARD from the
   contact face (`-impact_dir`); backwards, the raymarch starts at the hull and
   heads away, silently dealing zero.

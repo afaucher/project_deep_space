@@ -87,7 +87,29 @@ Two properties this surfaces:
    better shielded — far more survivable. Emergent and arguably correct, but
    punishing.
 
-## Decision: PARKED (accept M28 as-is, revisit)
+## Change: high-end cap `COLLISION_DAMAGE_MAX = 4000` (2026-07-05)
+
+In response to the finding above (a fast ram was near-fatal from any long-axis
+angle), a single-collision damage ceiling was added: `damage = min(damage,
+COLLISION_DAMAGE_MAX)` with `COLLISION_DAMAGE_MAX = 4000` (`ship.gd`). Because
+each full-health component costs a flat ~2000, 4000 bounds a ram to **~2 outer
+components**, so:
+- The low/mid curve is **untouched** — 4000 is only reached above ~400 u/s
+  frigate-vs-frigate; everything the tuning already liked stays identical
+  (measured: 0.02 / 56 / 507 / 1407 for 151/200/300/400 u/s unchanged; a 1200
+  u/s hit that was ~24800 uncapped now clamps to 4000).
+- A **front or rear** ram now loses its nose or its drive+rear-hull but the
+  amidships reactor survives — brutal, not instantly fatal.
+- A dead **broadside** ram can *still* reach the reactor: on the flank the
+  reactor is only one hull layer deep (`hull_port`/`hull_stbd` → reactor), so no
+  damage-scaling knob fully fixes that — it's a **ship-layout exposure**. If we
+  want "survivable from every angle," the reactor needs to sit deeper amidships
+  (a design change), tracked with the parked items below.
+
+Regression pinned in `test_collision_damage.gd` phase 7 (the 1200 u/s sub-run
+asserts the clamp).
+
+## Decision: PARKED (thickness-blindness + flank exposure, revisit)
 
 For the M28 plumbing milestone we **accept** the behavior — the damage system is
 correct and consistent (lasers and collisions share one raymarch), it just has
