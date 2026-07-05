@@ -128,6 +128,8 @@ the top of `_physics_process`, `contact_monitor`/`max_contacts_reported` in
   moves). That's existing `take_damage` raymarch behavior, not new here — noted
   as a *playtest* question for whether rams should feel heftier (a future
   penetration/spread tweak), out of scope for M28's plumbing milestone.
+  Mechanism + parked decision + revisit options written up in
+  `design_ideas/damage_model.md`.
 
 ---
 
