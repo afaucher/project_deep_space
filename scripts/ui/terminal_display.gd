@@ -215,14 +215,6 @@ func _ready() -> void:
 	ship_oriented_toggle.toggled.connect(func(pressed): current_ship_oriented = pressed)
 	top_bar.add_child(ship_oriented_toggle)
 
-	var perf_spacer = Control.new()
-	perf_spacer.custom_minimum_size = Vector2(16, 0)
-	top_bar.add_child(perf_spacer)
-	_perf_label = Label.new()
-	_perf_label.text = "FPS --"
-	_perf_label.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
-	top_bar.add_child(_perf_label)
-
 	# Prevent top bar buttons from stealing focus and consuming the spacebar hotkey
 	for child in top_bar.get_children():
 		if child is BaseButton:
@@ -393,11 +385,26 @@ func _ready() -> void:
 	help_overlay = HelpOverlay.new()
 	add_child(help_overlay)
 
+	# Bottom bar: help hint on the left, live perf readout on the right.
+	var bottom_bar := HBoxContainer.new()
+
 	var help_hint := Label.new()
 	help_hint.text = "F1  Controls"
 	help_hint.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
 	help_hint.add_theme_font_size_override("font_size", 13)
-	main_vbox.add_child(help_hint)
+	bottom_bar.add_child(help_hint)
+
+	var bottom_spacer := Control.new()
+	bottom_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom_bar.add_child(bottom_spacer)
+
+	_perf_label = Label.new()
+	_perf_label.text = "FPS --"
+	_perf_label.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
+	_perf_label.add_theme_font_size_override("font_size", 13)
+	bottom_bar.add_child(_perf_label)
+
+	main_vbox.add_child(bottom_bar)
 
 func _add_margins(style: StyleBoxFlat) -> void:
 	style.content_margin_left = 3
