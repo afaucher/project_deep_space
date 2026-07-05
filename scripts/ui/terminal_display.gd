@@ -45,6 +45,16 @@ var spawn_hull_dropdown: OptionButton
 var spawn_team_dropdown: OptionButton
 var ship_oriented_toggle: CheckButton
 
+# Live performance readout (top bar). "phys tick %%" is the share of each fixed
+# physics tick (1/Engine.physics_ticks_per_second) actually spent computing the
+# physics step -- the rest is idle headroom. Directly answers "how much room is
+# left before something like CCD would cost us frames". EMA-smoothed so it reads
+# steadily instead of flickering per frame.
+var _perf_label: Label
+var _perf_phys_ema: float = 0.0
+var _perf_fps_ema: float = 0.0
+const PERF_EMA := 0.1
+
 # Debug menu plumbing: each popup item id is an index into _debug_menu_items, which
 # records which DebugSettings key + choice that row represents. Auto-built from the
 # DebugSettings.OPTIONS registry, so new debug knobs need zero UI code here.
@@ -204,7 +214,15 @@ func _ready() -> void:
 	ship_oriented_toggle.button_pressed = false
 	ship_oriented_toggle.toggled.connect(func(pressed): current_ship_oriented = pressed)
 	top_bar.add_child(ship_oriented_toggle)
-	
+
+	var perf_spacer = Control.new()
+	perf_spacer.custom_minimum_size = Vector2(16, 0)
+	top_bar.add_child(perf_spacer)
+	_perf_label = Label.new()
+	_perf_label.text = "FPS --"
+	_perf_label.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
+	top_bar.add_child(_perf_label)
+
 	# Prevent top bar buttons from stealing focus and consuming the spacebar hotkey
 	for child in top_bar.get_children():
 		if child is BaseButton:
@@ -502,7 +520,27 @@ func _on_transponder_share_loc_toggled(share: bool) -> void:
 # ----------------------------------------------------
 # Player feedback: heat fan / overheat alert / damage punch
 # ----------------------------------------------------
+# Live top-bar perf readout. "phys % busy" is the share of one fixed physics
+# tick (1/Engine.physics_ticks_per_second) spent computing the physics step
+# (server integration + every _physics_process); the idle remainder is the
+# headroom a heavier physics feature (e.g. CCD) would eat into. TIME_PROCESS is
+# the per-frame render/idle cost in ms. EMA-smoothed so it reads steadily.
+func _update_perf_readout() -> void:
+	if _perf_label == null:
+		return
+	var tick_period: float = 1.0 / float(max(1, Engine.physics_ticks_per_second))
+	var phys_pct: float = Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) / tick_period * 100.0
+	var proc_ms: float = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	var fps: float = Engine.get_frames_per_second()
+	_perf_phys_ema = lerp(_perf_phys_ema, phys_pct, PERF_EMA)
+	_perf_fps_ema = lerp(_perf_fps_ema, fps, PERF_EMA)
+	var idle_pct: float = clampf(100.0 - _perf_phys_ema, 0.0, 100.0)
+	_perf_label.text = "FPS %d  |  phys %d%% busy / %d%% idle  |  proc %.1f ms" % [
+		int(round(_perf_fps_ema)), int(round(_perf_phys_ema)), int(round(idle_pct)), proc_ms]
+
 func _process(delta: float) -> void:
+	_update_perf_readout()
+
 	# Coolant fan: ramp volume + pitch with heat fraction above the floor, silence below.
 	if _heat_fraction > FAN_HEAT_FLOOR:
 		if not sfx_fan.playing: sfx_fan.play()
