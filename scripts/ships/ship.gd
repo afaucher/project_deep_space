@@ -820,11 +820,37 @@ func _ready() -> void:
 	angular_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
 	angular_damp = 0.0 # No drag in space
 	
-	# Add collision shape so raycasts can hit the ship
+	# Add collision shape so raycasts can hit the ship.
+	# M29 -- convex-hull collision: build a single ConvexPolygonShape2D from the
+	# ship's cached silhouette (outer loops only; holes ignored, see
+	# ShipSilhouette header) instead of the old circumscribing circle. Elongated
+	# hulls (destroyer, freighter) now stop colliding at their true half-width
+	# instead of their diagonal-corner radius. Mass/inertia are authored above
+	# (get_ship_mass()/get_ship_inertia()), NOT shape-derived -- this swap is
+	# geometry only, handling feel is unchanged. get_bounding_radius() (docking
+	# standoff, steering margins, nav bounds ring) intentionally stays on the
+	# old circumscribing-circle math -- conservative and correct since the
+	# circle always contains the hull.
 	var collision = CollisionShape2D.new()
-	var shape = CircleShape2D.new()
-	shape.radius = get_bounding_radius()
-	collision.shape = shape
+	var hull_points: PackedVector2Array = PackedVector2Array()
+	var loops: Array = ShipSilhouette.loops_for(self)
+	var outer_points: PackedVector2Array = PackedVector2Array()
+	for loop in loops:
+		if not loop.get("is_hole", false):
+			outer_points.append_array(loop.get("points", PackedVector2Array()))
+	if not outer_points.is_empty():
+		hull_points = Geometry2D.convex_hull(outer_points)
+	if hull_points.size() >= 3:
+		var poly_shape = ConvexPolygonShape2D.new()
+		poly_shape.points = hull_points
+		collision.shape = poly_shape
+	else:
+		# Fallback: rect-less/degenerate ship (empty silhouette or hull collapsed
+		# to < 3 points) -- keep the old bounding circle rather than crash on a
+		# componentless ship.
+		var circle_shape = CircleShape2D.new()
+		circle_shape.radius = get_bounding_radius()
+		collision.shape = circle_shape
 	add_child(collision)
 
 	# M28 -- kinetic collision damage. Only THIS body needs contact_monitor on;

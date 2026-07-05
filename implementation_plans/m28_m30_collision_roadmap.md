@@ -1,6 +1,6 @@
 # M28–M30 — Collision roadmap: damage first, accurate concave shapes last
 
-Status: M28 SHIPPED (2026-07-04); M29 + M30 PLANNED. Design context:
+Status: M28 (2026-07-04) + M29 (2026-07-05) SHIPPED; M30 PLANNED. Design context:
 `design_ideas/ship_outline_rendering.md` (geometry-consistency problem, the
 collision open-decision findings) and the outline v1.1 work — `ShipSilhouette`
 already computes the exact contours these milestones reuse.
@@ -180,6 +180,26 @@ harness), ShipSilhouette (exists).
 6. Full regression: M28 suite + docking suite + `test_avoidance` +
    `test_patrol` + `test_cargo_run` + campaign bootstrap suite (contact
    normals feed the docking spring's environment now).
+
+### Shipped (2026-07-05)
+
+`ship.gd` `_ready()` now builds a single `ConvexPolygonShape2D` from
+`ShipSilhouette.loops_for(self)` (outer loops only) via
+`Geometry2D.convex_hull`, with a `< 3`-point fallback to the old
+`get_bounding_radius()` circle for componentless/degenerate ships. Kept as a
+`CollisionShape2D` child, so `missile.gd`'s existing shape-cleanup keeps missiles
+on their 2.0 circle untouched; `asteroid.gd` untouched (circle IS its truth);
+mass/inertia and every `get_bounding_radius()` consumer (docking standoff,
+steering, nav ring) unchanged. New `test_collision_shapes.gd`: shape policy
+across all 15 catalog classes + asteroid + missile, hull-correctness vs the
+`convex_hull` oracle, destroyer tightness proof (broadside (0,50) inside the old
+65u circle but OUTSIDE the hull; nose (50,0) inside — confirmed pure-geometry
+AND via live space-state point query), and the tunneling probe. Findings:
+- **Tunneling: none.** A LAC at max_speed (2200 u/s, ~36.7 u/frame) fired through
+  SmallStation's 40u-thick arm contacted at t=0.15 — **no CCD applied** (the
+  `CCD_MODE_CAST_RAY` contingency is documented in-test if it ever regresses).
+- Concave hulls (stations, freighter, defence-pod ring) are tighter but their
+  notches/holes stay filled — that's M30.
 
 ---
 
