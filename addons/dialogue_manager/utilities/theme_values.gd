@@ -51,31 +51,42 @@ func _init(values: Dictionary) -> void:
 	font_size = values.font_size
 
 
+## Some Godot versions don't expose every text_editor/theme/highlighting/*
+## setting this addon was written against (renamed/removed), in which case
+## EditorSettings.get_setting returns null -- assigning that straight into a
+## typed Color field throws "Nil -> Color" at editor/export load. Fall back to
+## white (matches every field's own default above) instead of erroring.
+static func _get_color_setting(editor_settings: EditorSettings, setting_name: String) -> Color:
+	var value = editor_settings.get_setting(setting_name)
+	if value == null:
+		return Color.WHITE
+	return value
+
 ## Get size and colour values used for setting themes.
 static func get_values_from_editor() -> DMThemeValues:
 	var editor_settings: EditorSettings = EditorInterface.get_editor_settings()
 	return DMThemeValues.new({
 		scale = EditorInterface.get_editor_scale(),
 
-		background_color = Color(editor_settings.get_setting("interface/theme/base_color").blend(editor_settings.get_setting("text_editor/theme/highlighting/background_color")), 1),
-		current_line_color = editor_settings.get_setting("text_editor/theme/highlighting/current_line_color"),
-		error_line_color = editor_settings.get_setting("text_editor/theme/highlighting/mark_color"),
+		background_color = Color(_get_color_setting(editor_settings, "interface/theme/base_color").blend(_get_color_setting(editor_settings, "text_editor/theme/highlighting/background_color")), 1),
+		current_line_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/current_line_color"),
+		error_line_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/mark_color"),
 
-		critical_color = editor_settings.get_setting("text_editor/theme/highlighting/comment_markers/critical_color"),
-		notice_color = editor_settings.get_setting("text_editor/theme/highlighting/comment_markers/notice_color"),
+		critical_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/comment_markers/critical_color"),
+		notice_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/comment_markers/notice_color"),
 
-		cues_color = editor_settings.get_setting("text_editor/theme/highlighting/gdscript/node_reference_color"),
-		text_color = editor_settings.get_setting("text_editor/theme/highlighting/text_color"),
-		tags_color = editor_settings.get_setting("text_editor/theme/highlighting/string_placeholder_color"),
-		conditions_color = editor_settings.get_setting("text_editor/theme/highlighting/keyword_color"),
-		mutations_color = editor_settings.get_setting("text_editor/theme/highlighting/function_color"),
-		mutations_line_color = Color(editor_settings.get_setting("text_editor/theme/highlighting/function_color"), 0.6),
-		members_color = editor_settings.get_setting("text_editor/theme/highlighting/member_variable_color"),
-		strings_color = editor_settings.get_setting("text_editor/theme/highlighting/string_color"),
-		numbers_color = editor_settings.get_setting("text_editor/theme/highlighting/number_color"),
-		symbols_color = editor_settings.get_setting("text_editor/theme/highlighting/symbol_color"),
-		comments_color = editor_settings.get_setting("text_editor/theme/highlighting/comment_color"),
-		jumps_color = Color(editor_settings.get_setting("text_editor/theme/highlighting/gdscript/node_reference_color"), 0.6),
+		cues_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/gdscript/node_reference_color"),
+		text_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/text_color"),
+		tags_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/string_placeholder_color"),
+		conditions_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/keyword_color"),
+		mutations_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/function_color"),
+		mutations_line_color = Color(_get_color_setting(editor_settings, "text_editor/theme/highlighting/function_color"), 0.6),
+		members_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/member_variable_color"),
+		strings_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/string_color"),
+		numbers_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/number_color"),
+		symbols_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/symbol_color"),
+		comments_color = _get_color_setting(editor_settings, "text_editor/theme/highlighting/comment_color"),
+		jumps_color = Color(_get_color_setting(editor_settings, "text_editor/theme/highlighting/gdscript/node_reference_color"), 0.6),
 
 		font_size = editor_settings.get_setting("interface/editor/code_font_size")
 	})
