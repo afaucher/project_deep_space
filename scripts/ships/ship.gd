@@ -98,6 +98,7 @@ const SENSOR_POS_NOISE := 0.005        # +/- fractional distance noise and bin f
 # changed together if the fade window is ever retuned.
 const OUTLINE_DOT_RANGE := 3000.0
 const MAX_OUTLINE_DOTS := 192           # ring-buffer cap per contact -- overwrite oldest
+const MAX_DOT_BINS_PER_SAMPLE := 64     # cap ray-samples per sensor/target/frame -- a close target can subtend thousands of fine-sensor bins; stride down to bound the cost (dots persist + accumulate over frames anyway)
 const OUTLINE_DOT_TTL := 1.5            # seconds (same delta-accumulated clock as last_seen_timer) before a dot prunes
 
 
@@ -1692,13 +1693,26 @@ func _sample_outline_dots(sensor: Dictionary, sensor_range: float, origin: Vecto
 		contact["outline_dots"] = []
 	var dots: Array = contact["outline_dots"]
 
-	for bin_idx in range(lo, hi + 1):
-		var bin_center_angle: float = sensor_heading - (arc_width / 2.0) + (bin_idx * bin_angle) + (bin_angle / 2.0)
-		var dir_world: Vector2 = Vector2.RIGHT.rotated(bin_center_angle)
+	# Step 3 of the chain above: re-express the origin in the target's local
+	# frame once (it doesn't vary per bin) before handing off to the sampler.
+	var origin_local: Vector2 = target.to_local(origin)
 
-		# Step 3 of the chain above: re-express origin + direction in the
-		# target's local frame before handing off to the analytic sampler.
-		var origin_local: Vector2 = target.to_local(origin)
+	# Cost guard: at close range the target subtends a wide angle, so [lo,hi]
+	# can span hundreds-to-thousands of bins on a fine sensor (the 3600-bin
+	# short-range collision sensor is the worst case). Sampling EVERY bin --
+	# a ray-vs-AABB over every target component, per sensor, per ship, per
+	# frame -- is what spiked physics into the hundreds of ms on a close pass.
+	# We only KEEP MAX_OUTLINE_DOTS (192) and they persist for OUTLINE_DOT_TTL,
+	# so stride the range down to at most MAX_DOT_BINS_PER_SAMPLE evenly-spaced
+	# bins per call; the outline still fills in fully over a few frames.
+	var total_bins: int = hi - lo + 1
+	var stride: int = maxi(1, int(ceil(float(total_bins) / float(MAX_DOT_BINS_PER_SAMPLE))))
+	var bin_idx: int = lo
+	while bin_idx <= hi:
+		var cur_bin: int = bin_idx
+		bin_idx += stride  # advance first so the `continue` below stays safe in a while loop
+		var bin_center_angle: float = sensor_heading - (arc_width / 2.0) + (cur_bin * bin_angle) + (bin_angle / 2.0)
+		var dir_world: Vector2 = Vector2.RIGHT.rotated(bin_center_angle)
 		var dir_local: Vector2 = dir_world.rotated(-target_rotation)
 
 		var hit_point = SilhouetteSampler.sample(target_comps, origin_local, dir_local.angle())
