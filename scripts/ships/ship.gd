@@ -110,6 +110,20 @@ const KINETIC_HEAT_MODIFIER := 0.05    # fraction of absorbed non-laser damage c
 
 const SHIP_COLLISION_RADIUS := 50.0    # physical hit/collision circle radius -- separate from the cross_section sensor stat
 
+# M28 -- kinetic collision damage (implementation_plans/m28_m30_collision_roadmap.md).
+# The speed threshold is the ONLY gate -- no blanket exemptions for docking or
+# missiles (see roadmap). v_impact uses PRE-solve velocities (cached each physics
+# tick in _prev_linear_velocity) because by the time body_entered fires,
+# linear_velocity has already been altered by the bounce.
+const COLLISION_DAMAGE_MIN_SPEED := 150.0 # u/s -- below this, contact is free (routine docking settle ~25 u/s, traffic bumps)
+# Tuned so a ~400 u/s head-on frigate-vs-frigate hit (reduced_mass ~45, excess
+# speed 250 u/s) deals ~1400 damage -- enough to blow through one 1000-HP hull
+# plate's raymarch absorption (which saturates in a single 2px step at that
+# damage level) but NOT enough to cascade into the rest of the ship (hull death
+# requires ALL hull plates destroyed, see is_sys_destroyed). See
+# test_collision_damage.gd for the measurements that picked this value.
+const COLLISION_DAMAGE_K := 0.0005
+
 const RCS_SFX_TORQUE_THRESHOLD := 100.0 # torque above this plays the RCS thruster sound cue
 
 const HIT_TRACE_DURATION := 3.0 # seconds a damage-raymarch trace lingers for the engineering panel's spatial view to fade out
@@ -248,6 +262,12 @@ var em_signature: float = 0.0
 
 var transient_events: Array = []
 var hit_traces: Array = []
+
+# M28 -- pre-solve velocity, cached at the TOP of _physics_process each tick.
+# body_entered fires AFTER the physics solver has already applied the bounce
+# impulse to linear_velocity, so the signal handler must read this cached value
+# (not linear_velocity) to get the speed the ship actually hit at.
+var _prev_linear_velocity: Vector2 = Vector2.ZERO
 
 func get_sys_health(sys_type: String) -> float:
 	var h = 0.0
@@ -693,6 +713,58 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 		print("[Damage] ", name, " suffers catastrophic failure and dies.")
 		hulk()
 
+# M28 -- kinetic collision damage. Fires on THIS body when its collision shape
+# starts touching another PhysicsBody2D (ship, missile, or asteroid). Each side
+# damages itself from its own handler -- symmetric by construction, no need to
+# coordinate with the other body. The speed threshold is the only gate: no
+# exemption for docking (a routine capture+settle should already stay under it
+# by physics) and no exemption for missiles (their low mass keeps their
+# reduced-mass term -- and therefore their damage -- naturally small).
+func _on_body_entered(other: Node) -> void:
+	if DebugSettings and DebugSettings.get_choice("collision_damage") == DebugSettings.CollisionDamage.OFF:
+		return
+	if is_dead:
+		return
+	if not (other is RigidBody2D):
+		return
+
+	# Other body's velocity for the closing-speed calc: its own cached pre-solve
+	# velocity if it's a Ship (or Missile, which extends Ship) -- body_entered on
+	# BOTH ships can fire the same tick, so using its pre-solve value keeps this
+	# symmetric regardless of handler ordering. Otherwise (asteroid, or anything
+	# without the field) fall back to its current linear_velocity: rocks are
+	# heavy enough that their own post-bounce delta is negligible.
+	var other_velocity: Vector2 = other.get("_prev_linear_velocity") if other.get("_prev_linear_velocity") != null else other.linear_velocity
+
+	var v_impact: float = (_prev_linear_velocity - other_velocity).length()
+	if v_impact <= COLLISION_DAMAGE_MIN_SPEED:
+		return
+
+	var other_mass: float = max(0.001, other.mass)
+	var reduced_mass: float = (mass * other_mass) / (mass + other_mass)
+
+	var excess_speed: float = v_impact - COLLISION_DAMAGE_MIN_SPEED
+	var damage: float = COLLISION_DAMAGE_K * reduced_mass * pow(excess_speed, 2.0)
+	if damage <= 0.0:
+		return
+
+	# impact_dir points from self OUT toward the other body (the contact face);
+	# take_damage()'s raymarch needs the direction damage travels, i.e. INWARD
+	# from that face, which is the opposite vector -- see take_damage()'s own
+	# doc/callers (e.g. laser_behavior.gd, test_ship_geometry.gd) where
+	# global_pos sits outside/at the hull and global_dir points back toward the
+	# ship's center. Getting this backwards sends the raymarch's start point
+	# outward along a ray heading further away, missing the hull's AABB
+	# entirely -- silently zero damage despite a correct v_impact/damage calc.
+	var impact_dir: Vector2 = (other.position - position).normalized()
+	if impact_dir == Vector2.ZERO:
+		impact_dir = Vector2.RIGHT
+	var hit_dir: Vector2 = -impact_dir
+	var hit_pos: Vector2 = position + impact_dir * get_bounding_radius()
+
+	if COMBAT_DEBUG: print("[Collision] ", name, " hit ", other.name, " at v_impact=", v_impact, " dmg=", damage)
+	take_damage(damage, hit_pos, hit_dir, "kinetic")
+
 func hulk() -> void:
 	is_dead = true
 	# Shut down all individual components
@@ -742,7 +814,15 @@ func _ready() -> void:
 	shape.radius = get_bounding_radius()
 	collision.shape = shape
 	add_child(collision)
-	
+
+	# M28 -- kinetic collision damage. Only THIS body needs contact_monitor on;
+	# body_entered fires regardless of the other body's own contact settings
+	# (asteroids don't need it). max_contacts_reported=4 is generous headroom
+	# over the 1-2 simultaneous contacts a normal collision produces.
+	contact_monitor = true
+	max_contacts_reported = 4
+	body_entered.connect(_on_body_entered)
+
 	# Initialize component default states
 	for c in ship_components:
 		if c.get("powered_on") == null:
@@ -886,6 +966,12 @@ func set_sensor_target(target_id: String) -> void:
 	manual_sensor_target = target_id
 
 func _physics_process(delta: float) -> void:
+	# M28 -- cache PRE-solve velocity for this tick before the physics engine's
+	# own integration/collision response can alter linear_velocity. This is what
+	# _on_body_entered reads for v_impact -- by the time that signal fires later
+	# this same tick, linear_velocity already reflects the post-bounce result.
+	_prev_linear_velocity = linear_velocity
+
 	if is_multiplayer_authority():
 		for w in get_components_by_type("weapons"):
 			# .get() guard: a weapon missing "cooldown" must not abort the entire

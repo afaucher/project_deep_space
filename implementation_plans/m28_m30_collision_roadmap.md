@@ -1,6 +1,6 @@
 # M28–M30 — Collision roadmap: damage first, accurate concave shapes last
 
-Status: PLANNED (all three). Design context:
+Status: M28 SHIPPED (2026-07-04); M29 + M30 PLANNED. Design context:
 `design_ideas/ship_outline_rendering.md` (geometry-consistency problem, the
 collision open-decision findings) and the outline v1.1 work — `ShipSilhouette`
 already computes the exact contours these milestones reuse.
@@ -108,6 +108,26 @@ Regression: `test_docking`, `test_docking_multi`, `test_freighter_docking`,
 `test_cargo_run`, `test_patrol`, `test_avoidance`, `test_mine`,
 `test_defence_pod` — all must stay green, which doubles as proof that no
 existing behavior generates accidental ram damage.
+
+### Shipped (2026-07-04)
+
+Implemented in `ship.gd` (`_on_body_entered`, `_prev_linear_velocity` cached at
+the top of `_physics_process`, `contact_monitor`/`max_contacts_reported` in
+`_ready`), `debug_settings.gd` (`collision_damage` ON/OFF knob), and
+`test_collision_damage.gd` (8 phases). **`COLLISION_DAMAGE_K = 0.0005`**,
+`COLLISION_DAMAGE_MIN_SPEED = 150.0`. Friction findings:
+- **Damage direction:** `take_damage`'s `global_dir` must point INWARD from the
+  contact face (`-impact_dir`); backwards, the raymarch starts at the hull and
+  heads away, silently dealing zero.
+- **Gating validated with no exemptions:** routine freighter docking never even
+  brings the collision circles into contact (M27 standoff → peak *contact* speed
+  0), so it's free by physics; a 500 u/s ram into a station deals ~5300 (no host
+  exemption); a missile hit is 167 vs a 1407 frigate ram (mild, by reduced mass).
+- **Damage concentrates on the outermost component the ray hits** (a 400 u/s ram
+  overkills one ~50-HP forward component and stops; whole-ship health barely
+  moves). That's existing `take_damage` raymarch behavior, not new here — noted
+  as a *playtest* question for whether rams should feel heftier (a future
+  penetration/spread tweak), out of scope for M28's plumbing milestone.
 
 ---
 

@@ -33,6 +33,11 @@ enum SignatureMerge { BLEND, NEAREST }
 # lever vs. overkill-buffed PD -- see warhead_laser_special_case.md.
 enum MissileJink { OFF, ON }
 
+# M28 -- kinetic collision damage on/off (playtesting knob + negative-control
+# test lever). Default ON: the speed threshold is the real gate; this knob
+# exists to let the effect be disabled outright, not to relax the threshold.
+enum CollisionDamage { ON, OFF }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -60,6 +65,14 @@ const OPTIONS := {
 			"On (weave to spoil PD)",          # ON  -- terminal evasion
 		],
 		"default": MissileJink.OFF,
+	},
+	"collision_damage": {
+		"label": "Kinetic collision damage",
+		"choices": [
+			"On (speed-gated kinetic damage)", # ON  -- current behavior
+			"Off (no contact damage)",         # OFF -- playtesting / negative control
+		],
+		"default": CollisionDamage.ON,
 	},
 }
 
