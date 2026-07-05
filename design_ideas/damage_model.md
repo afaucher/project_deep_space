@@ -57,25 +57,58 @@ burn through in one call, exactly like the 3200 laser (2000 in step 1, kill the
 outer component, march the remainder inward). M28's tuned `COLLISION_DAMAGE_K`
 just never produces a lump that large against a full-health face.
 
+## Playtest finding (2026-07-05): rams are bimodal, and thickness barely matters
+
+First hands-on ram: from the campaign start, **full reverse into a station ~3k
+away** destroyed the ship's `engine_main`, `hull_aft`, `reactor_core`, and one
+aft sensor — and, because the reactor died, `is_sys_destroyed("reactor") →
+hulk()`, so **the ram was fatal.** The model predicts this exactly:
+
+- Reverse over 3000 u reaches ~550 u/s (`thrust 5000 / mass ~90 ≈ 55 u/s²`,
+  `sqrt(2·a·d) ≈ 570`; below the 1000 max_speed cap). Against a station ~1000×
+  heavier the reduced mass is ~the frigate's own (~90), so the lump is
+  `0.0005 × 90 × (550−150)² ≈ 7200` — **well over the 2000/step cap.**
+- Penetration ≈ `lump / 2000` components: each full-health component in the path
+  costs a **flat ~2000** (one step at the density-20 cap) then dies and is
+  skipped. 7200 → ~3.6 → four components deep. Matches what was observed.
+
+Two properties this surfaces:
+1. **Ram lethality is bimodal**, not weak: negligible below the cap (the 1407
+   test lump clipped one sensor), then ~2000-per-component brutal above it. The
+   "feel weak" note above is only the sub-cap half of the picture.
+2. **Penetration ignores armor HP.** A 40-HP sensor and a 1000-HP hull plate each
+   cost the ram the same ~2000 of budget, so ram *depth* is about component
+   **count** in the path, not armor thickness — a heavily-armored hull and a
+   paper one take about the same number of layers. Odd for a "kinetic" model.
+3. **Reverse-ramming is a footgun.** `engine_main` (x −35) and `reactor_core`
+   (x −15) sit at the aft face, so backing into something drives straight through
+   the drive and powerplant (→ reactor death → hulk). A *forward* ram at the same
+   speed spends itself on nose sensors/weapons + `hull_fwd` with the reactor
+   better shielded — far more survivable. Emergent and arguably correct, but
+   punishing.
+
 ## Decision: PARKED (accept M28 as-is, revisit)
 
-For the M28 plumbing milestone we **accept** that a ram concentrates on the
-outermost component and barely moves whole-ship health — the damage system is
-correct and consistent (lasers still burn through, collisions still respect
-armor via the same raymarch), it just doesn't *feel* heavy. This is a tuning /
-feel question, not a bug, and it is explicitly deferred.
+For the M28 plumbing milestone we **accept** the behavior — the damage system is
+correct and consistent (lasers and collisions share one raymarch), it just has
+the bimodal feel and thickness-blindness above. This is a tuning / feel question,
+not a bug, and it is explicitly deferred.
 
 When we revisit (candidate: alongside the M29/M30 collision-shape work), the
-options, roughly increasing effort:
-1. **Scale K up** so rams routinely exceed the ~2000/step cap and penetrate.
-   Blunt — also makes light taps swingier.
-2. **Lower the per-step cap** so any big hit is forced to march. But the cap is
-   the shared `ABSORPTION_PER_DENSITY` constant, so this also changes laser feel.
-3. **Bias ram damage into `hull`-type components** rather than whatever 20–50 HP
-   sensor is outermost. Most physically sensible — a hull ram should crush
-   structure, not shear off an antenna. Preferred starting point.
-4. **Spread the lump over a few sub-steps/frames** so it ablates-then-advances
+sharpened read is that the real oddity is **penetration ignoring armor HP**, not
+"rams too weak" — which argues *against* pure K-scaling. Options:
+1. **Scale a component's per-step soak with its own HP** (so a thick hull plate
+   actually stops more of a ram than a thin sensor does). Most directly fixes the
+   thickness-blindness; now the leading candidate.
+2. **Bias ram damage into `hull`-type components** rather than whatever 20–50 HP
+   sensor is outermost — a hull ram should crush structure, not shear off an
+   antenna. Good companion to (1).
+3. **Spread the lump over a few sub-steps/frames** so it ablates-then-advances
    like a sustained beam.
+4. **Scale K up** so light rams also bite — blunt, worsens the bimodal cliff and
+   the reverse-ram one-shot; *least* preferred given the finding above.
+5. **Lower the per-step cap** — but it's the shared `ABSORPTION_PER_DENSITY`
+   constant, so it also changes laser feel.
 
 ## See also
 
