@@ -263,6 +263,20 @@ func _init() -> void:
 	super()
 	ship_name = "Medium Deep Space Station"
 
+	# M31 -- Ironhold is the controlled hub (AUTOMATED authority style, see
+	# implementation_plans/m31_m36_port_authority_roadmap.md). Radius picked to
+	# comfortably contain the docking approach: the berth sits at 340u and
+	# DockingBay's default capture_radius is 5000u (docking_bay.gd), so 8000u
+	# gives a couple thousand units of clearance beyond the capture radius for
+	# the hail-and-request approach before a ship is even in range to dock --
+	# well outside the ~210u hull collision circle. `rules` is left empty here;
+	# M35 populates it (docking_permission_required, speed_advisory, ...).
+	port_zone = {
+		"radius": 8000.0,
+		"authority": "Ironhold Control",
+		"rules": {},
+	}
+
 # One berth below the station, clear of the hull collision circle (~210u) so
 # force-capture doesn't fight the physics body. Nose faces the station.
 func get_berths() -> Array:

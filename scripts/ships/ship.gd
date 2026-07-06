@@ -13,6 +13,14 @@ const CommsLedger = preload("res://scripts/comms/comms_ledger.gd")
 const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const SilhouetteSampler = preload("res://scripts/sensors/silhouette_sampler.gd")
+const PortZone = preload("res://scripts/port/port_zone.gd")
+
+# M31 -- port-zone membership hysteresis. A ship hovering right on a zone's
+# boundary would otherwise thrash zone_enter/zone_exit every tick (its position
+# jittering a few units either side of `radius` from thruster noise/physics
+# solver jitter). Enter at the authored radius, but only exit once past
+# radius + margin, so the boundary has a dead band instead of a knife edge.
+const PORT_ZONE_EXIT_MARGIN := 200.0
 
 # Mass is derived from each component's rect area x density, not authored directly.
 # Calibrated so the default Frigate loadout (total area 2775 x density 20.0)
@@ -274,6 +282,67 @@ var em_signature: float = 0.0
 
 var transient_events: Array = []
 var hit_traces: Array = []
+
+# M31 -- port authority zone substrate. Empty dict = uncontrolled/open station
+# (or a non-station ship, which never declares one) -- old permissionless
+# behavior is preserved by simply never populating this. A controlled hull
+# authors {"radius": float, "authority": String, "rules": Dictionary} (see
+# medium_station.gd). get_port_zone() is the read accessor other ships use
+# when scanning the "ships" group for controlled stations.
+var port_zone: Dictionary = {}
+
+# The authority name (String) of the controlled zone this ship is currently
+# inside, or null if it's not in any controlled zone. Updated once per tick in
+# _physics_process; a transition fires exactly one zone_enter/zone_exit into
+# transient_events (see _update_port_zone_membership()).
+var current_port_zone = null
+
+func get_port_zone() -> Dictionary:
+	return port_zone
+
+# M31 -- per-tick zone membership + edge-event detection. Scans the "ships"
+# group (stations live in it too, see _ready() add_to_group("ships")) for
+# controlled stations -- non-empty get_port_zone() -- and finds the NEAREST
+# whose zone contains this ship's position. Diffs the result against
+# current_port_zone and fires exactly one zone_enter/zone_exit transient event
+# on a change. Cost: one distance compare per controlled station per ship per
+# tick -- there are a handful of controlled stations in a sim bubble, not
+# hundreds, so this is trivially bounded (do NOT ray/sample here).
+#
+# Hysteresis: enter uses the authored radius; once inside, a ship only counts
+# as having exited once past radius + PORT_ZONE_EXIT_MARGIN, so hovering right
+# on the boundary doesn't thrash enter/exit every frame.
+func _update_port_zone_membership() -> void:
+	var nearest_authority = null
+	var nearest_dist: float = INF
+
+	for s in get_tree().get_nodes_in_group("ships"):
+		if s == self: continue
+		var zone: Dictionary = s.get_port_zone()
+		if zone.is_empty(): continue
+
+		var radius: float = zone.get("radius", 0.0)
+		var authority: String = zone.get("authority", "")
+		var d: float = position.distance_to(s.position)
+
+		# Effective test radius: if we're currently inside THIS authority's
+		# zone, extend the radius by the exit margin (hysteresis) so we don't
+		# fall out on a boundary-hugging jitter; otherwise use the plain
+		# authored radius for the entry test.
+		var test_radius: float = radius
+		if current_port_zone == authority:
+			test_radius = radius + PORT_ZONE_EXIT_MARGIN
+
+		if PortZone.contains(s.position, test_radius, position) and d < nearest_dist:
+			nearest_dist = d
+			nearest_authority = authority
+
+	if nearest_authority != current_port_zone:
+		if current_port_zone != null:
+			transient_events.append({"type": "zone_exit", "authority": current_port_zone})
+		if nearest_authority != null:
+			transient_events.append({"type": "zone_enter", "authority": nearest_authority})
+		current_port_zone = nearest_authority
 
 # M28 -- pre-solve velocity, cached at the TOP of _physics_process each tick.
 # body_entered fires AFTER the physics solver has already applied the bounce
@@ -1010,6 +1079,9 @@ func _physics_process(delta: float) -> void:
 	# _on_body_entered reads for v_impact -- by the time that signal fires later
 	# this same tick, linear_velocity already reflects the post-bounce result.
 	_prev_linear_velocity = linear_velocity
+
+	if is_multiplayer_authority() and not is_dead:
+		_update_port_zone_membership()
 
 	if is_multiplayer_authority():
 		for w in get_components_by_type("weapons"):

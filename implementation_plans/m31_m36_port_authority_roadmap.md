@@ -1,6 +1,6 @@
 # M31–M36 — Port authority: zones, docking permission, and nav aids
 
-Status: PLANNED (all six). Goal: the player requests docking (**one press** of a
+Status: M31 SHIPPED (2026-07-05); M32–M36 PLANNED. Goal: the player requests docking (**one press** of a
 top-level control that auto-runs the port-control handshake, or a full chat with
 the NPC if they'd rather) and receives a **grant** — permission to dock at a
 **specific assigned slip**, valid for a **time limit** and only **while inside
@@ -217,6 +217,22 @@ This is the substrate M32's expiry, M35's rules, and M35's boundary aid all use.
    nearer authority.
 Regression: `test_docking`, `test_docking_multi`, `test_freighter_docking`,
 `test_cargo_run` (zone tracking must not perturb existing docking/traffic).
+
+### Shipped (2026-07-05)
+
+`scripts/port/port_zone.gd` (`PortZone.contains`, pure static), `Ship.port_zone`
+/ `get_port_zone()` / `current_port_zone` + `_update_port_zone_membership()` in
+`_physics_process` (scans the `"ships"` group for controlled stations, nearest
+containing zone wins, `PORT_ZONE_EXIT_MARGIN = 200.0` hysteresis, one
+`zone_enter`/`zone_exit` into `transient_events` per transition, gated to
+authority + alive). Ironhold zone on `medium_station.gd` (`radius 8000`,
+authority "Ironhold Control", empty `rules` — M35 fills it). `test_port_zone`
+(4 items) + the docking/traffic regression all green. Friction: teleporting a
+`RigidBody2D` in the test needs `PhysicsServer2D.body_set_state` (a plain
+`position =` gets snapped back by the physics server → the test hung with no
+error). Note: membership scan is O(N²) across authority ships but each op is a
+cheap dict check — revisit only if ship counts get large (cache the controlled
+list).
 
 ---
 
