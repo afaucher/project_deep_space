@@ -23,7 +23,17 @@ class HeadingDial extends Control:
 	var actual_angle: float = 0.0
 	var actual_vel: Vector2 = Vector2.ZERO
 	var is_ship_oriented: bool = false
-	
+
+	# Selected-target overlays (set by helm update_data; see there).
+	var has_target: bool = false
+	var target_bearing: float = 0.0      # world bearing from own ship to the target
+	var target_color: Color = Color.WHITE
+	var rel_vel: Vector2 = Vector2.ZERO  # own_vel - target_vel; null it to match the target's speed
+	# Relative speed (u/s) at which the match-speed needle reaches full length.
+	# Log-scaled below it so small mismatches stay readable (fine control) and
+	# high closing speeds clamp instead of shooting off the dial (no overshoot).
+	const REL_VEL_FULL := 600.0
+
 	func _ready() -> void:
 		custom_minimum_size = Vector2(300, 300)
 		
@@ -106,11 +116,36 @@ class HeadingDial extends Control:
 		draw_line(center, actual_end, Color.CYAN, 3.0)
 		draw_circle(actual_end, 5.0, Color.CYAN)
 
+		# --- Selected target: a "compass bug" on the ring in the target's color.
+		# Line the yellow prograde (velocity) marker up with this bug and you're
+		# flying straight at the target.
+		if has_target:
+			var tb = target_bearing + map_rot
+			var tdir = Vector2.RIGHT.rotated(tb)
+			var tip = center + tdir * (radius - 1.0)
+			var wing_l = center + Vector2.RIGHT.rotated(tb + 0.11) * (radius + 13.0)
+			var wing_r = center + Vector2.RIGHT.rotated(tb - 0.11) * (radius + 13.0)
+			draw_colored_polygon(PackedVector2Array([tip, wing_l, wing_r]), target_color)
+
+		# --- Relative-velocity needle: your motion RELATIVE to the target. Burn
+		# opposite to it to null it out and match speed. Length is log-scaled +
+		# clamped (see REL_VEL_FULL) so it's precise near a match and never
+		# overshoots the dial at high closing speed.
+		if has_target and rel_vel.length() > 2.0:
+			var rv: float = rel_vel.length()
+			var rdir: Vector2 = Vector2.RIGHT.rotated(rel_vel.angle() + map_rot)
+			var norm: float = clampf(log(1.0 + rv) / log(1.0 + REL_VEL_FULL), 0.0, 1.0)
+			var tip2: Vector2 = center + rdir * (norm * (radius - 6.0))
+			var rcol: Color = Color(1.0, 0.55, 0.1)  # orange -- distinct from yellow prograde
+			draw_line(center, tip2, rcol, 2.5)
+			draw_circle(tip2, 4.0, rcol)
+			draw_string(font, Vector2(6.0, font_size + 6.0), "Δv %.0f" % rv, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, rcol)
+
 class EngineSlider extends Control:
 	signal intent_changed(val: float)
 	signal became_active()
 
-	const DEADZONE_RATIO := 0.05 # fraction of the slider's full range snapped to exactly 0.0 near center
+	const DEADZONE_RATIO := 0.025 # fraction of the slider's full range snapped to exactly 0.0 near center -- narrow so low-throttle fine control isn't lost to the detent
 
 	var is_active_control: bool = false
 	var min_val: float = -1.0
@@ -350,6 +385,25 @@ func update_data(packet: Dictionary) -> void:
 	heading_dial.actual_angle = rot
 	heading_dial.actual_vel = current_state.get("vel", Vector2.ZERO)
 	heading_dial.is_ship_oriented = current_state.get("is_ship_oriented", false)
+
+	# Selected-target overlays: bearing bug (in the target's color) + relative-
+	# velocity needle for speed-matching. Both key off the same selected contact
+	# the contacts/weapons panels use.
+	var sel_id: String = current_state.get("selected_contact_id", "")
+	var contacts: Dictionary = current_state.get("contacts", {})
+	if sel_id != "" and contacts.has(sel_id):
+		var tc: Dictionary = contacts[sel_id]
+		var own_pos: Vector2 = current_state.get("pos", Vector2.ZERO)
+		var own_vel: Vector2 = current_state.get("vel", Vector2.ZERO)
+		var tpos: Vector2 = tc.get("pos", own_pos)
+		heading_dial.has_target = true
+		heading_dial.target_bearing = (tpos - own_pos).angle()
+		heading_dial.target_color = Utils.classification_color(tc.get("classification", ""))
+		heading_dial.rel_vel = own_vel - tc.get("vel", Vector2.ZERO)
+	else:
+		heading_dial.has_target = false
+		heading_dial.rel_vel = Vector2.ZERO
+
 	heading_dial.queue_redraw()
 
 	# Update Engine Controls
