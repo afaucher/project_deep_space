@@ -15,6 +15,7 @@ const Buoy = preload("res://scripts/ships/buoy.gd")
 const Wormhole = preload("res://scripts/wormhole.gd")
 const LightAttackCraft = preload("res://scripts/ships/light_attack_craft.gd")
 const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
+const MobileHome = preload("res://scripts/ships/mobile_home.gd")
 
 # Home faction shares the player's tag so hubs read friendly and their station AI
 # never targets the player. Faction modelling proper is a later concern.
@@ -41,6 +42,16 @@ static func build() -> ClusterDef:
 	def.add_field({"center": Vector2(150000, 110000), "radius": 10000.0, "count": 18, "seed": 1})
 	def.add_field({"center": Vector2(-70000, 90000), "radius": 12000.0, "count": 22, "seed": 2})
 	def.add_field({"center": Vector2(90000, -170000), "radius": 9000.0, "count": 15, "seed": 3})
+
+	# --- Mobile Homes (civilian habitats) parked in the outposts' fields ---
+	# Slag Bay homes
+	_home(def, 200, "Hermit's Rest", Vector2(145000, 115000))
+	_home(def, 201, "Claim 42", Vector2(155000, 105000))
+	# Coldreach homes
+	_home(def, 202, "The Deep Freeze", Vector2(-75000, 95000))
+	_home(def, 203, "Lucky Strike", Vector2(-65000, 85000))
+	# Deepcut homes
+	_home(def, 204, "Rock Bottom", Vector2(95000, -175000))
 
 	# --- Beacon road: Ironhold (0,0) -> Drift Market (200000,40000) ---
 	# Seven interior beacons at ~25k spacing (well inside the 50k comms range, so
@@ -116,3 +127,12 @@ static func _cargo(def, id: int, name: String, a: Vector2, b: Vector2) -> void:
 		"iff_tags": HOME_IFF, "is_static": false,
 		"behavior": {"route": [a, b], "loop": true, "cargo": true},
 	})
+
+# A mobile home holding station in a specific location.
+static func _home(def, id: int, name: String, pos: Vector2) -> void:
+	def.add_entity({
+		"id": id, "name": name, "hull": MobileHome,
+		"kind": ClusterEntity.Kind.STATION, "pos": pos,
+		"iff_tags": ["TEAM_CIVILIAN"], "is_static": true,
+	})
+
