@@ -139,6 +139,7 @@ func _on_connection_established(hosting: bool) -> void:
 			_bootstrap_campaign()
 		else:
 			_spawn_asteroids()
+			_spawn_mobile_homes()
 			#_spawn_bouys() # Temporarily disabled
 			_spawn_player_ship(multiplayer.get_unique_id())
 	else:
@@ -154,6 +155,26 @@ func _spawn_asteroids() -> void:
 		ast.linear_velocity = Vector2(randf_range(-50, 50), randf_range(-50, 50))
 		add_child(ast)
 		asteroids.append(ast)
+
+func _spawn_mobile_homes() -> void:
+	# Spread a few out where mining activity might be (in the asteroid field)
+	for i in range(3):
+		var home = ShipCatalog.SPAWNABLE[12]["script"].new() # Index 12 is Mobile Home
+		var home_id = _next_sandbox_id
+		_next_sandbox_id += 1
+		
+		home.name = "MobileHome_" + str(home_id)
+		home.owner_id = home_id
+		home.iff_tags = ["TEAM_CIVILIAN"] # A neutral civilian tag
+		home.position = Vector2(randf_range(-8000, 8000), randf_range(-8000, 8000))
+		# Start them with zero velocity (holding station)
+		home.linear_velocity = Vector2.ZERO
+		
+		add_child(home)
+		players[home_id] = home
+		
+		# Give it the station AI so it holds its ground
+		home.add_child(AITreeFactory.build_station())
 
 func _spawn_bouys() -> void:
 	for i in range(5):

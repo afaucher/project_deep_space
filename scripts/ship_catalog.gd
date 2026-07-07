@@ -21,6 +21,7 @@ const SPAWNABLE := [
 	{ "name": "Mine", "script": preload("res://scripts/ships/mine.gd") },
 	{ "name": "Defence Pod", "script": preload("res://scripts/ships/defence_pod.gd") },
 	{ "name": "Asteroid Station", "script": preload("res://scripts/ships/asteroid_station.gd") },
+	{ "name": "Mobile Home", "script": preload("res://scripts/ships/mobile_home.gd") },
 ]
 
 # M24 -- delta variants: skins of a validated base hull (see
