@@ -1237,7 +1237,9 @@ func _physics_process(delta: float) -> void:
 	
 	var is_my_ship = (multiplayer.get_unique_id() == owner_id)
 	
-	if active_max_thrust > 0.0 and actual_throttle != 0.0:
+	var is_captured_and_willing = (docking_bay != null and wants_dock)
+	
+	if active_max_thrust > 0.0 and actual_throttle != 0.0 and not is_captured_and_willing:
 		apply_central_force(forward * actual_throttle * active_max_thrust)
 		if is_my_ship and not sfx_engine.playing:
 			sfx_engine.play()
@@ -1275,7 +1277,8 @@ func _physics_process(delta: float) -> void:
 		torque = required_alpha * inertia
 		torque = clampf(torque, -active_max_torque, active_max_torque)
 		
-		apply_torque(torque)
+		if not is_captured_and_willing:
+			apply_torque(torque)
 	
 	# RCS translation/rotation (omnidirectional). Stations have no engines, so this
 	# is how they arrest drift and hold heading; also fine-control for any hull with

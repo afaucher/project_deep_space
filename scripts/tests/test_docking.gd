@@ -68,7 +68,9 @@ func _physics_process(delta: float) -> void:
 	if phase == 0:
 		if bay.state == DockingBay.State.DOCKED:
 			dock_time = t
-			var err: float = bay.global_position.distance_to(shuttle.position)
+			var port_offset = bay._get_captured_port_offset(shuttle)
+			var port_global_offset = port_offset.rotated(shuttle.rotation)
+			var err: float = bay._berth_pos_for(shuttle).distance_to(shuttle.position + port_global_offset)
 			var spd: float = shuttle.linear_velocity.length()
 			_assert(start_dist > 500.0, "shuttle should start well off the berth (was %.0f)" % start_dist)
 			_assert(err < bay.pos_tolerance, "docked pose should be within tolerance (err=%.1f)" % err)
