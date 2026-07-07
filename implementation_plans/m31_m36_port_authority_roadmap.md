@@ -15,6 +15,29 @@ three cases:
 3. **The road:** see the **buoy-road travel corridor** between hubs — the lit
    beacon-graph edges (and your active route) drawn as a lane to follow (M36).
 
+## The Architecture of Permission (Roles & Layers)
+
+To ensure emergent gameplay (like forceful boarding, hacking, or breaking clamps), the docking architecture is strictly separated into three layers. Permission is not a magical lock; it is a system of physical and social rules.
+
+### 1. The Mechanical Layer (M19 - `DockingBay`)
+The dumb physics layer. A `DockingBay` component simply grabs things that get too close and holds them using a physical spring (`K_SPRING`). 
+- **Role**: Execute `capture()`, `hold()`, and `release()`.
+- **Logic**: It can be configured to capture *any* ship, or *only a specific* ship (if a `slip_id` is passed down to it). 
+- **Emergence (Future)**: Because it's a physical spring, it has a yield strength. If a docked ship fires its engines hard enough, the lock **snaps**. A large pirate ship with its own `DockingBay` can physically grapple another ship against its will.
+
+### 2. The Systemic Layer (M32 - Port Authority Rules)
+The traffic control rulebook. This lives on the station's main hull (via `ship.gd`) and manages the dumb mechanical bays.
+- **Role**: Manage reservations, issue `DockingGrant`s, and enforce timeouts.
+- **Logic**: It tells the Mechanical Layer who is allowed in. If a ship arrives without a grant in a controlled zone, the Systemic Layer tells the Mechanical Layer to keep its tractor beams off.
+- **Absence**: A station/asteroid *without* a Port Authority (e.g., an open Slag Bay) simply doesn't run this layer. The Mechanical bays fall back to their default "grab anyone who wants to dock" behavior.
+
+### 3. The Social Layer (M33 - Port Authority NPC)
+The interface. This is the NPC you hail on the comms panel.
+- **Role**: Judge the player (IFF, reputation, ship size) and interact with the Systemic Layer on their behalf.
+- **Logic**: You ask the NPC for clearance. If they like you, *they* invoke the Systemic Layer to issue you a grant. 
+- **Absence**: If a station has a Systemic Layer (it's locked down) but the NPC is dead or missing, you cannot get permission through normal channels. You would have to hack the Systemic Layer, or bypass it entirely by using forceful boarding (Mechanical Layer) to clamp onto them.
+
+
 ## Decisions (locked with the user)
 
 - **Permission is a property of a *controlled* zone, not of docking.** A station

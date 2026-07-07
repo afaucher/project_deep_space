@@ -7,8 +7,8 @@ func _init() -> void:
 	ship_components = [
 		# --- Central Hub (X=-50..50, Y=-20..20) ---
 		{
-			"id": "docking_port_1",
-			"type": "docking_port",
+			"id": "hub_1",
+			"type": "living_quarters",
 			"rect": Rect2(-50, -20, 100, 40),
 			"health": 6000.0, "max_health": 6000.0, "density": 20.0,
 		},
@@ -218,6 +218,14 @@ func _init() -> void:
 			"health": 6000.0, "max_health": 6000.0, "density": 20.0,
 		},
 		
+		# --- Docking Ports ---
+		{
+			"id": "dock_main", "type": "docking_port",
+			"rect": Rect2(-10, 190, 20, 10),
+			"health": 2000.0, "max_health": 2000.0, "density": 20.0,
+			"heading": PI / 2.0, "has_servo": true,
+		},
+		
 		# --- Hull Armor Flanks (Sides of the arms) ---
 		{
 			"id": "hull_fwd_port_flank", "type": "hull",
@@ -277,7 +285,4 @@ func _init() -> void:
 		"rules": {},
 	}
 
-# One berth below the station, clear of the hull collision circle (~210u) so
-# force-capture doesn't fight the physics body. Nose faces the station.
-func get_berths() -> Array:
-	return [{"pos": Vector2(0, 340), "heading": -PI / 2.0}]
+

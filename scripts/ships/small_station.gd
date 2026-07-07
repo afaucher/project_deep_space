@@ -97,10 +97,19 @@ func _init() -> void:
 		{
 			"id": "pd_stbd",
 			"type": "weapons", "weapon_type": "laser",
-			"rect": Rect2(-10, 130, 20, 20),
+			"rect": Rect2(-10, 140, 20, 20),
 			"health": 500.0, "max_health": 500.0, "density": 20.0,
 			"damage": 500.0, "range": 4000.0, "cooldown_max": 0.5,
 			"heading": PI / 2.0, "arc_width": PI / 2.0,
+		},
+		
+		# --- Docking Ports ---
+		{
+			"id": "dock_main",
+			"type": "docking_port",
+			"rect": Rect2(-10, 130, 20, 10),
+			"health": 1000.0, "max_health": 1000.0, "density": 20.0,
+			"heading": PI / 2.0, "has_servo": true,
 		},
 		
 		# --- Inner Corner RCS (Armpits) ---
@@ -196,7 +205,4 @@ func _init() -> void:
 	super()
 	ship_name = "Small Outpost"
 
-# One berth below the station, clear of the hull collision circle (~150u) so
-# force-capture doesn't fight the physics body. Nose faces the station.
-func get_berths() -> Array:
-	return [{"pos": Vector2(0, 240), "heading": -PI / 2.0}]
+

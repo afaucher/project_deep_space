@@ -10,6 +10,12 @@ func tick(actor: Node, blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
 
+	var max_weapon_range = 0.0
+	for comp in actor.ship_components:
+		if comp.get("type") == "weapons" and comp.has("range"):
+			max_weapon_range = max(max_weapon_range, comp["range"])
+	var engagement_radius = max_weapon_range * 1.5
+
 	var best_id := ""
 	var best_dist := INF
 	for c_id in actor.active_contacts:
@@ -17,6 +23,8 @@ func tick(actor: Node, blackboard) -> int:
 		if contact.get("classification", "") != "UNIDENTIFIED VESSEL":
 			continue
 		var d = actor.position.distance_to(contact["pos"])
+		if d > engagement_radius:
+			continue
 		if d < best_dist:
 			best_dist = d
 			best_id = c_id

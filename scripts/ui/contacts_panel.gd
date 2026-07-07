@@ -129,6 +129,9 @@ func update_data(packet: Dictionary) -> void:
 
 func _update_contact_list(contacts: Dictionary) -> void:
 	var my_pos = current_state.get("pos", Vector2.ZERO)
+	var my_rot = current_state.get("rot", 0.0)
+	var my_components = current_state.get("engineering", {}).get("ship_components", [])
+	var mock_my_sig = {"rot": my_rot, "em_emitters": my_components}
 		
 	var enemies = []
 	var ships = []
@@ -275,9 +278,14 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var their_pos = c.get("pos", Vector2.ZERO)
 		var hdg = wrapf(rad_to_deg((their_pos - my_pos).angle()) + 90.0, 0.0, 360.0)
 		
+		var angle_from_them_to_us = (my_pos - their_pos).angle()
+		var my_em_emit = Utils.get_directional_em(mock_my_sig, angle_from_them_to_us)
+		var detect_dist = my_em_emit * (10000.0 / 15.0)
+		
 		var sig = c.get("signature", {})
-		info.text = "Dist: %s | Hdg: %03d | Spd: %.1f m/s | Age: %.1fs\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" % [
-			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
+		info.text = "Dist: %s | Hdg: %03d | Spd: %.1f m/s | Age: %.1fs\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nOur Emit: %.1f | Det Limit: %s" % [
+			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0),
+			my_em_emit, Utils.format_dist(detect_dist)
 		]
 		
 		# Update state without emitting signal

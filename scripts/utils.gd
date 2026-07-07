@@ -71,3 +71,28 @@ static func compass_label_text(degrees: int) -> String:
 		180: return "S"
 		270: return "W"
 		_: return str(degrees)
+
+static func is_directional_emitter(comp: Dictionary) -> bool:
+	return comp.get("type", "") == "sensors" or comp.get("type", "") == "weapons"
+
+static func get_directional_em_power(comp: Dictionary, target_rotation: float, angle_from_target: float) -> float:
+	var em_emission = comp.get("em_emission", 0.0)
+	if em_emission <= 0.0:
+		return 0.0
+	if not is_directional_emitter(comp):
+		var relative_angle = angle_from_target - target_rotation
+		var rear_bias = 1.0 + 0.5 * max(0.0, cos(relative_angle + PI))
+		return em_emission * rear_bias
+	var comp_heading = target_rotation + comp.get("heading", 0.0)
+	var arc = comp.get("arc_width", TAU)
+	var diff = abs(wrapf(angle_from_target - comp_heading, -PI, PI))
+	if diff > arc / 2.0:
+		return 0.0
+	return em_emission * (1.0 - diff / (arc / 2.0))
+
+static func get_directional_em(sig: Dictionary, angle_from_target: float) -> float:
+	var target_rotation = sig.get("rot", 0.0)
+	var total = 0.0
+	for comp in sig.get("em_emitters", []):
+		total += get_directional_em_power(comp, target_rotation, angle_from_target)
+	return total

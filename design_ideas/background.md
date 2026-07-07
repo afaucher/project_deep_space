@@ -167,3 +167,26 @@ Let's look at how the factions we designed fit into this specific map layout usi
 1. **Sabotage & Dark Sectors:** When the corporation or pirates attack a beacon in Phase 2, that entire leg of the trade route goes "Dark." Suddenly, a safe, automated autopilot route becomes a blind navigation hazard where the player has to manually steer through asteroids using ping sensors.
 2. **Wormhole Interception:** If the player is smuggling black-market corporate blueprints back to the Drift, they have to survive the transit through the Nexus, dodging both JRA customs blockades and corporate interceptors waiting at the crossroads.
 3. **Rebuilding the Net:** A core mission type could involve escorting a Drift deployment vessel into deep, hostile space to drop a new nav-beacon, slowly pushing the "fog of war" back and reclaiming the sector map.
+
+---
+
+## The Foam: The Architecture of Space
+
+The physical setting of the universe is defined by a phenomenon known as **The Foam**. Rather than a continuous, infinite vacuum, habitable space exists in a series of pocket universes or "bubbles." Within these bubbles, physics is mostly stable enough to sustain life, though it doesn't function exactly right—which conveniently explains why ships have strict velocity limits and why friction or resistance seems to exist in the void.
+
+### Bubble Boundaries and The Poles
+The edges of these pocket spaces are literal boundaries. They act like the surface tension of a soap bubble. If a ship flies too far into the deep dark and crosses the boundary, it doesn't just hit a wall; it falls through the boundary fabric and is violently displaced, usually reappearing at one of the two extreme ends of the pocket space. 
+
+This spatial displacement phenomenon is what defines the **North and South poles** for each bubble. Navigational compasses in The Foam don't point to magnetic north; they point to the spatial poles where boundary-breachers are spat back out. 
+
+### Wormholes and The Unknown
+Near the center of each bubble lies its **Wormhole**, the only stable anchor point connecting it to the rest of The Foam. Wormholes link a series of bubbles together, forming the known clusters. However, navigating a wormhole is incredibly violent and difficult to control. A captain must have precise coordinates and know exactly where they are going before entering, or risk being torn apart or lost forever.
+
+Because of the sheer difficulty of charting new wormhole vectors, there are countless unmapped bubbles out there—vast, isolated clusters that humanity simply doesn't know how to reach yet.
+
+### Gameplay and Design Benefits of The Foam
+This setting architecture solves a host of game design challenges naturally:
+* **Map Boundaries:** Instead of invisible walls or arbitrary kill-zones, the edges of the map have a lore-friendly, functional mechanic (disappearing and being spat out at a pole).
+* **Level Progression:** Breaking the universe into distinct bubbles gives us natural, isolated "levels" or maps that can be dynamically loaded and controlled.
+* **Physics Justifications:** The strange, localized physics of The Foam neatly explains away our submarine-style gameplay, top speed limits, and other boundary weirdness we want to impose on the simulation.
+* **Background Pressure & Environment Design:** We can define different levels of "background pressure" across the space. Higher pressure zones would exert a slight force towards lower pressure zones. This gives us a natural mechanism for environmental storytelling and map layout, such as causing asteroids to naturally clump into distinct bands or rings while still allowing them to eventually drift or escape.

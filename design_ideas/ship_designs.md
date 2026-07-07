@@ -34,14 +34,14 @@ Lets also think through the current play experience - can the player switch thei
 # designs
 
 ## cargo shuttle
-present in high numbers for short hop in system cargo movement.  they are always buzzing around back and forth to mining stations and between local stations.
+present in high numbers for short hop in system cargo movement. From a traffic perspective, they travel back and forth between small and larger stations, ferrying refined resources or supplies.
 
 unarmed
 slow
 moderate cargo capacity
 
 ## freighter
-heavy cargo transport for between system long duration trips.
+heavy cargo transport for between system long duration trips. They operate exclusively on major trade lanes, only traveling from large station to large station.
 
 unarmed
 very slow
@@ -117,3 +117,29 @@ long term habbitation stations built into an existing asteroid, immobile.  with 
 
 extreme armor around the outside and inside
 almost certainly armed with PD, missles, sensor bouys and bad tempers
+
+## mining ship
+a rugged industrial vessel designed to extract resources from the environment. Rather than parking at a station, the mining ship's docking mechanic works in reverse: it is equipped with a heavy-duty tractor beam (a modified docking bay) that captures asteroids against their will and reels them in for processing.
+
+From a traffic perspective, mining ships operate on the fringe, traveling back and forth between asteroid fields and the smaller outposts/stations where they drop off raw ore.
+
+unarmed
+slow
+equipped with specialized mining lasers and heavy cargo holds
+
+## hab-ship (mobile home)
+effectively a retrofitted, parked cargo ship used as a permanent house. The population of the Sovereign Drift includes many who live in these mobile homes spread out thinly across areas with mining activity. 
+
+From a traffic perspective, they rarely travel. They mostly sit in deep space near asteroid belts, running basic station-keeping and obstacle avoidance routines to avoid drifting rocks. 
+
+unarmed
+extremely slow or immobile (station-keeping only)
+heavy emphasis on living quarters instead of cargo
+
+## Universal Docking (Ship-to-Ship)
+The docking mechanic is not restricted to stations. Because any ship can technically mount a `DockingBay` module, any two ships can dock with each other in deep space. 
+
+This enables incredibly dynamic traffic and interactions at all levels:
+* **Hab-Ship Visitors:** The tiny, isolated mobile homes can receive visitors, mail, or Amazon-style cargo shuttle deliveries right in the middle of a dense asteroid field.
+* **Mid-Space Exchange:** Two cargo ships can meet in deep space to exchange goods or refuel without needing to return to a station.
+* **Piracy & Boarding:** "Docking" can be non-consensual if one ship mounts a heavy-duty capture bay and forces a link, perfectly facilitating pirate boarding actions or customs inspections by the Jovian Regional Authority.

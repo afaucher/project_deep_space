@@ -5,11 +5,29 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # TRANSIT (cruise to the station) and DOCKING (yield to the station's berth while
 # it captures/holds/releases us). Returns FAILURE with no route so the selector
 # falls through to Idle. See implementation_plans/m20_traffic_wiring_design.md.
+#
+# M32 -- controlled-station parity: at a CONTROLLED stop (station's
+# get_port_zone() non-empty) the leaf runs the SAME lifecycle as the player --
+# request a grant via the shared Station.issue_docking_grant() BEFORE raising
+# wants_dock; no grant (full or otherwise ineligible) means the shuttle holds
+# near the approach point and retries next tick rather than piling up at the
+# capture radius with nothing to show for it. At an OPEN stop (no port_zone)
+# the old permissionless wants_dock-only path is unchanged.
+#
+# Undock: cargo shuttles never set manual_undock (it defaults false), so
+# DockingBay's original M19 auto-release-after-dock_duration timer still owns
+# their release, at both open AND controlled stops -- the leaf doesn't call
+# request_undock() itself. That command exists for the manual-hold path (a
+# ship that DID set manual_undock=true); wiring the cargo AI onto it too is a
+# judgment call left for when a controlled route actually needs a longer,
+# business-gated hold rather than the fixed timer (out of scope here -- noted
+# in the M32 report).
 
 const Steering = preload("res://scripts/ai/steering.gd")
 
 const DOCK_REQUEST_RADIUS := 4000.0   # raise the dock request within this of the station
 const CARGO_CRUISE := 700.0           # transit speed
+const STATION_SEARCH_RADIUS := 6000.0 # how close a "ships"-group node must be to count as "the station here"
 
 func tick(actor: Node, _blackboard) -> int:
 	if actor == null:
@@ -25,9 +43,24 @@ func tick(actor: Node, _blackboard) -> int:
 	if not actor.cargo_docking:
 		# TRANSIT to the current station.
 		if actor.position.distance_to(target) < DOCK_REQUEST_RADIUS:
-			actor.cargo_docking = true
-			actor.cargo_captured_seen = false
-			actor.wants_dock = true
+			var station = _find_station_at(actor, target)
+			var zone: Dictionary = {}
+			if station != null and station.has_method("get_port_zone"):
+				zone = station.get_port_zone()
+			if not zone.is_empty():
+				# Controlled stop -- must hold a grant before wants_dock does anything
+				# (DockingBay's gate rejects an ungranted ship at a controlled bay).
+				if actor.get("docking_grant") == null:
+					station.issue_docking_grant(actor)   # null (no berths) just means retry next tick
+				if actor.get("docking_grant") != null:
+					actor.cargo_docking = true
+					actor.cargo_captured_seen = false
+					actor.wants_dock = true
+				# else: no grant yet (full or zone hiccup) -- hold and retry.
+			else:
+				actor.cargo_docking = true
+				actor.cargo_captured_seen = false
+				actor.wants_dock = true
 		else:
 			_cruise_to(actor, target)
 		return SUCCESS
@@ -50,6 +83,27 @@ func tick(actor: Node, _blackboard) -> int:
 		# approach point rather than drifting off or ramming the station.
 		actor.apply_control_input(0.0, 0.0, (target - actor.position).angle(), 1, 1)
 	return SUCCESS
+
+# Resolve the actual station node standing at (near) this stop's waypoint, so
+# the leaf can call its issue_docking_grant()/get_port_zone(). patrol_route is
+# just Vector2 waypoints (no node reference), so this is a cheap proximity
+# lookup in the same "ships" group _update_port_zone_membership() already
+# scans -- bounded to a handful of stations in a sim bubble, not hundreds.
+func _find_station_at(actor: Node, waypoint: Vector2):
+	var tree = actor.get_tree()
+	if tree == null:
+		return null
+	var best = null
+	var best_d: float = STATION_SEARCH_RADIUS
+	for s in tree.get_nodes_in_group("ships"):
+		if s == actor: continue
+		if not s.has_method("get_berths"): continue
+		if s.get_berths().is_empty(): continue
+		var d: float = s.position.distance_to(waypoint)
+		if d <= best_d:
+			best = s
+			best_d = d
+	return best
 
 func _cruise_to(actor: Node, target: Vector2) -> void:
 	var desired: Vector2 = target - actor.position

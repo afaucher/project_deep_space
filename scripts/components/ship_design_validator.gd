@@ -402,7 +402,7 @@ const LAYOUT_RAY_START_OFFSET := 0.5  # start the ray this far outside the face,
 # living quarters, docking ports) are exempt from both -- only components with
 # a directional purpose (weapon/sensor/engine) have an "active surface" or a
 # coverage expectation in the skill's rules.
-const LAYOUT_CHECKED_TYPES := ["weapons", "sensors", "engines"]
+const LAYOUT_CHECKED_TYPES := ["weapons", "sensors", "engines", "docking_port"]
 
 # Cardinal face directions, keyed by name for violation messages.
 const _FACE_DIRS := {

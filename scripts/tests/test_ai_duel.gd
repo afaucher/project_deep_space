@@ -40,6 +40,7 @@ var full_health := 0.0            # pristine total health of a fresh frigate
 var results: Array = []           # one entry per trial: "new" / "legacy" / "draw"
 
 func setup(main) -> void:
+	Engine.time_scale = 10.0
 	main_node = main
 	print("Test test_ai_duel initialized.")
 	_start_trial()

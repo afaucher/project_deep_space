@@ -32,7 +32,10 @@ func tick(actor: Node, blackboard) -> int:
 				actor.fire_weapon(wid, target_pos, target_id)
 		# Missile volley: only when the whole live battery is synced and ready.
 		if has_missiles and actor.is_group_volley_ready(gid, "missile"):
+			var dist = actor.position.distance_to(target_pos)
 			for wid in ids:
-				if actor.get_component(wid)["weapon_type"] == "missile":
-					actor.fire_weapon(wid, target_pos, target_id)
+				var comp = actor.get_component(wid)
+				if comp["weapon_type"] == "missile":
+					if dist <= comp["range"]:
+						actor.fire_weapon(wid, target_pos, target_id)
 	return SUCCESS

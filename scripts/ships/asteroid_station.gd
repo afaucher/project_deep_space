@@ -114,6 +114,7 @@ static func design() -> Array:
 
 	# --- COLUMN A: x -70..-50, y -20..20 (h40) -- pure rock, no module ------
 	comps.append(_rock("rock_a", Rect2(-70, -20, 20, 40), 8000.0))
+	comps.append({"id": "dock_main", "type": "docking_port", "rect": Rect2(-80, -5, 10, 10), "health": 1000.0, "max_health": 1000.0, "density": 20.0, "heading": PI, "has_servo": true})
 
 	# --- COLUMN B: x -50..-30, y -35..35 (h70) -- reactor sandwich ----------
 	comps.append(_rock("rock_b_top", Rect2(-50, -35, 20, 27), 5000.0))
@@ -206,8 +207,4 @@ func _init() -> void:
 		if WAKE_COMPONENT_IDS.has(c.get("id", "")):
 			c["powered_on"] = false
 
-# One berth on the aft (-X) face, clear of the hull's own bounding radius --
-# same offset convention as small_station.gd (a station-class berth needs to
-# sit outside the collision circle so force-capture doesn't fight physics).
-func get_berths() -> Array:
-	return [{"pos": Vector2(-90, 0), "heading": PI}]
+

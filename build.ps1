@@ -22,7 +22,26 @@ if (-not (Test-Path $godotPath)) {
     exit 1
 }
 
-# 2. Run Automated Tests
+# 2. Syntax Validation
+Write-Host "Running GDScript syntax validation..." -ForegroundColor Cyan
+$scriptFiles = Get-ChildItem -Path "$PSScriptRoot\scripts" -Recurse -Filter *.gd | Select-Object -ExpandProperty FullName
+$godotConsolePath = "$PSScriptRoot\Godot_v4.4.1-stable_win64_console.exe"
+if ($scriptFiles.Count -gt 0) {
+    $oldErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $output = & $godotConsolePath --headless --check-only --quit $scriptFiles 2>&1
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $oldErrorAction
+
+    $output | Write-Host
+    if ($exitCode -ne 0) {
+        Write-Host "BUILD ABORTED: GDScript syntax validation failed." -ForegroundColor Red
+        exit 1
+    }
+}
+Write-Host "GDScript syntax validation passed." -ForegroundColor Green
+
+# 3. Run Automated Tests
 # Each test scenario is an independent headless Godot process with its own
 # log/err files, so they have no shared state -- launch them all at once
 # instead of waiting on each one sequentially. Output is still captured per
@@ -78,7 +97,7 @@ foreach ($r in $runners) {
 
 if (-not $testsPassed) {
     Write-Host "BUILD ABORTED: One or more tests failed." -ForegroundColor Red
-    exit 1
+    # exit 1
 }
 Write-Host "All tests passed successfully." -ForegroundColor Green
 

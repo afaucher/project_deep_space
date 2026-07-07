@@ -168,6 +168,40 @@ var dockable: bool = false
 var wants_dock: bool = false
 var docking_bay = null   # the DockingBay currently claiming this hull, else null (one bay per hull)
 
+# M32 -- docking permission. A DockingGrant is a plain Dictionary (no class_name
+# needed -- see roadmap): {"authority": String, "holder": int (owner_id),
+# "slip_id": int (>=0 assigned slip, or -1 any-open), "time_left": float,
+# "zone_authority": String}. null = no grant held. `zone_authority` duplicates
+# `authority` (kept as two fields per the roadmap's struct spec -- authority is
+# the issuing station's zone name, zone_authority is what expiry compares
+# against the holder's current_port_zone; they're always equal at issuance,
+# but keeping them distinct fields matches the spec and leaves room for a
+# future "authority handed off to a relay" wrinkle without a struct change).
+var docking_grant = null
+
+# M32 -- per-tick countdown expiry (NOT an absolute clock -- deterministic,
+# no clock injection needed). Decremented by delta each physics tick while the
+# grant is unfulfilled (ship not yet CAPTURING/DOCKED); frozen once fulfilled
+# (see _update_docking_grant()). Grant duration in seconds.
+const GRANT_DURATION := 120.0
+
+# M32 -- player-initiated undock flag. false (default) preserves the M19
+# auto-release-after-dock_duration behavior (see DockingBay._physics_process),
+# which is why the existing docking/traffic regression tests stay green
+# untouched. true means the bay holds DOCKED indefinitely until this ship's
+# request_undock() RPC fires DockingBay.release_with_push(). Wiring this to an
+# actual player UI toggle is M33 -- here it's set programmatically by tests/AI.
+var manual_undock: bool = false
+
+# M32 -- slip-assignment policy for a controlled station's issue_docking_grant
+# (the "authority style" spectrum -- see roadmap "Two allocation models").
+# "assigned" (default, matches AUTOMATED-style ports like Ironhold): issuance
+# reserves one concrete free slip_id. "any_open" (MINIMAL/STAFFED-style ports):
+# issuance reserves nothing, stamps slip_id = -1, and the bay claims its slip
+# at capture time instead (DockingBay._try_capture()). Meaningless on a hull
+# with no port_zone (open stations never issue grants at all).
+var slip_policy: String = "assigned"
+
 # Patrol/route (M18). patrol_route = world-space waypoints the FollowRoute leaf
 # steers along; patrol_loop wraps at the end; patrol_index is the current target
 # (the leaf advances it).
@@ -181,11 +215,71 @@ var patrol_index: int = 0
 var cargo_docking: bool = false
 var cargo_captured_seen: bool = false
 
-# Berth poses this hull offers to docking traffic, each { pos:Vector2 (local),
-# heading:float (local), capture_radius:float (optional) }. Stations override;
-# every other hull offers none. Bays are grown from these in _ready().
-func get_berths() -> Array:
-	return []
+
+
+# M32 -- the single pool allocator (server-authoritative; call on the host).
+# THIS is the one issuance path both the player (later M33 dialogue/fast-path)
+# and NPC docking AI must go through -- see roadmap "NPC / player parity". No
+# grant is handed out unless the pool actually has room; the caller never picks
+# which slip, which is exactly what stops players and NPCs double-booking.
+#
+# Pool room = at least one DockingBay child that is (a) not CAPTURING/DOCKED,
+# AND (b) not currently reserved by another ship's live, unfulfilled grant
+# (grant.slip_id == that bay's slip_id). An any-open ("") live grant doesn't
+# reserve a concrete bay, so it doesn't block a later assigned reservation --
+# it only competes for a bay at actual capture time (DockingBay's own claim
+# bookkeeping handles that race).
+#
+# Returns null when the station has no port_zone (permission is a property of
+# a controlled zone -- callers should just set wants_dock directly at an open
+# station) or when no berth is free ("no berths").
+func issue_docking_grant(ship) -> Variant:
+	var zone: Dictionary = get_port_zone()
+	if zone.is_empty():
+		return null
+
+	var bays: Array = []
+	for c in get_children():
+		if c is DockingBay:
+			bays.append(c)
+	if bays.is_empty():
+		return null
+
+	var reserved_slips: Dictionary = {}   # slip_id -> true, for live assigned grants elsewhere
+	for s in get_tree().get_nodes_in_group("ships"):
+		if s == ship: continue
+		var g = s.get("docking_grant")
+		if g == null: continue
+		if g.get("authority", "") != zone.get("authority", ""): continue
+		var sid: String = g.get("slip_id", "")
+		if sid != "":
+			reserved_slips[sid] = true
+
+	var free_bays: Array = []
+	for b in bays:
+		if b.state != DockingBay.State.EMPTY:
+			continue
+		if reserved_slips.has(b.slip_id):
+			continue
+		free_bays.append(b)
+
+	if free_bays.is_empty():
+		return null   # no berths
+
+	var grant: Dictionary = {
+		"authority": zone.get("authority", ""),
+		"holder": ship.owner_id,
+		"slip_id": "",
+		"time_left": GRANT_DURATION,
+		"zone_authority": zone.get("authority", ""),
+	}
+	if slip_policy == "any_open":
+		pass   # slip_id stays "", reserve nothing -- claimed at capture instead
+	else:
+		grant["slip_id"] = free_bays[0].slip_id   # "assigned" (default): reserve one concrete slip
+
+	ship.docking_grant = grant
+	return grant
 
 func _init() -> void:
 	ship_name = "HMM " + NAME_ADJECTIVES[randi() % NAME_ADJECTIVES.size()] + " " + NAME_VERBS[randi() % NAME_VERBS.size()]
@@ -343,6 +437,41 @@ func _update_port_zone_membership() -> void:
 		if nearest_authority != null:
 			transient_events.append({"type": "zone_enter", "authority": nearest_authority})
 		current_port_zone = nearest_authority
+
+# M32 -- per-tick docking_grant validity check on the HOLDER. Two ways a grant
+# dies while unfulfilled: the countdown (time_left) reaches zero, or the ship
+# leaves the granting zone (current_port_zone no longer matches the grant's
+# zone_authority -- reuses M31's membership tracking, already updated earlier
+# this same tick by _update_port_zone_membership()). Either clears the grant
+# and emits a `grant_expired` transient event.
+#
+# Fulfilled freeze: once the ship is actually CAPTURING or DOCKED at its own
+# docking_bay, the grant is "fulfilled" -- freeze the countdown and skip the
+# zone check entirely, so a ship that's mid-capture (or already docked and
+# sitting inside the hull's own collision footprint, which can read outside
+# the zone radius depending on geometry) is never ejected by a timeout or a
+# zone-membership quirk while a bay physically holds it. A slip returns to the
+# pool the instant the grant clears here (assigned) or on undock (both
+# policies) -- issue_docking_grant() re-derives pool room live each call, so
+# there's no separate bookkeeping to free.
+func _update_docking_grant(delta: float) -> void:
+	if docking_grant == null:
+		return
+
+	var fulfilled: bool = docking_bay != null and (docking_bay.state == DockingBay.State.CAPTURING or docking_bay.state == DockingBay.State.DOCKED)
+	if fulfilled:
+		return   # frozen -- countdown paused, no zone check, never ejected mid-dock
+
+	var expired := false
+	docking_grant["time_left"] -= delta
+	if docking_grant["time_left"] <= 0.0:
+		expired = true
+	elif current_port_zone != docking_grant.get("zone_authority", ""):
+		expired = true
+
+	if expired:
+		transient_events.append({"type": "grant_expired", "authority": docking_grant.get("authority", "")})
+		docking_grant = null
 
 # M28 -- pre-solve velocity, cached at the TOP of _physics_process each tick.
 # body_entered fires AFTER the physics solver has already applied the bounce
@@ -603,44 +732,6 @@ func _decay_damage_heat(comp: Dictionary, delta: float) -> float:
 	var damage_heat = max(0.0, comp.get("damage_heat", 0.0) - DAMAGE_HEAT_DECAY_RATE * delta)
 	comp["damage_heat"] = damage_heat
 	return damage_heat
-
-# EM emission pattern is a function of component type, not an authored field:
-# sensors and weapons already carry their own heading/arc_width (used for
-# sensing/engagement arcs), so they emit directionally through that same
-# cone for free. Everything else (reactor, engine, passive leakage) has no
-# natural facing and stays omnidirectional.
-func _is_directional_emitter(comp: Dictionary) -> bool:
-	return comp["type"] == "sensors" or comp["type"] == "weapons"
-
-# How much of one component's em_emission a receiver at angle_from_target
-# (world-space angle from the receiver back to the emitting ship) actually
-# sees, given the emitting ship's rotation. Omni sources use the existing
-# rear-aspect dipole bias; directional sources (sensors/weapons) fall off
-# across their own mount arc, same shape as the old sensor-only cone code.
-func _received_em_power(comp: Dictionary, target_rotation: float, angle_from_target: float) -> float:
-	var em_emission = comp.get("em_emission", 0.0)
-	if em_emission <= 0.0:
-		return 0.0
-	if not _is_directional_emitter(comp):
-		var relative_angle = angle_from_target - target_rotation
-		var rear_bias = 1.0 + 0.5 * max(0.0, cos(relative_angle + PI))
-		return em_emission * rear_bias
-	var comp_heading = target_rotation + comp.get("heading", 0.0)
-	var arc = comp.get("arc_width", TAU)
-	var diff = abs(wrapf(angle_from_target - comp_heading, -PI, PI))
-	if diff > arc / 2.0:
-		return 0.0
-	return em_emission * (1.0 - diff / (arc / 2.0))
-
-# Sums received EM across every emitter a target's get_signature() exposes,
-# replacing the old "one rear-biased scalar + sensor_config-only cone spikes"
-# split with one consistent per-component pass.
-func _total_received_em(sig: Dictionary, angle_from_target: float) -> float:
-	var target_rotation = sig.get("rot", 0.0)
-	var total = 0.0
-	for comp in sig.get("em_emitters", []):
-		total += _received_em_power(comp, target_rotation, angle_from_target)
-	return total
 
 # Fraction of rated power currently available for sys_type (0 if no such
 # components exist). Reduces to is_component_powered(id) ? health_ratio : 0
@@ -972,13 +1063,19 @@ func _ready() -> void:
 			if not c.has("timer"): c["timer"] = 0.0
 			if not c.has("base_em_emission"): c["base_em_emission"] = 0.0
 
-	# M19: stations (any hull that defines berths) grow their docking bays.
-	for berth in get_berths():
+	# Universal Docking Refactor: stations and ships build DockingBay nodes
+	# for each "docking_port" component in their loadout.
+	for comp in get_components_by_type("docking_port"):
 		var bay = DockingBay.new()
-		bay.position = berth.get("pos", Vector2.ZERO)
-		bay.rotation = berth.get("heading", 0.0)
-		if berth.has("capture_radius"):
-			bay.capture_radius = berth["capture_radius"]
+		# Port is located at the center of the component rect.
+		bay.position = comp["rect"].position + comp["rect"].size / 2.0
+		bay.rotation = comp.get("heading", 0.0)
+		if comp.has("capture_radius"):
+			bay.capture_radius = comp["capture_radius"]
+		# slip_id is now the string ID of the docking port component.
+		bay.slip_id = comp["id"]
+		# Only docking ports with 'has_servo': false are completely fixed. Most can rotate +/- degrees or move along a rail.
+		bay.has_servo = comp.get("has_servo", false)
 		add_child(bay)
 
 	sfx_engine = AudioStreamPlayer.new()
@@ -1073,6 +1170,21 @@ func set_sensor_target(target_id: String) -> void:
 		if multiplayer.get_remote_sender_id() != 0: pass
 	manual_sensor_target = target_id
 
+# M32 -- player/AI-initiated undock. Only meaningful while actually captured
+# (docking_bay != null, i.e. CAPTURING or DOCKED) with manual_undock=true (see
+# DockingBay._physics_process -- manual_undock=false auto-releases on the old
+# M19 timer and never needs this command). Delegates the drop-spring-then-push
+# sequencing to DockingBay.release_with_push() so the mechanics live in one
+# place. The player triggers this via the context docking control (M33); NPC
+# docking behaviors (cargo_run_leaf) call it directly after their business.
+@rpc("any_peer", "call_local")
+func request_undock() -> void:
+	if not is_multiplayer_authority(): return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
+		if multiplayer.get_remote_sender_id() != 0: return
+	if docking_bay != null:
+		docking_bay.release_with_push()
+
 func _physics_process(delta: float) -> void:
 	# M28 -- cache PRE-solve velocity for this tick before the physics engine's
 	# own integration/collision response can alter linear_velocity. This is what
@@ -1082,6 +1194,7 @@ func _physics_process(delta: float) -> void:
 
 	if is_multiplayer_authority() and not is_dead:
 		_update_port_zone_membership()
+		_update_docking_grant(delta)
 
 	if is_multiplayer_authority():
 		for w in get_components_by_type("weapons"):
@@ -1567,7 +1680,7 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 				# directional cone falloff per _received_em_power) instead of
 				# one rear-biased scalar plus a sensor-only cone bolt-on.
 				var angle_from_target = (origin - collider.position).angle()
-				var em_power = _total_received_em(sig, angle_from_target)
+				var em_power = Utils.get_directional_em(sig, angle_from_target)
 
 				var received_em = em_power * (EM_FALLOFF_REFERENCE_DISTANCE / max(EM_FALLOFF_REFERENCE_DISTANCE, dist))
 				if received_em < PASSIVE_EM_NOISE_FLOOR:

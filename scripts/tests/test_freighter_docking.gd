@@ -73,6 +73,7 @@ func setup(main) -> void:
 	freighter.owner_id = 50
 	freighter.iff_tags = ["TEAM_PLAYER"]   # friendly so station PD ignores it
 	freighter.wants_dock = true
+	freighter.set("docking_grant", {"authority": "Ironhold Control", "slip_id": -1})
 
 	main_node.add_child(station)   # _ready grows the station's own (default) bay
 

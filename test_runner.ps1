@@ -22,20 +22,25 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Running Automated Tests for Project Deep Space " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
-# 1. Syntax Validation
-Write-Host "`n[1] Running GDScript syntax validation..." -ForegroundColor Yellow
-$scriptFiles = Get-ChildItem -Path "$PSScriptRoot\scripts" -Recurse -Filter *.gd | Select-Object -ExpandProperty FullName
-$godotConsolePath = "$PSScriptRoot\Godot_v4.4.1-stable_win64_console.exe"
-if ($scriptFiles.Count -gt 0) {
-    & $godotConsolePath --headless --check-only $scriptFiles 2>&1 | Out-String | Write-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ">>> [TEST FAILED] GDScript syntax validation failed <<<" -ForegroundColor Red
-        exit 1
-    }
-}
-Write-Host ">>> [TEST PASSED] GDScript syntax validation passed <<<" -ForegroundColor Green
-
 if ($TestName -eq "") {
+    Write-Host "`n[1] Running GDScript syntax validation..." -ForegroundColor Yellow
+    $scriptFiles = Get-ChildItem -Path "$PSScriptRoot\scripts" -Recurse -Filter *.gd | Select-Object -ExpandProperty FullName
+    $godotConsolePath = "$PSScriptRoot\Godot_v4.4.1-stable_win64_console.exe"
+    if ($scriptFiles.Count -gt 0) {
+        $oldErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $output = & $godotConsolePath --headless --check-only --quit $scriptFiles 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $oldErrorAction
+
+        $output | Write-Host
+        if ($exitCode -ne 0) {
+            Write-Host ">>> [TEST FAILED] GDScript syntax validation failed <<<" -ForegroundColor Red
+            exit 1
+        }
+    }
+    Write-Host ">>> [TEST PASSED] GDScript syntax validation passed <<<" -ForegroundColor Green
+
     Write-Host "`n[2] No specific test provided. Orchestration ready." -ForegroundColor Green
     exit 0
 }
