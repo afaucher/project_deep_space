@@ -60,18 +60,18 @@ static func _avoidance(actor, exclude_pos) -> Vector2:
 		if miss >= safe:
 			continue   # will clear it anyway
 
-		# Steer perpendicular to our heading, away from the obstacle's side.
-		var head: Vector2 = vel.normalized() if vel.length() > 0.01 else rel.normalized()
+		# Steer perpendicular to the relative velocity, away from the obstacle's side.
+		var head: Vector2 = relv.normalized() if relv.length() > 0.01 else rel.normalized()
 		var perp: Vector2 = Vector2(-head.y, head.x)
 		var side: float = signf(perp.dot(rel))
 		if absf(side) < 0.001:
 			side = 1.0   # dead ahead -> pick a side deterministically
 		var away: Vector2 = perp * -side
-		# Full push as soon as a hit is predicted (scaled by how deep the miss would
-		# breach clearance), NOT ramped from zero -- ramping reacts too late to move
-		# a heavy hull clear in time.
 		var urgency: float = (safe - miss) / safe
-		total += away.normalized() * urgency * AVOID_GAIN
+		var avoid_vec = away.normalized() * urgency * AVOID_GAIN
+		if actor.name == "MobileHome" and Engine.get_process_frames() % 60 == 0:
+			print("Steering ", actor.name, " obs: ", obs.name, " rel: ", rel, " relv: ", relv, " head: ", head, " perp: ", perp, " side: ", side, " away: ", away, " avoid: ", avoid_vec)
+		total += avoid_vec
 	return total
 
 static func _nearby(actor) -> Array:

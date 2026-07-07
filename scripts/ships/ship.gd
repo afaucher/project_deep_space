@@ -767,7 +767,7 @@ var sfx_missile: AudioStreamPlayer
 
 # Set true to re-enable verbose combat traces ([Damage]/[PD]); off by default so normal
 # play and headless tests are not flooded with per-hit / per-shot prints.
-const COMBAT_DEBUG := false
+const COMBAT_DEBUG := true
 
 func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic") -> void:
 	if is_dead: return

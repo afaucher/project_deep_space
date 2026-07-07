@@ -17,6 +17,9 @@ const K_DAMP := 4.0
 const K_ROT := 6.0
 const K_ROT_DAMP := 5.0
 
+# Yield strength of the clamp (distance error before it snaps). Allows forceful breakaway.
+const YIELD_STRENGTH := 200.0
+
 var capture_radius := 5000.0
 var pos_tolerance := 60.0     # settled when within this of the berth...
 var settle_speed := 25.0      # ...and slower than this
@@ -86,6 +89,18 @@ func _physics_process(delta: float) -> void:
 				_release()
 			else:
 				_servo(captured)          # keep it seated while loading
+				
+				# M19 -- Clamp Snapping / Forceful Breakaway.
+				# The spring has a physical yield strength. If the ship fires its engines
+				# hard enough to stretch the spring beyond this distance error, the clamp breaks.
+				var port_offset = _get_captured_port_offset(captured)
+				var port_global_offset = port_offset.rotated(captured.rotation)
+				var pos_err: float = _berth_pos_for(captured).distance_to(captured.position + port_global_offset)
+				
+				if pos_err > YIELD_STRENGTH:
+					_release()
+					return # Clamp snapped!
+				
 				# M32 -- manual_undock=false keeps the original M19 behavior
 				# (auto-release after dock_duration) unchanged, which is why the
 				# existing NPC/production docking tests stay green untouched.
