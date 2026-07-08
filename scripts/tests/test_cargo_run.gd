@@ -51,10 +51,14 @@ func setup(main) -> void:
 	main_node.add_child(shuttle)
 	shuttle.add_child(AITreeFactory.build_cargo())
 
+var test_ticks = 0
 func _physics_process(delta: float) -> void:
 	if finished or shuttle == null:
 		return
 	t += delta
+	test_ticks += 1
+	if test_ticks % 60 == 0:
+		print("Tick: ", test_ticks, " Pos: ", shuttle.position, " Bay: ", shuttle.docking_bay, " CargoDocking: ", shuttle.cargo_docking)
 
 	# A dock "completes" when cargo_docking falls from true to false (bay released
 	# us and we advanced). Record which lane station it was.

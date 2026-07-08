@@ -79,8 +79,26 @@ func tick(actor: Node, _blackboard) -> int:
 		actor.patrol_index = idx
 		actor.cargo_docking = false
 	else:
-		# Requested but not yet berthed (waiting for a free berth) -> hold near the
-		# approach point rather than drifting off or ramming the station.
+		var grant = actor.get("docking_grant")
+		if grant != null and grant.get("slip_id", "") != "":
+			var station = _find_station_at(actor, target)
+			if station != null:
+				for b in station.get_berths():
+					if b.slip_id == grant.get("slip_id", ""):
+						var approach_pt = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 2000.0
+						_cruise_to(actor, approach_pt)
+						return RUNNING
+		# Fallback if no slip is assigned yet (e.g. uncontrolled station).
+		# Seek the first bay's approach point so we can enter its capture cone.
+		var station = _find_station_at(actor, target)
+		if station != null:
+			var bays = station.get_berths()
+			if bays.size() > 0:
+				var b = bays[0]
+				var approach_pt = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 2000.0
+				_cruise_to(actor, approach_pt)
+				return RUNNING
+				
 		actor.apply_control_input(0.0, 0.0, (target - actor.position).angle(), 1, 1)
 	return SUCCESS
 
@@ -99,6 +117,7 @@ func _find_station_at(actor: Node, waypoint: Vector2):
 		if s == actor: continue
 		if not s.has_method("get_berths"): continue
 		if s.get_berths().is_empty(): continue
+		if s.get('ship_tier') != 4: continue # ComponentSpec.Tier.STRUCTURE
 		var d: float = s.position.distance_to(waypoint)
 		if d <= best_d:
 			best = s

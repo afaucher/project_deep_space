@@ -594,8 +594,9 @@ func get_component_origin(comp: Dictionary) -> Vector2:
 func get_active_transponder_data() -> Dictionary:
 	for c in get_components_by_type("comms"):
 		if is_component_powered(c["id"]) and c.get("transponder_active", true):
+			var custom_name = c.get("transponder_custom_name", "")
 			var data = {
-				"name": c.get("transponder_custom_name", ship_name),
+				"name": custom_name if custom_name != "" else ship_name,
 				"flag": c.get("flag", "")
 			}
 			if not c.get("transponder_share_name", true):
@@ -1301,10 +1302,10 @@ func _physics_process(delta: float) -> void:
 		if sfx_rcs.playing:
 			sfx_rcs.stop()
 	
-	# Pin dir_high_res scanner to forward
+	# Pin dir_high_res scanner to forward (0.0 is local forward)
 	for s in get_components_by_type("sensors"):
 		if s["id"] == "dir_high_res":
-			s["heading"] = rotation
+			s["heading"] = 0.0
 	
 	# Decay and dead-reckon contacts
 	var to_remove = []
@@ -2249,6 +2250,9 @@ func apply_rcs_input(direction: Vector2, rot: float) -> void:
 		direction = direction.normalized()
 	rcs_translation_cmd = direction
 	rcs_rotation_cmd = clampf(rot, -1.0, 1.0)
+
+func get_berths() -> Array:
+	return get_tree().get_nodes_in_group("docking_bays").filter(func(b): return b.get_parent() == self)
 
 func apply_control_input(thrust: float, t_vel: float, heading: float, s_mode: int, l_mode: int) -> void:
 	target_thrust = clampf(thrust, -1.0, 1.0)

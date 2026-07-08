@@ -535,7 +535,8 @@ func _draw() -> void:
 			var color = _get_contact_color(c)
 			
 			if show_contact_labels:
-				draw_string(font, screen_pos + Vector2(10, 10), c_id, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, color)
+				var display_name = c.get("name", c_id)
+				draw_string(font, screen_pos + Vector2(10, 10), display_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, color)
 				
 			if c_id == selected_id:
 				# Draw bracket
@@ -666,9 +667,10 @@ func _draw() -> void:
 			
 			
 			# Draw label
-			var text_size = font.get_string_size(c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+			var display_name = c.get("name", c_id)
+			var text_size = font.get_string_size(display_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
 			var label_pos = edge_pos - dir_to_contact * 15.0 - Vector2(text_size.x/2.0, -text_size.y/3.0)
-			draw_string(font, label_pos, c_id, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
+			draw_string(font, label_pos, display_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
 
 func _get_contact_color(c: Dictionary) -> Color:
 	# Dim by confidence-from-age so stale dead-reckoned contacts fade toward ghosts

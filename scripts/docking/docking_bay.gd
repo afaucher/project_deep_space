@@ -60,6 +60,12 @@ var state: int = State.EMPTY
 var captured = null
 var _dock_timer := 0.0
 
+func _enter_tree() -> void:
+	add_to_group("docking_bays")
+
+func _exit_tree() -> void:
+	remove_from_group("docking_bays")
+
 func configure(radius: float, duration: float) -> void:
 	capture_radius = radius
 	dock_duration = duration
@@ -120,8 +126,13 @@ func _try_capture() -> void:
 			continue
 		var d: float = global_position.distance_to(s.position)
 		if d <= best_d:
-			best = s
-			best_d = d
+			# M32: Only capture if the ship is in the approach hemisphere.
+			# Prevents tractoring ships through the station hull from the far side.
+			var dir_to_ship = (s.position - global_position).normalized()
+			var bay_forward = Vector2.RIGHT.rotated(global_rotation)
+			if dir_to_ship.dot(bay_forward) > 0.866:
+				best = s
+				best_d = d
 	if best != null:
 		captured = best
 		captured.docking_bay = self   # claim it so no other bay double-captures
@@ -232,10 +243,15 @@ func _dockable_seeking(s) -> bool:
 	var zone: Dictionary = {}
 	if host != null and host.has_method("get_port_zone"):
 		zone = host.get_port_zone()
-	if zone.is_empty():
-		return true   # open/uncontrolled station -- old permissionless behavior
-
 	var grant = s.get("docking_grant")
+
+	if zone.is_empty():
+		# open/uncontrolled station -- old permissionless behavior, BUT we should NOT
+		# kidnap a ship that explicitly holds a grant for a different controlled station.
+		if grant != null and grant.get("authority", "") != "":
+			return false
+		return true
+
 	if grant == null:
 		return false
 	var authority: String = zone.get("authority", "")
