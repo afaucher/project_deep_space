@@ -1,6 +1,6 @@
 # M31–M36 — Port authority: zones, docking permission, and nav aids
 
-Status: M31 SHIPPED (2026-07-05); M32–M36 PLANNED. Goal: the player requests docking (**one press** of a
+Status: M31 (2026-07-05) + M32 (2026-07-08) SHIPPED; M33–M36 PLANNED. Goal: the player requests docking (**one press** of a
 top-level control that auto-runs the port-control handshake, or a full chat with
 the NPC if they'd rather) and receives a **grant** — permission to dock at a
 **specific assigned slip**, valid for a **time limit** and only **while inside
@@ -344,6 +344,43 @@ Regression: `test_docking`, `test_docking_multi`, `test_freighter_docking`,
 path at controlled stations; if the campaign's civilian dock is controlled,
 either mark it open or have the cargo-run leaf request a grant — resolve in-agent
 and note it).
+
+### Shipped (initial 2026-07-08; completed 2026-07-08)
+
+Landed as part of the "M19 Universal Docking Refactor + M32" commit, then
+finished out. In `ship.gd`: `DockingGrant` dict, `issue_docking_grant(ship)`
+(the single pool allocator — reserves a concrete slip for `slip_policy
+"assigned"`, leaves `slip_id=""` for `"any_open"`, denies when full),
+`_update_docking_grant()` per-tick expiry (`time_left` countdown OR zone-exit
+via M31's `current_port_zone`, frozen once CAPTURING/DOCKED), `manual_undock` +
+`request_undock()`. In `docking_bay.gd`: the conditional grant gate in
+`_dockable_seeking` (open station unchanged; assigned → only the matching
+`slip_id` bay; any-open → any free bay, claimed at capture), and
+`release_with_push()` (drop servo + separation impulse).
+
+Friction / fixes during completion (the refactor shipped red under a disabled
+build gate — see below):
+- **Build gate had been disabled** (`# exit 1` in `build.ps1`) — RESTORED, so
+  red tests fail the build again.
+- **Approach-capture cone bug:** `_try_capture`'s hemisphere gate was `> 0.866`
+  (a 30° cone) contradicting its own "far side" comment; a legitimate ~31°
+  approach was rejected. Corrected to `> 0.0` (true hemisphere).
+- **MobileHome** had a `living_quarters_1`/`hull_port` overlap (validator error)
+  — moved the quarters outboard.
+- **Refactor renames:** `Ship._received_em_power`/`_total_received_em` moved to
+  `Utils.get_directional_em_power`/`get_directional_em` (test callers updated);
+  bays are now built per `docking_port` component with `has_servo` from the
+  component (hand-made test bays must set rotation + has_servo).
+- Test coverage was issuance-only; **`test_docking_permission` extended** to the
+  full lifecycle: grant→DOCKED, undock round-trip (holds past `dock_duration`,
+  `request_undock`→EMPTY), timeout expiry, zone-exit expiry, specific-slip gate,
+  any-open gate. `EXPECTED_LAYOUT_WARNINGS` re-frozen for the docking-port-bearing
+  stations + Mobile Home registered.
+- NPC-at-controlled-station grant path: current campaign NPC docks are OPEN
+  (`SmallStation`), so unaffected; the cargo-run leaf grant path is still owed
+  when an NPC needs a *controlled* berth (carry to M33's NPC parity work).
+- Watch-item: `build.ps1` runs tests in PARALLEL and a heavy sim (`test_missile_ai`)
+  can false-timeout under starvation — passes standalone; not a real failure.
 
 ---
 
