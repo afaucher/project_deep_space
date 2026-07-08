@@ -311,7 +311,7 @@ func _build_tests() -> void:
 			var comp = {"type": "reactor", "em_emission": 100.0}
 			# target faces +X (rotation 0); receiver is also along +X from the
 			# target, i.e. looking at the target's nose.
-			var power = ship._received_em_power(comp, 0.0, 0.0)
+			var power = Utils.get_directional_em_power(comp, 0.0, 0.0)
 			return _assert(absf(power - 100.0) < 0.01,
 				"Bow-on omni emission should be exactly em_emission * 1.0. got=" + str(power)),
 		"duration": 1
@@ -322,7 +322,7 @@ func _build_tests() -> void:
 		"check": func():
 			var comp = {"type": "reactor", "em_emission": 100.0}
 			# receiver is behind the target (along target's -X / six o'clock).
-			var power = ship._received_em_power(comp, 0.0, PI)
+			var power = Utils.get_directional_em_power(comp, 0.0, PI)
 			return _assert(absf(power - 150.0) < 0.01,
 				"Tail-on omni emission should be exactly em_emission * 1.5. got=" + str(power)),
 		"duration": 1
@@ -332,7 +332,7 @@ func _build_tests() -> void:
 		"setup": func(): pass,
 		"check": func():
 			var comp = {"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
-			var power = ship._received_em_power(comp, 0.0, 0.0) # dead-on the boresight
+			var power = Utils.get_directional_em_power(comp, 0.0, 0.0) # dead-on the boresight
 			return _assert(absf(power - 100.0) < 0.01,
 				"On-axis directional emission should be full strength, no falloff. got=" + str(power)),
 		"duration": 1
@@ -342,7 +342,7 @@ func _build_tests() -> void:
 		"setup": func(): pass,
 		"check": func():
 			var comp = {"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0} # half_arc = PI/6
-			var power = ship._received_em_power(comp, 0.0, PI / 12.0) # half_arc / 2
+			var power = Utils.get_directional_em_power(comp, 0.0, PI / 12.0) # half_arc / 2
 			return _assert(absf(power - 50.0) < 0.01,
 				"At half the half-arc off-axis, linear falloff should give exactly 50%. got=" + str(power)),
 		"duration": 1
@@ -352,7 +352,7 @@ func _build_tests() -> void:
 		"setup": func(): pass,
 		"check": func():
 			var comp = {"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
-			var power = ship._received_em_power(comp, 0.0, PI / 2.0) # 90 degrees off, well outside +-30deg
+			var power = Utils.get_directional_em_power(comp, 0.0, PI / 2.0) # 90 degrees off, well outside +-30deg
 			return _assert(power == 0.0,
 				"Outside the emission cone should give exactly zero, not a small falloff tail. got=" + str(power)),
 		"duration": 1
@@ -365,7 +365,7 @@ func _build_tests() -> void:
 				{"type": "reactor", "em_emission": 100.0},
 				{"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
 			]}
-			var total = ship._total_received_em(sig, 0.0) # bow-on AND on-axis for the weapon
+			var total = Utils.get_directional_em(sig, 0.0) # bow-on AND on-axis for the weapon
 			return _assert(absf(total - 200.0) < 0.01,
 				"Bow-on: reactor 100*1.0 + weapon 100*1.0 (on-axis) = 200. got=" + str(total)),
 		"duration": 1
@@ -378,7 +378,7 @@ func _build_tests() -> void:
 				{"type": "reactor", "em_emission": 100.0},
 				{"type": "weapons", "em_emission": 100.0, "heading": 0.0, "arc_width": PI / 3.0}
 			]}
-			var total = ship._total_received_em(sig, PI) # tail-on: reactor rear-biased, weapon arc doesn't reach
+			var total = Utils.get_directional_em(sig, PI) # tail-on: reactor rear-biased, weapon arc doesn't reach
 			return _assert(absf(total - 150.0) < 0.01,
 				"Tail-on: reactor 100*1.5 + weapon 0 (outside its forward arc) = 150. got=" + str(total)),
 		"duration": 1

@@ -18,8 +18,10 @@ static func design() -> Array:
 		{"id": "omni_main", "type": "sensors", "rect": Rect2(0, -2.5, 5, 5), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "base_em_emission": 8.0, "em_emission": 8.0, "switchable": true, "powered_on": true,
 			"sensor_type": "active", "active": true, "range": 22000.0, "arc_width": TAU, "num_bins": 36, "refresh_interval": 1.5, "timer": 0.0, "heading": 0.0},
 
-		# Add a living quarters!
-		{"id": "living_quarters_1", "type": "living_quarters", "rect": Rect2(-5, -10, 10, 5), "health": 150.0, "max_health": 150.0, "density": 20.0},
+		# Add a living quarters! Sits just outboard of the port hull slab
+		# (edge-adjacent along y=-15), clear of the packed interior -- the old
+		# Rect2(-5,-10,...) overlapped hull_port and failed the design validator.
+		{"id": "living_quarters_1", "type": "living_quarters", "rect": Rect2(-5, -20, 10, 5), "health": 150.0, "max_health": 150.0, "density": 20.0},
 		
 		# Add a docking port!
 		{

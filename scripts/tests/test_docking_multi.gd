@@ -49,6 +49,13 @@ func setup(main) -> void:
 	for off in EXTRA_BERTHS:
 		var b = DockingBay.new()
 		b.position = off
+		# Universal Docking Refactor: bays are now directional passive collars.
+		# Face each berth OUTWARD (toward the quadrant its shuttle approaches
+		# from) so the shuttle sits in the approach hemisphere, and enable the
+		# tractor servo (real station bays get has_servo=true from their
+		# docking_port component; these hand-made test bays must set it too).
+		b.rotation = off.angle()
+		b.has_servo = true
 		station.add_child(b)
 		bays.append(b)
 
@@ -88,10 +95,13 @@ func _physics_process(_delta: float) -> void:
 			caught[b.captured.get_instance_id()] = true
 		_assert(caught.size() == bays.size(), "each berth must hold a distinct shuttle (double-capture!) got %d" % caught.size())
 
-		# Each captured shuttle settled at its berth.
+		# Each captured shuttle settled at its berth. Measure against the
+		# effective berth pose (_berth_pos_for applies the M27 radius standoff),
+		# NOT the raw bay position -- that's where the servo actually seats the
+		# ship, and it's the same reference test_docking (single) checks against.
 		var all_settled := true
 		for b in bays:
-			if b.global_position.distance_to(b.captured.position) >= b.pos_tolerance:
+			if b._berth_pos_for(b.captured).distance_to(b.captured.position) >= b.pos_tolerance:
 				all_settled = false
 		_assert(all_settled, "every docked shuttle should be settled within tolerance")
 

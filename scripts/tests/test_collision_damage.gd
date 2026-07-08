@@ -290,6 +290,12 @@ func _start_phase_4() -> void:
 	freighter.owner_id = 650
 	freighter.iff_tags = ["TEAM_PLAYER"]
 	freighter.wants_dock = true
+	# M32: MediumStation is a controlled zone ("Ironhold Control"), so the bay
+	# gate now requires a valid grant. Hand the freighter an any-open grant so
+	# it can dock (same shortcut test_freighter_docking uses). This is a routine
+	# dock -- exercising the collision-damage docking-exemption path, not the
+	# permission system, so a pre-issued grant keeps the phase focused.
+	freighter.set("docking_grant", {"authority": "Ironhold Control", "zone_authority": "Ironhold Control", "slip_id": "", "time_left": 300.0})
 
 	main_node.add_child(station)
 	for c in station.get_children():

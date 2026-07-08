@@ -126,11 +126,17 @@ func _try_capture() -> void:
 			continue
 		var d: float = global_position.distance_to(s.position)
 		if d <= best_d:
-			# M32: Only capture if the ship is in the approach hemisphere.
-			# Prevents tractoring ships through the station hull from the far side.
+			# M32: Only capture if the ship is in the approach HEMISPHERE (in
+			# front of the port), so we never tractor a ship through the station
+			# hull from the far side. `> 0.0` is the hemisphere (reject only what's
+			# behind the port); the earlier `> 0.866` was a 30-degree cone that
+			# contradicted this comment and rejected legitimate off-axis approaches
+			# (a shuttle ~31 degrees off the port axis -- see test_docking). Any
+			# tighter "fly down the lane" discipline belongs to the M34 lane aid,
+			# not a hard capture gate.
 			var dir_to_ship = (s.position - global_position).normalized()
 			var bay_forward = Vector2.RIGHT.rotated(global_rotation)
-			if dir_to_ship.dot(bay_forward) > 0.866:
+			if dir_to_ship.dot(bay_forward) > 0.0:
 				best = s
 				best_d = d
 	if best != null:

@@ -97,7 +97,7 @@ foreach ($r in $runners) {
 
 if (-not $testsPassed) {
     Write-Host "BUILD ABORTED: One or more tests failed." -ForegroundColor Red
-    # exit 1
+    exit 1
 }
 Write-Host "All tests passed successfully." -ForegroundColor Green
 

@@ -254,6 +254,11 @@ const EXPECTED_LAYOUT_WARNINGS := {
 	],
 	"Buoy": [],
 	"Small Station": [
+		# dock_main: docking port added in the Universal Docking Refactor; its
+		# exposed faces + active surface are expected (a port, not armor).
+		{"component_id": "dock_main", "field": "active_surface"},
+		{"component_id": "dock_main", "field": "hull_coverage"},
+		{"component_id": "dock_main", "field": "hull_coverage"},
 		{"component_id": "omni_short_pd", "field": "hull_coverage"},
 		{"component_id": "omni_short_pd", "field": "hull_coverage"},
 		{"component_id": "pd_fwd", "field": "hull_coverage"},
@@ -368,10 +373,22 @@ const EXPECTED_LAYOUT_WARNINGS := {
 	#    confirming the modules really are embedded IN the rock, not merely
 	#    adjacent to it (the plan's explicit sanity check for this archetype).
 	"Asteroid Station": [
+		# dock_main: docking port added in the Universal Docking Refactor.
+		{"component_id": "dock_main", "field": "hull_coverage"},
+		{"component_id": "dock_main", "field": "hull_coverage"},
 		{"component_id": "pd_north", "field": "hull_coverage"},
 		{"component_id": "pd_north", "field": "hull_coverage"},
 		{"component_id": "pd_south", "field": "hull_coverage"},
 		{"component_id": "pd_south", "field": "hull_coverage"},
+	],
+	# Mobile Home (MobileHome ship, Universal Docking Refactor era). Its aft
+	# engine (exposed +Y/-Y) and its outboard docking port each flag two
+	# exposed faces -- expected for a small mobile hull with a stuck-out port.
+	"Mobile Home": [
+		{"component_id": "dock_main", "field": "hull_coverage"},
+		{"component_id": "dock_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
 	],
 }
 
