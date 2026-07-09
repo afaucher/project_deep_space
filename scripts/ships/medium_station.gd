@@ -279,10 +279,28 @@ func _init() -> void:
 	# the hail-and-request approach before a ship is even in range to dock --
 	# well outside the ~210u hull collision circle. `rules` is left empty here;
 	# M35 populates it (docking_permission_required, speed_advisory, ...).
+	# M33 -- `style` is a new top-level key (NOT inside `rules`, which is
+	# reserved for M35's rule dispatch): drives the port-control NPC's name +
+	# dialogue flavor + reliability (see scripts/port/port_control.gd).
 	port_zone = {
 		"radius": 8000.0,
 		"authority": "Ironhold Control",
+		"style": PortControl.STYLE_AUTOMATED,
 		"rules": {},
 	}
+
+	# M33 -- the port-control NPC, discoverable via the same transponder path
+	# as any other NPC (Ship.get_active_transponder_data() -> comms_panel's
+	# NPC list). PUBLIC tier: always visible in range, no vouching needed to
+	# hail port control. One shared dialogue resource branches on the
+	# station's style itself (see dialogue/port_control.dialogue) -- keeping
+	# exactly one small dialogue tree per the roadmap's "wiring, not writing a
+	# script" instruction.
+	var port_control_npc := NPCProfile.new()
+	port_control_npc.character_name = PortControl.get_controller_name(self)
+	port_control_npc.faction = port_zone["authority"]
+	port_control_npc.tier = NPCProfile.Tier.PUBLIC
+	port_control_npc.default_dialogue = load("res://dialogue/port_control.dialogue")
+	available_npcs.append(port_control_npc)
 
 

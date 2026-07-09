@@ -14,6 +14,7 @@ const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const SilhouetteSampler = preload("res://scripts/sensors/silhouette_sampler.gd")
 const PortZone = preload("res://scripts/port/port_zone.gd")
+const PortControl = preload("res://scripts/port/port_control.gd")
 
 # M31 -- port-zone membership hysteresis. A ship hovering right on a zone's
 # boundary would otherwise thrash zone_enter/zone_exit every tick (its position
@@ -280,6 +281,19 @@ func issue_docking_grant(ship) -> Variant:
 
 	ship.docking_grant = grant
 	return grant
+
+# M33 -- thin wrapper so a .dialogue mutation (dialogue/port_control.dialogue)
+# can drive the style-aware request path (stall/deny/grant, see
+# scripts/port/port_control.gd) via a plain object method call instead of
+# referencing the PortControl class_name directly. Dialogue Manager CAN
+# resolve global class_names via ProjectSettings.get_global_class_list(), but
+# that cache isn't guaranteed fresh under the headless --run-test path (see
+# CLAUDE.md's --check-only caveat) -- routing through an object already in
+# extra_game_states (the station itself) sidesteps that entirely. Also used
+# by the fast-path "Request Docking" button for the SAME outcome as the
+# dialogue branch (see scripts/port/port_control.gd's docstring).
+func request_docking_via_control(ship) -> Dictionary:
+	return PortControl.request_docking(self, ship)
 
 func _init() -> void:
 	ship_name = "HMM " + NAME_ADJECTIVES[randi() % NAME_ADJECTIVES.size()] + " " + NAME_VERBS[randi() % NAME_VERBS.size()]
@@ -607,9 +621,19 @@ func get_active_transponder_data() -> Dictionary:
 			var public_npcs = []
 			for npc in available_npcs:
 				if npc.tier == 0:
+					# M33 -- dialogue_path/tier were missing here: comms_panel's NPC
+					# button click reads npc.get("dialogue_path","") to load a chat
+					# (_start_dialogue()), so without this an in-range NPC button had
+					# nowhere to load a conversation from. default_dialogue is the
+					# NPCProfile's authored Resource (a DialogueResource); its
+					# resource_path is what comms_panel's ResourceLoader.exists()/load()
+					# expects. tier is included too so a future non-PUBLIC broadcast
+					# (STAFFED/VOUCHED-gated NPCs) has somewhere to carry it.
 					public_npcs.append({
 						"name": npc.character_name,
-						"faction": npc.faction
+						"faction": npc.faction,
+						"tier": npc.tier,
+						"dialogue_path": npc.default_dialogue.resource_path if npc.default_dialogue else "",
 					})
 			if not public_npcs.is_empty():
 				data["npcs"] = public_npcs

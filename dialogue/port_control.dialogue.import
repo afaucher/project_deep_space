@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://up6yggevtuc"
+path="res://.godot/imported/port_control.dialogue-61c9843719272c7c2e93af0fdc1692c5.tres"
+
+[deps]
+
+source_file="res://dialogue/port_control.dialogue"
+dest_files=["res://.godot/imported/port_control.dialogue-61c9843719272c7c2e93af0fdc1692c5.tres"]
+
+[params]
+
+defaults=true

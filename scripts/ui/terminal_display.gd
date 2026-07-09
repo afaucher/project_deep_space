@@ -8,6 +8,7 @@ const WeaponsPanel = preload("res://scripts/ui/weapons_panel.gd")
 const EngineeringPanel = preload("res://scripts/ui/engineering_panel.gd")
 const CommsPanel = preload("res://scripts/ui/comms_panel.gd")
 const HelpOverlay = preload("res://scripts/ui/help_overlay.gd")
+const DockingControl = preload("res://scripts/ui/docking_control.gd")
 
 var nav_panel: Control
 var helm_panel: Control
@@ -18,6 +19,7 @@ var eng_panel: Control
 var comms_panel: Control
 var help_overlay: Control
 var sensor_container: PanelContainer
+var docking_control: DockingControl
 
 var pinned_contacts: Array = []
 var current_ship_oriented: bool = false
@@ -208,6 +210,14 @@ func _ready() -> void:
 	top_bar.add_child(spacer3)
 	
 	top_bar.add_child(_build_debug_menu())
+
+	# M33 -- top-level "Request Docking"/"Undock" context-flip control. One
+	# press runs the whole hail->request->grant->clearance handshake via the
+	# SAME issuance path the port-control dialogue uses (PortControl.
+	# request_docking(), see scripts/port/port_control.gd); flips to "Undock"
+	# (Ship.request_undock(), M32) once actually captured by a bay.
+	docking_control = DockingControl.new()
+	top_bar.add_child(docking_control)
 
 	ship_oriented_toggle = CheckButton.new()
 	ship_oriented_toggle.text = "Ship Oriented"
@@ -456,6 +466,8 @@ func update_data(packet: Dictionary) -> void:
 	if comms_panel and comms_panel.has_method("update_data"):
 		comms_panel.update_data(packet)
 
+	_update_docking_control(packet, selected_target)
+
 	if packet.has("transient_events"):
 		for ev in packet["transient_events"]:
 			if ev["type"] == "laser":
@@ -468,6 +480,30 @@ func update_data(packet: Dictionary) -> void:
 	var maxh = eng.get("max_heat", 0.0)
 	_heat_fraction = (eng.get("current_heat", 0.0) / maxh) if maxh > 0.0 else 0.0
 	_update_overheat(_heat_fraction >= OVERHEAT_FRACTION)
+
+# M33 -- resolves the docking control's player/station node references each
+# frame from the current packet + contact selection. selected_target is a
+# contact id into packet["contacts"]; instance_id there is the same
+# instance_from_id() pattern navigation_panel.gd already uses to turn a
+# broadcast/contact id back into a live node reference (valid because
+# terminal_display and the ships it renders share one process).
+func _update_docking_control(packet: Dictionary, selected_target: String) -> void:
+	if docking_control == null or not is_instance_valid(docking_control):
+		return
+	docking_control.player_ship = _get_my_ship()
+
+	var station = null
+	var contacts: Dictionary = packet.get("contacts", {})
+	if selected_target != "" and contacts.has(selected_target):
+		var c: Dictionary = contacts[selected_target]
+		var inst_id: int = c.get("instance_id", -1)
+		if inst_id != -1:
+			var inst = instance_from_id(inst_id)
+			if inst != null and is_instance_valid(inst) and inst.has_method("get_port_zone"):
+				if not inst.get_port_zone().is_empty():
+					station = inst
+	docking_control.target_station = station
+	docking_control.refresh()
 
 func _on_fire_weapon_requested(weapon_id: String) -> void:
 	var target_id = contacts_panel.get_selected_contact_id() if is_instance_valid(contacts_panel) else ""

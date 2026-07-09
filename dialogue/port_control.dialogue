@@ -1,0 +1,22 @@
+~ start
+
+if station.get_port_zone().get("style", "AUTOMATED") == "STAFFED"
+	Dockmaster: This is the dock, go ahead.
+else
+	Port Control: State your business.
+- Request docking.
+	do result = station.request_docking_via_control(player)
+	do outcome = result["outcome"]
+	if outcome == "granted"
+		do grant = result["grant"]
+		do slip = grant["slip_id"]
+		Port Control: Copy that. Cleared to berth {{ slip }}. Welcome in.
+		=> END
+	elif outcome == "stalled"
+		Port Control: Stand by...
+		=> END
+	else
+		Port Control: Negative, we have no open berths. Hold position.
+		=> END
+- Never mind.
+	=> END

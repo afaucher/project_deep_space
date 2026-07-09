@@ -1,6 +1,6 @@
 # M31–M36 — Port authority: zones, docking permission, and nav aids
 
-Status: M31 (2026-07-05) + M32 (2026-07-08) SHIPPED; M33–M36 PLANNED. Goal: the player requests docking (**one press** of a
+Status: M31 (2026-07-05) + M32 (2026-07-08) + M33 (2026-07-08) SHIPPED; M34–M36 PLANNED. Goal: the player requests docking (**one press** of a
 top-level control that auto-runs the port-control handshake, or a full chat with
 the NPC if they'd rather) and receives a **grant** — permission to dock at a
 **specific assigned slip**, valid for a **time limit** and only **while inside
@@ -437,6 +437,88 @@ slip assignment. Wires the existing Dialogue Manager comms to M32's issuance.
    identical.
 Regression: M32 suite + `test_comms_relay` / `test_comms_chat` (dialogue/comms
 plumbing intact).
+
+### Shipped (2026-07-08)
+
+`scripts/port/port_control.gd` (`PortControl`, pure static helpers): style
+lookup (`get_style`/`get_controller_name` — AUTOMATED reads the zone
+authority, STAFFED reads a personal `dockmaster_name`, MINIMAL reads
+"`<authority> (auto)`"), the single `request_docking(station, ship)` entry
+point both the dialogue mutation and the fast-path button call (wraps
+`Station.issue_docking_grant`, unchanged from M32), and the MINIMAL "stall"
+degradation as a deterministic per-station attempt counter (`
+MINIMAL_STALL_ATTEMPTS`, not RNG — see "Friction" below). `Ship.
+request_docking_via_control(ship)` (ship.gd) is a thin wrapper so a `.dialogue`
+mutation can drive `PortControl.request_docking` via a plain object method
+call. `port_zone["style"]` added as a new top-level key (Ironhold →
+`AUTOMATED`, medium_station.gd); a port-control `NPCProfile` (PUBLIC tier) is
+appended to the station's `available_npcs` in `_init()`, named via
+`PortControl.get_controller_name`. `dialogue/port_control.dialogue`: one small
+request/grant/deny/stall tree, branching on `station.get_port_zone()`'s style
+for the greeting line, calling `station.request_docking_via_control(player)`
+on "Request docking.". `scripts/ui/docking_control.gd` (`DockingControl`, a
+`Button` subclass): the context-flip "Request Docking"/"Undock" control —
+`_is_docked()` checks `docking_bay != null`; delegates fully to `PortControl`
+so button and dialogue share one behavior. Wired into `terminal_display.gd`'s
+top bar, resolving `target_station` from the nav/contacts selection each
+frame via `instance_from_id` (same pattern `navigation_panel.gd` already
+uses). `comms_panel.gd`: `get_active_transponder_data()` (ship.gd) now
+includes `dialogue_path` + `tier` per broadcast NPC (was missing both — an NPC
+button had nowhere to load a conversation from); `_start_dialogue`/
+`_process_dialogue` thread `extra_game_states` (`[{"station":...,
+"player":...}]`, resolved via `instance_from_id`/`_get_my_ship()`) into every
+`DialogueManager.get_next_dialogue_line` call, so a `.dialogue` mutation can
+address the hailed station and the local player ship by name. `test_port_control_comms.gd`
+(32 assertions: a real DialogueManager traversal smoke check plus the 6 roadmap
+scenarios) + the M32/M31/comms regression set all green (see Friction).
+
+Friction / fixes during completion:
+- **`slip_id` is a `String`, not an `int`** — the roadmap's "-1 = any-open"
+  language (line 84, 128) predates M32's actual shipped shape (`""` = any-open,
+  a concrete component id like `"dock_main"` = assigned); `PortControl` and the
+  dialogue/test code follow the real shape, not the doc's.
+- **DM compiler bug on chained bracket indexing**: `result["grant"]["slip_id"]`
+  inside a `.dialogue` mutation/interpolation hits a typed-array coercion error
+  in `DMExpressionParser._build_token_tree` (`Array[Dictionary]` assigned to an
+  `Array[Array]`-typed local) and fails to compile. Worked around by flattening
+  through two `do` assignments (`do grant = result["grant"]` then `do slip =
+  grant["slip_id"]`) instead of one chained expression — no engine/addon file
+  touched.
+- **`.dialogue` files need a real import pass to load headlessly** — a bare
+  `--run-test`/`--script` invocation errors "No loader found for resource" on a
+  brand-new `.dialogue` file with no `.import` sidecar yet; a one-time
+  `--headless --editor --quit-after 1` run generates it (same as any other
+  Godot-imported asset). Also surfaced the actual dialogue compile error (the
+  bracket-chaining bug above), which a bare load doesn't report as clearly.
+- **`DialogueResponse` carries no `extra_game_states` field** — confirmed by
+  reading `addons/dialogue_manager/dialogue_response.gd`; `comms_panel.gd`
+  never needed one (it rebuilds `extra_game_states` fresh from
+  `_dialogue_game_states()` on every `_process_dialogue` call, including from
+  `_on_response_clicked`), but an early test draft assumed the field existed
+  and silently dead-ended a scenario with no failure recorded — fixed by
+  reusing the same `extra_game_states` array across both `get_next_dialogue_line`
+  calls, matching the real UI code path.
+- **GDScript lambda closures capture locals by VALUE at connect-time, not by
+  reference** — an early test draft tried to capture a signal's emitted payload
+  into an outer local via `signal.connect(func(o): outer = o)`; the reassignment
+  never propagated out. Fixed by asserting on the button press's real side
+  effect (`ship.docking_grant`) instead of a captured signal argument.
+- **Full multiplayer-authority RPC wiring for the fast-path button is left as
+  a follow-on, not built here**: `DockingControl`/`PortControl` call
+  `Station.issue_docking_grant`/`Ship.request_undock` directly (matching how
+  `test_docking_permission.gd` already calls `request_undock()` directly, and
+  how `@rpc(..., "call_local")` methods work when called locally by the
+  authority), the same way the existing helm/weapons panels call ship methods
+  via `rpc_id(1, ...)` for cross-peer safety. `DockingControl` does NOT yet
+  route through an `rpc_id` — fine for host/single-player (the only mode
+  exercised by the M33 test plan), but a client peer's button press would need
+  a new `@rpc` endpoint on `Ship` to be safe over the network. Flagged, not
+  fixed — out of the M33 test plan's scope.
+- `docking_bay.gd` (M32), `ship.gd`'s M32 grant machinery, and
+  `medium_station.gd`'s pre-M33 fields were read but not modified beyond the
+  additive `style` key and the `request_docking_via_control` wrapper (both
+  additive, no existing behavior changed) — confirmed by the full M32/M31/comms
+  regression suite staying green.
 
 ---
 

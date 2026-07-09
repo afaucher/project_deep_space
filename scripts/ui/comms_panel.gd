@@ -21,6 +21,12 @@ var responses_vbox: VBoxContainer
 # Active Chat State
 var active_dialogue_resource: Resource
 var active_chat_contact: String = ""
+# M33 -- the transmitting ship's instance id for the currently-open chat (the
+# station/NPC host, e.g. a port-control NPC's owner). Used to resolve an
+# actual node reference for extra_game_states (see _dialogue_game_states())
+# so a .dialogue mutation can call station-specific methods like
+# issue_docking_grant()/request_docking_via_control(). 0 = none/unresolved.
+var active_chat_source_id: int = 0
 
 signal transponder_toggled(active: bool)
 signal transponder_share_name_toggled(share: bool)
@@ -193,7 +199,8 @@ func _update_contacts_list() -> void:
 				btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 				
 				var path = npc.get("dialogue_path", "")
-				btn.pressed.connect(func(): _start_dialogue(path, char_name))
+				var source_id: int = int(t_id)
+				btn.pressed.connect(func(): _start_dialogue(path, char_name, source_id))
 				
 				comms_list_vbox.add_child(btn)
 				npc_buttons[uid] = btn
@@ -208,6 +215,7 @@ func _update_contacts_list() -> void:
 func _open_broadcast() -> void:
 	active_chat_contact = "BROADCAST"
 	active_dialogue_resource = null
+	active_chat_source_id = 0
 	chat_header.text = "CHAT: OPEN BROADCAST CHANNEL"
 	chat_log.text = "[color=orange]-- MONITORING OPEN FREQUENCIES --[/color]\n"
 	_clear_responses()
@@ -217,26 +225,50 @@ func _open_broadcast() -> void:
 	btn_disconnect.pressed.connect(_disconnect_chat)
 	responses_vbox.add_child(btn_disconnect)
 
-func _start_dialogue(path: String, char_name: String) -> void:
+func _start_dialogue(path: String, char_name: String, source_id: int = 0) -> void:
 	if path == "" or not ResourceLoader.exists(path):
 		return
-		
+
 	active_chat_contact = char_name
+	active_chat_source_id = source_id
 	active_dialogue_resource = load(path)
 	chat_header.text = "CHAT: " + char_name.to_upper()
 	chat_log.text = "[color=cyan]-- ENCRYPTED LINK ESTABLISHED --[/color]\n"
-	
+
 	_process_dialogue("start")
+
+# M33 -- extra_game_states for the DialogueManager call: a single Dictionary
+# whose keys become identifiers a .dialogue mutation/condition can reference
+# directly (e.g. `station.request_docking_via_control(player)`,
+# `station.get_port_zone()`). "station" resolves the NPC's transmitting ship
+# via its instance id (same instance_from_id() pattern navigation_panel.gd
+# already uses to turn a broadcast id back into a live node -- valid here
+# because comms_panel and the ships it's rendering share one process; only
+# cross-peer state goes through the RPC packet layer). "player" is this
+# client's own ship (same _get_my_ship() lookup terminal_display.gd uses).
+# Both may be null (source freed mid-chat, or no local ship yet) -- a
+# mutation that calls a method on a null state simply won't resolve, same
+# failure mode DialogueManager already has for any missing state value.
+func _dialogue_game_states() -> Array:
+	var station = instance_from_id(active_chat_source_id) if active_chat_source_id != 0 else null
+	if station != null and not is_instance_valid(station):
+		station = null
+	var player = _get_my_ship()
+	return [{"station": station, "player": player}]
+
+func _get_my_ship() -> Node:
+	var ship_node_name = "Ship_" + str(multiplayer.get_unique_id())
+	return get_node_or_null("/root/Main/" + ship_node_name)
 
 func _process_dialogue(node_id: String) -> void:
 	_clear_responses()
-	
+
 	if not Engine.has_singleton("DialogueManager"):
 		chat_log.text += "\n[color=red]Error: Comms system failure.[/color]\n"
 		return
-		
+
 	var dm = Engine.get_singleton("DialogueManager")
-	var line = await dm.get_next_dialogue_line(active_dialogue_resource, node_id)
+	var line = await dm.get_next_dialogue_line(active_dialogue_resource, node_id, _dialogue_game_states())
 	
 	if line != null:
 		chat_log.text += "\n[color=cyan][b]" + line.character + ":[/b][/color] " + line.text + "\n"
@@ -263,6 +295,7 @@ func _clear_responses() -> void:
 func _disconnect_chat() -> void:
 	active_chat_contact = ""
 	active_dialogue_resource = null
+	active_chat_source_id = 0
 	chat_header.text = "CHAT: OFFLINE"
 	chat_log.text = ""
 	_clear_responses()
