@@ -9,6 +9,8 @@ const EngineeringPanel = preload("res://scripts/ui/engineering_panel.gd")
 const CommsPanel = preload("res://scripts/ui/comms_panel.gd")
 const HelpOverlay = preload("res://scripts/ui/help_overlay.gd")
 const DockingControl = preload("res://scripts/ui/docking_control.gd")
+const PortRules = preload("res://scripts/port/port_rules.gd")
+const ZoneBanner = preload("res://scripts/port/zone_banner.gd")
 
 var nav_panel: Control
 var helm_panel: Control
@@ -32,6 +34,22 @@ var sfx_alarm: AudioStreamPlayer     # looping overheat klaxon
 var sfx_impact: AudioStreamPlayer    # one-shot hull thud on damage
 var damage_flash: ColorRect          # red full-screen flash on damage
 var overheat_label: Label            # blinking on-screen overheat alert
+var zone_banner_label: Label         # M35 -- zone-crossing banner (enter/exit)
+
+# M35 -- crossing-banner show/hide semantics: the roadmap's test scenario 2
+# says "entering sets a banner...leaving clears it" -- driven by the
+# zone_enter/zone_exit EVENT PAIR itself, not a timer. So: a zone_enter event
+# sets zone_banner_text + shows the label and (re)starts a display timer;
+# a zone_exit event OVERWRITES the text to the "Leaving..." message and
+# restarts the same timer (still driven by the event, still auto-clears --
+# unlike overheat_label, which stays up for the whole overheat condition,
+# a crossing is a one-off moment, so it fades after a few seconds whichever
+# event set it last, and the NEXT crossing event always re-shows/resets it
+# regardless of the timer's state). ZONE_BANNER_DURATION is how long either
+# message stays up before auto-clearing.
+var zone_banner_text: String = ""
+var _zone_banner_timer: float = 0.0
+const ZONE_BANNER_DURATION := 6.0
 
 var _heat_fraction: float = 0.0      # latest current_heat / max_heat, drives the fan
 var _is_overheating: bool = false    # edge state for alarm + sustained rumble
@@ -390,6 +408,22 @@ func _ready() -> void:
 	overheat_label.visible = false
 	add_child(overheat_label)
 
+	# M35 -- zone-crossing banner. Sits below the overheat alert's anchor line
+	# (offset_top staggered) so the two can never overlap if a crossing
+	# happens to land during an overheat. See zone_banner_text's comment above
+	# for the exact show/hide semantics (event-driven, auto-clears after
+	# ZONE_BANNER_DURATION).
+	zone_banner_label = Label.new()
+	zone_banner_label.text = ""
+	zone_banner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	zone_banner_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	zone_banner_label.offset_top = 90
+	zone_banner_label.add_theme_color_override("font_color", Color(0.3, 0.8, 1.0))
+	zone_banner_label.add_theme_font_size_override("font_size", 20)
+	zone_banner_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	zone_banner_label.visible = false
+	add_child(zone_banner_label)
+
 	# F1 controls overlay (added last so it draws on top of every panel) + a persistent
 	# nudge so a cold player discovers it.
 	help_overlay = HelpOverlay.new()
@@ -474,12 +508,55 @@ func update_data(packet: Dictionary) -> void:
 				sfx_laser.play()
 			elif ev["type"] == "damage":
 				_on_player_damage(ev.get("amount", 0.0))
+			elif ev["type"] == "zone_enter":
+				_on_zone_crossing(true, ev.get("authority", ""))
+			elif ev["type"] == "zone_exit":
+				_on_zone_crossing(false, ev.get("authority", ""))
 
 	# Heat feedback: fan (continuous, in _process) + overheat alert (edge).
 	var eng = packet.get("engineering", {})
 	var maxh = eng.get("max_heat", 0.0)
 	_heat_fraction = (eng.get("current_heat", 0.0) / maxh) if maxh > 0.0 else 0.0
 	_update_overheat(_heat_fraction >= OVERHEAT_FRACTION)
+
+# M35 -- crossing banner. entering=true on zone_enter, false on zone_exit;
+# authority is the zone's name straight off the transient event (ship.gd's
+# _update_port_zone_membership -- see that file for the event shape). The
+# banner text is fully data-driven off the zone's `rules` dict via
+# PortRules.banner_text/RULE_SUMMARY_HANDLERS -- this function does not
+# hardcode "docking by permission"/"speed advisory" anywhere; it only knows
+# how to find the rules dict (live station lookup, same "ships" group scan
+# pattern as _update_docking_control/navigation_panel.gd's
+# _station_for_authority) and hand it to PortRules. On exit, rules aren't
+# needed at all (PortRules.banner_text's entering=false branch never reads
+# them) so an empty dict is passed rather than re-resolving a station that
+# may already be out of range/destroyed.
+func _on_zone_crossing(entering: bool, authority: String) -> void:
+	var rules: Dictionary = {}
+	if entering:
+		rules = _rules_for_authority(authority)
+	zone_banner_text = ZoneBanner.text_for_crossing(entering, authority, rules)
+	# zone_banner_label is built in _ready(); guarded so the STATE half of
+	# this (zone_banner_text, read by test_port_rules.gd's crossing-banner
+	# scenario) is exercisable without spinning up the full terminal_display
+	# node tree (audio players, every sub-panel, etc.) just to prove the
+	# text/timer logic.
+	if zone_banner_label != null:
+		zone_banner_label.text = zone_banner_text
+		zone_banner_label.visible = true
+		zone_banner_label.modulate.a = 1.0
+	_zone_banner_timer = ZONE_BANNER_DURATION
+
+func _rules_for_authority(authority: String) -> Dictionary:
+	if authority == "":
+		return {}
+	for s in get_tree().get_nodes_in_group("ships"):
+		if not s.has_method("get_port_zone"):
+			continue
+		var zone: Dictionary = s.get_port_zone()
+		if zone.get("authority", "") == authority:
+			return zone.get("rules", {})
+	return {}
 
 # M33 -- resolves the docking control's player/station node references each
 # frame from the current packet + contact selection. selected_target is a
@@ -606,6 +683,16 @@ func _process(delta: float) -> void:
 		if _rumble_refresh <= 0.0:
 			_rumble(0.45, 0.0, 0.22)   # buzz pulse (no heavy motor); gap before re-arm -> throb
 			_rumble_refresh = 0.45
+
+	# M35 -- zone-crossing banner auto-clear. Each zone_enter/zone_exit event
+	# (see _on_zone_crossing) resets this timer and shows the label; here it
+	# just counts down and hides once it runs out. A later crossing event
+	# always re-arms the timer regardless of where this countdown currently
+	# is, so back-to-back crossings (e.g. skimming the boundary) each get
+	# their own full display window.
+	if ZoneBanner.is_visible(_zone_banner_timer):
+		_zone_banner_timer -= delta
+		zone_banner_label.visible = ZoneBanner.is_visible(_zone_banner_timer)
 
 func _on_player_damage(amount: float) -> void:
 	sfx_impact.play()

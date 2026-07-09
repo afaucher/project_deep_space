@@ -66,6 +66,13 @@ const LANE_EDGE_COLOR := Color(1.0, 0.85, 0.2, 0.25)
 # used throughout this file) so it reads the same size on screen at any zoom.
 const SLIP_MARKER_RADIUS_PX := 10.0
 
+# M35 -- zone boundary ring color. Same gold family as the M34 slip/lane
+# markers (SLIP_HIGHLIGHT_COLOR) -- "authority-colored" per the roadmap, i.e.
+# it reads as "controlled space", not a threat/classification color. Kept
+# distinct (lower alpha, no fill) so a docked-in-Ironhold nav map doesn't
+# double up two full-strength gold rings once a lane is also drawn.
+const ZONE_BOUNDARY_COLOR := Color(1.0, 0.85, 0.2, 0.35)
+
 # The friendly-identification convention this whole file already uses:
 # Utils.classification_color/_get_contact_color key off classify_contact()'s
 # string output, and "FRIENDLY VESSEL"/"FRIENDLY ORDNANCE" are the only two
@@ -232,6 +239,35 @@ static func lane_path(berth_pos: Vector2, berth_heading: float, length: float) -
 # lane_path with the shared NavCorridor helper (see scripts/nav/nav_corridor.gd).
 static func lane_corridor(berth_pos: Vector2, berth_heading: float, length: float, half_width: float) -> Dictionary:
 	return NavCorridor.corridor(lane_path(berth_pos, berth_heading, length), half_width)
+
+# M35 -- zone boundary LOD suppression. Mirrors the existing outline LOD gate
+# exactly (OUTLINE_LOD_MIN_PX / _outline_alpha_for's "bounds_radius * map_zoom
+# < OUTLINE_LOD_MIN_PX" check at the bottom of this file): below this many
+# screen pixels of radius, a boundary ring is too small to read and just adds
+# noise, so skip the draw entirely. Reuses the SAME constant (not a second
+# threshold) per the ground-truth brief -- one "too small to read" pixel floor
+# for the whole panel. Pure/testable: test_port_rules.gd scenario 1 calls this
+# directly with fixture radius/zoom pairs, no scene/draw involved.
+static func zone_boundary_visible(radius: float, zoom: float) -> bool:
+	return radius * zoom >= OUTLINE_LOD_MIN_PX
+
+# M35 -- resolves the LIVE controlled station whose port_zone.authority
+# matches the given name, scanning the "ships" group. Same group/lookup
+# pattern _draw_docking_nav_aids already uses to turn a grant's authority
+# string into a station node (and the same cardinality note: a handful of
+# controlled stations, not hundreds). Returns null if no controlled station
+# currently answers to that authority (e.g. it was destroyed since the ship
+# entered its zone -- draw nothing rather than stale geometry).
+func _station_for_authority(authority: String) -> Node:
+	if authority == "":
+		return null
+	for s in get_tree().get_nodes_in_group("ships"):
+		if not s.has_method("get_port_zone"):
+			continue
+		var zone: Dictionary = s.get_port_zone()
+		if zone.get("authority", "") == authority:
+			return s
+	return null
 
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
@@ -566,6 +602,11 @@ func _draw() -> void:
 		if comms_range > 0.0:
 			draw_arc(pos, comms_range, 0, TAU, 64, Color(0.8, 0.4, 1.0, 0.4), 2.0 / map_zoom)
 
+	# M35 -- zone boundary ring, drawn UNDER contacts (before the contacts loop
+	# in z-order, per roadmap scope) so a contact blip/outline sitting on the
+	# boundary always reads on top of it, never the reverse.
+	_draw_zone_boundary(current_state.get("current_port_zone", null))
+
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
 	for c_id in contacts.keys():
@@ -889,6 +930,29 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) ->
 				poly.append(c_pos + p.rotated(rot))
 			poly.append(poly[0])
 			draw_polyline(poly, draw_color, 1.5 / map_zoom)
+
+# M35 -- zone boundary ring for the controlled zone the player is CURRENTLY
+# inside (current_port_zone, an authority-name String or null). Resolved live
+# from the "ships" group the same way _draw_docking_nav_aids resolves a
+# grant's authority to a station -- current_port_zone is only a name on the
+# packet, not a serialized zone dict (see main.gd's M35 packet-field comment).
+# Draws only the ring the ship is inside, not every controlled zone in the
+# sim: the roadmap's boundary-aid scope is "see the boundary you're
+# crossing", and the player is inside at most one authority's zone at a time
+# (M31's nearest-wins membership), so there's exactly one ring to show.
+func _draw_zone_boundary(authority) -> void:
+	if authority == null or authority == "":
+		return
+	var station: Node = _station_for_authority(authority)
+	if station == null:
+		return
+	var zone: Dictionary = station.get_port_zone()
+	var radius: float = zone.get("radius", 0.0)
+	if radius <= 0.0:
+		return
+	if not zone_boundary_visible(radius, map_zoom):
+		return
+	draw_arc(station.global_position, radius, 0, TAU, 64, ZONE_BOUNDARY_COLOR, 2.0 / map_zoom)
 
 # M34 -- resolves the docking-grant nav aids (assigned-slip highlight + lane)
 # from the packet's docking_grant and live DockingBay nodes, then draws them.

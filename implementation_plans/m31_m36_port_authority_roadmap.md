@@ -670,6 +670,122 @@ the crossing, and enforce/surface the first local rules via an extensible set.
 Regression: M31 suite + `test_nav` + the outline/silhouette suites (nav-panel
 draw changes must not disturb existing seams).
 
+### Shipped (2026-07-09)
+
+`scripts/port/port_rules.gd` (`PortRules`, pure static): the rule → handler
+dispatch (`rule_summary_handlers()` — a keyed registry of
+`func(value) -> String` summary fragments, `docking_permission_required` and
+`speed_advisory` implemented; an unrecognized rule key is skipped, not a
+crash), `banner_summary(rules)` (joins every registered fragment with
+" · "), `banner_text(entering, authority, rules)` (the full "Entering X —
+summary" / "Leaving X" line), and the speed-advisory truth table
+(`speed_advisory_active(in_zone, speed, limit)` + a `rules`-dict
+convenience wrapper). `scripts/port/zone_banner.gd` (`ZoneBanner`, pure
+static): factors the crossing-banner's text-composition
+(`text_for_crossing`) and show/hide decision (`is_visible(timer)`) out of
+`terminal_display.gd` as a testable seam (same "pure static, thin UI
+wrapper" pattern M34 set for `navigation_panel.gd`). `medium_station.gd`'s
+Ironhold `port_zone.rules` populated: `docking_permission_required: true`,
+`speed_advisory: 200.0` — the exact roadmap worked example. `navigation_panel.gd`:
+`zone_boundary_visible(radius, zoom)` (reuses `OUTLINE_LOD_MIN_PX`, not a
+second threshold) + `_draw_zone_boundary()` (resolves the player's
+`current_port_zone` authority to a live station via the same "ships" group
+scan `_draw_docking_nav_aids` already uses, draws one authority-colored ring
+for the zone the ship is currently inside), called BEFORE the contacts loop
+in `_draw()` so it renders under contacts. `helm_panel.gd`'s `EngineSlider`
+gains `show_speed_number` (set true only on `velocity_slider`) and
+`speed_advisory_active` (amber vs. neutral-grey `draw_string` readout below
+the gauge); `update_data()` computes the advisory from true velocity
+magnitude (not the signed forward component the gauge/number otherwise
+track) against the in-zone rules, resolved live via a small
+`_rules_for_authority()` group scan. `terminal_display.gd`: a new
+`zone_banner_label` (Label, styled like `overheat_label` but offset below
+it) + `zone_banner_text` state, driven by `_on_zone_crossing()` on the
+packet's `zone_enter`/`zone_exit` transient events (wired into the same
+`transient_events` loop that already handles `laser`/`damage`), auto-clearing
+after `ZONE_BANNER_DURATION` (6s) via a per-frame countdown in `_process()`.
+`main.gd`'s packet gained `"current_port_zone": ship.current_port_zone`
+(main.gd, next to M34's `docking_grant` field) — see "Packet vs.
+instance_from_id" below. `scripts/tests/test_port_rules.gd` (39 assertions
+covering all 4 roadmap scenarios plus a live-wiring check against Ironhold's
+actual authored rules) + the full regression set green: `test_port_zone`,
+`test_nav`, `test_docking_nav_aids`, `test_docking_permission`,
+`test_docking_multi`, `test_port_control_comms`, `test_ship_silhouette`,
+`test_sensor_dots`.
+
+Deviations / friction:
+- **Packet vs. `instance_from_id`, again — same call as M34, for the same
+  reason.** `current_port_zone` is just the authority NAME string living on
+  the ship (ship.gd), and `navigation_panel.gd`/`terminal_display.gd` have no
+  other path to it (both are 100% packet-driven, same as M34's
+  `docking_grant` reasoning) — so it rides the packet as one small value.
+  The zone's actual DATA (`radius`, `rules`) is never serialized through the
+  packet — both the boundary-ring draw and the speed-advisory/banner lookups
+  resolve the authority name to its live controlling station via the SAME
+  "ships" group scan `_draw_docking_nav_aids` (M34) already established, then
+  read `get_port_zone()` off that live node. This is deliberately the exact
+  M34 precedent, not a new pattern: one small "which zone am I in" value on
+  the packet, everything else about that zone resolved live.
+- **`RULE_SUMMARY_HANDLERS` as a `const Dictionary` of Callables does not
+  compile** — GDScript rejected it outright: "Assigned value for constant...
+  isn't a constant expression" (a static method reference isn't a constant
+  expression at parse time in this engine version). Fixed by making it a
+  `static func rule_summary_handlers() -> Dictionary` that builds and returns
+  the dict fresh each call — still a genuine keyed registry (not an
+  if/elif chain), just built by a function instead of a `const` literal.
+  Cheap enough (2-entry dict, called per banner/summary build, not per
+  frame) that this isn't a perf concern.
+- **Crossing-banner show/hide semantics, decided from the spec text**: the
+  roadmap says "entering sets a banner...leaving clears it" but also gives
+  "Leaving IRONHOLD CONTROL" as real displayed banner text — those two
+  statements only reconcile if "leaving clears it" means the ENTER
+  message/summary is replaced by the (summary-free) leaving message, not
+  that the banner goes instantly silent on exit. Implemented that way:
+  `zone_exit` overwrites `zone_banner_text` to "Leaving <authority>" (still
+  visible, still event-driven per the spec's literal wording), and a
+  6-second auto-clear timer (not in the spec, my addition — a crossing
+  banner sitting on screen forever after the message is stale reads as a
+  bug) fades it after either message, re-arming on every new crossing event
+  regardless of where the countdown currently sits. `zone_banner_text` is
+  the state `test_port_rules.gd` scenario 2 asserts on, per the spec's
+  explicit "test the state the HUD reads, not pixels."
+- **Speed number vs. speed advisory use different velocity components,
+  deliberately.** The velocity gauge's existing `actual_val` (and the new
+  numeric readout drawn from it) is the SIGNED FORWARD component
+  (`vel.dot(forward)`, unchanged from pre-M35) so the number stays consistent
+  with where the gauge's dot/bar already sit. The advisory truth table
+  instead compares TRUE speed (`vel.length()`) against the limit — a fast
+  lateral drift with near-zero forward component is still a real overspeed
+  relative to a port's advisory even though the forward-facing number reads
+  low. Not called out explicitly in the roadmap; judgment call favoring "the
+  advisory means what it says" over "the advisory always agrees with the
+  displayed number."
+- **`docking_permission_required: false` suppresses its own banner
+  fragment** rather than rendering something like "docking NOT by
+  permission" — no roadmap station authors `false` today (Ironhold is the
+  only populated `rules` dict, always `true`), but a handler that reads
+  oddly on the false case would be a footgun for the next rule to drop into
+  this seam. Covered by a defensive test assertion, not required by the 4
+  scenarios.
+- Did not touch `docking_bay.gd`, `ship.gd`'s M31/M32 zone/grant machinery,
+  or any M32/M33 dialogue/comms file — confirmed by the full M31-M34
+  regression suite staying green. `small_station.gd` was read (to confirm it
+  authors no `port_zone`, per the brief) but not modified.
+- **Known gap, caught in review, not fixed here**: the boundary ring only
+  draws for the zone the ship is CURRENTLY inside (`current_port_zone`) — a
+  ship approaching a controlled station from outside sees no ring until the
+  instant it's already crossed the line, which undercuts the Goal's "see the
+  boundary you're crossing" for the approach side of that crossing (M34's
+  lane already carries most of the actual approach-guidance value, since a
+  grant — and therefore the lane — can be requested from comms range,
+  30000u, well outside the 8000u zone). Root cause: the client has no
+  broadcast of a not-yet-entered station's `port_zone` data to draw from
+  (only `current_port_zone`, a membership fact about the player's own ship,
+  rides the packet). Fixing this properly means broadcasting nearby
+  controlled-zone bounds (e.g. via the transponder/contact data any
+  in-sensor-range station already sends) — a small but real scope add, left
+  for a follow-up rather than expanding M35 silently.
+
 ---
 
 ## M36 — Buoy-road travel corridor (nav aid)

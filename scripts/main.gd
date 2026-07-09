@@ -412,7 +412,16 @@ func _distribute_state() -> void:
 				"hit_traces": ship.hit_traces.duplicate(true)
 			},
 			"transient_events": ship.transient_events.duplicate(true),
-			"docking_grant": ship.docking_grant
+			"docking_grant": ship.docking_grant,
+			# M35 -- current_port_zone is just the authority NAME string (see
+			# ship.gd), the same small-value-with-no-other-path-in shape as
+			# M34's docking_grant field above (see that milestone's "Packet
+			# vs. instance_from_id" note for why docking_grant rides the
+			# packet). navigation_panel.gd/terminal_display.gd resolve the
+			# authority name back to its owning station's port_zone dict live
+			# via the "ships" group scan (same pattern _draw_docking_nav_aids
+			# already uses to resolve a grant's authority to a station).
+			"current_port_zone": ship.current_port_zone
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal

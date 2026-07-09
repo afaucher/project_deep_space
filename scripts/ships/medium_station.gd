@@ -277,16 +277,25 @@ func _init() -> void:
 	# DockingBay's default capture_radius is 5000u (docking_bay.gd), so 8000u
 	# gives a couple thousand units of clearance beyond the capture radius for
 	# the hail-and-request approach before a ship is even in range to dock --
-	# well outside the ~210u hull collision circle. `rules` is left empty here;
-	# M35 populates it (docking_permission_required, speed_advisory, ...).
-	# M33 -- `style` is a new top-level key (NOT inside `rules`, which is
-	# reserved for M35's rule dispatch): drives the port-control NPC's name +
-	# dialogue flavor + reliability (see scripts/port/port_control.gd).
+	# well outside the ~210u hull collision circle. M33 -- `style` is a new
+	# top-level key (NOT inside `rules`, which is reserved for M35's rule
+	# dispatch): drives the port-control NPC's name + dialogue flavor +
+	# reliability (see scripts/port/port_control.gd).
+	# M35 -- `rules` is data read by PortRules' rule->handler dispatch
+	# (scripts/port/port_rules.gd): `docking_permission_required` is a pure
+	# surfacing flag (M32 already enforces the gate unconditionally at any
+	# controlled station -- this key only drives the crossing-banner text, see
+	# PortRules._docking_permission_summary); `speed_advisory` is the u/s
+	# threshold above which the helm's speed readout goes amber while inside
+	# this zone (warn-only, no thrust clamp -- see helm_panel.gd).
 	port_zone = {
 		"radius": 8000.0,
 		"authority": "Ironhold Control",
 		"style": PortControl.STYLE_AUTOMATED,
-		"rules": {},
+		"rules": {
+			"docking_permission_required": true,
+			"speed_advisory": 200.0,
+		},
 	}
 
 	# M33 -- the port-control NPC, discoverable via the same transponder path

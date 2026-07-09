@@ -1,5 +1,7 @@
 extends Control
 
+const PortRules = preload("res://scripts/port/port_rules.gd")
+
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
 	"rot": 0.0,
@@ -154,7 +156,21 @@ class EngineSlider extends Control:
 	var target_val: float = 0.0 # Red dot if active
 	var actual_val: float = 0.0 # Mid-grey filled bar
 	var implied_val: float = 0.0 # Light grey dot if inactive
-	
+
+	# M35 -- numeric speed readout (helm velocity control gains a current-speed
+	# number; see roadmap M35 "speed_advisory" scope). show_speed_number is set
+	# true ONLY on the velocity slider (helm_panel._ready() below) -- the
+	# throttle slider stays exactly as before, no number, since "current
+	# forward speed" doesn't mean anything on a -1..1 throttle axis. The number
+	# reads ALWAYS (not just in a zone -- "a plain speed number is useful
+	# everywhere" per spec); speed_advisory_active is the only thing a zone
+	# drives, flipping the readout's color to amber as a warn-only cue (no
+	# thrust clamp, no other gameplay effect).
+	var show_speed_number: bool = false
+	var speed_advisory_active: bool = false
+	const SPEED_NORMAL_COLOR := Color(0.8, 0.8, 0.8)
+	const SPEED_ADVISORY_COLOR := Color(1.0, 0.7, 0.1) # amber
+
 	func _ready() -> void:
 		custom_minimum_size = Vector2(40, 200)
 		
@@ -203,6 +219,19 @@ class EngineSlider extends Control:
 		var dot_y = size.y * (1.0 - dot_t)
 		var dot_color = Color.RED if is_active_control else Color(0.7, 0.7, 0.7)
 		draw_circle(Vector2(size.x / 2.0, dot_y), 8.0, dot_color)
+
+		# M35 -- numeric speed readout, screen-space text below the bar/dot
+		# gauge (the gauge itself is unchanged -- this is purely additive).
+		# Amber while speed_advisory_active, otherwise the same neutral grey
+		# the rest of this gauge already uses.
+		if show_speed_number:
+			var font = ThemeDB.fallback_font
+			var font_size = 14
+			var speed_color = SPEED_ADVISORY_COLOR if speed_advisory_active else SPEED_NORMAL_COLOR
+			var speed_text = "%d" % int(round(actual_val))
+			var text_size = font.get_string_size(speed_text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+			var text_pos = Vector2(size.x / 2.0 - text_size.x / 2.0, size.y + font_size + 4.0)
+			draw_string(font, text_pos, speed_text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, speed_color)
 
 var linear_mode: int = 0 # 0 = Throttle, 1 = Velocity
 var target_velocity: float = 0.0
@@ -332,6 +361,7 @@ func _ready() -> void:
 	velocity_slider.is_active_control = false
 	velocity_slider.target_val = 0.0
 	velocity_slider.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	velocity_slider.show_speed_number = true # M35 -- velocity gauge only, see EngineSlider.show_speed_number
 	velocity_slider.became_active.connect(func():
 		linear_mode = 1
 		velocity_slider.is_active_control = true
@@ -347,6 +377,25 @@ func _ready() -> void:
 	engine_hbox.add_child(vel_vbox)
 	
 	vbox.add_child(engine_hbox)
+
+# M35 -- resolves a controlled zone's `rules` dict from its authority name.
+# current_port_zone (see main.gd's packet field / ship.gd) is only the
+# authority STRING, not the zone dict -- same live-resolution call M34/M35's
+# navigation_panel.gd already make (station_for_authority there); mirrored
+# here rather than shared because helm_panel has no existing coupling to
+# navigation_panel and the lookup is a 4-line group scan, not worth a new
+# shared module for. Returns {} (no rules) when there's no current zone or
+# the authority no longer resolves to a live controlled station.
+func _rules_for_authority(authority) -> Dictionary:
+	if authority == null or authority == "":
+		return {}
+	for s in get_tree().get_nodes_in_group("ships"):
+		if not s.has_method("get_port_zone"):
+			continue
+		var zone: Dictionary = s.get_port_zone()
+		if zone.get("authority", "") == authority:
+			return zone.get("rules", {})
+	return {}
 
 func _on_heading_changed(angle: float) -> void:
 	target_heading = angle
@@ -414,7 +463,18 @@ func update_data(packet: Dictionary) -> void:
 
 	throttle_slider.actual_val = actual_throttle
 	velocity_slider.actual_val = forward_speed
-	
+
+	# M35 -- speed advisory: amber the velocity readout while inside a
+	# controlled zone AND over that zone's speed_advisory limit. True speed
+	# (vector magnitude), not the signed forward component the gauge/number
+	# otherwise track -- a fast lateral drift is still an overspeed relative
+	# to a port's advisory even if forward_speed reads low. Warn-only: this
+	# never touches target_thrust/target_velocity, just the readout color.
+	var authority = current_state.get("current_port_zone", null)
+	var rules: Dictionary = _rules_for_authority(authority)
+	velocity_slider.speed_advisory_active = PortRules.speed_advisory_active_for_rules(
+		authority != null and authority != "", actual_vel.length(), rules)
+
 	if linear_mode == 0:
 		# Throttle is active. Implied velocity is just thrust * max_speed
 		velocity_slider.implied_val = target_thrust * max_speed
