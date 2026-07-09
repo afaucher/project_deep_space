@@ -38,6 +38,17 @@ Status: SHIPPED 2026-07-09.
   direct `git stash`/re-run, not just the subagent's report.
 - Full `build.ps1` suite (every test, all ~65) passes clean with both fixes in
   place.
+- **Follow-up (2026-07-09): cache-miss now precomputes the whole class in one
+  pass.** The initial cache still filled one bucket at a time -- a class's
+  first 72 real sensor-sweep queries (spread across however many frames it
+  took different bearings to come up) each triggered their own miss, even
+  though `ShipSilhouette.loops_for`'s own cache meant the expensive union was
+  already paid for after the very first one. `cross_section_at_angle` now
+  calls `_warm_class` on the first miss, which fetches the class's outer
+  vertices once and projects all 72 buckets in the same pass -- a class hits
+  the miss path at most once, ever, and every other bucket (even ones never
+  directly queried yet) is already a hit. Re-verified against the full
+  regression set above.
 
 Closes the gap identified while auditing `design_ideas/angle_accurate_cross_sections.md`
 against the current code: `cross_section` is still a flat scalar (never implemented),
