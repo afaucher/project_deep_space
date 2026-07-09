@@ -36,6 +36,35 @@ const BOUNDS_FALLBACK_CS_SCALE := 1.0
 const OUTLINE_DOT_RADIUS_PX := 1.5
 
 const ShipSilhouette = preload("res://scripts/components/ship_silhouette.gd")
+const NavCorridor = preload("res://scripts/nav/nav_corridor.gd")
+const DockingBay = preload("res://scripts/docking/docking_bay.gd")
+
+# M34 -- Docking nav aids (assigned slip highlight + approach lane). See
+# implementation_plans/m31_m36_port_authority_roadmap.md, M34 scope.
+# LANE_LENGTH is how far back from the berth the guide corridor's approach
+# waypoint sits, measured along the berth's outward heading (bay.rotation --
+# same convention DockingBay._servo uses: "global_rotation + PI - port_heading"
+# faces the ship INTO the berth, so the berth's own forward axis points OUT of
+# the station, and the lane runs from a point LANE_LENGTH out back down to the
+# berth). LANE_HALF_WIDTH is the corridor's authored half-width fed to
+# NavCorridor.corridor().
+const LANE_LENGTH := 1500.0
+const LANE_HALF_WIDTH := 120.0
+
+# Authority-colored highlight (distinct from any existing classification hue --
+# GREEN=friendly, RED=hostile, YELLOW=ordnance, GRAY=asteroid, CYAN=sensor --
+# so a granted slip never gets confused with an IFF/threat read). Gold reads as
+# "clearance" without overlapping the classification palette.
+const SLIP_HIGHLIGHT_COLOR := Color(1.0, 0.85, 0.2, 1.0)
+const SLIP_DIM_COLOR := Color(0.5, 0.45, 0.25, 0.35)
+const LANE_CENTERLINE_COLOR := Color(1.0, 0.85, 0.2, 0.8)
+const LANE_EDGE_COLOR := Color(1.0, 0.85, 0.2, 0.25)
+
+# Berth pose marker radius, in screen pixels -- a small ring/cross at the
+# bay's berth position. Divided by map_zoom at draw time (same
+# constant-screen-width pattern as the "2.0 / map_zoom" line widths already
+# used throughout this file) so it reads the same size on screen at any zoom.
+const SLIP_MARKER_RADIUS_PX := 10.0
 
 # The friendly-identification convention this whole file already uses:
 # Utils.classification_color/_get_contact_color key off classify_contact()'s
@@ -149,6 +178,60 @@ static func _dot_draw_list(contact: Dictionary, c_pos: Vector2) -> Array:
 		var pos_local: Vector2 = dot.get("pos_local", Vector2.ZERO)
 		out.append(c_pos + pos_local.rotated(ship_rot))
 	return out
+
+# ---------------------------------------------------------------------------
+# M34 -- Docking nav aids. Pure/testable seams (no draw_* calls, no scene
+# lookups) -- the panel's _draw() is a thin wrapper that resolves live
+# DockingBay nodes then calls these. See test_docking_nav_aids.gd.
+# ---------------------------------------------------------------------------
+
+# Given a station's list of DockingBay children and the player's docking_grant
+# (or null/empty), returns the ONE bay the grant is assigned to, or null:
+#   - no grant, or grant.slip_id doesn't match any bay -> null (nothing to
+#     highlight -- scenario 3, "no grant -> no aid").
+#   - grant.slip_id == "" (any-open, the MINIMAL/STAFFED degraded style) ->
+#     null too. Any-open highlights ALL open bays equally (see
+#     open_bays_for below), not one assigned bay/lane -- there's nothing
+#     specific to line up on (roadmap: "draw no single lane").
+#   - grant.slip_id == a concrete bay's slip_id -> that bay (scenario 2,
+#     "assignment binding": grant for slip 2 finds bay 2, not bay 1).
+static func assigned_bay_for(bays: Array, grant) -> Node:
+	if grant == null:
+		return null
+	var slip: String = grant.get("slip_id", "")
+	if slip == "":
+		return null
+	for b in bays:
+		if b.slip_id == slip:
+			return b
+	return null
+
+# Any-open grant support: every bay not currently DOCKED/CAPTURING (i.e. still
+# open to a landing) reads as an equally-valid target. Empty bays array or no
+# open bays -> empty (nothing to highlight).
+static func open_bays_for(bays: Array) -> Array:
+	var out: Array = []
+	for b in bays:
+		if b.state == DockingBay.State.EMPTY:
+			out.append(b)
+	return out
+
+# The docking lane's 2-point path: an approach waypoint LANE_LENGTH back from
+# berth_pos along berth_heading's outward axis, down to berth_pos itself.
+# berth_heading follows the same convention as DockingBay.global_rotation --
+# "forward" (angle 0) points OUT of the station along the berth's own facing,
+# so walking back along -heading by `length` places the waypoint further out,
+# and the path [waypoint, berth_pos] reads as "fly this heading inbound to
+# berth". Pure fixtures -- no node/scene state (test scenario 1).
+static func lane_path(berth_pos: Vector2, berth_heading: float, length: float) -> PackedVector2Array:
+	var outward: Vector2 = Vector2.RIGHT.rotated(berth_heading)
+	var waypoint: Vector2 = berth_pos + outward * length
+	return PackedVector2Array([waypoint, berth_pos])
+
+# Full lane corridor (centerline + edges) for a berth pose -- composes
+# lane_path with the shared NavCorridor helper (see scripts/nav/nav_corridor.gd).
+static func lane_corridor(berth_pos: Vector2, berth_heading: float, length: float, half_width: float) -> Dictionary:
+	return NavCorridor.corridor(lane_path(berth_pos, berth_heading, length), half_width)
 
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
@@ -516,6 +599,8 @@ func _draw() -> void:
 	# Contact labels are drawn later, after the transform reset below --
 	# world-space text would scale with map_zoom otherwise.
 
+	_draw_docking_nav_aids(current_state.get("docking_grant", null))
+
 	# Draw active lasers
 	for laser in active_lasers:
 		var alpha = max(0.0, 1.0 - (laser["age"] / 0.1))
@@ -805,3 +890,82 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) ->
 			poly.append(poly[0])
 			draw_polyline(poly, draw_color, 1.5 / map_zoom)
 
+# M34 -- resolves the docking-grant nav aids (assigned-slip highlight + lane)
+# from the packet's docking_grant and live DockingBay nodes, then draws them.
+# Called inside the world-space transform (draw_set_transform_matrix is
+# already set by the caller -- see _draw()), so every draw_* call here uses
+# raw world coordinates, same convention as every other per-contact draw call
+# in this file (no second screen-space conversion).
+#
+# Bay poses are never serialized through the packet -- they're resolved live
+# via the "docking_bays" group (registered by DockingBay._enter_tree, see
+# scripts/docking/docking_bay.gd:64), matching the existing instance_from_id/
+# group-lookup pattern this project already uses for host/client-in-one-
+# process node resolution (docking_control.gd's target_station, comms_panel's
+# NPC resolution) rather than growing the packet with berth transforms that
+# would just be re-deriving live node state.
+func _draw_docking_nav_aids(grant) -> void:
+	if grant == null:
+		return
+	var authority: String = grant.get("authority", "")
+	if authority == "":
+		return
+
+	# Find the controlled station that issued this grant (stations live in the
+	# "ships" group too -- same scan Ship._update_port_zone_membership and
+	# issue_docking_grant's reserved-slip check already use).
+	var station: Node = null
+	for s in get_tree().get_nodes_in_group("ships"):
+		if not s.has_method("get_port_zone"):
+			continue
+		var zone: Dictionary = s.get_port_zone()
+		if zone.get("authority", "") == authority:
+			station = s
+			break
+	if station == null:
+		return
+
+	var bays: Array = []
+	for b in get_tree().get_nodes_in_group("docking_bays"):
+		if b.get_parent() == station:
+			bays.append(b)
+	if bays.is_empty():
+		return
+
+	var assigned: Node = assigned_bay_for(bays, grant)
+	if assigned != null:
+		# Specific slip: THAT bay bright/authority-colored, every other slip at
+		# this station dimmed -- and draw the one lane down to it.
+		for b in bays:
+			_draw_slip_marker(b, b == assigned)
+		_draw_lane(assigned.global_position, assigned.global_rotation)
+	else:
+		# Any-open grant (slip_id == "") -- highlight ALL open slips equally,
+		# no single lane (nothing specific to line up on; roadmap M34 scope).
+		var open_bays: Array = open_bays_for(bays)
+		var open_set := {}
+		for b in open_bays:
+			open_set[b] = true
+		for b in bays:
+			_draw_slip_marker(b, open_set.has(b))
+
+func _draw_slip_marker(bay: Node, highlighted: bool) -> void:
+	var color: Color = SLIP_HIGHLIGHT_COLOR if highlighted else SLIP_DIM_COLOR
+	var r: float = SLIP_MARKER_RADIUS_PX / map_zoom
+	var p: Vector2 = bay.global_position
+	draw_arc(p, r, 0, TAU, 16, color, 2.0 / map_zoom)
+	# Small heading tick so the berth's facing (approach direction) reads at a
+	# glance, not just its position.
+	var tip: Vector2 = p + Vector2.RIGHT.rotated(bay.global_rotation) * r * 2.0
+	draw_line(p, tip, color, 2.0 / map_zoom)
+
+func _draw_lane(berth_pos: Vector2, berth_heading: float) -> void:
+	var lane: Dictionary = lane_corridor(berth_pos, berth_heading, LANE_LENGTH, LANE_HALF_WIDTH)
+	var centerline: PackedVector2Array = lane.get("centerline", PackedVector2Array())
+	var left_edge: PackedVector2Array = lane.get("left_edge", PackedVector2Array())
+	var right_edge: PackedVector2Array = lane.get("right_edge", PackedVector2Array())
+	if centerline.size() < 2:
+		return
+	draw_polyline(centerline, LANE_CENTERLINE_COLOR, 2.0 / map_zoom)
+	draw_polyline(left_edge, LANE_EDGE_COLOR, 1.0 / map_zoom)
+	draw_polyline(right_edge, LANE_EDGE_COLOR, 1.0 / map_zoom)

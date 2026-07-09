@@ -558,6 +558,75 @@ up is legible.
    drawn (the helper returns empty).
 Manual: fly a clearance into Ironhold and confirm the lane reads clearly.
 
+### Shipped (2026-07-08)
+
+`scripts/nav/nav_corridor.gd` (`NavCorridor`, `RefCounted`, pure static
+`corridor(path: PackedVector2Array, half_width: float) -> Dictionary` —
+`{centerline, left_edge, right_edge}`, offset perpendicular to each segment by
+`half_width` with a plain miter average at interior vertices; generic over any
+polyline length so M36's buoy-road corridor can call the same helper later —
+not built here). `scripts/ui/navigation_panel.gd`: pure/testable seams
+`assigned_bay_for(bays, grant)` (matches `grant.slip_id` to a bay's `slip_id`,
+`null` for no grant / any-open / no match), `open_bays_for(bays)` (all
+`State.EMPTY` bays, for the any-open "highlight everything open" case),
+`lane_path(berth_pos, berth_heading, length)` + `lane_corridor(...)` (composes
+`lane_path` with `NavCorridor.corridor`), plus `_draw_docking_nav_aids()` /
+`_draw_slip_marker()` / `_draw_lane()` wiring them into `_draw()` (world-space,
+inside the panel's existing `draw_set_transform_matrix` block, `.../map_zoom`
+constant-screen-width convention). `LANE_LENGTH = 1500.0`,
+`LANE_HALF_WIDTH = 120.0`, gold `SLIP_HIGHLIGHT_COLOR`/dim
+`SLIP_DIM_COLOR`/lane colors (a hue not already claimed by the classification
+palette). `scripts/main.gd`'s `_distribute_state()` packet gained one field,
+`"docking_grant": ship.docking_grant` (main.gd:415) — see "Packet vs.
+instance_from_id" below for why this one field IS plumbed through the packet
+while bay poses are NOT. `scripts/tests/test_docking_nav_aids.gd` (28
+assertions covering all 3 roadmap scenarios plus a few defensive extras — a
+mismatched slip_id, an empty bays list, a rotated heading, and a 3-point
+`NavCorridor` path to prove it's genuinely generic) + the full regression set
+green: `test_docking_permission`, `test_port_zone`, `test_docking_multi`,
+`test_port_control_comms`, `test_comms_chat`, `test_comms_relay`, `test_nav`.
+
+Deviations / friction:
+- **Packet vs. `instance_from_id`: split the difference, deliberately.** The
+  brief flagged this as a real decision, not a formality. `docking_grant` is a
+  small value (authority/slip/time_left strings+floats) that
+  `navigation_panel.gd` has NO other way to reach — unlike `docking_control.gd`
+  (M33), the nav panel is never handed a live `player_ship`/`target_station`
+  reference; it is 100% packet-driven (`update_data(packet)` is its only
+  input, and `terminal_display.gd` already injects extra UI-only keys
+  — `pinned_contacts`, `is_ship_oriented`, `selected_contact_id` — into that
+  same packet before forwarding it). Adding `docking_grant` alongside those is
+  the smallest change that fits the panel's existing architecture. Bay
+  **poses**, by contrast, are live node transforms already resolvable in-process
+  (host and every ship share one scene tree — the same fact M33 leaned on for
+  `instance_from_id`/group lookups) and would be pure duplication to serialize
+  every frame for every berth at every controlled station. So: `docking_grant`
+  rides the packet (one small value, no other path in); the assigned
+  `DockingBay` node is resolved live via `get_tree().get_nodes_in_group(
+  "docking_bays")` filtered by parent (the same group `docking_bay.gd:64`
+  already registers, `get_berths()` on `Ship` already reads the same way) once
+  `_draw_docking_nav_aids()` has matched the grant's `authority` to a
+  controlled station in the `"ships"` group. This is NOT the exact
+  `instance_from_id` pattern (there is no contact/instance id for "which
+  station issued this grant" to resolve from — the grant only carries the
+  authority *name*), so the station lookup is a linear scan of `"ships"` by
+  `get_port_zone().authority`, same cardinality/cost class as M31's own
+  zone-membership scan (a handful of controlled stations, not hundreds).
+- **The roadmap prose's "No new state plumbing — the grant already rides the
+  packet (M32 adds it)" is wrong** — checked directly: M32/M33 never added
+  `docking_grant` to `_distribute_state()`'s packet dict (grep confirmed no
+  hit before this milestone). One field added here; noted so a future reader
+  doesn't go looking for it in the M32 diff.
+- **"`slip_id` null/`-1`" (scope bullet, line ~535) is the same stale doc
+  language M33's Friction notes already flagged** — the real shipped shape is
+  `slip_id: String`, `""` = any-open. `assigned_bay_for`/the test file follow
+  the real shape.
+- Helm berth-dial marker: confirmed still untouched, per the spec's explicit
+  DEFERRED call — no changes to `helm_panel.gd`.
+- No port-zone circle added to the nav map (that's M35's job, confirmed
+  out of scope here) — `_draw_docking_nav_aids` draws only the slip
+  markers + lane, nothing zone-boundary-shaped.
+
 ---
 
 ## M35 — Zone boundary aid + local rules

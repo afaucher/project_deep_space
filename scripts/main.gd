@@ -411,7 +411,8 @@ func _distribute_state() -> void:
 				"em_signature": ship.em_signature,
 				"hit_traces": ship.hit_traces.duplicate(true)
 			},
-			"transient_events": ship.transient_events.duplicate(true)
+			"transient_events": ship.transient_events.duplicate(true),
+			"docking_grant": ship.docking_grant
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal
