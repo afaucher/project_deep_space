@@ -13,6 +13,7 @@ const CommsLedger = preload("res://scripts/comms/comms_ledger.gd")
 const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const SilhouetteSampler = preload("res://scripts/sensors/silhouette_sampler.gd")
+const RadarCrossSection = preload("res://scripts/components/radar_cross_section.gd")
 const PortZone = preload("res://scripts/port/port_zone.gd")
 const PortControl = preload("res://scripts/port/port_control.gd")
 
@@ -1414,6 +1415,17 @@ func _physics_process(delta: float) -> void:
 			for c in ship_components:
 				if c["type"] == "reactor":
 					c["health"] -= OVERHEAT_DAMAGE_RATE * delta
+			# Pre-existing gap (found while verifying M38, not introduced by it --
+			# see implementation_plans/m38_angle_accurate_signatures_design.md):
+			# this drains reactor health directly instead of going through
+			# take_damage(), so it never hit take_damage()'s own death check.
+			# A reactor cooked to 0 health this way became a "zombie hulk" --
+			# is_dead stayed false, but em_signature genuinely dropped to 0 once
+			# nothing was powered, so classify_contact (correctly) read it as
+			# WRECKAGE and nothing would re-target it, stalling combat. Mirrors
+			# take_damage()'s own death check (line ~910) exactly.
+			if not is_dead and (is_sys_destroyed("reactor") or is_sys_destroyed("hull")):
+				hulk()
 
 		# Update Component EM & Heat
 		var base_em = get_total_power_rating("reactor")
@@ -1703,11 +1715,13 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 			# at all (range/arc/LOS) reports its true current_heat unmodified.
 			# This is a deliberate scope cut for now, not an oversight: give heat
 			# the same observation-fidelity treatment as EM later if it's wanted.
+			var angle = (collider.position - origin).angle()
+			var angle_from_target = wrapf(angle + PI, -PI, PI)
+
 			if sensor.get("sensor_type", "active") == "passive_em":
 				# Sums every emitter's own contribution (omni rear-bias or
 				# directional cone falloff per _received_em_power) instead of
 				# one rear-biased scalar plus a sensor-only cone bolt-on.
-				var angle_from_target = (origin - collider.position).angle()
 				var em_power = Utils.get_directional_em(sig, angle_from_target)
 
 				var received_em = em_power * (EM_FALLOFF_REFERENCE_DISTANCE / max(EM_FALLOFF_REFERENCE_DISTANCE, dist))
@@ -1719,8 +1733,13 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 				# the directional model only ever gated detection, never what
 				# gets classified/displayed once detected.
 				sig["em_noise"] = received_em
-
-			var angle = (collider.position - origin).angle()
+			else:
+				# Active sensors (M38): facing matters even against a radar
+				# lock, but detection stays distance-independent for now --
+				# no falloff term, just the directional weighting.
+				sig["em_noise"] = Utils.get_directional_em(sig, angle_from_target)
+				if collider.get("ship_components") != null:
+					sig["cross_section"] = RadarCrossSection.cross_section_at_angle(collider, angle_from_target) * collider.signature_multiplier
 
 			var rel_angle = wrapf(angle - SENSOR_HEADING, -PI, PI)
 			var half_arc = ARC_WIDTH / 2.0

@@ -65,16 +65,26 @@ func setup(main) -> void:
 	main_node.add_child(asteroid)
 	
 	# 6. Friendly Ordnance
+	# Heading points back at the observer (bow-on), not the arbitrary world +X
+	# `initial_heading = 0` this used pre-M38 -- since cross_section is now
+	# angle-accurate, an ordnance contact only reads as small (< the ordnance
+	# threshold) from roughly its nose/tail aspect, same as real radar cross-
+	# section behaves. A missile in flight toward its target (the realistic
+	# "incoming ordnance" case this test models) presents bow-on to the
+	# observer it's flying at, so heading = bearing-to-observer is the correct
+	# fixture, not an artifact.
 	var f_missile = Missile.new()
 	f_missile.name = "FriendlyMissile"
-	f_missile.setup(1, Vector2(-1000, -1000), Vector2.ZERO, 0)
+	var f_pos = Vector2(-1000, -1000)
+	f_missile.setup(1, f_pos, Vector2.ZERO, (-f_pos).angle())
 	f_missile.iff_tags = ["TEAM_A"]
 	main_node.add_child(f_missile)
-	
+
 	# 7. Incoming Ordnance
 	var e_missile = Missile.new()
 	e_missile.name = "EnemyMissile"
-	e_missile.setup(2, Vector2(1000, 1000), Vector2.ZERO, 0)
+	var e_pos = Vector2(1000, 1000)
+	e_missile.setup(2, e_pos, Vector2.ZERO, (-e_pos).angle())
 	e_missile.iff_tags = ["TEAM_B"]
 	main_node.add_child(e_missile)
 
