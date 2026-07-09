@@ -16,8 +16,14 @@ Tests live in `scripts/tests/*.gd` and are run by name. Two ways:
 powershell -NoProfile -ExecutionPolicy Bypass -File ./test_runner.ps1 -TestName test_ship_designs
 
 # Direct (simplest to capture output for grepping):
-./Godot_v4.4.1-stable_win64.exe --headless --run-test test_ship_designs
+./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --run-test test_ship_designs
 ```
+
+**Pass `--fixed-fps 60` on direct runs** (the runner already does). Without it,
+headless Godot runs the sim in REAL TIME (sleeps to hold 60Hz), so a frame-capped
+test takes real wall-clock — test_missile_ai's scenarios = ~32s, most sim tests
+several seconds. `--fixed-fps` uses the same 1/60 delta and identical frame
+counts (fully deterministic) but stops sleeping → ~17x faster.
 
 - **Pass marker:** a passing test prints `>>> [TEST PASSED] <name> <<<` (or the
   older `[TEST PASSED] <name>`). Failures print `[TEST FAILED]` / `ASSERT FAILED`.
@@ -35,8 +41,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./test_runner.ps1 -TestName 
   reports *false* parse errors on autoload identifiers (e.g. `DebugSettings`).
   The runner deliberately skips syntax validation for this reason. Validate a
   script by running a test that loads it instead.
-- **Run Godot sims one at a time.** Two concurrent headless instances starve
-  each other's CPU and produce false test *timeouts*. Sequential only.
+- **The "flaky sim timeout" was real-time throttling, not CPU starvation.**
+  Headless sleeps to hold 60Hz (see `--fixed-fps` above); real-time sleep does
+  NOT parallelize, so under N-way contention the loop can't hold 60Hz and
+  wall-clock slips toward the runner's cap. `--fixed-fps 60` (now in the runner)
+  fixes it — a 32-core box never legitimately needed 10 minutes for a 20s
+  scenario. Combined with the RNG seed below, sims are fast AND deterministic.
+- **Tests seed the global RNG** (`seed()` in `main.gd`'s `_run_test`). The global
+  `randf`/`randi` — per-frame sensor position/velocity noise (`ship.gd`), missile
+  jink — is otherwise entropy-seeded per launch, which made combat-OUTCOME tests
+  flaky run-to-run. Do NOT remove the seed; if a new combat test is flaky, that's
+  the first thing to check.
+- **Godot 2D physics is NOT bit-deterministic run-to-run** (contact-solver/float
+  ordering), even with the RNG seeded + a fixed delta. A long combat sim's exact
+  outcome jitters — assert *robustly* (margins/majorities, e.g. test_ai_duel),
+  not on an exact frame or a unanimous sweep.
 - **Kill stragglers** if a run hangs: `taskkill //F //IM Godot_v4.4.1-stable_win64.exe`.
 - **`FileAccess.store_line` buffers** — a CSV being written may read back 0 lines
   until the file is flushed/closed.

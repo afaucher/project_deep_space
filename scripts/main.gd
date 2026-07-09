@@ -72,7 +72,17 @@ func _run_test(test_name: String) -> void:
 	print("Starting automated test: ", test_name)
 	is_host = true
 	menu.hide()
-	
+
+	# Deterministic RNG for every test. The global randi/randf -- per-frame sensor
+	# position/velocity noise (ship.gd), missile jink (missile_controller.gd),
+	# ship-name picks -- is otherwise auto-seeded from entropy each launch, so
+	# combat-OUTCOME tests (who kills whom) were flaky run-to-run. This was the
+	# real cause of the "flaky test" timeouts/failures, NOT parallelism or
+	# --fixed-fps (fixed delta already makes physics/AI deterministic; only the
+	# RNG stream was free). One fixed seed here -> a repeatable draw sequence for
+	# the whole run.
+	seed(20260708)
+
 	var test_script_path = "res://scripts/tests/" + test_name + ".gd"
 	if ResourceLoader.exists(test_script_path):
 		var test_script = load(test_script_path)

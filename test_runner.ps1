@@ -57,19 +57,24 @@ if (Test-Path $errFile) { Remove-Item $errFile }
 
 # We run Godot headless and pass the test name as an argument.
 #
-# Hard per-test timeout: a hung test must FAIL the build, never wedge it
-# indefinitely. test_missile_ai (and occasionally others) can flakily fail to
-# exit cleanly in headless even after get_tree().quit() -- the test logic is
-# bounded (frame-capped), so a process that's still alive well past any
-# legitimate run time is hung, not working. We use a raw .NET Process rather
-# than Start-Process so we can (a) enforce the timeout via WaitForExit(ms) and
-# (b) read ExitCode reliably alongside redirected output (Start-Process
-# -PassThru doesn't expose ExitCode once output is redirected).
+# --fixed-fps 60 DECOUPLES the loop from real time. Headless Godot otherwise
+# SLEEPS to hold 60Hz, so a frame-capped sim test runs in real time (e.g.
+# test_missile_ai's scenarios = ~32s wall-clock) despite doing milliseconds of
+# work -- and real-time sleep does NOT parallelize, so under N-way contention
+# the loop can't hold 60Hz and wall-clock slips toward the cap (that was the
+# "flaky timeout", never CPU-load). --fixed-fps runs the same fixed 1/60 delta
+# with identical frame counts (deterministic) but no sleep -> ~17x faster.
+# Determinism also needs main.gd's seed() (the global RNG -- sensor noise,
+# missile jink -- was the real flakiness source; see _run_test).
+#
+# Hard per-test timeout stays as a backstop for a genuinely hung test.
+# Raw .NET Process (not Start-Process) so we can (a) enforce the timeout via
+# WaitForExit(ms) and (b) read ExitCode reliably alongside redirected output.
 $TEST_TIMEOUT_SEC = 600
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $godotPath
-$psi.Arguments = "--path `"$PSScriptRoot`" --headless --run-test `"$TestName`""
+$psi.Arguments = "--path `"$PSScriptRoot`" --headless --fixed-fps 60 --run-test `"$TestName`""
 $psi.UseShellExecute = $false
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
