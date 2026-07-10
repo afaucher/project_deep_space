@@ -18,6 +18,9 @@ if (-not (Test-Path $godotPath)) {
     exit 1
 }
 
+. "$PSScriptRoot\import_check.ps1"
+Import-IfStale -ProjectRoot $PSScriptRoot -GodotPath $godotPath
+
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Running Automated Tests for Project Deep Space " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan

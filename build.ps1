@@ -22,6 +22,13 @@ if (-not (Test-Path $godotPath)) {
     exit 1
 }
 
+# Reimport up front, once, before spawning the parallel test runners below --
+# each of those also self-checks (test_runner.ps1), but by then this pass
+# will have already left nothing stale, so they're just a cheap no-op scan
+# rather than N processes racing to reimport into .godot/imported/.
+. "$PSScriptRoot\import_check.ps1"
+Import-IfStale -ProjectRoot $PSScriptRoot -GodotPath $godotPath
+
 # 2. Syntax Validation
 Write-Host "Running GDScript syntax validation..." -ForegroundColor Cyan
 $scriptFiles = Get-ChildItem -Path "$PSScriptRoot\scripts" -Recurse -Filter *.gd | Select-Object -ExpandProperty FullName
