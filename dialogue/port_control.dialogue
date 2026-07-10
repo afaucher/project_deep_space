@@ -14,9 +14,9 @@ else
 		=> END
 	elif outcome == "stalled"
 		Port Control: Stand by...
-		=> END
+		=> start
 	else
 		Port Control: Negative, we have no open berths. Hold position.
-		=> END
+		=> start
 - Never mind.
 	=> END

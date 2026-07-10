@@ -93,6 +93,7 @@ func setup(main) -> void:
 	main_node = main
 	print("Starting Port Control Comms (M33) Tests")
 	await _run_dialogue_traversal_check()
+	await _run_dialogue_loop_check()
 	_run_scenario_1_grant_mutation()
 
 # ---------------------------------------------------------------------------
@@ -148,6 +149,66 @@ func _run_dialogue_traversal_check() -> void:
 	_assert(player.docking_grant != null, "dialogue traversal: the .dialogue mutation issued a real grant on the player ship")
 
 	_free_if_valid(player); _free_if_valid(station)
+
+# ---------------------------------------------------------------------------
+# Dialogue loop-back smoke check. A rejected request ("no open berths") used
+# to `=> END` the conversation outright; a player who got denied had to
+# re-hail from scratch to try again. dialogue/port_control.dialogue now
+# `=> start`s on both "no_berths" and "stalled" outcomes, so continuing past
+# the rejection line should drop back into the same menu (a line with
+# "Request docking."/"Never mind." responses attached again), not terminate
+# it (get_next_dialogue_line returning null). Drives the real DialogueManager
+# singleton end to end, same as the traversal check above, so it exercises
+# the actual .dialogue file rather than just PortControl.gd's pure logic.
+# ---------------------------------------------------------------------------
+func _run_dialogue_loop_check() -> void:
+	print("--- Dialogue loop-back smoke check (reject returns to the menu, not END) ---")
+	var station = _make_station("DialogueLoop", PortControl.STYLE_AUTOMATED, 10)
+	var occupant = _make_shuttle("DialogueLoopOccupant", 201, Vector2(9999, 9999))
+	var player = _make_shuttle("DialogueLoopPlayer", 202, Vector2(9999, 9999))
+
+	# Take the station's one berth first so the dialogue-driven request below
+	# is denied (MediumStation authors exactly one docking_port).
+	var occ_result: Dictionary = station.request_docking_via_control(occupant)
+	_assert(occ_result.get("outcome", "") == "granted", "dialogue loop: setup occupant takes the only berth")
+
+	if not Engine.has_singleton("DialogueManager"):
+		_assert(false, "dialogue loop: DialogueManager singleton not available")
+		_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
+		return
+	var dm = Engine.get_singleton("DialogueManager")
+	var resource = load("res://dialogue/port_control.dialogue")
+
+	var states: Array = [{"station": station, "player": player}]
+	var line = await dm.get_next_dialogue_line(resource, "start", states)
+	var docking_resp = null
+	for r in line.responses:
+		if r.text == "Request docking.":
+			docking_resp = r
+	_assert(docking_resp != null, "dialogue loop: 'Request docking.' offered")
+	if docking_resp == null:
+		_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
+		return
+
+	var reject_line = await dm.get_next_dialogue_line(resource, docking_resp.next_id, states)
+	_assert(reject_line != null, "dialogue loop: a rejected request still returns a line (the 'no open berths' text)")
+	_assert(player.docking_grant == null, "dialogue loop: the rejected request issued no grant")
+	if reject_line == null:
+		_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
+		return
+
+	# THE regression check: continuing past the rejection must land back on
+	# the menu, not end the conversation. Pre-fix (=> END) this returns null.
+	var looped_line = await dm.get_next_dialogue_line(resource, reject_line.next_id, states)
+	_assert(looped_line != null, "dialogue loop: conversation continues past a reject instead of ending (pre-fix regression: returned null / END)")
+	if looped_line != null:
+		var has_docking_choice := false
+		for r in looped_line.responses:
+			if r.text == "Request docking.":
+				has_docking_choice = true
+		_assert(has_docking_choice, "dialogue loop: reject drops back into the same menu ('Request docking.' offered again)")
+
+	_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
 
 # ---------------------------------------------------------------------------
 # Scenario 1: the dialogue's "request docking" mutation path (via
