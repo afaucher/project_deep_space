@@ -151,6 +151,28 @@ const RCS_SFX_TORQUE_THRESHOLD := 100.0 # torque above this plays the RCS thrust
 
 const HIT_TRACE_DURATION := 3.0 # seconds a damage-raymarch trace lingers for the engineering panel's spatial view to fade out
 
+# M40 -- repair mechanism (implementation_plans/m39_m44_homefront_roadmap.md,
+# M40 section). REPAIR_RATE is HP/sec restored to a single component while it
+# is registered for repair -- chosen so a badly-hurt component (a few hundred
+# to a couple thousand HP, see catalog health values) comes back over roughly
+# a docked minute or two, not instantly and not so slowly a test/playtest has
+# to sit there for ages. Applies PER COMPONENT (a ship with 5 damaged parts
+# heals all 5 at once, each at this rate) -- deliberately not divided across
+# the ship, so a heavily-damaged hull isn't punished with a slower per-part
+# trickle than a lightly-damaged one.
+const REPAIR_RATE := 20.0 # HP/sec per component while under repair
+
+# M40 -- engineering log. Ring buffer cap: enough history to review a fight or
+# a repair cycle in the panel without unbounded growth on a long play session.
+const ENG_LOG_CAP := 50
+
+const ENG_LOG_SEVERITY_INFO := "info"
+const ENG_LOG_SEVERITY_WARN := "warn"
+const ENG_LOG_SEVERITY_CRIT := "crit"
+
+# M40 -- health crossing thresholds for edge-triggered "damaged" logging.
+const ENG_LOG_DAMAGED_THRESHOLD := 0.5 # fraction of max_health; downward crossing logs "damaged"
+
 const NAME_ADJECTIVES = [
 	"Silent", "Swift", "Crimson", "Azure", "Golden", "Obsidian", "Astral", "Solar", "Lunar", "Quantum",
 	"Ghost", "Shadow", "Storm", "Iron", "Steel", "Silver", "Void", "Star", "Cosmic", "Nebula"
@@ -393,6 +415,107 @@ var em_signature: float = 0.0
 
 var transient_events: Array = []
 var hit_traces: Array = []
+
+# M40 -- engineering log. Ring buffer of {t: float, severity: String, text: String},
+# newest entries appended at the end (see log_event()). eng_event fires once per
+# append so a UI (engineering_panel.gd) can react live instead of polling, though
+# polling current eng_log directly on an existing refresh path works too.
+signal eng_event(entry: Dictionary)
+var eng_log: Array = []
+
+# M40 -- per-component crossing-state, keyed by component id. Tracks the LAST
+# KNOWN boolean for each edge-triggered condition so repeated frames of damage
+# below a threshold don't re-log every tick, and so recovery re-arms the
+# detector. Shape: {comp_id: {"destroyed": bool, "damaged": bool, "at_max": bool}}.
+# Not persisted/saved -- rebuilds implicitly (all crossings re-arm from
+# whatever the current health values are) the first tick after a fresh load,
+# which is fine since this only gates LOGGING, not any gameplay effect.
+var _eng_crossing_state: Dictionary = {}
+
+# M40 -- ship-wide (not per-component) crossing state: thermal overload and
+# hulk are one-shot ship-level conditions, not per-component ones.
+var _eng_was_overheated: bool = false
+var _eng_was_hulk_logged: bool = false
+
+# M40 -- repair mechanism (station.begin_repairs(ship) registers the ship
+# here; see begin_repairs() below). Keyed by the repaired ship's instance_id
+# so the same ship can't double-register, valued with the Ship reference
+# itself for the tick loop to iterate. This is transient runtime bookkeeping
+# on a live node (NOT persisted STORY state), so an Object ref here is fine --
+# unlike StoryState/MissionLog, which must never bake in Object references.
+var active_repairs: Dictionary = {}
+
+func log_event(severity: String, text: String) -> void:
+	eng_log.append({"t": Time.get_ticks_msec() / 1000.0, "severity": severity, "text": text})
+	if eng_log.size() > ENG_LOG_CAP:
+		eng_log.pop_front()
+	eng_event.emit(eng_log[eng_log.size() - 1])
+
+# M40 -- begin_repairs on the HOST (station). Valid only while `ship` is
+# actually DOCKED at THIS host's own bay -- refuses a ship that's merely
+# CAPTURING (not settled yet), docked somewhere else, not dockable at all, or
+# a hulk (never repair a dead ship; a live ship with a destroyed-but-repairable
+# component is fine and handled by the tick below coming back through
+# is_component_powered's health>0 gate once healed).
+func begin_repairs(ship) -> bool:
+	if ship == null or not is_instance_valid(ship):
+		return false
+	if ship.is_dead:
+		return false
+	var bay = ship.get("docking_bay")
+	if bay == null:
+		return false
+	if bay.state != DockingBay.State.DOCKED:
+		return false
+	if bay.get_parent() != self:
+		return false
+	active_repairs[ship.get_instance_id()] = ship
+	return true
+
+func _unregister_repair(ship) -> void:
+	if ship != null:
+		active_repairs.erase(ship.get_instance_id())
+
+# M40 -- host-side repair tick. Only hosts with something in active_repairs pay
+# any cost (early-out below), so this doesn't add per-component work to every
+# ship's hot _physics_process. Called once per physics tick from THIS host's
+# own _physics_process (see the call site further down).
+func _process_repairs(delta: float) -> void:
+	if active_repairs.is_empty():
+		return
+
+	var done: Array = []
+	for key in active_repairs.keys():
+		var ship = active_repairs[key]
+		if ship == null or not is_instance_valid(ship):
+			done.append(key)
+			continue
+		if ship.is_dead:
+			done.append(key)
+			continue
+		var bay = ship.get("docking_bay")
+		if bay == null or bay.state != DockingBay.State.DOCKED or bay.get_parent() != self:
+			done.append(key)
+			continue
+
+		var all_at_max := true
+		for c in ship.ship_components:
+			var max_h: float = c.get("max_health", 0.0)
+			if c["health"] < max_h:
+				c["health"] = min(max_h, c["health"] + REPAIR_RATE * delta)
+				all_at_max = false
+			# Component crossing back to exactly full health, from below --
+			# ship._check_eng_log_crossings() (run in the ship's own
+			# _physics_process) is what actually emits "<id> repaired", since
+			# that's where the per-component crossing-state dict lives. This
+			# loop just applies the healing; the ship logs its own recovery.
+
+		if all_at_max:
+			ship.log_event(ENG_LOG_SEVERITY_INFO, "Repairs complete")
+			done.append(key)
+
+	for key in done:
+		active_repairs.erase(key)
 
 # M31 -- port authority zone substrate. Empty dict = uncontrolled/open station
 # (or a non-station ship, which never declares one) -- old permissionless
@@ -973,6 +1096,71 @@ func hulk() -> void:
 		c["powered_on"] = false
 	target_thrust = 0.0
 	actual_throttle = 0.0
+	# M40 -- a ship dying mid-repair must stop being repaired immediately (never
+	# heal a hulk). Repairs are always registered on the HOST (the station), not
+	# on this ship, so unregister everywhere this ship might be listed -- in
+	# practice exactly one host at a time (a ship can only be docked/repaired at
+	# one bay), but scanning the "ships" group here is cheap (one-shot, not
+	# per-frame) and doesn't assume which host, if any, is repairing us.
+	if not _eng_was_hulk_logged:
+		log_event(ENG_LOG_SEVERITY_CRIT, "Catastrophic failure -- all systems dead")
+		_eng_was_hulk_logged = true
+	var tree = get_tree()
+	if tree != null:
+		for s in tree.get_nodes_in_group("ships"):
+			if s.has_method("_unregister_repair"):
+				s._unregister_repair(self)
+
+# M40 -- edge-triggered engineering-log crossing detector. Called once per
+# physics tick from _physics_process (cheap: iterates this ship's own
+# components, no allocation when nothing is crossing a threshold). Tracks
+# per-component "destroyed"/"damaged"/"at_max" booleans in _eng_crossing_state
+# so repeated frames of damage (or repair) below/above a threshold don't
+# re-log every tick -- only the actual crossing does, and recovery re-arms it.
+func _check_eng_log_crossings() -> void:
+	for c in ship_components:
+		var comp_id: String = c.get("id", "")
+		if comp_id == "":
+			continue
+		var max_h: float = c.get("max_health", 0.0)
+		if max_h <= 0.0:
+			continue
+		var health: float = c.get("health", 0.0)
+
+		var st: Dictionary = _eng_crossing_state.get(comp_id, {"destroyed": false, "damaged": false, "at_max": health >= max_h})
+
+		var is_destroyed: bool = health <= 0.0
+		if is_destroyed and not st["destroyed"]:
+			log_event(ENG_LOG_SEVERITY_CRIT, comp_id + " destroyed")
+		st["destroyed"] = is_destroyed
+
+		var is_damaged: bool = health < (ENG_LOG_DAMAGED_THRESHOLD * max_h) and health > 0.0
+		if is_damaged and not st["damaged"]:
+			log_event(ENG_LOG_SEVERITY_WARN, comp_id + " damaged")
+		# Re-arm "damaged" once health rises back above the threshold OR the
+		# component dies outright (the "destroyed" entry already covers that
+		# case, "damaged" shouldn't also re-fire on the same drop below 0).
+		if health >= (ENG_LOG_DAMAGED_THRESHOLD * max_h) or is_destroyed:
+			st["damaged"] = false
+		else:
+			st["damaged"] = is_damaged
+
+		var is_at_max: bool = health >= max_h
+		if is_at_max and not st["at_max"] and health > 0.0:
+			log_event(ENG_LOG_SEVERITY_INFO, comp_id + " repaired")
+		st["at_max"] = is_at_max
+
+		_eng_crossing_state[comp_id] = st
+
+	# Thermal overload: current_heat first reaching/exceeding max_heat, and
+	# dropping back below it, are ship-level (not per-component) one-shot
+	# crossings.
+	var overheated: bool = current_heat >= max_heat and max_heat > 0.0
+	if overheated and not _eng_was_overheated:
+		log_event(ENG_LOG_SEVERITY_CRIT, "Thermal overload -- reactor taking damage")
+	elif not overheated and _eng_was_overheated:
+		log_event(ENG_LOG_SEVERITY_INFO, "Thermal levels nominal")
+	_eng_was_overheated = overheated
 
 func get_signature() -> Dictionary:
 	return {
@@ -1225,6 +1413,18 @@ func _physics_process(delta: float) -> void:
 	if is_multiplayer_authority() and not is_dead:
 		_update_port_zone_membership()
 		_update_docking_grant(delta)
+
+	# M40 -- repair tick (host-side only; early-outs internally when
+	# active_repairs is empty, so a ship that never hosts a repair pays zero
+	# extra cost here) + engineering-log crossing detection (cheap per-tick
+	# scan of this ship's OWN components; see _check_eng_log_crossings()).
+	# Both run regardless of is_dead: a live station must keep repairing
+	# docked ships even mid-combat, and a hulk's own crossing state still
+	# needs one final settle (e.g. the "destroyed" entries for whatever killed
+	# it) even though hulk() already logged the catastrophic-failure line.
+	if is_multiplayer_authority():
+		_process_repairs(delta)
+		_check_eng_log_crossings()
 
 	if is_multiplayer_authority():
 		for w in get_components_by_type("weapons"):

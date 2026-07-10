@@ -57,8 +57,10 @@ func setup(main) -> void:
 	_assert(small.issue_docking_grant(s1) == null, "open station returns null grant (permissionless)")
 	_free_if_valid(s1); _free_if_valid(small)
 
-	# Controlled station: issues a valid assigned grant; a second request is
-	# denied because the only bay's slip is now reserved (shared-pool, no
+	# Controlled station: issues a valid assigned grant per free berth
+	# (MediumStation authors TWO docking_port bays, M40 "second Ironhold
+	# berth" -- see medium_station.gd's dock_main/dock_aux). A request is only
+	# denied once BOTH berths' slips are reserved (shared-pool, no
 	# double-book).
 	var med = MediumStation.new()
 	med.name = "IssueMed"
@@ -70,8 +72,13 @@ func setup(main) -> void:
 		_assert(g2.get("holder") == 51, "grant holder matches ship owner_id")
 		_assert(g2.get("slip_id") != "" and typeof(g2.get("slip_id")) == TYPE_STRING, "assigned policy stamps a non-empty string slip_id")
 	var s3 = CargoShuttle.new(); s3.owner_id = 52; main_node.add_child(s3)
-	_assert(med.issue_docking_grant(s3) == null, "second grant denied -- only bay's slip already reserved (pool, no double-book)")
-	_free_if_valid(s2); _free_if_valid(s3); _free_if_valid(med)
+	var g3 = med.issue_docking_grant(s3)
+	_assert(g3 != null, "second grant issued -- the station's other berth is still free")
+	if g2 != null and g3 != null:
+		_assert(g2.get("slip_id") != g3.get("slip_id"), "the two requesters are assigned two DIFFERENT slips, not double-booked into one")
+	var s4 = CargoShuttle.new(); s4.owner_id = 53; main_node.add_child(s4)
+	_assert(med.issue_docking_grant(s4) == null, "third grant denied -- both berths' slips already reserved (pool, no double-book)")
+	_free_if_valid(s2); _free_if_valid(s3); _free_if_valid(s4); _free_if_valid(med)
 
 	_start_dock_undock()
 

@@ -77,27 +77,48 @@ func setup(main) -> void:
 	_assert(auth_b == "Drift Market Control", "station B (named 'Drift Market') should rebrand to its OWN authority, got '%s'" % auth_b)
 	_assert(auth_a != auth_b, "two distinct hubs must not share an authority string")
 
-	# 2. A shuttle takes Drift Market's one and only berth.
+	# 2. Two shuttles take BOTH of Drift Market's berths (M40 -- MediumStation
+	# now authors two docking_port bays, dock_main/dock_aux -- filling just
+	# one no longer makes the station full, so the regression check below
+	# needs Drift Market genuinely fully booked).
 	var shuttle_b := CargoShuttle.new()
 	shuttle_b.name = "ShuttleAtDriftMarket"
 	shuttle_b.owner_id = 50
 	main.add_child(shuttle_b)
 	var grant_b = station_b.issue_docking_grant(shuttle_b)
-	_assert(grant_b != null, "Drift Market should grant its own free berth to shuttle_b")
+	_assert(grant_b != null, "Drift Market should grant its first free berth to shuttle_b")
 	_assert(grant_b != null and grant_b.get("authority", "") == "Drift Market Control",
 		"shuttle_b's grant should carry Drift Market's own authority")
 
+	var shuttle_b2 := CargoShuttle.new()
+	shuttle_b2.name = "ShuttleAtDriftMarket2"
+	shuttle_b2.owner_id = 52
+	main.add_child(shuttle_b2)
+	var grant_b2 = station_b.issue_docking_grant(shuttle_b2)
+	_assert(grant_b2 != null, "Drift Market should grant its SECOND free berth to shuttle_b2")
+	_assert(grant_b2 != null and grant_b != null and grant_b2.get("slip_id", "") != grant_b.get("slip_id", ""),
+		"shuttle_b and shuttle_b2 should hold two DIFFERENT Drift Market slips, not double-booked")
+
+	# Drift Market is now genuinely full -- a third shuttle there gets no berths.
+	var shuttle_b3 := CargoShuttle.new()
+	shuttle_b3.name = "ShuttleAtDriftMarket3"
+	shuttle_b3.owner_id = 53
+	main.add_child(shuttle_b3)
+	var grant_b3 = station_b.issue_docking_grant(shuttle_b3)
+	_assert(grant_b3 == null, "Drift Market should deny a third shuttle once both its berths are reserved")
+
 	# 3. THE regression check: Ironhold, a completely different station with
-	# its own separate single berth, must still grant a DIFFERENT shuttle a
-	# berth. Pre-fix, this failed -- Ironhold's reservation scan saw shuttle_b's
-	# grant (same shared "Ironhold Control" authority + same "dock_main" slip
-	# id under the old bug) and believed its own berth was already taken.
+	# its own separate pair of berths, must still grant a DIFFERENT shuttle a
+	# berth even while Drift Market is fully booked. Pre-fix, this failed --
+	# Ironhold's reservation scan saw Drift Market's shuttles' grants (same
+	# shared "Ironhold Control" authority + same slip ids under the old bug)
+	# and believed its own berths were already taken.
 	var shuttle_a := CargoShuttle.new()
 	shuttle_a.name = "ShuttleAtIronhold"
 	shuttle_a.owner_id = 51
 	main.add_child(shuttle_a)
 	var grant_a = station_a.issue_docking_grant(shuttle_a)
-	_assert(grant_a != null, "Ironhold must still grant its own free berth even while Drift Market's berth is taken (pre-fix regression: always returned null / 'no open berths')")
+	_assert(grant_a != null, "Ironhold must still grant its own free berth even while Drift Market is fully booked (pre-fix regression: always returned null / 'no open berths')")
 
 	_finish()
 

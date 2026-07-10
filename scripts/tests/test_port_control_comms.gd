@@ -165,16 +165,21 @@ func _run_dialogue_loop_check() -> void:
 	print("--- Dialogue loop-back smoke check (reject returns to the menu, not END) ---")
 	var station = _make_station("DialogueLoop", PortControl.STYLE_AUTOMATED, 10)
 	var occupant = _make_shuttle("DialogueLoopOccupant", 201, Vector2(9999, 9999))
+	var occupant2 = _make_shuttle("DialogueLoopOccupant2", 203, Vector2(9999, 9999))
 	var player = _make_shuttle("DialogueLoopPlayer", 202, Vector2(9999, 9999))
 
-	# Take the station's one berth first so the dialogue-driven request below
-	# is denied (MediumStation authors exactly one docking_port).
+	# Take BOTH of the station's berths first so the dialogue-driven request
+	# below is denied. M40 -- MediumStation now authors two docking_port bays
+	# (dock_main/dock_aux, "second Ironhold berth"); taking only one berth no
+	# longer makes the station full.
 	var occ_result: Dictionary = station.request_docking_via_control(occupant)
-	_assert(occ_result.get("outcome", "") == "granted", "dialogue loop: setup occupant takes the only berth")
+	_assert(occ_result.get("outcome", "") == "granted", "dialogue loop: setup occupant takes the first berth")
+	var occ_result2: Dictionary = station.request_docking_via_control(occupant2)
+	_assert(occ_result2.get("outcome", "") == "granted", "dialogue loop: setup occupant2 takes the second berth")
 
 	if not Engine.has_singleton("DialogueManager"):
 		_assert(false, "dialogue loop: DialogueManager singleton not available")
-		_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
+		_free_if_valid(occupant); _free_if_valid(occupant2); _free_if_valid(player); _free_if_valid(station)
 		return
 	var dm = Engine.get_singleton("DialogueManager")
 	var resource = load("res://dialogue/port_control.dialogue")
@@ -187,14 +192,14 @@ func _run_dialogue_loop_check() -> void:
 			docking_resp = r
 	_assert(docking_resp != null, "dialogue loop: 'Request docking.' offered")
 	if docking_resp == null:
-		_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
+		_free_if_valid(occupant); _free_if_valid(occupant2); _free_if_valid(player); _free_if_valid(station)
 		return
 
 	var reject_line = await dm.get_next_dialogue_line(resource, docking_resp.next_id, states)
 	_assert(reject_line != null, "dialogue loop: a rejected request still returns a line (the 'no open berths' text)")
 	_assert(player.docking_grant == null, "dialogue loop: the rejected request issued no grant")
 	if reject_line == null:
-		_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
+		_free_if_valid(occupant); _free_if_valid(occupant2); _free_if_valid(player); _free_if_valid(station)
 		return
 
 	# THE regression check: continuing past the rejection must land back on
@@ -208,7 +213,7 @@ func _run_dialogue_loop_check() -> void:
 				has_docking_choice = true
 		_assert(has_docking_choice, "dialogue loop: reject drops back into the same menu ('Request docking.' offered again)")
 
-	_free_if_valid(occupant); _free_if_valid(player); _free_if_valid(station)
+	_free_if_valid(occupant); _free_if_valid(occupant2); _free_if_valid(player); _free_if_valid(station)
 
 # ---------------------------------------------------------------------------
 # Scenario 1: the dialogue's "request docking" mutation path (via
@@ -236,7 +241,14 @@ func _run_scenario_1_grant_mutation() -> void:
 	_assert(result.get("outcome", "") == "granted", "scenario 1: mutation path issues a granted outcome")
 	_assert(s1_shuttle.docking_grant != null, "scenario 1: shuttle now holds a DockingGrant")
 	if result.get("outcome", "") == "granted":
-		_assert(result["grant"].get("slip_id", "") == s1_bay.slip_id, "scenario 1: granted slip matches the station's only bay")
+		# M40 -- MediumStation now authors TWO berths (dock_main/dock_aux), so
+		# the pool may hand out either one; assert membership in the station's
+		# own bay set rather than pinning to _med_bay()'s specific first bay.
+		var granted_slip: String = result["grant"].get("slip_id", "")
+		var station_slip_ids: Array = []
+		for b in _all_bays(s1_station):
+			station_slip_ids.append(b.slip_id)
+		_assert(granted_slip in station_slip_ids, "scenario 1: granted slip is one of the station's own bays' slip_ids")
 
 	s1_shuttle.wants_dock = true
 	s1_t = 0.0
@@ -254,43 +266,54 @@ func _step_scenario_1(delta: float) -> void:
 
 # ---------------------------------------------------------------------------
 # Scenario 2: slip allocation -- "two requesters get two DIFFERENT open
-# slips; a third when the station is full gets no berths" (roadmap item 2).
-# MediumStation authors exactly one docking_port (dock_main), so two
-# requesters at the SAME station can't both hold an open slip simultaneously
-# -- the second at a single-bay station already proves "full station denies
-# the next request" (see the "third" assertion below). To also exercise
-# "two different slips" at the data level (distinct slip_id identity, not
-# just distinct requesters), this drives two independently-provisioned
-# stations and confirms each requester is assigned that station's own
-# concrete slip_id -- then proves the "no berths" half by over-requesting the
-# now-full station A a second time.
+# slips; a station that is FULLY BOOKED denies the next request" (roadmap
+# item 2). M40 -- MediumStation now authors TWO docking_port bays (dock_main/
+# dock_aux, "second Ironhold berth"), so a single station alone can hold two
+# simultaneous requesters; a single granted request no longer proves
+# fullness the way it did when there was exactly one berth. This exercises
+# both axes: two requesters AT THE SAME STATION get two distinct slip_ids
+# (proving the pool doesn't double-book one slip), plus a third,
+# independently-provisioned station proves grants across different stations
+# carry distinct (station, slip) identity -- then fills BOTH of station A's
+# berths before proving a further request there is denied.
 # ---------------------------------------------------------------------------
 func _run_scenario_2_slip_allocation() -> void:
-	print("--- Scenario 2: slip allocation (two different slips; third = no berths) ---")
+	print("--- Scenario 2: slip allocation (two different slips; a FULL station = no berths) ---")
 	var station_a = _make_station("SlipA", PortControl.STYLE_AUTOMATED, 1)
-	var bay_a = _med_bay(station_a)
+	var bays_a: Array = _all_bays(station_a)
 	var station_b = _make_station("SlipB", PortControl.STYLE_AUTOMATED, 2)
-	var bay_b = _med_bay(station_b)
 
 	var req1 = _make_shuttle("Req1", 70, Vector2(9999, 9999))
+	var req1b = _make_shuttle("Req1b", 73, Vector2(9999, 9999))
 	var req2 = _make_shuttle("Req2", 71, Vector2(9999, 9999))
 	var req3 = _make_shuttle("Req3", 72, Vector2(9999, 9999))
 
 	var g1 = station_a.request_docking_via_control(req1)
+	var g1b = station_a.request_docking_via_control(req1b)
 	var g2 = station_b.request_docking_via_control(req2)
-	_assert(g1.get("outcome") == "granted" and g2.get("outcome") == "granted",
-		"scenario 2: two independent requesters both get granted")
+	_assert(g1.get("outcome") == "granted" and g1b.get("outcome") == "granted" and g2.get("outcome") == "granted",
+		"scenario 2: two requesters at station A's two berths, plus one at station B, all get granted")
+
+	if g1.get("outcome") == "granted" and g1b.get("outcome") == "granted":
+		_assert(g1["grant"]["slip_id"] != g1b["grant"]["slip_id"],
+			"scenario 2: two requesters at the SAME station are assigned two DIFFERENT slips, not double-booked into one")
+		var station_a_slips: Array = []
+		for b in bays_a:
+			station_a_slips.append(b.slip_id)
+		_assert(g1["grant"]["slip_id"] in station_a_slips and g1b["grant"]["slip_id"] in station_a_slips,
+			"scenario 2: both station-A grants carry one of station A's own bays' slip_ids")
+
 	if g1.get("outcome") == "granted" and g2.get("outcome") == "granted":
 		_assert(g1["grant"]["slip_id"] != g2["grant"]["slip_id"] or station_a != station_b,
-			"scenario 2: the two grants carry distinct (station, slip) identity")
-		_assert(g1["grant"]["slip_id"] == bay_a.slip_id, "scenario 2: requester 1 gets station A's only slip")
-		_assert(g2["grant"]["slip_id"] == bay_b.slip_id, "scenario 2: requester 2 gets station B's only slip")
+			"scenario 2: grants across two different stations carry distinct (station, slip) identity")
 
-	# A third request at station A (already fully reserved by req1) must be denied.
+	# A third request at station A -- now with BOTH berths reserved by
+	# req1/req1b -- must be denied. This is the genuine "station is full"
+	# case; with two berths, a single prior grant no longer proves it.
 	var g3 = station_a.request_docking_via_control(req3)
-	_assert(g3.get("outcome") == "no_berths", "scenario 2: third request at a full station gets no_berths")
+	_assert(g3.get("outcome") == "no_berths", "scenario 2: a request at a station with BOTH berths reserved gets no_berths")
 
-	_free_if_valid(req1); _free_if_valid(req2); _free_if_valid(req3)
+	_free_if_valid(req1); _free_if_valid(req1b); _free_if_valid(req2); _free_if_valid(req3)
 	_free_if_valid(station_a); _free_if_valid(station_b)
 	_run_scenario_3_discovery()
 

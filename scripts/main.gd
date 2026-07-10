@@ -409,7 +409,12 @@ func _distribute_state() -> void:
 				"heat_gen": ship.current_heat_gen,
 				"heat_dissipation_rate": ship.heat_dissipation_rate,
 				"em_signature": ship.em_signature,
-				"hit_traces": ship.hit_traces.duplicate(true)
+				"hit_traces": ship.hit_traces.duplicate(true),
+				# M40 -- engineering log (see Ship.log_event/eng_log). Same
+				# current_state-polling shape as everything else in this
+				# packet -- the panel diffs against what it last rendered
+				# rather than the host pushing incremental deltas.
+				"eng_log": ship.eng_log.duplicate(true)
 			},
 			"transient_events": ship.transient_events.duplicate(true),
 			"docking_grant": ship.docking_grant,

@@ -225,7 +225,22 @@ func _init() -> void:
 			"health": 2000.0, "max_health": 2000.0, "density": 20.0,
 			"heading": PI / 2.0, "has_servo": true,
 		},
-		
+		# M40 -- second berth ("Fold-in -- a second Ironhold berth",
+		# implementation_plans/m39_m44_homefront_roadmap.md M40 section). Two
+		# NPC cargo shuttles loop through Ironhold and the player also wants to
+		# dock; home base must never bounce the player for a berth a shuttle is
+		# occasionally sitting in. Mirrored onto the PORT hull face (opposite
+		# dock_main's STARBOARD face): edge-adjacent to hull_port_cap
+		# (Rect2(-60,-190,120,10) -- shares the y=-190 edge) the same way
+		# dock_main is edge-adjacent to hull_stbd_cap, so the layout stays
+		# connected without touching any other component's rect.
+		{
+			"id": "dock_aux", "type": "docking_port",
+			"rect": Rect2(-10, -200, 20, 10),
+			"health": 2000.0, "max_health": 2000.0, "density": 20.0,
+			"heading": -PI / 2.0, "has_servo": true,
+		},
+
 		# --- Hull Armor Flanks (Sides of the arms) ---
 		{
 			"id": "hull_fwd_port_flank", "type": "hull",

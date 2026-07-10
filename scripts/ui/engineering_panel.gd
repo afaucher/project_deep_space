@@ -18,6 +18,20 @@ var comp_rows: Dictionary = {}
 var lbl_peak_em: Label
 var lbl_det_dist: Label
 
+# M40 -- engineering log section. eng_log_rich mirrors Ship.eng_log
+# (newest entry LAST, matching the ring buffer's own append order -- see
+# Ship.log_event). Rebuilt from scratch whenever the log actually changed
+# (tracked via _eng_log_last_t, the last-rendered entry's timestamp) rather
+# than every frame, so a player scrolled up to read history isn't yanked
+# back to the bottom on every unrelated state update.
+var eng_log_rich: RichTextLabel
+var _eng_log_last_t: float = -1.0
+var _eng_log_last_count: int = -1
+
+const ENG_LOG_COLOR_INFO := "#999999" # gray
+const ENG_LOG_COLOR_WARN := "#dddd33" # yellow
+const ENG_LOG_COLOR_CRIT := "#ff5555" # red
+
 class EMPolarChart extends Control:
 	const RING_RADIUS_RATIOS := [1.0, 0.66, 0.33]
 	const NOISE_RESEED_INTERVAL_MSEC := 100 # how often the radiation-pattern jitter changes
@@ -290,12 +304,73 @@ func _ready() -> void:
 	components_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(components_vbox)
 
+	# M40 -- Engineering Log section: a small scrolling, severity-colored feed
+	# of Ship.eng_log entries (component damaged/destroyed/repaired, thermal
+	# overload/nominal, catastrophic failure, repair completion).
+	var log_sep = HSeparator.new()
+	main_vbox.add_child(log_sep)
+
+	var log_lbl = Label.new()
+	log_lbl.text = "ENGINEERING LOG"
+	main_vbox.add_child(log_lbl)
+
+	eng_log_rich = RichTextLabel.new()
+	eng_log_rich.bbcode_enabled = true
+	eng_log_rich.scroll_active = true
+	eng_log_rich.scroll_following = true
+	eng_log_rich.fit_content = false
+	eng_log_rich.custom_minimum_size = Vector2(0, 100)
+	eng_log_rich.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main_vbox.add_child(eng_log_rich)
+
+func _eng_log_severity_color(severity: String) -> String:
+	match severity:
+		Ship.ENG_LOG_SEVERITY_WARN:
+			return ENG_LOG_COLOR_WARN
+		Ship.ENG_LOG_SEVERITY_CRIT:
+			return ENG_LOG_COLOR_CRIT
+		_:
+			return ENG_LOG_COLOR_INFO
+
+func _update_eng_log(eng: Dictionary) -> void:
+	if eng_log_rich == null or not eng.has("eng_log"):
+		return
+	var entries: Array = eng["eng_log"]
+	if entries.is_empty():
+		if _eng_log_last_count != 0:
+			eng_log_rich.text = ""
+			_eng_log_last_count = 0
+			_eng_log_last_t = -1.0
+		return
+
+	var last_t: float = entries[entries.size() - 1].get("t", 0.0)
+	# Only rebuild when the log actually changed (new entry appended, or the
+	# ring buffer trimmed its oldest entry) -- comparing both the newest
+	# timestamp and the entry count catches a trim even when it coincides
+	# with a new append landing at the same rendered size.
+	if entries.size() == _eng_log_last_count and last_t == _eng_log_last_t:
+		return
+	_eng_log_last_count = entries.size()
+	_eng_log_last_t = last_t
+
+	var bb := ""
+	for entry in entries:
+		var severity: String = entry.get("severity", Ship.ENG_LOG_SEVERITY_INFO)
+		var color: String = _eng_log_severity_color(severity)
+		var t: float = entry.get("t", 0.0)
+		var mm: int = int(t) / 60
+		var ss: int = int(t) % 60
+		bb += "[color=%s][%02d:%02d] %s[/color]\n" % [color, mm, ss, entry.get("text", "")]
+	eng_log_rich.text = bb
+
 func update_data(state: Dictionary) -> void:
 	current_state = state
 	
 	if state.has("engineering"):
 		var eng = state["engineering"]
-		
+
+		_update_eng_log(eng)
+
 		if eng.has("current_heat") and heat_bar:
 			heat_bar.value = eng.get("current_heat", 0.0)
 		heat_bar.max_value = max(1.0, eng.get("max_heat", 200.0))
