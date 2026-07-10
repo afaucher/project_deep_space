@@ -15,6 +15,9 @@ const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 const LivenessPolicy = preload("res://scripts/cluster/liveness_policy.gd")
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
+const PortControl = preload("res://scripts/port/port_control.gd")
+const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
+const PORT_CONTROL_DIALOGUE = preload("res://dialogue/port_control.dialogue")
 
 var records: Array = []          # all ClusterEntity, live or dormant
 var policy = null                # a LivenessPolicy; defaults to a bubble
@@ -87,8 +90,46 @@ func _promote(rec) -> void:
 		node.linear_velocity = rec.vel
 		node.angular_velocity = rec.ang_vel
 	rec.live_node = node
+	_rebrand_port_zone(node, rec.name)
 	if is_ship:
 		_attach_ai(rec, node)
+
+# A hull's port_zone/NPC identity (authority name, the port-control NPC's
+# faction + display name) is baked in at construction time as a class-level
+# default -- e.g. MediumStation's _init() always sets "Ironhold Control",
+# historically true when only one medium station existed. The home cluster
+# reuses that SAME class for three hubs (Ironhold, Drift Market, Refinery
+# Prime), so every instance shares the identical literal unless rebranded
+# here once the entity's real name (rec.name) is known.
+#
+# Without this, Ship.issue_docking_grant()'s reservation scan (ship.gd) --
+# which matches outstanding grants to a station purely by `authority` STRING,
+# scanning every ship in the "ships" group -- treats a grant held anywhere in
+# the cluster as reserving a slip at EVERY medium station, since they all
+# report the same authority + the same single docking-port id ("dock_main").
+# With cargo traffic constantly cycling through hubs (home_cluster.gd's
+# looping shuttles), some grant matching that shared identity is outstanding
+# almost continuously, so every hub's docking request reads as permanently
+# "no open berths" regardless of that hub's own actual occupancy. Rebranding
+# to a per-entity authority ("<name> Control") makes the reservation scan's
+# authority check correctly scope to the right station again.
+#
+# Duck-typed (works on any hull exposing a non-empty `port_zone`), not
+# station-specific -- doesn't need updating if another controlled-hull class
+# is added later.
+func _rebrand_port_zone(node, entity_name: String) -> void:
+	var zone = node.get("port_zone")
+	if not (zone is Dictionary) or zone.is_empty():
+		return
+	zone["authority"] = "%s Control" % entity_name
+
+	var npcs = node.get("available_npcs")
+	if npcs == null:
+		return
+	for npc in npcs:
+		if npc is NPCProfile and npc.default_dialogue == PORT_CONTROL_DIALOGUE:
+			npc.faction = zone["authority"]
+			npc.character_name = PortControl.get_controller_name(node)
 
 func _attach_ai(rec, node) -> void:
 	# Only autonomous hulls get a brain. The player flies itself; asteroids,
