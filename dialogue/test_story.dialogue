@@ -1,0 +1,17 @@
+~ start
+
+Aunt Stephanie: Family doesn't pay. Say the word and I'll get the ship moving on your cousin.
+- Check on Todd for me.
+	do story.set_flag("todd_mission_offered")
+	do missions.start_mission(station.canned_mission())
+	Aunt Stephanie: Good. Fly out and find him.
+	=> END
+- Not right now.
+	=> END
+
+~ status_check
+if story.has_flag("todd_mission_offered")
+	Aunt Stephanie: You still owe me a visit to Todd's place.
+else
+	Aunt Stephanie: Everything's quiet around here.
+=> END

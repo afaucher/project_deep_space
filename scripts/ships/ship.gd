@@ -10,6 +10,7 @@ const WeaponBehaviorRegistry = preload("res://scripts/components/weapon_behavior
 # (Frigate uses it for ship_tier). See implementation_plans/m9b_spec_chart_design.md.
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 const CommsLedger = preload("res://scripts/comms/comms_ledger.gd")
+const MissionLog = preload("res://scripts/story/mission_log.gd")
 const NPCProfile = preload("res://scripts/comms/npc_profile.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const SilhouetteSampler = preload("res://scripts/sensors/silhouette_sampler.gd")
@@ -314,6 +315,7 @@ var max_speed: float = 1000.0
 var iff_tags: Array = []
 var available_npcs: Array[Resource] = []
 var comms_ledger: Node
+var mission_log: Node
 
 # M9b: declared spec-chart tier for ShipDesignValidator. Ships left at
 # UNVALIDATED are skipped by the validator (opt-out, not a failure) -- see
@@ -994,6 +996,8 @@ func get_signature() -> Dictionary:
 func _ready() -> void:
 	comms_ledger = CommsLedger.new()
 	add_child(comms_ledger)
+	mission_log = MissionLog.new()
+	add_child(mission_log)
 	if owner_id == -1:
 		owner_id = int(name.replace("Ship_", ""))
 		

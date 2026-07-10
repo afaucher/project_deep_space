@@ -249,12 +249,22 @@ func _start_dialogue(path: String, char_name: String, source_id: int = 0) -> voi
 # Both may be null (source freed mid-chat, or no local ship yet) -- a
 # mutation that calls a method on a null state simply won't resolve, same
 # failure mode DialogueManager already has for any missing state value.
+#
+# M39 -- "story" (the StoryState autoload) and "missions" (the player ship's
+# MissionLog, null-safe) join the same surface, per the roadmap's "keep ONE
+# pattern" rule (challenge #6): dialogue reaches game systems only through
+# objects handed in extra_game_states, never autoload lookups inside
+# .dialogue files. StoryState IS an autoload, but .dialogue files still refer
+# to it as "story" from this dict like everything else -- the autoload
+# wiring is an implementation detail of comms_panel, not something a
+# .dialogue file should know about directly.
 func _dialogue_game_states() -> Array:
 	var station = instance_from_id(active_chat_source_id) if active_chat_source_id != 0 else null
 	if station != null and not is_instance_valid(station):
 		station = null
 	var player = _get_my_ship()
-	return [{"station": station, "player": player}]
+	var missions = player.mission_log if player != null else null
+	return [{"station": station, "player": player, "story": StoryState, "missions": missions}]
 
 func _get_my_ship() -> Node:
 	var ship_node_name = "Ship_" + str(multiplayer.get_unique_id())

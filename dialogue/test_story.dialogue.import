@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://cyco2jmovn0be"
+path="res://.godot/imported/test_story.dialogue-1c20fbfed42b1e5ccd42b08a0902f169.tres"
+
+[deps]
+
+source_file="res://dialogue/test_story.dialogue"
+dest_files=["res://.godot/imported/test_story.dialogue-1c20fbfed42b1e5ccd42b08a0902f169.tres"]
+
+[params]
+
+defaults=true
