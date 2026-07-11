@@ -1,21 +1,21 @@
 ~ start
 
-Aunt Stephanie: [STEPHANIE GREETING -- warm, busy mechanic, acknowledges the player docking in or hailing]
+Aunt Stephanie: Well, there's my favorite trouble. What do you need, Hun?
 - Ask about repairs.
 	do repairs_started = station.begin_repairs(player)
 	if repairs_started
-		Aunt Stephanie: [STEPHANIE REPAIR ACCEPT -- family doesn't pay, ship's getting fixed]
+		Aunt Stephanie: Family doesn't pay here, Hun, don't insult me by asking twice. Crew's already on your hull -- sit tight.
 	else
-		Aunt Stephanie: [STEPHANIE REPAIR REFUSAL -- can't work on you from way out there, dock with me first]
+		Aunt Stephanie: Hun, I can't fix what I can't touch. Get that ship into my dock, then we'll talk.
 	=> start
-- [RESPONSE PLACEHOLDER -- ask Stephanie about checking on Todd] [if not story.has_flag("todd_mission_accepted") /]
+- You look like something's bugging you. [if not story.has_flag("todd_mission_accepted") /]
 	do story.set_flag("todd_mission_accepted")
 	do missions.start_mission_by_id("check_on_todd")
-	Aunt Stephanie: [STEPHANIE MISSION PITCH -- worried, Todd hasn't called, asks player to fly out and check on him]
-	Aunt Stephanie: [STEPHANIE MISSION ACCEPTANCE -- thanks the player, tells them where to start looking]
+	Aunt Stephanie: It's your cousin Todd. Three weeks, not one call. Even for him that's a new record. It's probably nothing -- probably broke his antenna again and can't be bothered -- but I want eyes on him, Hun. Just in case.
+	Aunt Stephanie: Head out to the Slag Bay field -- his place is parked in there somewhere. If you can't raise him, ask the neighbors; those folks see everything. And tell that boy his aunt says to CALL.
 	=> start
-- [RESPONSE PLACEHOLDER -- ask Stephanie for a status update on Todd] [if story.has_flag("todd_mission_accepted") /]
-	Aunt Stephanie: [STEPHANIE STATUS REMINDER -- still owes her a visit to Todd's place, hasn't heard back yet]
+- Any word from Todd? [if story.has_flag("todd_mission_accepted") /]
+	Aunt Stephanie: Not a peep -- which means you still owe me a flyby, Hun. Slag Bay field. Go.
 	=> start
 - Goodbye.
 	=> END

@@ -148,8 +148,8 @@ func _run() -> void:
 		_free_if_valid(player); _finish()
 		return
 
-	var offer_resp = _find_response(line, "checking on Todd")
-	var status_resp = _find_response(line, "status update on Todd")
+	var offer_resp = _find_response(line, "something's bugging you")
+	var status_resp = _find_response(line, "Any word from Todd")
 	_assert(offer_resp != null, "stephanie: mission-offer response visible before todd_mission_accepted is set")
 	_assert(status_resp == null, "stephanie: status response should NOT be visible before accepting")
 
@@ -164,7 +164,7 @@ func _run() -> void:
 
 	# --- Phase 3: accept the mission ---
 	line = await dm.get_next_dialogue_line(resource, "start", states)
-	offer_resp = _find_response(line, "checking on Todd")
+	offer_resp = _find_response(line, "something's bugging you")
 	_assert(offer_resp != null, "stephanie: mission-offer response still visible before accepting")
 	if offer_resp != null:
 		var accept_line = await dm.get_next_dialogue_line(resource, offer_resp.next_id, states)
@@ -182,8 +182,8 @@ func _run() -> void:
 	line = await dm.get_next_dialogue_line(resource, "start", states)
 	_assert(line != null, "stephanie: re-entering 'start' after accepting returns a line")
 	if line != null:
-		offer_resp = _find_response(line, "checking on Todd")
-		status_resp = _find_response(line, "status update on Todd")
+		offer_resp = _find_response(line, "something's bugging you")
+		status_resp = _find_response(line, "Any word from Todd")
 		_assert(offer_resp == null, "stephanie: mission-offer response should be gone after accepting")
 		_assert(status_resp != null, "stephanie: status response should be shown after accepting")
 
