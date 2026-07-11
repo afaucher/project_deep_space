@@ -12,6 +12,16 @@ var btn_share_name: CheckButton
 var btn_share_loc: CheckButton
 var ship_name_label: RichTextLabel
 
+# M41 -- "Missions" section: this panel is where missions are GRANTED (via
+# dialogue mutations, see aunt_stephanie.dialogue), so it's also where you
+# review them. Just a text readout (title + current objective per active
+# mission), NOT the contract feed -- no indicators_visible filtering here;
+# muting only affects map/contacts-panel declutter, not "can I see what I
+# accepted". A single Label whose .text is reset each update_data() tick
+# (packet["missions"], built by main.gd) rather than rebuilding child nodes
+# every tick.
+var missions_label: Label
+
 # Chat UI
 var chat_panel: VBoxContainer
 var chat_header: Label
@@ -86,7 +96,23 @@ func _ready() -> void:
 	my_vbox.add_child(hbox1)
 	
 	top_pane.add_child(HSeparator.new())
-	
+
+	# M41 -- Missions section: header + a small text readout, updated in
+	# _update_missions_list() (called from update_data()).
+	var missions_title = Label.new()
+	missions_title.text = "MISSIONS"
+	missions_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	missions_title.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
+	top_pane.add_child(missions_title)
+
+	missions_label = Label.new()
+	missions_label.text = "(no active missions)"
+	missions_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	missions_label.add_theme_font_size_override("font_size", 12)
+	top_pane.add_child(missions_label)
+
+	top_pane.add_child(HSeparator.new())
+
 	var title2 = Label.new()
 	title2.text = "LOCAL CONTACTS"
 	title2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -163,6 +189,23 @@ func update_data(packet: Dictionary) -> void:
 				break
 				
 	_update_contacts_list()
+	_update_missions_list()
+
+# M41 -- packet["missions"] is built by main.gd's _distribute_state() as
+# [{title, objective_text}, ...] straight off the player ship's MissionLog
+# (active_missions() + get_active_objective() per mission) -- plain data,
+# same cadence as every other packet field this panel already reads.
+func _update_missions_list() -> void:
+	if missions_label == null:
+		return
+	var missions: Array = current_state.get("missions", [])
+	if missions.is_empty():
+		missions_label.text = "(no active missions)"
+		return
+	var lines: Array = []
+	for m in missions:
+		lines.append("%s: %s" % [m.get("title", ""), m.get("objective_text", "")])
+	missions_label.text = "\n".join(lines)
 
 func _update_contacts_list() -> void:
 	var transponders = current_state.get("transponders", {})

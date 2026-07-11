@@ -484,7 +484,11 @@ func update_data(packet: Dictionary) -> void:
 	
 	var selected_target = contacts_panel.get_selected_contact_id() if is_instance_valid(contacts_panel) else ""
 	packet["selected_contact_id"] = selected_target
-	
+	# M41 -- contract selection rides the packet the same way contact selection
+	# does; navigation_panel reads packet["selected_contract_id"] to bracket
+	# the selected contract marker.
+	packet["selected_contract_id"] = contacts_panel.get_selected_contract_id() if is_instance_valid(contacts_panel) else ""
+
 	if nav_panel and nav_panel.has_method("update_data"):
 		nav_panel.update_data(packet)
 	if helm_panel and helm_panel.has_method("update_data"):

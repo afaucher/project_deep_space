@@ -6,14 +6,37 @@ signal selection_changed(c_id: String)
 var current_state: Dictionary = {}
 var contact_panels: Dictionary = {}
 
+# M41 -- {entry_id: {"node": Control, "has_pos": bool}} for the "Contracts"
+# section below. Separate from contact_panels: contract entries are a plain
+# Array off packet["contracts"] (see scripts/story/contract_feed.gd), NOT
+# keyed members of the sensor `contacts` Dictionary, so they need their own
+# id->node tracking for the same create/reuse/prune-stale pattern
+# _update_contact_list already uses.
+var contract_panels: Dictionary = {}
+
 var main_vbox: VBoxContainer
 var section_vboxes: Dictionary = {}
 var section_buttons: Dictionary = {}
 
 var selected_contact_id: String = ""
 
+# M41 -- the currently-selected "Contracts" row's entry id (independent of
+# selected_contact_id -- a contract entry is never a member of the sensor
+# `contacts` dict, so it can't reuse that id space). Polled by
+# terminal_display.gd the same way it already polls get_selected_contact_id(),
+# and read by navigation_panel.gd (packet["selected_contract_id"]) to draw the
+# same white selection bracket a selected sensor contact gets -- that IS how
+# "selecting a contract focuses the nav map on it" here: this codebase has no
+# camera-pan-to-point mechanism, so map "focus" already means "highlight with
+# the bracket + always-on label", the same visual treatment contact selection
+# gets.
+var selected_contract_id: String = ""
+
 func get_selected_contact_id() -> String:
 	return selected_contact_id
+
+func get_selected_contract_id() -> String:
+	return selected_contract_id
 
 func set_selected_contact_id(c_id: String) -> void:
 	if selected_contact_id != c_id:
@@ -88,7 +111,11 @@ func _ready() -> void:
 	content_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(content_vbox)
 	
-	var sections = ["Enemies", "Ships", "All Contacts"]
+	# M41 -- "Contracts" at the END, same header-with-count + collapse
+	# affordance as the other three (this loop already builds that generically
+	# per section name -- no special-casing needed here, only in the
+	# count/content updater below).
+	var sections = ["Enemies", "Ships", "All Contacts", "Contracts"]
 	for s_name in sections:
 		var btn = Button.new()
 		btn.text = s_name + " (-)"
@@ -126,6 +153,10 @@ func update_data(packet: Dictionary) -> void:
 	current_state = packet
 	if current_state.has("contacts"):
 		_update_contact_list(current_state["contacts"])
+	# M41 -- packet["contracts"] is the separate NAV-layer feed built by
+	# scripts/story/contract_feed.gd (main.gd's _distribute_state) -- an
+	# Array, never merged into the sensor `contacts` Dictionary above.
+	_update_contracts_list(current_state.get("contracts", []))
 
 func _update_contact_list(contacts: Dictionary) -> void:
 	var my_pos = current_state.get("pos", Vector2.ZERO)
@@ -290,6 +321,85 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		
 		# Update state without emitting signal
 		pin_btn.set_pressed_no_signal(c_id in pinned_list)
+
+# ---------------------------------------------------------------------------
+# M41 -- "Contracts" section: one row per contract_feed.gd entry (the current
+# active objective of each active, un-muted mission). Entries with pos != null
+# are clickable Buttons -- selecting one highlights it on the nav map (the
+# navigation_panel.gd bracket, via packet["selected_contract_id"] -- see
+# selected_contract_id's comment above for why that's "focus" in this
+# codebase). Entries with pos == null (e.g. TALK_TO Todd) render as plain
+# non-focusing Labels -- nothing to focus the map ON. See
+# implementation_plans/m39_m44_homefront_roadmap.md, "M41".
+# ---------------------------------------------------------------------------
+func _update_contracts_list(contracts: Array) -> void:
+	var btn = section_buttons.get("Contracts", null)
+	if btn == null:
+		return # defensive -- Contracts section always exists after _ready(), but never assume
+	btn.text = "Contracts (" + str(contracts.size()) + ")" + (" (+)" if btn.button_pressed else " (-)")
+
+	var target_vbox: VBoxContainer = section_vboxes["Contracts"]
+
+	var active_ids: Array = []
+	for entry in contracts:
+		active_ids.append(entry.get("id", ""))
+
+	# Prune stale rows (mission progressed to a new objective id, mission
+	# completed, indicators muted, ...) -- same pattern _update_contact_list
+	# uses for contact_panels above.
+	for e_id in contract_panels.keys():
+		if not e_id in active_ids:
+			var stale_node = contract_panels[e_id]["node"]
+			if is_instance_valid(stale_node):
+				stale_node.queue_free()
+			contract_panels.erase(e_id)
+
+	# A selection whose entry disappeared (objective advanced/completed) can't
+	# stay "selected" -- nothing on the map to bracket anymore.
+	if selected_contract_id != "" and not active_ids.has(selected_contract_id):
+		selected_contract_id = ""
+
+	for entry in contracts:
+		var e_id: String = entry.get("id", "")
+		if e_id == "":
+			continue
+		var pos = entry.get("pos", null)
+		var has_pos: bool = pos != null
+		var title: String = entry.get("title", "")
+		var mission_title: String = entry.get("mission_title", "")
+		var label_text: String = (mission_title + " -- " + title) if mission_title != "" else title
+
+		if not contract_panels.has(e_id):
+			var node: Control
+			if has_pos:
+				var row_btn := Button.new()
+				row_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+				row_btn.autowrap_mode = TextServer.AUTOWRAP_WORD
+				row_btn.pressed.connect(_on_contract_row_pressed.bind(e_id))
+				node = row_btn
+			else:
+				var row_lbl := Label.new()
+				row_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+				node = row_lbl
+			target_vbox.add_child(node)
+			contract_panels[e_id] = {"node": node, "has_pos": has_pos}
+
+		var refs: Dictionary = contract_panels[e_id]
+		var row = refs["node"] # Button or Label -- untyped so .text below resolves dynamically
+		target_vbox.move_child(row, target_vbox.get_child_count() - 1)
+
+		if row is Button:
+			row.text = label_text
+			row.modulate = Color(1.0, 0.9, 0.4) if e_id == selected_contract_id else Color(1.0, 1.0, 1.0)
+		else:
+			row.text = label_text
+			row.modulate = Color(0.65, 0.65, 0.65) # dimmer -- reads as "listed, not focusable"
+
+func _on_contract_row_pressed(e_id: String) -> void:
+	if selected_contract_id == e_id:
+		selected_contract_id = ""
+	else:
+		selected_contract_id = e_id
 
 func _draw() -> void:
 	pass

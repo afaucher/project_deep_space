@@ -17,6 +17,7 @@ const ClusterLoader = preload("res://scripts/cluster/cluster_loader.gd")
 const HomeCluster = preload("res://scripts/cluster/home_cluster.gd")
 const HomeClusterOverlay = preload("res://scripts/story/home_cluster_overlay.gd")
 const StoryCharacters = preload("res://scripts/story/characters.gd")
+const ContractFeed = preload("res://scripts/story/contract_feed.gd")
 const NavComputer = preload("res://scripts/nav/nav_computer.gd")
 const NavAutopilot = preload("res://scripts/nav/nav_autopilot.gd")
 
@@ -255,10 +256,25 @@ func _bootstrap_campaign() -> void:
 # Nav hooks for the destination-picker UI. nav_destinations() lists named targets;
 # set_nav_destination() routes from the player's current position over the beacon
 # graph and engages the autopilot.
+#
+# M41 -- also appends contract entries (active-mission objectives, see
+# scripts/story/contract_feed.gd) that have a resolved pos: contracts ARE nav
+# destinations with mission context (roadmap: "it already routes to arbitrary
+# positions internally; expose contracts as destinations"), named after the
+# objective's title. Entries with pos == null (e.g. TALK_TO Todd -- no known
+# position) are never destinations; there's nowhere to route to.
 func nav_destinations() -> Array:
 	if cluster_manager == null or cluster_manager.cluster_def == null:
 		return []
-	return NavComputer.destinations(cluster_manager.cluster_def)
+	var out: Array = NavComputer.destinations(cluster_manager.cluster_def)
+	var player = players.get(1, null)
+	if player != null and is_instance_valid(player) and player.mission_log != null:
+		for entry in ContractFeed.build(player.mission_log, cluster_manager):
+			var pos = entry.get("pos", null)
+			if pos == null:
+				continue
+			out.append({"name": entry.get("title", ""), "pos": pos})
+	return out
 
 func set_nav_destination(dest_name: String) -> bool:
 	if cluster_manager == null or cluster_manager.cluster_def == null or not players.has(1):
@@ -267,7 +283,12 @@ func set_nav_destination(dest_name: String) -> bool:
 	var autopilot = player.get_node_or_null("NavAutopilot")
 	if autopilot == null:
 		return false
-	for d in NavComputer.destinations(cluster_manager.cluster_def):
+	# Routes over the SAME combined list nav_destinations() lists (beacon/
+	# station/wormhole destinations + contract destinations), so a contract
+	# destination named in the picker UI always resolves here too -- one
+	# source of truth for "what names are valid", not two lists that could
+	# drift apart.
+	for d in nav_destinations():
 		if d["name"] == dest_name:
 			autopilot.engage(NavComputer.route(cluster_manager.cluster_def, player.position, d["pos"]))
 			return true
@@ -432,7 +453,21 @@ func _distribute_state() -> void:
 			# authority name back to its owning station's port_zone dict live
 			# via the "ships" group scan (same pattern _draw_docking_nav_aids
 			# already uses to resolve a grant's authority to a station).
-			"current_port_zone": ship.current_port_zone
+			"current_port_zone": ship.current_port_zone,
+			# M41 -- contracts are NAV-layer data (a known coordinate/area,
+			# never a sensor detection -- see scripts/story/contract_feed.gd's
+			# header), built fresh once per client per tick from this ship's
+			# own MissionLog + the campaign ClusterManager (null in sandbox,
+			# where ContractFeed.build() degrades to marker_sid entries
+			# resolving to null pos -- still listed, never drawn). Consumed by
+			# navigation_panel.gd (markers/rings) and contacts_panel.gd (the
+			# "Contracts" section). NEVER merged into "contacts" above.
+			"contracts": ContractFeed.build(ship.mission_log, cluster_manager),
+			# M41 -- comms panel's "Missions" section: active missions' titles
+			# + current objective text, straight off MissionLog (NOT filtered
+			# by indicators_visible -- that flag only mutes map/contacts-panel
+			# declutter, not "can I review what I accepted").
+			"missions": _missions_summary(ship.mission_log),
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal
@@ -442,6 +477,25 @@ func _distribute_state() -> void:
 			rpc_id(client_id, "receive_perceived_state", packet)
 			
 		ship.transient_events.clear()
+
+# M41 -- plain-data summary of a MissionLog's active missions for the comms
+# panel's "Missions" section: [{title, objective_text}, ...], one entry per
+# active mission (regardless of indicators_visible -- see the packet-field
+# comment above). Missing-key-safe throughout (a null mission_log, or an
+# objective dict with no "text", just contributes an empty string rather than
+# erroring the whole packet build for the frame -- CLAUDE.md's
+# missing-Dictionary-key gotcha).
+func _missions_summary(mission_log) -> Array:
+	var out: Array = []
+	if mission_log == null:
+		return out
+	for m in mission_log.active_missions():
+		var obj: Dictionary = mission_log.get_active_objective(m.get("id", ""))
+		out.append({
+			"title": m.get("title", ""),
+			"objective_text": obj.get("text", ""),
+		})
+	return out
 
 # ----------------------------------------------------
 # Client Terminal / RPC Pipeline

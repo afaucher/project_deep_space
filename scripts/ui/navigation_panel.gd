@@ -73,6 +73,26 @@ const SLIP_MARKER_RADIUS_PX := 10.0
 # double up two full-strength gold rings once a lane is also drawn.
 const ZONE_BOUNDARY_COLOR := Color(1.0, 0.85, 0.2, 0.35)
 
+# M41 -- contract markers (see scripts/story/contract_feed.gd) are NAV
+# knowledge, never a sensor detection -- a known coordinate/area/place, the
+# same knowledge family as destinations/beacon routes/docking lanes. They
+# reuse the contact-rendering AFFORDANCES (on-screen marker, off-screen edge
+# arrow) but get their OWN color so nav knowledge always reads as a distinct
+# channel from classification-colored sensor contacts (green=friendly,
+# red=hostile, yellow=ordnance, gray=asteroid, cyan=sensor) and from the
+# docking-gold slip/lane markers above (a different context -- "clearance",
+# not "objective"). Amber, per the roadmap's suggestion, but visibly warmer/
+# more saturated than SLIP_HIGHLIGHT_COLOR so the two golds don't blur
+# together when a mission objective happens to be at a controlled station.
+const CONTRACT_COLOR := Color(1.0, 0.68, 0.05, 0.95)
+const CONTRACT_RING_COLOR := Color(1.0, 0.68, 0.05, 0.4)
+const CONTRACT_MARKER_RADIUS_PX := 9.0
+# GO_TO_AREA ring dash pattern, in WORLD units (not screen pixels) so the
+# dash rhythm holds steady across zoom -- only the stroke WIDTH stays
+# constant-pixel (the "N.0 / map_zoom" convention used throughout this file).
+const CONTRACT_DASH_LEN := 400.0
+const CONTRACT_GAP_LEN := 250.0
+
 # The friendly-identification convention this whole file already uses:
 # Utils.classification_color/_get_contact_color key off classify_contact()'s
 # string output, and "FRIENDLY VESSEL"/"FRIENDLY ORDNANCE" are the only two
@@ -239,6 +259,29 @@ static func lane_path(berth_pos: Vector2, berth_heading: float, length: float) -
 # lane_path with the shared NavCorridor helper (see scripts/nav/nav_corridor.gd).
 static func lane_corridor(berth_pos: Vector2, berth_heading: float, length: float, half_width: float) -> Dictionary:
 	return NavCorridor.corridor(lane_path(berth_pos, berth_heading, length), half_width)
+
+# M41 -- pure geometry for the off-screen "dorito" arrow: given a marker's
+# SCREEN position, the panel's center/size, and the safe-area margin, returns
+# null if the point is already on-screen, else {edge_pos, dir} where `dir` is
+# the outward unit direction the arrowhead points along and `edge_pos` is
+# where its tip anchors on the panel's safe-area border. Factored out of the
+# original inline pinned-contacts off-screen-indicator code below (unchanged
+# math -- same offset/ratio/edge_pos derivation) so M41's contract markers
+# reuse the EXACT SAME arrow geometry instead of a second copy that could
+# drift from the contact arrows.
+static func edge_arrow_geometry(screen_pos: Vector2, center: Vector2, panel_size: Vector2, margin: float):
+	var safe_rect := Rect2(Vector2.ZERO, panel_size).grow(-margin)
+	if safe_rect.has_point(screen_pos):
+		return null
+	var offset = screen_pos - center
+	var x_ratio = abs(offset.x) / (panel_size.x / 2.0 - margin)
+	var y_ratio = abs(offset.y) / (panel_size.y / 2.0 - margin)
+	var max_ratio = max(x_ratio, y_ratio)
+	if max_ratio <= 0.0:
+		return null # dead-center -- can't be off-screen, avoid a divide-by-zero
+	var edge_pos = center + offset / max_ratio
+	var dir_to_contact = offset.normalized()
+	return {"edge_pos": edge_pos, "dir": dir_to_contact}
 
 # M35 -- zone boundary LOD suppression. Mirrors the existing outline LOD gate
 # exactly (OUTLINE_LOD_MIN_PX / _outline_alpha_for's "bounds_radius * map_zoom
@@ -607,6 +650,12 @@ func _draw() -> void:
 	# boundary always reads on top of it, never the reverse.
 	_draw_zone_boundary(current_state.get("current_port_zone", null))
 
+	# M41 -- GO_TO_AREA search rings, same "drawn under contacts" z-order as
+	# the zone boundary ring above (a search-area ring the player is standing
+	# inside should never occlude a real contact sitting on it).
+	var contracts: Array = current_state.get("contracts", [])
+	_draw_contract_rings(contracts)
+
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
 	for c_id in contacts.keys():
@@ -640,6 +689,10 @@ func _draw() -> void:
 	# Contact labels are drawn later, after the transform reset below --
 	# world-space text would scale with map_zoom otherwise.
 
+	# M41 -- contract PIN markers draw on top of contacts (unlike the ring
+	# above) so a mission marker never gets lost under a dense sensor picture.
+	_draw_contract_pins(contracts)
+
 	_draw_docking_nav_aids(current_state.get("docking_grant", null))
 
 	# Draw active lasers
@@ -665,20 +718,8 @@ func _draw() -> void:
 				draw_string(font, screen_pos + Vector2(10, 10), display_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, color)
 				
 			if c_id == selected_id:
-				# Draw bracket
-				var b_size = 15.0
-				draw_line(screen_pos + Vector2(-b_size, -b_size), screen_pos + Vector2(-b_size/2, -b_size), Color.WHITE, 2.0)
-				draw_line(screen_pos + Vector2(-b_size, -b_size), screen_pos + Vector2(-b_size, -b_size/2), Color.WHITE, 2.0)
-				
-				draw_line(screen_pos + Vector2(b_size, -b_size), screen_pos + Vector2(b_size/2, -b_size), Color.WHITE, 2.0)
-				draw_line(screen_pos + Vector2(b_size, -b_size), screen_pos + Vector2(b_size, -b_size/2), Color.WHITE, 2.0)
-				
-				draw_line(screen_pos + Vector2(-b_size, b_size), screen_pos + Vector2(-b_size/2, b_size), Color.WHITE, 2.0)
-				draw_line(screen_pos + Vector2(-b_size, b_size), screen_pos + Vector2(-b_size, b_size/2), Color.WHITE, 2.0)
-				
-				draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size/2, b_size), Color.WHITE, 2.0)
-				draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size, b_size/2), Color.WHITE, 2.0)
-				
+				_draw_selection_bracket(screen_pos, Color.WHITE)
+
 				# Draw telemetry
 				var s_pos = current_state.get("pos", Vector2.ZERO)
 				var dist = s_pos.distance_to(c_pos)
@@ -764,39 +805,77 @@ func _draw() -> void:
 		if not contacts.has(c_id): continue
 		var c = contacts[c_id]
 		var c_pos = c.get("pos", Vector2.ZERO)
-		
+
 		# Transform world pos to screen pos manually
 		var screen_pos = t.basis_xform(c_pos) + t.origin
-		
-		if not safe_rect.has_point(screen_pos):
-			# It's off screen, calculate edge intersection
-			var offset = screen_pos - center
-			var x_ratio = abs(offset.x) / (size.x/2.0 - margin)
-			var y_ratio = abs(offset.y) / (size.y/2.0 - margin)
-			var max_ratio = max(x_ratio, y_ratio)
-			if max_ratio <= 0.0: continue # contact is dead-center, can't be off-screen -- avoid a divide-by-zero
 
-			var edge_pos = center + offset / max_ratio
-			
-			var dir_to_contact = offset.normalized()
-			
-			# Draw an arrow at edge_pos pointing outward
-			var p_tip = edge_pos + dir_to_contact * 10.0
-			var p_left = edge_pos + dir_to_contact.rotated(PI * 0.8) * 10.0
-			var p_right = edge_pos + dir_to_contact.rotated(-PI * 0.8) * 10.0
-			
-			var color = _get_contact_color(c)
-			
-			var pts = PackedVector2Array([p_tip, p_left, p_right])
-			draw_colored_polygon(pts, color)
-			draw_polyline(PackedVector2Array([p_tip, p_left, p_right, p_tip]), color, 2.0)
-			
-			
-			# Draw label
+		var geo = edge_arrow_geometry(screen_pos, center, size, margin)
+		if geo != null:
 			var display_name = c.get("name", c_id)
-			var text_size = font.get_string_size(display_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
-			var label_pos = edge_pos - dir_to_contact * 15.0 - Vector2(text_size.x/2.0, -text_size.y/3.0)
-			draw_string(font, label_pos, display_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
+			_draw_offscreen_indicator(geo["edge_pos"], geo["dir"], _get_contact_color(c), display_name, font)
+
+	# M41 -- contract markers reuse the SAME off-screen edge-arrow affordance
+	# as pinned contacts above (edge_arrow_geometry), own color (CONTRACT_COLOR)
+	# so nav knowledge reads distinct from sensor knowledge. Entries with
+	# pos == null (e.g. TALK_TO Todd -- no known position, finding him IS the
+	# gameplay) are skipped here entirely; they're still listed in the
+	# contacts/comms panels, just never drawn on the map.
+	var selected_contract_id: String = current_state.get("selected_contract_id", "")
+	for entry in contracts:
+		var c_pos = entry.get("pos", null)
+		if c_pos == null:
+			continue
+		var title: String = entry.get("title", "")
+		var screen_pos = t.basis_xform(c_pos) + t.origin
+
+		if entry.get("id", "") == selected_contract_id and selected_contract_id != "":
+			_draw_selection_bracket(screen_pos, CONTRACT_COLOR)
+
+		var geo = edge_arrow_geometry(screen_pos, center, size, margin)
+		if geo != null:
+			_draw_offscreen_indicator(geo["edge_pos"], geo["dir"], CONTRACT_COLOR, title, font)
+		else:
+			# On-screen: always label (there are at most a couple active
+			# objectives at once, unlike the dense sensor picture
+			# show_contact_labels gates against).
+			var text_size = font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
+			draw_string(font, screen_pos + Vector2(10, -10 - text_size.y), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CONTRACT_COLOR)
+
+# Draws the four-corner white-bracket "selected" highlight around a screen
+# position -- factored out of the contact-selection code above (M41) so
+# contract-marker selection can reuse the identical visual treatment (own
+# color) instead of a second hand-copied set of draw_line calls.
+func _draw_selection_bracket(screen_pos: Vector2, color: Color) -> void:
+	var b_size = 15.0
+	draw_line(screen_pos + Vector2(-b_size, -b_size), screen_pos + Vector2(-b_size/2, -b_size), color, 2.0)
+	draw_line(screen_pos + Vector2(-b_size, -b_size), screen_pos + Vector2(-b_size, -b_size/2), color, 2.0)
+
+	draw_line(screen_pos + Vector2(b_size, -b_size), screen_pos + Vector2(b_size/2, -b_size), color, 2.0)
+	draw_line(screen_pos + Vector2(b_size, -b_size), screen_pos + Vector2(b_size, -b_size/2), color, 2.0)
+
+	draw_line(screen_pos + Vector2(-b_size, b_size), screen_pos + Vector2(-b_size/2, b_size), color, 2.0)
+	draw_line(screen_pos + Vector2(-b_size, b_size), screen_pos + Vector2(-b_size, b_size/2), color, 2.0)
+
+	draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size/2, b_size), color, 2.0)
+	draw_line(screen_pos + Vector2(b_size, b_size), screen_pos + Vector2(b_size, b_size/2), color, 2.0)
+
+# Draws the off-screen "dorito" arrow + label at an edge point, given the
+# geometry edge_arrow_geometry() computed -- factored out of the original
+# inline pinned-contacts drawing (M41) so contract markers reuse it exactly.
+func _draw_offscreen_indicator(edge_pos: Vector2, dir_to_contact: Vector2, color: Color, label: String, font: Font) -> void:
+	var p_tip = edge_pos + dir_to_contact * 10.0
+	var p_left = edge_pos + dir_to_contact.rotated(PI * 0.8) * 10.0
+	var p_right = edge_pos + dir_to_contact.rotated(-PI * 0.8) * 10.0
+
+	var pts = PackedVector2Array([p_tip, p_left, p_right])
+	draw_colored_polygon(pts, color)
+	draw_polyline(PackedVector2Array([p_tip, p_left, p_right, p_tip]), color, 2.0)
+
+	if label == "":
+		return
+	var text_size = font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+	var label_pos = edge_pos - dir_to_contact * 15.0 - Vector2(text_size.x/2.0, -text_size.y/3.0)
+	draw_string(font, label_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
 
 func _get_contact_color(c: Dictionary) -> Color:
 	# Dim by confidence-from-age so stale dead-reckoned contacts fade toward ghosts
@@ -953,6 +1032,63 @@ func _draw_zone_boundary(authority) -> void:
 	if not zone_boundary_visible(radius, map_zoom):
 		return
 	draw_arc(station.global_position, radius, 0, TAU, 64, ZONE_BOUNDARY_COLOR, 2.0 / map_zoom)
+
+# M41 -- GO_TO_AREA search-area rings, one per contract entry whose kind is
+# GO_TO_AREA and radius > 0.0 (contract_feed.gd only sets a radius for that
+# kind). Called inside the world-space transform, same convention as every
+# other per-contact draw call in this file. DASHED, not a solid ring like the
+# zone boundary above, so a search area reads distinctly from "controlled
+# space" even though both use the gold/amber family.
+func _draw_contract_rings(contracts: Array) -> void:
+	for entry in contracts:
+		if entry.get("kind", "") != "GO_TO_AREA":
+			continue
+		var c_pos = entry.get("pos", null)
+		var radius: float = entry.get("radius", 0.0)
+		if c_pos == null or radius <= 0.0:
+			continue
+		_draw_dashed_circle(c_pos, radius, CONTRACT_RING_COLOR, 2.0 / map_zoom)
+
+# Manual dashed ring: draw_arc has no native dash support, so step around the
+# circle in CONTRACT_DASH_LEN-world-unit arcs separated by CONTRACT_GAP_LEN-
+# world-unit gaps. Dash/gap lengths are WORLD units (the dash rhythm holds
+# steady across zoom); only the stroke `width` follows this file's constant-
+# screen-width convention (divided by map_zoom by the caller).
+func _draw_dashed_circle(center: Vector2, radius: float, color: Color, width: float) -> void:
+	if radius <= 0.0:
+		return
+	var dash_angle: float = CONTRACT_DASH_LEN / radius
+	var gap_angle: float = CONTRACT_GAP_LEN / radius
+	var step: float = dash_angle + gap_angle
+	if step <= 0.0:
+		return
+	var angle: float = 0.0
+	while angle < TAU:
+		var seg_end: float = min(angle + dash_angle, TAU)
+		draw_arc(center, radius, angle, seg_end, 8, color, width)
+		angle += step
+
+# M41 -- contract PIN markers: a small diamond at every contract entry's pos
+# (entries with pos == null draw nothing here -- e.g. TALK_TO Todd; they're
+# still listed in the contacts/comms panels, just not on the map). Drawn
+# in-world so it scales/tracks like every other map marker; the off-screen
+# edge-arrow case is handled separately in the screen-space overlay section
+# of _draw() (mirrors how contact blips vs. pinned-contact arrows split
+# between the world-space and screen-space passes).
+func _draw_contract_pins(contracts: Array) -> void:
+	for entry in contracts:
+		var c_pos = entry.get("pos", null)
+		if c_pos == null:
+			continue
+		_draw_contract_pin(c_pos)
+
+func _draw_contract_pin(p: Vector2) -> void:
+	var r: float = CONTRACT_MARKER_RADIUS_PX / map_zoom
+	var diamond := PackedVector2Array([
+		p + Vector2(0, -r), p + Vector2(r, 0), p + Vector2(0, r), p + Vector2(-r, 0), p + Vector2(0, -r)
+	])
+	draw_polyline(diamond, CONTRACT_COLOR, 2.0 / map_zoom)
+	draw_circle(p, r * 0.35, CONTRACT_COLOR)
 
 # M34 -- resolves the docking-grant nav aids (assigned-slip highlight + lane)
 # from the packet's docking_grant and live DockingBay nodes, then draws them.

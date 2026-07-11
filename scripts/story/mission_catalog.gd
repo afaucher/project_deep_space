@@ -43,7 +43,12 @@ const MISSIONS: Dictionary = {
 				"id": "deliver_present",
 				"kind": "DELIVER",
 				"text": "Deliver the present to Aunt Stephanie",
-				"target": {"item": "stephanies_present", "npc": "Aunt Stephanie"},
+				# M41 -- marker_sid resolves this objective's contract-feed
+				# position via ClusterManager records (see contract_feed.gd) --
+				# Aunt Stephanie is stationed at Ironhold (characters.gd's
+				# home_sid). TALK_TO Todd intentionally carries no marker_sid:
+				# his position is unknown; finding him IS the gameplay.
+				"target": {"item": "stephanies_present", "npc": "Aunt Stephanie", "marker_sid": "ironhold"},
 			},
 		],
 	},
