@@ -91,6 +91,7 @@ func _promote(rec) -> void:
 		node.angular_velocity = rec.ang_vel
 	rec.live_node = node
 	_rebrand_port_zone(node, rec.name)
+	_apply_overlay_decorations(rec, node)
 	if is_ship:
 		_attach_ai(rec, node)
 
@@ -130,6 +131,60 @@ func _rebrand_port_zone(node, entity_name: String) -> void:
 		if npc is NPCProfile and npc.default_dialogue == PORT_CONTROL_DIALOGUE:
 			npc.faction = zone["authority"]
 			npc.character_name = PortControl.get_controller_name(node)
+
+# M42 -- applies whatever plain, generic decorations the record was carrying
+# (ClusterLoader._merge_overlay folded the story overlay onto it at load
+# time -- ClusterManager never imports story/*, it just consumes plain
+# fields). Called AFTER construction and AFTER _rebrand_port_zone(), per the
+# roadmap's M42 section: rebrand sets authority first, the port patch below
+# adds to it (must not clobber), and cast injection APPENDS to
+# available_npcs (MediumStation._init() already self-appends its own
+# port-control NPC -- see cluster_manager.gd's docking-bug comment above).
+# No-ops cheaply for the overwhelming majority of entities (asteroids,
+# patrols, unreferenced stations) that carry no overlay data.
+func _apply_overlay_decorations(rec, node) -> void:
+	# 1. Port patch -- merge into the node's port_zone (flat top-level merge;
+	# `authority` was just set by _rebrand_port_zone above and is left alone
+	# unless the patch explicitly names it, which no overlay entry does).
+	if not rec.port_patch.is_empty():
+		var zone = node.get("port_zone")
+		if zone is Dictionary and not zone.is_empty():
+			for key in rec.port_patch.keys():
+				zone[key] = rec.port_patch[key]
+
+	# 2. Cast -- append an NPCProfile per plain {name, role, dialogue_path}
+	# descriptor. Faction resolves NOW (not at load) because it depends on
+	# the node's (possibly just-rebranded) port_zone authority.
+	if not rec.cast.is_empty():
+		var npcs = node.get("available_npcs")
+		if npcs != null:
+			var zone2 = node.get("port_zone")
+			var faction: String = "Independent"
+			if zone2 is Dictionary and zone2.get("authority", "") != "":
+				faction = zone2["authority"]
+			for desc in rec.cast:
+				var npc := NPCProfile.new()
+				npc.character_name = desc.get("name", "Unknown Contact")
+				npc.faction = faction
+				npc.tier = NPCProfile.Tier.PUBLIC
+				var dpath: String = desc.get("dialogue_path", "")
+				if dpath != "" and ResourceLoader.exists(dpath):
+					npc.default_dialogue = load(dpath)
+				npcs.append(npc)
+
+	# 3. Component overrides -- {component_id: {field: value}} merged into
+	# the matching ship_components dict by "id". Missing-key-safe (.get())
+	# per the CLAUDE.md GDScript trap -- a record targeting a component id
+	# this hull doesn't have is simply skipped, never an error.
+	if not rec.component_overrides.is_empty():
+		var comps = node.get("ship_components")
+		if comps is Array:
+			for comp in comps:
+				var cid: String = comp.get("id", "")
+				if cid != "" and rec.component_overrides.has(cid):
+					var patch: Dictionary = rec.component_overrides[cid]
+					for key in patch.keys():
+						comp[key] = patch[key]
 
 func _attach_ai(rec, node) -> void:
 	# Only autonomous hulls get a brain. The player flies itself; asteroids,

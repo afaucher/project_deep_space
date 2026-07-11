@@ -29,9 +29,13 @@ static func build() -> ClusterDef:
 	def.player_start = Vector2(3000, 0)
 
 	# --- Hubs (medium stations) ---
-	_station(def, 1, "Ironhold", MediumStation, Vector2(0, 0), "hub")
-	_station(def, 2, "Drift Market", MediumStation, Vector2(200000, 40000), "hub")
-	_station(def, 3, "Refinery Prime", MediumStation, Vector2(40000, -150000), "hub")
+	# M42 -- sid is the story overlay's join key (story/home_cluster_overlay.gd,
+	# story/characters.gd); only entities story content actually references
+	# need one -- Ironhold (Aunt Stephanie) now, the five homes for M43's Todd
+	# + residents.
+	_station(def, 1, "Ironhold", MediumStation, Vector2(0, 0), "hub", "ironhold")
+	_station(def, 2, "Drift Market", MediumStation, Vector2(200000, 40000), "hub", "drift_market")
+	_station(def, 3, "Refinery Prime", MediumStation, Vector2(40000, -150000), "hub", "refinery_prime")
 
 	# --- Mining outposts (small stations), each parked on a field ---
 	_station(def, 10, "Slag Bay", SmallStation, Vector2(150000, 110000), "outpost")
@@ -45,13 +49,13 @@ static func build() -> ClusterDef:
 
 	# --- Mobile Homes (civilian habitats) parked in the outposts' fields ---
 	# Slag Bay homes
-	_home(def, 200, "Hermit's Rest", Vector2(145000, 115000))
-	_home(def, 201, "Claim 42", Vector2(155000, 105000))
+	_home(def, 200, "Hermit's Rest", Vector2(145000, 115000), "hermits_rest")
+	_home(def, 201, "Claim 42", Vector2(155000, 105000), "claim_42")
 	# Coldreach homes
-	_home(def, 202, "The Deep Freeze", Vector2(-75000, 95000))
-	_home(def, 203, "Lucky Strike", Vector2(-65000, 85000))
+	_home(def, 202, "The Deep Freeze", Vector2(-75000, 95000), "deep_freeze")
+	_home(def, 203, "Lucky Strike", Vector2(-65000, 85000), "lucky_strike")
 	# Deepcut homes
-	_home(def, 204, "Rock Bottom", Vector2(95000, -175000))
+	_home(def, 204, "Rock Bottom", Vector2(95000, -175000), "rock_bottom")
 
 	# --- Beacon road: Ironhold (0,0) -> Drift Market (200000,40000) ---
 	# Seven interior beacons at ~25k spacing (well inside the 50k comms range, so
@@ -84,9 +88,9 @@ static func build() -> ClusterDef:
 
 	return def
 
-static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String) -> void:
+static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String, sid: String = "") -> void:
 	def.add_entity({
-		"id": id, "name": name, "hull": hull,
+		"id": id, "sid": sid, "name": name, "hull": hull,
 		"kind": ClusterEntity.Kind.STATION, "pos": pos, "role": role,
 		"iff_tags": HOME_IFF, "is_static": true,
 	})
@@ -129,9 +133,9 @@ static func _cargo(def, id: int, name: String, a: Vector2, b: Vector2) -> void:
 	})
 
 # A mobile home holding station in a specific location.
-static func _home(def, id: int, name: String, pos: Vector2) -> void:
+static func _home(def, id: int, name: String, pos: Vector2, sid: String = "") -> void:
 	def.add_entity({
-		"id": id, "name": name, "hull": MobileHome,
+		"id": id, "sid": sid, "name": name, "hull": MobileHome,
 		"kind": ClusterEntity.Kind.STATION, "pos": pos,
 		"iff_tags": ["TEAM_CIVILIAN"], "is_static": true,
 	})

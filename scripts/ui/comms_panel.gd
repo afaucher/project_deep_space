@@ -283,6 +283,18 @@ func _process_dialogue(node_id: String) -> void:
 	if line != null:
 		chat_log.text += "\n[color=cyan][b]" + line.character + ":[/b][/color] " + line.text + "\n"
 		for resp in line.responses:
+			# M42 -- DialogueManager's get_next_dialogue_line() does NOT filter
+			# line.responses by a `- Response [if cond /]` gate itself: every
+			# response line.responses ID compiles into the array regardless,
+			# each carrying an `is_allowed` bool set from evaluating its own
+			# condition (see dialogue_manager.gd's _get_responses()/
+			# _check_condition() -- filtering is left to the caller, normally
+			# DialogueResponsesMenu's `hide_failed_responses`). This panel
+			# builds its own buttons directly, so it must do that filtering
+			# itself, or a gated response (e.g. aunt_stephanie.dialogue's
+			# mission-offer/status-check pair) would show unconditionally.
+			if not resp.is_allowed:
+				continue
 			var btn = Button.new()
 			btn.text = resp.text
 			btn.pressed.connect(func(): _on_response_clicked(resp))

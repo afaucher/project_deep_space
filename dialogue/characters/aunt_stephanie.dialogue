@@ -1,0 +1,21 @@
+~ start
+
+Aunt Stephanie: [STEPHANIE GREETING -- warm, busy mechanic, acknowledges the player docking in or hailing]
+- Ask about repairs.
+	do repairs_started = station.begin_repairs(player)
+	if repairs_started
+		Aunt Stephanie: [STEPHANIE REPAIR ACCEPT -- family doesn't pay, ship's getting fixed]
+	else
+		Aunt Stephanie: [STEPHANIE REPAIR REFUSAL -- can't work on you from way out there, dock with me first]
+	=> start
+- [RESPONSE PLACEHOLDER -- ask Stephanie about checking on Todd] [if not story.has_flag("todd_mission_accepted") /]
+	do story.set_flag("todd_mission_accepted")
+	do missions.start_mission_by_id("check_on_todd")
+	Aunt Stephanie: [STEPHANIE MISSION PITCH -- worried, Todd hasn't called, asks player to fly out and check on him]
+	Aunt Stephanie: [STEPHANIE MISSION ACCEPTANCE -- thanks the player, tells them where to start looking]
+	=> start
+- [RESPONSE PLACEHOLDER -- ask Stephanie for a status update on Todd] [if story.has_flag("todd_mission_accepted") /]
+	Aunt Stephanie: [STEPHANIE STATUS REMINDER -- still owes her a visit to Todd's place, hasn't heard back yet]
+	=> start
+- Goodbye.
+	=> END

@@ -14,11 +14,24 @@ const _Asteroid = preload("res://scripts/asteroid.gd")
 const FIELD_ID_BASE := 1000000
 const FIELD_ID_STRIDE := 10000
 
-static func load_into(def, manager) -> void:
+# M42 -- `overlay`/`characters` are optional story-data hooks (default null,
+# so every pre-M42 call site -- test_cluster_loader, test_campaign_bootstrap --
+# keeps working unchanged). When supplied they must expose the same static
+# interface as scripts/story/home_cluster_overlay.gd (`get_entry(sid) ->
+# Dictionary`) and scripts/story/characters.gd (`get_character(id) ->
+# Dictionary`); main.gd's _bootstrap_campaign supplies the real home overlay +
+# registry, tests may supply synthetic stand-ins with the same two static
+# methods. ClusterLoader stays story-AGNOSTIC in mechanism: it merges
+# whatever overlay dict it's handed onto the record's plain generic fields
+# (cast/port_patch/component_overrides) and never interprets their content --
+# see cluster_manager.gd's _promote(), which applies them without knowing who
+# Stephanie is.
+static func load_into(def, manager, overlay = null, characters = null) -> void:
 	for e in def.entities:
 		var rec = ClusterEntity.new()
 		rec.id = e["id"]
 		rec.name = e.get("name", "")
+		rec.sid = e.get("sid", "")
 		rec.hull_script = e["hull"]
 		rec.kind = e.get("kind", ClusterEntity.Kind.TRAFFIC)
 		rec.pos = e["pos"]
@@ -26,6 +39,7 @@ static func load_into(def, manager) -> void:
 		rec.iff_tags = tags.duplicate(true)
 		rec.is_static = e.get("is_static", false)
 		rec.behavior = e.get("behavior", null)
+		_merge_overlay(rec, overlay, characters)
 		manager.add_record(rec)
 
 	# Expand asteroid fields into individual records. Seeded RNG -> deterministic
@@ -50,3 +64,35 @@ static func load_into(def, manager) -> void:
 			rec.pos = center + Vector2(cos(aa), sin(aa)) * rr
 			rec.is_static = true
 			manager.add_record(rec)
+
+# M42 -- folds one overlay entry (keyed by rec.sid) onto the record's plain
+# generic fields. No-ops when overlay is null or the record has no sid or the
+# overlay has no entry for it -- the vast majority of entities (asteroids,
+# patrols, beacons, unreferenced stations) take this fast path untouched.
+# Cast resolution happens HERE (load time), not at promote: characters.gd's
+# {name, role, dialogue} becomes a plain {name, role, dialogue_path}
+# descriptor on the record, so ClusterManager (story-blind by design) only
+# ever touches plain data it already knows how to build an NPCProfile from.
+# faction is deliberately NOT resolved here -- it depends on the node's
+# port_zone authority, which _rebrand_port_zone() only knows at promote time.
+static func _merge_overlay(rec, overlay, characters) -> void:
+	if overlay == null or rec.sid == "":
+		return
+	var entry: Dictionary = overlay.get_entry(rec.sid)
+	if entry.is_empty():
+		return
+
+	var cast_ids: Array = entry.get("cast", [])
+	if characters != null:
+		for cid in cast_ids:
+			var cdata: Dictionary = characters.get_character(cid)
+			if cdata.is_empty():
+				continue
+			rec.cast.append({
+				"name": cdata.get("name", cid),
+				"role": cdata.get("role", ""),
+				"dialogue_path": cdata.get("dialogue", ""),
+			})
+
+	rec.port_patch = entry.get("port", {}).duplicate(true)
+	rec.component_overrides = entry.get("component_overrides", {}).duplicate(true)

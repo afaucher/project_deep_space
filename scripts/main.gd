@@ -15,6 +15,8 @@ const MenuCompass = preload("res://scripts/ui/menu_compass.gd")
 const ClusterManager = preload("res://scripts/cluster/cluster_manager.gd")
 const ClusterLoader = preload("res://scripts/cluster/cluster_loader.gd")
 const HomeCluster = preload("res://scripts/cluster/home_cluster.gd")
+const HomeClusterOverlay = preload("res://scripts/story/home_cluster_overlay.gd")
+const StoryCharacters = preload("res://scripts/story/characters.gd")
 const NavComputer = preload("res://scripts/nav/nav_computer.gd")
 const NavAutopilot = preload("res://scripts/nav/nav_autopilot.gd")
 
@@ -227,7 +229,11 @@ func _bootstrap_campaign() -> void:
 	# rendering match exactly; the manager node just bookkeeps.
 	manager.live_parent = self
 	add_child(manager)
-	ClusterLoader.load_into(def, manager)
+	# M42 -- the real story overlay + character registry (see
+	# scripts/story/home_cluster_overlay.gd, scripts/story/characters.gd).
+	# ClusterLoader stays story-agnostic in mechanism; this is the one call
+	# site that actually knows Stephanie exists.
+	ClusterLoader.load_into(def, manager, HomeClusterOverlay, StoryCharacters)
 
 	var pid = multiplayer.get_unique_id()
 	_spawn_player_ship(pid, def.player_start)

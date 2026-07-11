@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://bqqeb4n6rgt7g"
+path="res://.godot/imported/aunt_stephanie.dialogue-9335c4d89de24c39f928f75b29c1a195.tres"
+
+[deps]
+
+source_file="res://dialogue/characters/aunt_stephanie.dialogue"
+dest_files=["res://.godot/imported/aunt_stephanie.dialogue-9335c4d89de24c39f928f75b29c1a195.tres"]
+
+[params]
+
+defaults=true

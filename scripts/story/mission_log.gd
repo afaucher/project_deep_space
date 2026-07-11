@@ -23,6 +23,12 @@ class_name MissionLog
 # added to ship.gd's already-hot per-frame path (roadmap explicitly calls
 # this out). Checked on an accumulated ~0.5s tick, not every frame.
 
+# M42 -- preloaded so start_mission_by_id() can look up catalog definitions by
+# id (dialogue mutations pass a plain String, never an inline Dictionary
+# literal -- see mission_catalog.gd's header). Preload const, not bare
+# class_name, per the headless class-cache caveat (CLAUDE.md).
+const MissionCatalog = preload("res://scripts/story/mission_catalog.gd")
+
 signal mission_started(id: String)
 signal objective_completed(mission_id: String, objective_id: String)
 signal mission_completed(id: String)
@@ -75,6 +81,16 @@ func start_mission(def: Dictionary) -> bool:
 	missions[id] = mission
 	mission_started.emit(id)
 	return true
+
+# M42 -- catalog lookup + start, so .dialogue mutations write
+# `do missions.start_mission_by_id("check_on_todd")` with no dictionary
+# literals. Returns false (no-op) for an unknown id, same failure mode as
+# start_mission() with a bad/empty def.
+func start_mission_by_id(id: String) -> bool:
+	var def: Dictionary = MissionCatalog.get_mission(id)
+	if def.is_empty():
+		return false
+	return start_mission(def)
 
 func active_missions() -> Array:
 	var out: Array = []
