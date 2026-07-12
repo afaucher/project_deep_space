@@ -161,6 +161,16 @@ func _run() -> void:
 		var repair_line = await dm.get_next_dialogue_line(resource, repairs_resp.next_id, states)
 		_assert(repair_line != null, "stephanie: repairs response yields a reply line")
 		_assert(not station.active_repairs.has(player.get_instance_id()), "stephanie: undocked player is not registered for repairs")
+		# The conversation must LOOP: continuing past her refusal line drops
+		# back into the same menu (greeting line with responses attached),
+		# never ending the conversation -- the same regression class as the
+		# port-control => END bug (a denied player had to re-hail to retry).
+		if repair_line != null:
+			var after_refusal = await dm.get_next_dialogue_line(resource, repair_line.next_id, states)
+			_assert(after_refusal != null, "stephanie: conversation continues past the repair refusal instead of ending")
+			if after_refusal != null:
+				_assert(_find_response_exact(after_refusal, "Ask about repairs.") != null,
+					"stephanie: after the refusal the menu returns ('Ask about repairs.' offered again)")
 
 	# --- Phase 3: accept the mission ---
 	line = await dm.get_next_dialogue_line(resource, "start", states)
