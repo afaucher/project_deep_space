@@ -1235,6 +1235,17 @@ func _ready() -> void:
 		
 	add_to_group("ships")
 
+	# M46 -- derive exclusion_radius once for a controlled station that didn't
+	# author an explicit value (absent/0.0). See PortZone.derive_exclusion_radius
+	# for the factor/reasoning. Runs here (Ship._ready(), triggered synchronously
+	# by add_child()) BEFORE ClusterManager's port_patch merge, which happens
+	# AFTER add_child() returns (cluster_manager.gd's _apply_overlay_decorations)
+	# -- so a story overlay's authored override always wins over this default,
+	# and get_bounding_radius() below already has ship_components to measure
+	# (authored in _init(), which already ran).
+	if not port_zone.is_empty() and float(port_zone.get("exclusion_radius", 0.0)) <= 0.0:
+		port_zone["exclusion_radius"] = PortZone.derive_exclusion_radius(get_bounding_radius())
+
 	mass = get_ship_mass()
 	inertia = get_ship_inertia()
 	gravity_scale = 0.0

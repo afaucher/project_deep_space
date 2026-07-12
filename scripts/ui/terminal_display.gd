@@ -35,6 +35,7 @@ var sfx_impact: AudioStreamPlayer    # one-shot hull thud on damage
 var damage_flash: ColorRect          # red full-screen flash on damage
 var overheat_label: Label            # blinking on-screen overheat alert
 var zone_banner_label: Label         # M35 -- zone-crossing banner (enter/exit)
+var zone_status_label: Label         # M46 -- compact persistent "<authority> · LIMIT <n>" line
 
 # M35 -- crossing-banner show/hide semantics: the roadmap's test scenario 2
 # says "entering sets a banner...leaving clears it" -- driven by the
@@ -424,6 +425,25 @@ func _ready() -> void:
 	zone_banner_label.visible = false
 	add_child(zone_banner_label)
 
+	# M46 -- compact persistent zone status line ("IRONHOLD CONTROL · LIMIT
+	# 200"), placement per the roadmap: "may also echo as a compact persistent
+	# status line...compatible with, not a substitute for, the gauge work".
+	# The limit LIVES with the helm gauge (helm_panel.gd's EngineSlider tick +
+	# readout, which is the actionable/required piece); this is just a
+	# glanceable header-region echo of which authority's rules currently apply
+	# -- top-left of the top bar area, distinct from the transient crossing
+	# banner above (which fades after a few seconds; this persists for as
+	# long as the player is actually inside a zone).
+	zone_status_label = Label.new()
+	zone_status_label.text = ""
+	zone_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	zone_status_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	zone_status_label.position = Vector2(8, 44)
+	zone_status_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	zone_status_label.add_theme_font_size_override("font_size", 13)
+	zone_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(zone_status_label)
+
 	# F1 controls overlay (added last so it draws on top of every panel) + a persistent
 	# nudge so a cold player discovers it.
 	help_overlay = HelpOverlay.new()
@@ -522,6 +542,26 @@ func update_data(packet: Dictionary) -> void:
 	var maxh = eng.get("max_heat", 0.0)
 	_heat_fraction = (eng.get("current_heat", 0.0) / maxh) if maxh > 0.0 else 0.0
 	_update_overheat(_heat_fraction >= OVERHEAT_FRACTION)
+
+	_update_zone_status(packet)
+
+# M46 -- drives zone_status_label's text every packet: empty outside any
+# controlled zone, "<authority>" inside one with no/zero speed_advisory rule,
+# "<authority> · LIMIT <n>" inside one that authors a positive limit. Same
+# live rules lookup _on_zone_crossing already uses (_rules_for_authority).
+func _update_zone_status(packet: Dictionary) -> void:
+	if zone_status_label == null:
+		return
+	var authority = packet.get("current_port_zone", null)
+	if authority == null or authority == "":
+		zone_status_label.text = ""
+		return
+	var rules: Dictionary = _rules_for_authority(authority)
+	var limit: float = float(rules.get("speed_advisory", 0.0))
+	if limit > 0.0:
+		zone_status_label.text = "%s · LIMIT %d" % [authority, int(round(limit))]
+	else:
+		zone_status_label.text = str(authority)
 
 # M35 -- crossing banner. entering=true on zone_enter, false on zone_exit;
 # authority is the zone's name straight off the transient event (ship.gd's

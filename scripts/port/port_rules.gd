@@ -104,3 +104,50 @@ static func speed_advisory_active(in_zone: bool, speed: float, limit: float) -> 
 static func speed_advisory_active_for_rules(in_zone: bool, speed: float, rules: Dictionary) -> bool:
 	var limit: float = float(rules.get("speed_advisory", 0.0))
 	return speed_advisory_active(in_zone, speed, limit)
+
+# M46 -- helm speed-limit readout, three-state truth table (design_ideas/
+# port_zones_and_channels.md: "current / limit readout with three color
+# states (under / approaching / over)"). Replaces the old binary
+# speed_advisory_active-driven amber on the velocity gauge specifically
+# (speed_advisory_active itself is left working unchanged -- see that
+# function's own doc comment -- other helm amber cues may still read it).
+#
+# NORMAL: outside a zone, a zone with no/zero limit, or comfortably under the
+#   limit (< SPEED_APPROACHING_RATIO of it).
+# APPROACHING: in zone, at or above SPEED_APPROACHING_RATIO of the limit but
+#   not over it -- the gauge tick makes this actionable BEFORE the ship is
+#   actually speeding.
+# OVER: in zone and strictly over the limit (matches speed_advisory_active's
+#   own "over", not "at or over", convention).
+enum SpeedState { NORMAL, APPROACHING, OVER }
+
+# 90% of the limit -- below this, normal; from here up to (not including) the
+# limit itself, approaching.
+const SPEED_APPROACHING_RATIO := 0.9
+
+static func speed_zone_state(speed: float, limit: float, in_zone: bool) -> int:
+	if not in_zone or limit <= 0.0:
+		return SpeedState.NORMAL
+	if speed > limit:
+		return SpeedState.OVER
+	if speed >= limit * SPEED_APPROACHING_RATIO:
+		return SpeedState.APPROACHING
+	return SpeedState.NORMAL
+
+# M46 -- lateral-drift cue threshold (design_ideas/port_zones_and_channels.md:
+# "the amber keys off TRUE speed...while the number shows FORWARD speed -- a
+# fast lateral drift reads amber over a legal-looking number"). The helm
+# readout's color already keys off TRUE speed (vector magnitude); this pure
+# truth table decides when a small secondary "lateral Δ" number should show
+# alongside the (forward-speed) main readout so an amber/over state with a
+# low-looking forward number explains itself. Either condition alone is
+# enough to show the cue -- a modest-speed ship drifting sideways at a large
+# FRACTION of its own speed, or a near-hovering ship with a small but
+# absolute lateral velocity, are both worth flagging.
+const DRIFT_CUE_RATIO := 0.2   # lateral speed >= 20% of true speed
+const DRIFT_CUE_ABS := 25.0    # ...or lateral speed alone exceeds 25 u/s
+
+static func drift_cue_visible(lateral_speed: float, true_speed: float) -> bool:
+	if lateral_speed > DRIFT_CUE_ABS:
+		return true
+	return true_speed > 0.0 and lateral_speed >= true_speed * DRIFT_CUE_RATIO

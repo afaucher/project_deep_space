@@ -167,9 +167,36 @@ class EngineSlider extends Control:
 	# drives, flipping the readout's color to amber as a warn-only cue (no
 	# thrust clamp, no other gameplay effect).
 	var show_speed_number: bool = false
+	# Kept working (set every update_data() call below) even though the
+	# gauge's own color no longer keys off it directly -- M35's own comment
+	# already flagged "helm amber elsewhere may use it", and the M46 roadmap
+	# explicitly says to leave it working.
 	var speed_advisory_active: bool = false
+
+	# M46 -- zone speed limit + three-state readout (design_ideas/
+	# port_zones_and_channels.md: "current / limit readout with three color
+	# states"). zone_limit is 0.0 outside a zone or in a zone with no/zero
+	# speed_advisory rule -- see helm_panel.update_data(). zone_speed_state
+	# is a PortRules.SpeedState value (NORMAL/APPROACHING/OVER), computed
+	# from TRUE speed (vector magnitude) even though the readout NUMBER
+	# below is forward speed -- see PortRules.speed_zone_state's doc comment
+	# for why (a fast lateral drift must still read as approaching/over).
+	var zone_limit: float = 0.0
+	var zone_speed_state: int = PortRules.SpeedState.NORMAL
+
+	# M46 -- lateral-drift cue: a small secondary number shown alongside the
+	# main (forward-speed) readout when PortRules.drift_cue_visible() says
+	# the color state is likely explained by sideways drift rather than
+	# forward speed. lateral_speed is the magnitude of the velocity
+	# component perpendicular to the ship's heading.
+	var show_drift_cue: bool = false
+	var lateral_speed: float = 0.0
+
 	const SPEED_NORMAL_COLOR := Color(0.8, 0.8, 0.8)
-	const SPEED_ADVISORY_COLOR := Color(1.0, 0.7, 0.1) # amber
+	const SPEED_APPROACHING_COLOR := Color(1.0, 0.7, 0.1)  # amber
+	const SPEED_OVER_COLOR := Color(1.0, 0.25, 0.15)       # red-tinted amber -- "over", not just "approaching"
+	const ZONE_LIMIT_TICK_COLOR := Color(1.0, 0.7, 0.1, 0.85)
+	const DRIFT_CUE_COLOR := Color(1.0, 0.55, 0.2)
 
 	func _ready() -> void:
 		custom_minimum_size = Vector2(40, 200)
@@ -220,18 +247,53 @@ class EngineSlider extends Control:
 		var dot_color = Color.RED if is_active_control else Color(0.7, 0.7, 0.7)
 		draw_circle(Vector2(size.x / 2.0, dot_y), 8.0, dot_color)
 
-		# M35 -- numeric speed readout, screen-space text below the bar/dot
+		# M46 -- zone speed-limit tick(s). Drawn at +limit AND -limit since this
+		# gauge's axis is -max_speed..+max_speed (a limit is a magnitude, not a
+		# direction) -- so dragging the target-velocity bug toward either end
+		# shows legal-or-not before the ship is actually moving that fast, per
+		# the roadmap's "actionable when SETTING a target velocity" goal.
+		# zone_limit is 0.0 outside a zone / with no rule authored, so this is a
+		# no-op there.
+		if zone_limit > 0.0:
+			var pos_t = clampf((zone_limit - min_val) / (max_val - min_val), 0.0, 1.0)
+			var pos_y = size.y * (1.0 - pos_t)
+			draw_line(Vector2(0, pos_y), Vector2(size.x, pos_y), ZONE_LIMIT_TICK_COLOR, 2.0)
+			var neg_t = clampf((-zone_limit - min_val) / (max_val - min_val), 0.0, 1.0)
+			var neg_y = size.y * (1.0 - neg_t)
+			draw_line(Vector2(0, neg_y), Vector2(size.x, neg_y), ZONE_LIMIT_TICK_COLOR, 2.0)
+
+		# M35/M46 -- numeric speed readout, screen-space text below the bar/dot
 		# gauge (the gauge itself is unchanged -- this is purely additive).
-		# Amber while speed_advisory_active, otherwise the same neutral grey
-		# the rest of this gauge already uses.
+		# "CUR / LIMIT" while in a zone with a positive limit (zone_limit > 0),
+		# plain number outside/no-rule -- unchanged from M35 there. Three color
+		# states (M46) replace the old binary amber; see PortRules.speed_zone_state.
 		if show_speed_number:
 			var font = ThemeDB.fallback_font
 			var font_size = 14
-			var speed_color = SPEED_ADVISORY_COLOR if speed_advisory_active else SPEED_NORMAL_COLOR
-			var speed_text = "%d" % int(round(actual_val))
+			var speed_color := SPEED_NORMAL_COLOR
+			match zone_speed_state:
+				PortRules.SpeedState.APPROACHING:
+					speed_color = SPEED_APPROACHING_COLOR
+				PortRules.SpeedState.OVER:
+					speed_color = SPEED_OVER_COLOR
+			var speed_text: String
+			if zone_limit > 0.0:
+				speed_text = "%d / %d" % [int(round(actual_val)), int(round(zone_limit))]
+			else:
+				speed_text = "%d" % int(round(actual_val))
 			var text_size = font.get_string_size(speed_text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
 			var text_pos = Vector2(size.x / 2.0 - text_size.x / 2.0, size.y + font_size + 4.0)
 			draw_string(font, text_pos, speed_text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, speed_color)
+
+			# M46 -- lateral-drift cue: a small secondary number so an amber/over
+			# state sitting over a legal-looking FORWARD number explains itself
+			# (the readout's color keys off TRUE speed, this text shows why).
+			if show_drift_cue:
+				var drift_font_size = 11
+				var drift_text = "lat %d" % int(round(lateral_speed))
+				var drift_size = font.get_string_size(drift_text, HORIZONTAL_ALIGNMENT_CENTER, -1, drift_font_size)
+				var drift_pos = Vector2(size.x / 2.0 - drift_size.x / 2.0, text_pos.y + font_size + 2.0)
+				draw_string(font, drift_pos, drift_text, HORIZONTAL_ALIGNMENT_CENTER, -1, drift_font_size, DRIFT_CUE_COLOR)
 
 var linear_mode: int = 0 # 0 = Throttle, 1 = Velocity
 var target_velocity: float = 0.0
@@ -470,10 +532,33 @@ func update_data(packet: Dictionary) -> void:
 	# otherwise track -- a fast lateral drift is still an overspeed relative
 	# to a port's advisory even if forward_speed reads low. Warn-only: this
 	# never touches target_thrust/target_velocity, just the readout color.
+	# Kept working (M46 roadmap: "helm amber elsewhere may use it") even
+	# though the gauge's OWN color below now comes from the three-state
+	# truth table instead.
 	var authority = current_state.get("current_port_zone", null)
 	var rules: Dictionary = _rules_for_authority(authority)
+	var in_zone: bool = authority != null and authority != ""
+	var true_speed: float = actual_vel.length()
 	velocity_slider.speed_advisory_active = PortRules.speed_advisory_active_for_rules(
-		authority != null and authority != "", actual_vel.length(), rules)
+		in_zone, true_speed, rules)
+
+	# M46 -- zone speed limit + three-state readout color. limit is 0.0 when
+	# not in a zone or the zone authors no/zero speed_advisory (PortRules.
+	# speed_zone_state's own in_zone/limit<=0 guards already return NORMAL for
+	# those cases, and zone_limit itself is explicitly zeroed outside a zone so
+	# the readout falls back to a plain number -- see EngineSlider._draw()).
+	var limit: float = float(rules.get("speed_advisory", 0.0))
+	velocity_slider.zone_limit = limit if in_zone else 0.0
+	velocity_slider.zone_speed_state = PortRules.speed_zone_state(true_speed, limit, in_zone)
+
+	# M46 -- lateral-drift cue: magnitude of the velocity component
+	# perpendicular to the ship's heading, and whether it's large enough
+	# (relative or absolute -- see PortRules.drift_cue_visible) to explain the
+	# readout's color on its own.
+	var lateral_dir: Vector2 = forward.rotated(PI / 2.0)
+	var lateral_speed: float = absf(actual_vel.dot(lateral_dir))
+	velocity_slider.lateral_speed = lateral_speed
+	velocity_slider.show_drift_cue = PortRules.drift_cue_visible(lateral_speed, true_speed)
 
 	if linear_mode == 0:
 		# Throttle is active. Implied velocity is just thrust * max_speed

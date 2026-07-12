@@ -18,7 +18,23 @@ extends Node
 const MediumStation = preload("res://scripts/ships/medium_station.gd")
 const NavigationPanel = preload("res://scripts/ui/navigation_panel.gd")
 const PortRules = preload("res://scripts/port/port_rules.gd")
+const PortZone = preload("res://scripts/port/port_zone.gd")
 const TerminalDisplay = preload("res://scripts/ui/terminal_display.gd")
+const ClusterManager = preload("res://scripts/cluster/cluster_manager.gd")
+const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
+const ClusterLoader = preload("res://scripts/cluster/cluster_loader.gd")
+const ClusterDef = preload("res://scripts/cluster/cluster_def.gd")
+
+# M46 -- synthetic overlay for the exclusion_radius port_patch scenario. Same
+# static get_entry(sid) -> Dictionary interface ClusterLoader._merge_overlay
+# expects (see cluster_loader.gd), mirroring test_story_overlay.gd's
+# SyntheticOverlay pattern rather than inventing a new mechanism.
+class ExclusionPatchOverlay:
+	extends RefCounted
+	static func get_entry(sid: String) -> Dictionary:
+		if sid == "patched_station":
+			return {"port": {"exclusion_radius": 999.0}}
+		return {}
 
 var main_node: Node = null
 var failures: Array = []
@@ -42,6 +58,9 @@ func setup(main) -> void:
 	_run_speed_advisory_scenario()
 	_run_extensibility_scenario()
 	_run_ironhold_data_scenario()
+	_run_speed_zone_state_scenario()
+	_run_drift_cue_scenario()
+	_run_exclusion_radius_scenario()
 
 	_finalize()
 
@@ -298,6 +317,129 @@ func _run_ironhold_data_scenario() -> void:
 		"Ironhold's actual authored rules produce the roadmap's exact worked example (got '%s')" % banner)
 
 	_free_if_valid(station)
+
+# ---------------------------------------------------------------------------
+# Scenario 6 (M46) -- three-state speed readout truth table
+# (PortRules.speed_zone_state), incl. boundaries at 90% and 100% of the
+# limit, in_zone == false always NORMAL, and limit == 0 always NORMAL.
+# ---------------------------------------------------------------------------
+func _run_speed_zone_state_scenario() -> void:
+	var limit := 200.0
+
+	_assert(PortRules.speed_zone_state(179.0, limit, true) == PortRules.SpeedState.NORMAL,
+		"speed_zone_state: just under 90%% of the limit (179/200) -> NORMAL")
+	_assert(PortRules.speed_zone_state(180.0, limit, true) == PortRules.SpeedState.APPROACHING,
+		"speed_zone_state: exactly 90%% of the limit (180/200) -> APPROACHING (boundary is inclusive)")
+	_assert(PortRules.speed_zone_state(199.0, limit, true) == PortRules.SpeedState.APPROACHING,
+		"speed_zone_state: just under the limit (199/200) -> APPROACHING")
+	_assert(PortRules.speed_zone_state(200.0, limit, true) == PortRules.SpeedState.APPROACHING,
+		"speed_zone_state: exactly AT the limit (200/200) -> APPROACHING, not OVER (matches speed_advisory_active's strict '>' convention)")
+	_assert(PortRules.speed_zone_state(200.01, limit, true) == PortRules.SpeedState.OVER,
+		"speed_zone_state: just over the limit -> OVER")
+	_assert(PortRules.speed_zone_state(500.0, limit, true) == PortRules.SpeedState.OVER,
+		"speed_zone_state: wildly over the limit -> OVER")
+	_assert(PortRules.speed_zone_state(0.0, limit, true) == PortRules.SpeedState.NORMAL,
+		"speed_zone_state: standing still in-zone -> NORMAL")
+
+	# in_zone == false -> always NORMAL regardless of speed/limit.
+	_assert(PortRules.speed_zone_state(999.0, limit, false) == PortRules.SpeedState.NORMAL,
+		"speed_zone_state: wildly over the limit but OUTSIDE the zone -> NORMAL")
+	_assert(PortRules.speed_zone_state(0.0, limit, false) == PortRules.SpeedState.NORMAL,
+		"speed_zone_state: standing still outside the zone -> NORMAL")
+
+	# limit == 0 (no rule authored) -> always NORMAL regardless of in_zone/speed.
+	_assert(PortRules.speed_zone_state(999.0, 0.0, true) == PortRules.SpeedState.NORMAL,
+		"speed_zone_state: in-zone and fast but limit is 0/unset -> NORMAL")
+	_assert(PortRules.speed_zone_state(999.0, -5.0, true) == PortRules.SpeedState.NORMAL,
+		"speed_zone_state: a malformed negative limit is treated as 'no rule' -> NORMAL")
+
+# ---------------------------------------------------------------------------
+# Scenario 7 (M46) -- lateral-drift cue visibility (PortRules.drift_cue_visible).
+# ---------------------------------------------------------------------------
+func _run_drift_cue_scenario() -> void:
+	_assert(PortRules.drift_cue_visible(30.0, 100.0) == true,
+		"drift_cue_visible: lateral 30/100 true speed (30%%) exceeds the 20%% ratio threshold -> visible")
+	_assert(PortRules.drift_cue_visible(10.0, 100.0) == false,
+		"drift_cue_visible: lateral 10/100 true speed (10%%, and well under the 25u/s absolute floor) -> not visible")
+	_assert(PortRules.drift_cue_visible(26.0, 1000.0) == true,
+		"drift_cue_visible: lateral 26u/s alone exceeds the 25u/s absolute floor even at a tiny fraction of true speed -> visible")
+	_assert(PortRules.drift_cue_visible(0.0, 0.0) == false,
+		"drift_cue_visible: no motion at all -> not visible (no div-by-zero either)")
+	_assert(PortRules.drift_cue_visible(0.0, 500.0) == false,
+		"drift_cue_visible: pure forward speed, zero lateral drift -> not visible")
+
+# ---------------------------------------------------------------------------
+# Scenario 8 (M46) -- exclusion_radius derivation: derived fallback when
+# unauthored, authored override wins when set before _ready(), and a story
+# overlay's port_patch override wins over the derived default (applied AFTER
+# Ship._ready()'s derivation, via the real ClusterLoader -> ClusterManager
+# pipeline -- same pattern test_story_overlay.gd uses for its port-patch
+# scenario).
+# ---------------------------------------------------------------------------
+func _run_exclusion_radius_scenario() -> void:
+	# --- Derived fallback: no exclusion_radius authored -> Ship._ready()
+	# derives one from the hull's own bounding radius. ---
+	var derived_station := MediumStation.new()
+	derived_station.name = "DerivedExclusionCheck"
+	derived_station.owner_id = 1
+	derived_station.iff_tags = ["TEAM_PLAYER"]
+	main_node.add_child(derived_station) # add_child triggers _ready() synchronously
+
+	var derived_zone: Dictionary = derived_station.get_port_zone()
+	var expected_radius: float = PortZone.derive_exclusion_radius(derived_station.get_bounding_radius())
+	_assert(float(derived_zone.get("exclusion_radius", 0.0)) > 0.0,
+		"exclusion_radius: a controlled station with none authored derives a positive value")
+	_assert(is_equal_approx(float(derived_zone.get("exclusion_radius", 0.0)), expected_radius),
+		"exclusion_radius: the derived value matches PortZone.derive_exclusion_radius(hull bounding radius) exactly (got %s, want %s)" % [derived_zone.get("exclusion_radius", 0.0), expected_radius])
+	_assert(expected_radius > derived_station.get_bounding_radius(),
+		"exclusion_radius: the derived disc extends beyond the hull itself (a no-fly zone that doesn't clear the hull would be meaningless)")
+	_free_if_valid(derived_station)
+
+	# --- Authored override: set BEFORE the station enters the tree (before
+	# _ready() runs) -- Ship._ready()'s derivation must leave it untouched. ---
+	var authored_station := MediumStation.new()
+	authored_station.name = "AuthoredExclusionCheck"
+	authored_station.owner_id = 1
+	authored_station.iff_tags = ["TEAM_PLAYER"]
+	authored_station.port_zone["exclusion_radius"] = 4242.0
+	main_node.add_child(authored_station)
+
+	var authored_zone: Dictionary = authored_station.get_port_zone()
+	_assert(float(authored_zone.get("exclusion_radius", 0.0)) == 4242.0,
+		"exclusion_radius: an authored value set before _ready() survives untouched (got %s)" % authored_zone.get("exclusion_radius", 0.0))
+	_free_if_valid(authored_station)
+
+	# --- port_patch override: a story overlay's "port": {"exclusion_radius": ...}
+	# entry, merged by ClusterManager._apply_overlay_decorations AFTER
+	# Ship._ready()'s derivation already ran -- the patch must win. ---
+	var manager := ClusterManager.new()
+	manager.policy.configure_full_sim()
+	manager.live_parent = main_node
+	main_node.add_child(manager)
+
+	var def := ClusterDef.new()
+	def.name = "Exclusion Patch Test Cluster"
+	def.bounds = Rect2(-10000, -10000, 200000, 200000)
+	def.player_start = Vector2.ZERO
+	def.add_entity({"id": 1, "sid": "patched_station", "name": "Patched Station", "hull": MediumStation,
+		"kind": ClusterEntity.Kind.STATION, "pos": Vector2(0, 0), "iff_tags": [], "is_static": true})
+
+	ClusterLoader.load_into(def, manager, ExclusionPatchOverlay, null)
+	manager.tick(0.0)
+
+	var rec = null
+	for r in manager.records:
+		if r.id == 1:
+			rec = r
+	_assert(rec != null and rec.is_live(), "the patched station should be promoted live")
+	if rec != null and rec.is_live():
+		var patched_zone: Dictionary = rec.live_node.get_port_zone()
+		_assert(float(patched_zone.get("exclusion_radius", 0.0)) == 999.0,
+			"exclusion_radius: a story overlay's port_patch override wins over the derived default (got %s)" % patched_zone.get("exclusion_radius", 0.0))
+		_assert(patched_zone.get("authority", "") == "Patched Station Control",
+			"exclusion_radius: the port_patch override must not clobber the rebranded authority (got '%s')" % patched_zone.get("authority", ""))
+
+	manager.queue_free()
 
 func _finalize() -> void:
 	if finished:
