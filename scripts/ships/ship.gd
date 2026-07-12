@@ -703,8 +703,39 @@ func is_component_powered(comp_id: String) -> bool:
 			# and recovers automatically the instant a reactor comes back on.
 			if c["type"] == "reactor" or c["type"] == "hull":
 				return true
-			return get_total_power_rating("reactor") > 0.0
+			return _get_reactor_power_rating_cached() > 0.0
 	return false
+
+# M45 perf fix: is_component_powered() is called O(component count) times per
+# ship per physics frame (heat/EM loop, get_total_rating/get_max_rating for
+# every sys_type, PD, transponder, comms range...), and every non-reactor/hull
+# call used to re-derive get_total_power_rating("reactor") from scratch (its
+# own O(component count) scan, itself calling is_component_powered on every
+# reactor) -- an O(n^2) per-frame cost. PerfProbe's heat_em_component_loop tag
+# convicted this (~2.9ms/frame, ~17.5% of the 16.67ms tick budget, stable
+# across every M45 bisection run regardless of sensors/AI/eng-log toggles --
+# see implementation_plans/m45_physics_perf_investigation.md "Findings").
+#
+# Reactor power rating only actually changes when a reactor's health or
+# powered_on state changes (damage, repair, a switch toggle) -- not every
+# physics frame -- so this caches the value for the CURRENT physics frame
+# (Engine.get_physics_frames()) and recomputes on a frame change, collapsing
+# the O(n^2) rescans inside a single tick down to one O(n) scan per ship per
+# frame. A frame-scoped cache (rather than a true health-mutation dirty flag
+# invalidated at every take_damage/repair/power-toggle call site) was chosen
+# deliberately: it needs no new invalidation hooks scattered across the
+# codebase, where a missed hook would silently return a STALE powered state
+# (a much worse failure mode for combat-outcome determinism than one tick,
+# 1/60s, of latency on a reactor state change).
+var _reactor_power_cache: float = 0.0
+var _reactor_power_cache_frame: int = -1
+
+func _get_reactor_power_rating_cached() -> float:
+	var frame := Engine.get_physics_frames()
+	if _reactor_power_cache_frame != frame:
+		_reactor_power_cache = get_total_power_rating("reactor")
+		_reactor_power_cache_frame = frame
+	return _reactor_power_cache
 
 func get_component_health_ratio(comp_id: String) -> float:
 	for c in ship_components:
@@ -1290,8 +1321,43 @@ func _ready() -> void:
 		# _physics_process (sensor["timer"] -= delta); the stations' search dishes
 		# never authored it, aborting the whole sweep loop. base_em_emission is read
 		# for passive EM (safely, via .get) -- defaulted here too for consistency.
+		#
+		# M45 perf fix: every RECURRING sweep after the first stayed perfectly
+		# synchronized across every ship forever -- since refresh_interval is a
+		# fixed value ticked down by a fixed delta (deterministic --fixed-fps
+		# sim), sensor["timer"] = sensor["refresh_interval"] always landed
+		# every ship's next sweep on the exact same physics frame as every
+		# other ship's, a "thundering herd". PerfProbe's sensor_sweep tag
+		# convicted this: max_frame_us ~2.4-2.6ms (all ~24 ships' sweeps
+		# landing on one frame) against a ~350us average (see
+		# implementation_plans/m45_physics_perf_investigation.md "Findings").
+		#
+		# timer still DEFAULTS to 0.0 (immediate first sweep) -- an earlier
+		# version of this fix staggered the INITIAL timer instead, which
+		# delayed a freshly-spawned/newly-authored ship's first-ever detection
+		# by up to a full refresh_interval and broke test_mine (a stationary
+		# mine's target LAC drifted much closer, sometimes into direct
+		# overlap, before first being sensed -- triggering steering.gd's
+		# close-range anti-overlap avoidance and blowing the mine's
+		# station-keeping tolerance). Immediate first sweep is relied on by
+		# every existing spawn path; staggering only the RECURRING reset (see
+		# the sweep loop below, `sensor["timer"] = refresh_interval +
+		# _sweep_stagger`) still de-synchronizes the herd from the second
+		# sweep onward without touching that first-detection guarantee.
+		# _sweep_stagger is a deterministic function of stable authored
+		# identity (this ship's name + the component's own id), NOT randf:
+		# CLAUDE.md's seeded-RNG determinism rules exist because
+		# combat/classification tests depend on the seeded RNG stream + fixed
+		# frame counts, and hash() is a pure function independent of that
+		# stream -- the same ship/component ids stagger the same way, run to
+		# run.
 		if c.get("type") == "sensors":
 			if not c.has("timer"): c["timer"] = 0.0
+			if not c.has("_sweep_stagger"):
+				var refresh: float = c.get("refresh_interval", 1.0)
+				var stagger_key: String = name + ":" + str(c.get("id", ""))
+				var stagger_frac: float = float(abs(hash(stagger_key)) % 100000) / 100000.0
+				c["_sweep_stagger"] = stagger_frac * refresh
 			if not c.has("base_em_emission"): c["base_em_emission"] = 0.0
 
 	# Universal Docking Refactor: stations and ships build DockingBay nodes
@@ -1436,8 +1502,15 @@ func _physics_process(delta: float) -> void:
 	# needs one final settle (e.g. the "destroyed" entries for whatever killed
 	# it) even though hulk() already logged the catastrophic-failure line.
 	if is_multiplayer_authority():
+		PerfProbe.begin("repairs")
 		_process_repairs(delta)
-		_check_eng_log_crossings()
+		PerfProbe.end("repairs")
+		# M45 bisect: perf_eng_log OFF skips this scan entirely for isolation
+		# testing; default ON preserves current behavior exactly.
+		if DebugSettings.get_choice("perf_eng_log") == DebugSettings.PerfSubsystem.ON:
+			PerfProbe.begin("eng_log_crossings")
+			_check_eng_log_crossings()
+			PerfProbe.end("eng_log_crossings")
 
 	# Station despin: a STRUCTURE's DockingBay berth poses rotate with the
 	# hull, so residual spin (a shuttle clipping the hull imparts it) turns
@@ -1454,6 +1527,7 @@ func _physics_process(delta: float) -> void:
 		angular_velocity = move_toward(angular_velocity, 0.0, STRUCTURE_DESPIN_RATE * delta)
 
 	if is_multiplayer_authority():
+		PerfProbe.begin("weapons_pd")
 		for w in get_components_by_type("weapons"):
 			# .get() guard: a weapon missing "cooldown" must not abort the entire
 			# physics frame (heat/EM sim, PD, steering all live below this). _ready()
@@ -1464,10 +1538,11 @@ func _physics_process(delta: float) -> void:
 				if ratio > 0.0:
 					cooldown_rate = ratio
 				w["cooldown"] -= delta * cooldown_rate
-				
+
 		if not is_dead:
 			_process_point_defense()
-		
+		PerfProbe.end("weapons_pd")
+
 	var forward = Vector2.RIGHT.rotated(rotation)
 	var current_forward_speed = linear_velocity.dot(forward)
 	
@@ -1564,6 +1639,7 @@ func _physics_process(delta: float) -> void:
 			s["heading"] = 0.0
 	
 	# Decay and dead-reckon contacts
+	PerfProbe.begin("contact_decay")
 	var to_remove = []
 	for c_id in active_contacts:
 		var c = active_contacts[c_id]
@@ -1606,10 +1682,12 @@ func _physics_process(delta: float) -> void:
 				ts_expired.append(t_id)
 		for t_id in ts_expired:
 			_contact_tombstones.erase(t_id)
+	PerfProbe.end("contact_decay")
 
 	var bins_this_frame = []
 
 	# --- Heat & Engineering Logic ---
+	PerfProbe.begin("heat_em_component_loop")
 	if is_multiplayer_authority():
 		var heat_gen = 0.0
 		var reactor_heat = REACTOR_HEAT_COEFFICIENT
@@ -1702,36 +1780,55 @@ func _physics_process(delta: float) -> void:
 		for w in get_components_by_type("weapons"):
 			weapon_em += w.get("em_emission", 0.0)
 		em_signature = current_em + sensor_em + passive_em + weapon_em
+	PerfProbe.end("heat_em_component_loop")
 
 	# Sensor Sweeps
-	var active_sensor_efficiency = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
-	
-	for sensor in get_components_by_type("sensors"):
-		if not is_component_powered(sensor["id"]):
-			active_sensor_sweeps[sensor["id"]] = []
-			continue
+	# M45 bisect: perf_sensors OFF skips the timer/sweep loop entirely (no
+	# bins produced this frame) for perf isolation; default ON is unchanged
+	# behavior.
+	PerfProbe.begin("sensor_sweep")
+	if DebugSettings.get_choice("perf_sensors") == DebugSettings.PerfSubsystem.ON:
+		var active_sensor_efficiency = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
 
-		var sensor_health_ratio = get_component_health_ratio(sensor["id"])
-		if sensor_health_ratio <= 0.0 or active_sensor_efficiency <= 0.1:
-			continue
+		for sensor in get_components_by_type("sensors"):
+			if not is_component_powered(sensor["id"]):
+				active_sensor_sweeps[sensor["id"]] = []
+				continue
 
-		if not sensor.get("active", true):
-			active_sensor_sweeps[sensor["id"]] = []
-			continue
+			var sensor_health_ratio = get_component_health_ratio(sensor["id"])
+			if sensor_health_ratio <= 0.0 or active_sensor_efficiency <= 0.1:
+				continue
 
-		sensor["timer"] -= delta
-		if sensor["timer"] <= 0.0:
-			sensor["timer"] = sensor["refresh_interval"]
-			var active_range = sensor["range"] * sensor_health_ratio
-			var bins = _run_sensor_sweep(sensor, active_range)
-			active_sensor_sweeps[sensor["id"]] = bins
-			bins_this_frame.append_array(bins)
+			if not sensor.get("active", true):
+				active_sensor_sweeps[sensor["id"]] = []
+				continue
+
+			sensor["timer"] -= delta
+			if sensor["timer"] <= 0.0:
+				# M45 perf fix: the FIRST sweep (timer defaulted to 0.0) is
+				# always immediate and shared by every ship, same as before --
+				# but this reset applies each sensor's one-time _sweep_stagger
+				# offset (see _ready() normalization above) so every ship's
+				# SECOND sweep onward lands on a different physics frame than
+				# every other ship's, breaking the recurring thundering herd.
+				# _sweep_stagger is consumed to 0.0 right after, so every
+				# reset after this one uses the plain authored
+				# refresh_interval -- the average sweep cadence a design
+				# tuned for is unchanged, only the phase is shifted, once.
+				sensor["timer"] = sensor["refresh_interval"] + sensor.get("_sweep_stagger", 0.0)
+				sensor["_sweep_stagger"] = 0.0
+				var active_range = sensor["range"] * sensor_health_ratio
+				var bins = _run_sensor_sweep(sensor, active_range)
+				active_sensor_sweeps[sensor["id"]] = bins
+				bins_this_frame.append_array(bins)
+	PerfProbe.end("sensor_sweep")
 	# Sort bins by accuracy (lowest bin_angle first). If multiple sensors sweep the
 	# same target on the exact same frame, processing the most accurate one first
 	# prevents lower-resolution sweeps from dragging the position backwards.
 	bins_this_frame.sort_custom(func(a, b): return a.get("bin_angle", TAU) < b.get("bin_angle", TAU))
 	
 	# Correlate tracks
+	PerfProbe.begin("contact_correlate")
 	for bin in bins_this_frame:
 		var closest_contact_id = ""
 		var bin_pos = bin.get("pos", Vector2.ZERO)
@@ -1822,6 +1919,7 @@ func _physics_process(delta: float) -> void:
 					var sensor_origin: Vector2 = position + get_component_origin(sensor_comp).rotated(rotation)
 					var sensor_range_effective: float = bin.get("sensor_range", sensor_comp.get("range", 0.0))
 					_sample_outline_dots(sensor_comp, sensor_range_effective, sensor_origin, active_contacts[closest_contact_id], target)
+	PerfProbe.end("contact_correlate")
 
 	# Datalink Relay: friendly ships in mutual comms range and line-of-sight
 	# share active_contacts via freshest-wins. This reruns from scratch every
@@ -1829,6 +1927,7 @@ func _physics_process(delta: float) -> void:
 	# free -- a contact relayed into this ship's active_contacts this frame
 	# is available to relay onward to a third ship next frame, one tick of
 	# latency per hop instead of needing an explicitly modeled delay.
+	PerfProbe.begin("datalink_relay")
 	active_transponders.clear()
 	var self_comms_range = get_comms_range()
 	if self_comms_range > 0.0:
@@ -1897,6 +1996,7 @@ func _physics_process(delta: float) -> void:
 						c["vel"] = external_contact["vel"]
 						c["last_seen_timer"] = external_contact["last_seen_timer"]
 						c["resolution"] = min(c["resolution"], external_contact["resolution"])
+	PerfProbe.end("datalink_relay")
 
 	if is_multiplayer_authority():
 		var i = hit_traces.size() - 1

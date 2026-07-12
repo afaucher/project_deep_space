@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://bcgx2jh7ealxh"
+
+[deps]
+
+files=["res://tactical_analysis/data/perf_baseline_summary.avg.translation", "res://tactical_analysis/data/perf_baseline_summary.p95.translation", "res://tactical_analysis/data/perf_baseline_summary.max.translation", "res://tactical_analysis/data/perf_baseline_summary.frames.translation"]
+
+source_file="res://tactical_analysis/data/perf_baseline_summary.csv"
+dest_files=["res://tactical_analysis/data/perf_baseline_summary.avg.translation", "res://tactical_analysis/data/perf_baseline_summary.p95.translation", "res://tactical_analysis/data/perf_baseline_summary.max.translation", "res://tactical_analysis/data/perf_baseline_summary.frames.translation"]
+
+[params]
+
+compress=true
+delimiter=0

@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 DialogueManager="*res://addons/dialogue_manager/dialogue_manager.gd"
 DebugSettings="*res://scripts/debug_settings.gd"
+PerfProbe="*res://scripts/perf/perf_probe.gd"
 StoryState="*res://scripts/story/story_state.gd"
 SteamManager="*res://scripts/steam_manager.gd"
 BeehaveGlobalMetrics="*res://addons/beehave/metrics/beehave_global_metrics.gd"

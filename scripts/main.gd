@@ -403,7 +403,9 @@ func _physics_process(delta: float) -> void:
 		return
 		
 	# Filter and distribute state to clients
+	PerfProbe.begin("distribute_state")
 	_distribute_state()
+	PerfProbe.end("distribute_state")
 
 func _distribute_state() -> void:
 	# Host filters the world state on a per-client basis

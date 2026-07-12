@@ -164,7 +164,16 @@ func _on_scene_tree_node_added_removed(node: Node, is_added: bool) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	# M45 perf investigation: PerfProbe/DebugSettings are project autoloads
+	# (always present at runtime); referenced by global name per this
+	# project's convention (see CLAUDE.md's headless class-cache caveat --
+	# never bare class_name). perf_ai OFF is a bisection-only isolation knob,
+	# default ON leaves every tree ticking exactly as before.
+	if DebugSettings.get_choice("perf_ai") == DebugSettings.PerfSubsystem.OFF:
+		return
+	PerfProbe.begin("ai_tree_tick")
 	tick()
+	PerfProbe.end("ai_tree_tick")
 
 
 func _process(_delta: float) -> void:

@@ -45,6 +45,15 @@ enum CollisionDamage { ON, OFF }
 # the measured-dot outline (bin-capped, but still the heavier path).
 enum SensorDotOutlines { OFF, ON }
 
+# M45 -- physics tick perf investigation bisection knobs. Each gates a whole
+# subsystem OFF so the baseline harness (test_perf_baseline) can be re-run
+# with one subsystem removed and diff the total physics-step cost against the
+# PerfProbe tag total for that subsystem -- two independent attributions
+# (probe table + bisection delta) instead of trusting the probe alone.
+# Default ON (=0) everywhere: normal gameplay/tests are unaffected unless a
+# harness explicitly flips one OFF for isolation.
+enum PerfSubsystem { ON, OFF }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -88,6 +97,30 @@ const OPTIONS := {
 			"On (measured dots for unidentified)",     # ON  -- the M26 dot sampler
 		],
 		"default": SensorDotOutlines.OFF,
+	},
+	"perf_sensors": {
+		"label": "M45 bisect: sensor sweeps",
+		"choices": [
+			"On (default)",
+			"Off (skip sensor timer/sweep -- perf isolation only)",
+		],
+		"default": PerfSubsystem.ON,
+	},
+	"perf_ai": {
+		"label": "M45 bisect: AI tree tick",
+		"choices": [
+			"On (default)",
+			"Off (skip Beehave tree tick -- perf isolation only)",
+		],
+		"default": PerfSubsystem.ON,
+	},
+	"perf_eng_log": {
+		"label": "M45 bisect: eng-log crossings",
+		"choices": [
+			"On (default)",
+			"Off (skip _check_eng_log_crossings -- perf isolation only)",
+		],
+		"default": PerfSubsystem.ON,
 	},
 }
 
