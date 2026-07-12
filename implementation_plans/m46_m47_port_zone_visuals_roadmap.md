@@ -34,10 +34,32 @@ Scope:
 5. **Small stations**: authoring choice lands here — give Slag Bay/Coldreach
    assignable berths (grant allocator, thin ring optional) OR leave open;
    per-station data only, no new code. Homes stay Level 1 (nothing draws).
-6. **Tests**: geometry-only — channel polygon derivation (given berth pose +
+6. **Speed-limit visibility** (helm_panel.gd). The limit lives with the
+   speedometer, NOT the missions/contracts section — it's local traffic law
+   (a property of where you are, active with or without a mission), not an
+   objective. Three pieces:
+   - **Limit tick on the velocity gauge**: a marker on the EngineSlider at
+     the zone's `speed_advisory` value while inside a zone, so dragging the
+     target-velocity bug shows legal-or-not BEFORE the ship is moving at it.
+   - **Readout "184 / 200"**: current-over-limit while in a zone (plain
+     number outside, unchanged). Color: grey comfortably under, amber within
+     ~10% of the limit, over-limit color above it (today's binary amber
+     becomes three states).
+   - **Forward/true speed mismatch fixed**: the amber keys off TRUE speed
+     (helm_panel.gd's own M35 comment) while the number shows FORWARD speed
+     — a fast lateral drift reads amber over a legal-looking number. Add a
+     small lateral-drift number (or equivalent cue) so the state explains
+     itself.
+   The zone name + limit ("IRONHOLD CONTROL · LIMIT 200") may also echo as a
+   compact persistent status line — placement decided at implementation
+   (terminal header region), compatible with, not a substitute for, the
+   gauge work.
+7. **Tests**: geometry-only — channel polygon derivation (given berth pose +
    exclusion radius, the cutout contains the approach axis and clears the
    capture cone), derived-radius fallback vs authored override, and a
    packet/serialization test if the exclusion radius rides the state packet.
+   The three-state readout color logic is a pure truth table (speed, limit,
+   in_zone -> state) — test it like PortRules.speed_advisory_active.
    Drawing itself is verified by eye (headless can't assert pixels).
 
 Explicitly NOT in M46: any AI change, any grant-lifetime change, any

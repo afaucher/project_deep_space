@@ -77,6 +77,12 @@ draw dimmer. Zoom-gated the same way the current boundary ring is
 
 - `speed_advisory` stays WARN-ONLY for the player (amber helm state — never a
   thrust clamp; the player is free to be a menace).
+- **The limit is displayed with the speedometer, not the mission area** —
+  it's local traffic law (a property of where you are), not an objective.
+  Helm velocity gauge gets a limit tick + a "current / limit" readout with
+  three color states (under / approaching / over) while inside a zone; the
+  gauge tick makes the limit actionable when SETTING a target velocity, not
+  just when already speeding.
 - **NPCs treat the advisory as mandatory.** Traffic AI clamps its in-zone
   cruise speed to the zone's limit and decelerates down the channel — this,
   not despin, is the real fix for shuttles tapping the station hard enough
