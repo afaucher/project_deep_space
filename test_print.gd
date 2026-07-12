@@ -1,5 +1,4 @@
 extends SceneTree
-
 func _init():
-	print("Hello from Godot!")
+	print("Test")
 	quit()

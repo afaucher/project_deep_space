@@ -1,4 +1,4 @@
-# Godot-specific ignores
+﻿# Godot-specific ignores
 .godot/
 !/.godot/extension_list.cfg
 !/.godot/global_script_class_cache.cfg
@@ -21,4 +21,5 @@ Thumbs.db
 
 # Python (generate_audio.py helper)
 __pycache__/
-*.pycversion.txt
+*.pyc
+version.txt
