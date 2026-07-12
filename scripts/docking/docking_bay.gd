@@ -158,7 +158,17 @@ func _try_capture() -> void:
 	for s in get_tree().get_nodes_in_group("ships"):
 		if not _dockable_seeking(s):
 			continue
-		var d: float = global_position.distance_to(s.position)
+		# Measured from the DOCKING POINT (the clearance-adjusted seat,
+		# _berth_pos_for -- same reference the nav panel's capture-zone circle
+		# draws around), not the raw authored bay position. Those two used to
+		# diverge for any berth where the standoff pushes the seat well
+		# outward (a big hull, or a berth mounted close to the hull) --
+		# capture engaged from a circle centered well INSIDE the one actually
+		# drawn on the map, so the clamp visibly grabbed ships long before
+		# they crossed the visible ring ("the actual zone is about half as
+		# wide"). The hemisphere check below still uses the raw bay position/
+		# heading -- standoff moves the seat, not the port's own facing.
+		var d: float = _berth_pos_for(s).distance_to(s.position)
 		if d <= best_d:
 			# M32: Only capture if the ship is in the approach HEMISPHERE (in
 			# front of the port), so we never tractor a ship through the station

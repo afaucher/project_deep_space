@@ -56,9 +56,10 @@ const LANE_HALF_WIDTH := 120.0
 # Authority-colored highlight (distinct from any existing classification hue --
 # GREEN=friendly, RED=hostile, YELLOW=ordnance, GRAY=asteroid, CYAN=sensor --
 # so a granted slip never gets confused with an IFF/threat read). Gold reads as
-# "clearance" without overlapping the classification palette.
+# "clearance" without overlapping the classification palette. Only the
+# assigned/open bay(s) draw at all now (see _draw_slip_marker) -- a dim ring
+# per unassigned slip was dropped as redundant with the capture zone circle.
 const SLIP_HIGHLIGHT_COLOR := Color(1.0, 0.85, 0.2, 1.0)
-const SLIP_DIM_COLOR := Color(0.5, 0.45, 0.25, 0.35)
 const LANE_CENTERLINE_COLOR := Color(1.0, 0.85, 0.2, 0.8)
 const LANE_EDGE_COLOR := Color(1.0, 0.85, 0.2, 0.25)
 
@@ -1185,10 +1186,15 @@ func _draw_controlled_zones(current_authority, grant, departing_slip: Dictionary
 			# bounded -- and now that the capture zone itself is drawn
 			# (_draw_docking_nav_aids), the guide's endpoint is finally
 			# self-explanatory instead of an unexplained stop partway out.
-			var docking_point: Vector2 = bay_node.berth_pos_for_bounding_radius(player_radius)
-			var guide: Dictionary = PortChannel.guide_segment(docking_point, bay_node.global_rotation, s.global_position, exclusion_radius, bay_node.capture_radius)
-			if not guide.is_empty():
-				draw_line(guide["mouth"], guide["engage"], CHANNEL_EDGE_COLOR, (ZONE_RING_WIDTH * 1.3) / map_zoom)
+			# The guide's job is getting you TO the capture zone -- once the
+			# clamp actually has you (DOCKED) there's nothing left to steer
+			# toward, so it goes away rather than sitting drawn over a ship
+			# that's already stopped moving.
+			if bay_node.state != DockingBay.State.DOCKED:
+				var docking_point: Vector2 = bay_node.berth_pos_for_bounding_radius(player_radius)
+				var guide: Dictionary = PortChannel.guide_segment(docking_point, bay_node.global_rotation, s.global_position, exclusion_radius, bay_node.capture_radius)
+				if not guide.is_empty():
+					draw_line(guide["mouth"], guide["engage"], CHANNEL_EDGE_COLOR, (ZONE_RING_WIDTH * 1.3) / map_zoom)
 
 # One keep-back circle: a full ring, or -- while the docking cone is open --
 # an arc leaving the cone's [theta0 - half, theta0 + half] span open.
@@ -1343,16 +1349,17 @@ func _draw_docking_nav_aids(grant) -> void:
 
 	var assigned: Node = assigned_bay_for(bays, grant)
 	if assigned != null:
+		var docking_point: Vector2 = assigned.berth_pos_for_bounding_radius(player_radius)
+
 		# The capture zone (design_ideas terminology: "a wide circle...
 		# centered on the docking point... the only area the docking clamp
 		# applies") -- drawn for the assigned bay only, BEFORE the marker/
 		# lane so those precision aids read on top of it, not the other way
-		# around. This is the answer to "what was the yellow circle?" going
-		# forward: the SLIP marker below is pos_tolerance (the small DOCKED-
-		# state acceptance gate); this is the much larger physics reach of
-		# the clamp itself, which was never drawn before now.
-		var docking_point: Vector2 = assigned.berth_pos_for_bounding_radius(player_radius)
-		draw_arc(docking_point, assigned.capture_radius, 0, TAU, 48, CAPTURE_ZONE_COLOR, ZONE_RING_WIDTH / map_zoom)
+		# around. Only while there's still something to reach for: once
+		# DOCKED the clamp already has the ship, so the reach circle would
+		# just be clutter sitting over a ship that isn't going anywhere.
+		if assigned.state != DockingBay.State.DOCKED:
+			draw_arc(docking_point, assigned.capture_radius, 0, TAU, 48, CAPTURE_ZONE_COLOR, ZONE_RING_WIDTH / map_zoom)
 
 		# Specific slip: THAT bay bright/authority-colored, every other slip at
 		# this station dimmed -- and draw the one lane down to it.
@@ -1370,27 +1377,16 @@ func _draw_docking_nav_aids(grant) -> void:
 			_draw_slip_marker(b, b.berth_pos_for_bounding_radius(player_radius), open_set.has(b))
 
 func _draw_slip_marker(bay: Node, berth_pos: Vector2, highlighted: bool) -> void:
-	var color: Color = SLIP_HIGHLIGHT_COLOR if highlighted else SLIP_DIM_COLOR
-	# Drawn TO SCALE at the bay's own pos_tolerance (docking_bay.gd: "settled
-	# when within this of the berth") -- this is the literal DOCKED-state
-	# position gate (also needs speed < settle_speed and ang_err < 0.2rad,
-	# not drawn), not a fixed screen-pixel marker. It legitimately shrinks/
-	# grows with zoom like everything else in world space; at typical
-	# navigation zoom it's the honest answer to "how big is the sweet spot".
-	var r: float = max(bay.pos_tolerance, 1.0)
-	var p: Vector2 = berth_pos
-	draw_arc(p, r, 0, TAU, 16, color, (3.0 if highlighted else 2.0) / map_zoom)
-	# Small heading tick so the berth's facing (approach direction) reads at a
-	# glance, not just its position. Heading is unaffected by the clearance
-	# standoff (DockingBay's own comment: "the standoff moves the seat, not
-	# the facing"), so bay.global_rotation is still correct here.
-	var tip: Vector2 = p + Vector2.RIGHT.rotated(bay.global_rotation) * r * 2.0
-	draw_line(p, tip, color, (3.0 if highlighted else 2.0) / map_zoom)
-	# The assigned berth is THE target -- "I expected a small zone near the
-	# station" -- so give it a filled core in addition to the ring, distinct
-	# from every dimmed/unassigned slip marker at this station.
-	if highlighted:
-		draw_circle(p, r * 0.35, color)
+	if not highlighted:
+		return # dim per-slip rings were redundant with the capture zone circle -- dropped
+	# The docking point itself: a small solid dot, not a to-scale ring at
+	# pos_tolerance -- that ring duplicated the (now-drawn) capture zone
+	# circle without adding information ("the dark yellow circle is now
+	# redundant"). This dot is the precise answer to "where exactly does the
+	# clamp hold me", kept through capture/dock rather than fading with the
+	# capture zone -- it's still meaningful to see once docked.
+	var r: float = max(bay.pos_tolerance, 1.0) * 0.35
+	draw_circle(berth_pos, r, SLIP_HIGHLIGHT_COLOR)
 
 func _draw_lane(berth_pos: Vector2, berth_heading: float) -> void:
 	var lane: Dictionary = lane_corridor(berth_pos, berth_heading, LANE_LENGTH, LANE_HALF_WIDTH)
