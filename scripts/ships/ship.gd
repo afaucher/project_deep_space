@@ -384,6 +384,18 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 func request_docking_via_control(ship) -> Dictionary:
 	return PortControl.request_docking(self, ship)
 
+# M33 (follow-up) -- dialogue-side context flip, mirroring docking_control.gd's
+# _is_docked() but scoped to a SPECIFIC station (the dialogue's own comms
+# target) rather than "docked anywhere". Same CAPTURING-or-DOCKED semantics
+# (docking_bay != null), same "get_parent() == station" test
+# PortControl.request_docking() already uses internally to detect the
+# already_docked case. Lets dialogue/port_control.dialogue show "Request
+# undock." instead of "Request docking." once you're actually at this
+# station's berth -- previously the only option re-requested docking and got
+# told "you are already berthed", with no way to ask to be released.
+func is_docked_at(station) -> bool:
+	return docking_bay != null and docking_bay.get_parent() == station
+
 func _init() -> void:
 	ship_name = "HMM " + NAME_ADJECTIVES[randi() % NAME_ADJECTIVES.size()] + " " + NAME_VERBS[randi() % NAME_VERBS.size()]
 	ship_components = ship_components.duplicate(true)

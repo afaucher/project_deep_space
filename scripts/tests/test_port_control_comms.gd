@@ -101,6 +101,7 @@ func setup(main) -> void:
 	await _run_dialogue_traversal_check()
 	await _run_dialogue_loop_check()
 	await _run_dialogue_out_of_zone_check()
+	await _run_dialogue_undock_check()
 	_run_scenario_1_grant_mutation()
 
 # ---------------------------------------------------------------------------
@@ -286,6 +287,79 @@ func _run_dialogue_out_of_zone_check() -> void:
 	if reply != null:
 		var looped = await dm.get_next_dialogue_line(resource, reply.next_id, states)
 		_assert(looped != null, "out-of-zone dialogue: loops back to the menu instead of ending")
+
+	_free_if_valid(player); _free_if_valid(station)
+
+# ---------------------------------------------------------------------------
+# Dialogue undock smoke check: the menu must CONTEXT-FLIP like the fast-path
+# button does (docking_control.gd) -- "Request docking." while free, "Request
+# undock." once actually at this station's berth, never both. Regression:
+# before this, the menu only ever offered "Request docking.", which for an
+# already-docked player just replied "you are already berthed" with no way to
+# ask to be released -- the player had to fall back to the DockingControl
+# button instead. Bypasses real capture-physics convergence (already covered
+# by test_docking/test_freighter_docking) by directly wiring the bay/ship
+# docked state, keeping this a synchronous, focused check of the DIALOGUE's
+# own branching.
+# ---------------------------------------------------------------------------
+func _run_dialogue_undock_check() -> void:
+	print("--- Dialogue undock smoke check ('Request undock.' offered only once actually docked) ---")
+	var station = _make_station("DialogueUndock", PortControl.STYLE_AUTOMATED, 12)
+	var player = _make_shuttle("DialogueUndockPlayer", 205, Vector2(4000, 4000))
+	var bay = _med_bay(station)
+
+	if not Engine.has_singleton("DialogueManager"):
+		_assert(false, "dialogue undock: DialogueManager singleton not available")
+		_free_if_valid(player); _free_if_valid(station)
+		return
+	var dm = Engine.get_singleton("DialogueManager")
+	var resource = load("res://dialogue/port_control.dialogue")
+	var states: Array = [{"station": station, "player": player}, DialogueScratch.scratch()]
+
+	# get_next_dialogue_line() does NOT filter line.responses by a gated
+	# choice's `[if .../]` condition -- every response ID always compiles
+	# into the array, each carrying its own `is_allowed` bool (see
+	# dialogue_manager.gd's _get_responses()/_check_condition() -- filtering
+	# is left to the caller). comms_panel.gd already does this (see its own
+	# comment there); mirror it here or this check would pass trivially
+	# regardless of whether the condition actually worked.
+	var line = await dm.get_next_dialogue_line(resource, "start", states)
+	var docking_resp = null
+	var undock_resp = null
+	for r in line.responses:
+		if not r.is_allowed:
+			continue
+		if r.text == "Request docking.":
+			docking_resp = r
+		elif r.text == "Request undock.":
+			undock_resp = r
+	_assert(docking_resp != null, "dialogue undock: 'Request docking.' offered before docking")
+	_assert(undock_resp == null, "dialogue undock: 'Request undock.' withheld before docking")
+
+	bay.captured = player
+	bay.state = DockingBay.State.DOCKED
+	player.docking_bay = bay
+
+	var line2 = await dm.get_next_dialogue_line(resource, "start", states)
+	docking_resp = null
+	undock_resp = null
+	for r in line2.responses:
+		if not r.is_allowed:
+			continue
+		if r.text == "Request docking.":
+			docking_resp = r
+		elif r.text == "Request undock.":
+			undock_resp = r
+	_assert(undock_resp != null, "dialogue undock: 'Request undock.' offered once docked")
+	_assert(docking_resp == null, "dialogue undock: 'Request docking.' withheld once docked (previously the only option -- it just replied 'already berthed')")
+	if undock_resp == null:
+		_free_if_valid(player); _free_if_valid(station)
+		return
+
+	var reply = await dm.get_next_dialogue_line(resource, undock_resp.next_id, states)
+	_assert(reply != null, "dialogue undock: selecting it returns a line")
+	_assert(player.docking_bay == null, "dialogue undock: selecting 'Request undock.' actually releases the ship")
+	_assert(bay.state == DockingBay.State.EMPTY, "dialogue undock: the bay returns to EMPTY")
 
 	_free_if_valid(player); _free_if_valid(station)
 

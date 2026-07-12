@@ -4,7 +4,7 @@ if station.get_port_zone().get("style", "AUTOMATED") == "STAFFED"
 	Dockmaster: This is the dock, go ahead.
 else
 	Port Control: State your business.
-- Request docking.
+- Request docking. [if not player.is_docked_at(station) /]
 	do result = station.request_docking_via_control(player)
 	do outcome = result["outcome"]
 	if outcome == "granted"
@@ -25,5 +25,9 @@ else
 	else
 		Port Control: Negative, we have no open berths. Hold position.
 		=> start
+- Request undock. [if player.is_docked_at(station) /]
+	do player.request_undock()
+	Port Control: Copy, releasing you. Watch your separation.
+	=> END
 - Never mind.
 	=> END
