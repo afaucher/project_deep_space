@@ -45,33 +45,56 @@ Principles that keep the use cases coherent:
   authored fields plus the player's grant state. Promoting a station up the
   ladder is a data edit.
 
-## Geometry
+## Geometry (revised after first playtest)
 
 - **Control ring** (existing `port_zone.radius`, e.g. Ironhold 8000): where
-  rules apply. Thin solid ring, banner on crossing — unchanged semantics.
-- **Exclusion disc** (new `exclusion_radius`, order ~1500-2000 for a medium
-  station): annulus from the hull to the exclusion radius, diagonal-hatched.
-  Entering without a grant is a violation. DERIVED by default (hull bounding
-  radius × factor, so every station is consistent for free) with an optional
-  authored override — story overlays can patch it via `port_patch` (a
-  paranoid outpost with an oversized keep-out).
-- **Channel**: with a grant, a corridor-shaped cutout opens from the
-  exclusion boundary to the ASSIGNED berth, aligned with the berth's heading
-  (the same approach vector the M34 lane and the capture cone already use).
-  Hatching gaps out over the channel; NavCorridor edges draw through it.
-  Everyone else still sees a closed disc. Channel width must fit the capture
-  cone with margin.
+  rules apply. Banner on crossing — unchanged semantics.
+- **Keep-back zone = two circles + hatch** (replacing the first-pass single
+  disc + narrow rectangle channel):
+  - **Inner keep-out ring** (`keep_out_radius`, derived: hull bounding
+    radius × 2): the hard do-not-cross line just off the hull.
+  - **Outer boundary** (`exclusion_radius`, derived: hull bounding
+    radius × 6, ~1584u for a medium station): much larger, so approaches can
+    come in well off-axis.
+  - 45° hatching fills hull → outer boundary. Both radii derived by default
+    (every station consistent for free), authored/`port_patch` override wins.
+- **Channel = a 90° cone** (`PortChannel`, half-angle 45°) centered on the
+  assigned berth's approach axis, opened only by a specific-slip grant: both
+  circles GAP over the cone's span (the gaps line up by construction), the
+  sector's radial edges are the drawn lane edges, and the hatch is clipped
+  out of the sector all the way down to the hull. Everyone else still sees
+  closed rings.
+- **Docking guide**: a bright centerline down the middle of the cone ending
+  at the point where the docking clamps take over
+  (`PortChannel.guide_points`: `min(bay capture_radius, mouth)` — with
+  current tuning, capture reach covers the whole disc, so the engage marker
+  sits at the cone mouth), marked with a diamond: hit it with a grant and
+  the berth takes you from there.
 - **Departure**: the channel stays open while the grant is held; the grant
-  expires when the ship EXITS the exclusion boundary after undocking (not on
-  a countdown) so you never undock into a violation.
+  is CONSUMED on bay release (undock/auto-release — landed with the grant-
+  lifecycle fix), and M47 adds expiry on exclusion-boundary exit for the
+  departure leg.
 
 ## Visibility
 
-Zones draw for EVERY controlled station on screen, not just the one the
-player is inside (a no-fly zone you can't see until you're in it defeats the
-purpose). The zone the player is inside gets the emphasized treatment; others
-draw dimmer. Zoom-gated the same way the current boundary ring is
-(`zone_boundary_visible`).
+Port zones are COMMS knowledge: an authority broadcasts its boundaries, so a
+station's rings/disc draw ONLY while the player and station are in mutual
+comms range (weaker-of-the-two-ranges, same rule as the datalink). Within
+that: every controlled station in comms range draws, the zone the player is
+inside emphasized, others dimmer; zoom-gated via `zone_boundary_visible`.
+
+Zone drawing is BACKGROUND terrain, not a foreground element: it draws at
+the bottom of the nav map's world-space stack (right after the grid), in
+colors blended toward the panel background with thicker strokes — every
+contact, lane, marker, and laser reads on top of it. The channel edges and
+guide stay bright full-gold: they're actionable aids, not terrain.
+
+## Ship's log
+
+Docking is recorded in the engineering log (M40): an entry on the DOCKED
+transition ("Docked at <station> berth <slip>") and on release from a
+completed stay ("Released from berth <slip>"). Aborted captures never log —
+they'd spam the ring buffer on every timeout/retry cycle.
 
 ## Rules and enforcement
 

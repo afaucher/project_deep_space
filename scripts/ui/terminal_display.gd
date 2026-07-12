@@ -237,6 +237,11 @@ func _ready() -> void:
 	# (Ship.request_undock(), M32) once actually captured by a bay.
 	docking_control = DockingControl.new()
 	top_bar.add_child(docking_control)
+	# Fast-path outcome feedback: the button previously gave NO response on a
+	# denial (the dialogue path speaks its outcome, the button path was mute
+	# -- a denied player saw nothing happen at all). Reuse the zone-crossing
+	# banner slot: same position/fade, transient, one line.
+	docking_control.docking_requested.connect(_on_docking_outcome)
 
 	ship_oriented_toggle = CheckButton.new()
 	ship_oriented_toggle.text = "Ship Oriented"
@@ -453,7 +458,11 @@ func _ready() -> void:
 	var bottom_bar := HBoxContainer.new()
 
 	var help_hint := Label.new()
-	help_hint.text = "F1  Controls"
+	var version_text := ""
+	if FileAccess.file_exists("res://version.txt"):
+		var f := FileAccess.open("res://version.txt", FileAccess.READ)
+		version_text = "  |  " + f.get_as_text().strip_edges()
+	help_hint.text = "F1  Controls" + version_text
 	help_hint.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
 	help_hint.add_theme_font_size_override("font_size", 13)
 	bottom_bar.add_child(help_hint)
@@ -587,6 +596,31 @@ func _on_zone_crossing(entering: bool, authority: String) -> void:
 	# text/timer logic.
 	if zone_banner_label != null:
 		zone_banner_label.text = zone_banner_text
+		zone_banner_label.visible = true
+		zone_banner_label.modulate.a = 1.0
+	_zone_banner_timer = ZONE_BANNER_DURATION
+
+# Fast-path "Request Docking" outcome -> transient banner line (same slot,
+# fade, and duration as the zone-crossing banner). PURE presentation of
+# PortControl.request_docking()'s outcome dict -- the text mirrors what the
+# port_control.dialogue branch would say on the comms path, so the two routes
+# stay one behavior with two voices.
+func _on_docking_outcome(result: Dictionary) -> void:
+	var text: String
+	match result.get("outcome", ""):
+		"granted":
+			text = "PORT: cleared to berth %s" % result.get("grant", {}).get("slip_id", "?")
+		"already_docked":
+			text = "PORT: already berthed at %s" % result.get("slip_id", "?")
+		"out_of_zone":
+			text = "PORT: outside control zone -- close range and re-request"
+		"stalled":
+			text = "PORT: stand by..."
+		_:
+			text = "PORT: no open berths -- hold position"
+	zone_banner_text = text
+	if zone_banner_label != null:
+		zone_banner_label.text = text
 		zone_banner_label.visible = true
 		zone_banner_label.modulate.a = 1.0
 	_zone_banner_timer = ZONE_BANNER_DURATION

@@ -1,4 +1,4 @@
-extends Node
+﻿extends Node
 
 # M33 acceptance -- Port Control comms (the dialogue that issues the grant).
 # implementation_plans/m31_m36_port_authority_roadmap.md, M33 "Test plan
@@ -26,6 +26,7 @@ const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const PortControl = preload("res://scripts/port/port_control.gd")
 const DockingControl = preload("res://scripts/ui/docking_control.gd")
+const DialogueScratch = preload("res://scripts/dialogue_scratch.gd")
 
 var main_node: Node = null
 var failures: Array = []
@@ -80,6 +81,11 @@ func _make_station(name: String, style: String, owner: int, extra := {}) -> Node
 		st.available_npcs[0].faction = zone["authority"]
 	return st
 
+# Spawn INSIDE the station's 8000u control zone (Vector2(4000, 4000) ~= 5657u
+# out): PortControl.request_docking now denies an out-of-zone requester
+# ("out_of_zone" -- see port_control.gd), so being in-zone is a precondition
+# for every granted-path scenario here. The old magic spot (9999, 9999) sat
+# ~14.1ku out and started failing the moment that check landed.
 func _make_shuttle(name: String, owner: int, pos: Vector2) -> Node:
 	var s = CargoShuttle.new()
 	s.name = name
@@ -94,6 +100,7 @@ func setup(main) -> void:
 	print("Starting Port Control Comms (M33) Tests")
 	await _run_dialogue_traversal_check()
 	await _run_dialogue_loop_check()
+	await _run_dialogue_out_of_zone_check()
 	_run_scenario_1_grant_mutation()
 
 # ---------------------------------------------------------------------------
@@ -110,7 +117,7 @@ func setup(main) -> void:
 func _run_dialogue_traversal_check() -> void:
 	print("--- Dialogue traversal smoke check (port_control.dialogue via DialogueManager) ---")
 	var station = _make_station("DialogueSmoke", PortControl.STYLE_AUTOMATED, 9)
-	var player = _make_shuttle("DialogueSmokePlayer", 200, Vector2(9999, 9999))
+	var player = _make_shuttle("DialogueSmokePlayer", 200, Vector2(4000, 4000))
 
 	if not Engine.has_singleton("DialogueManager"):
 		_assert(false, "dialogue traversal: DialogueManager singleton not available")
@@ -122,7 +129,7 @@ func _run_dialogue_traversal_check() -> void:
 		_free_if_valid(player); _free_if_valid(station)
 		return
 
-	var states: Array = [{"station": station, "player": player}]
+	var states: Array = [{"station": station, "player": player}, DialogueScratch.scratch()]
 	var line = await dm.get_next_dialogue_line(resource, "start", states)
 	_assert(line != null, "dialogue traversal: 'start' cue returns a line")
 	if line == null:
@@ -147,6 +154,16 @@ func _run_dialogue_traversal_check() -> void:
 	var line2 = await dm.get_next_dialogue_line(resource, docking_resp.next_id, states)
 	_assert(line2 != null, "dialogue traversal: following the response yields a reply line")
 	_assert(player.docking_grant != null, "dialogue traversal: the .dialogue mutation issued a real grant on the player ship")
+	# The SPOKEN line must match the outcome -- for years the grant was issued
+	# while the conversation spoke the else-branch "Negative, we have no open
+	# berths" (DialogueManager can't assign `do result = ...` to an undeclared
+	# name; see scripts/dialogue_scratch.gd). State-only assertions never
+	# caught it; this text assertion pins the fix.
+	if line2 != null:
+		_assert("Cleared to berth" in line2.text,
+			"dialogue traversal: the spoken line reflects the grant (got: %s)" % line2.text)
+		_assert(player.docking_grant != null and str(player.docking_grant.get("slip_id", "")) in line2.text,
+			"dialogue traversal: the spoken line names the assigned slip")
 
 	_free_if_valid(player); _free_if_valid(station)
 
@@ -164,9 +181,9 @@ func _run_dialogue_traversal_check() -> void:
 func _run_dialogue_loop_check() -> void:
 	print("--- Dialogue loop-back smoke check (reject returns to the menu, not END) ---")
 	var station = _make_station("DialogueLoop", PortControl.STYLE_AUTOMATED, 10)
-	var occupant = _make_shuttle("DialogueLoopOccupant", 201, Vector2(9999, 9999))
-	var occupant2 = _make_shuttle("DialogueLoopOccupant2", 203, Vector2(9999, 9999))
-	var player = _make_shuttle("DialogueLoopPlayer", 202, Vector2(9999, 9999))
+	var occupant = _make_shuttle("DialogueLoopOccupant", 201, Vector2(4000, 4000))
+	var occupant2 = _make_shuttle("DialogueLoopOccupant2", 203, Vector2(4000, 4000))
+	var player = _make_shuttle("DialogueLoopPlayer", 202, Vector2(4000, 4000))
 
 	# Take BOTH of the station's berths first so the dialogue-driven request
 	# below is denied. M40 -- MediumStation now authors two docking_port bays
@@ -184,7 +201,7 @@ func _run_dialogue_loop_check() -> void:
 	var dm = Engine.get_singleton("DialogueManager")
 	var resource = load("res://dialogue/port_control.dialogue")
 
-	var states: Array = [{"station": station, "player": player}]
+	var states: Array = [{"station": station, "player": player}, DialogueScratch.scratch()]
 	var line = await dm.get_next_dialogue_line(resource, "start", states)
 	var docking_resp = null
 	for r in line.responses:
@@ -214,6 +231,50 @@ func _run_dialogue_loop_check() -> void:
 		_assert(has_docking_choice, "dialogue loop: reject drops back into the same menu ('Request docking.' offered again)")
 
 	_free_if_valid(occupant); _free_if_valid(occupant2); _free_if_valid(player); _free_if_valid(station)
+
+# ---------------------------------------------------------------------------
+# Dialogue out-of-zone smoke check: a requester OUTSIDE the station's control
+# zone gets the "out_of_zone" outcome (port_control.gd's geometric gate --
+# without it, a grant issued out here would silently expire on the next tick's
+# membership check, reading as "granted then nothing happened"), the dialogue
+# speaks its dedicated line for it, no grant is issued, and the conversation
+# loops back to the menu like every other non-granted outcome.
+# ---------------------------------------------------------------------------
+func _run_dialogue_out_of_zone_check() -> void:
+	print("--- Dialogue out-of-zone smoke check ---")
+	var station = _make_station("DialogueFar", PortControl.STYLE_AUTOMATED, 11)
+	var player = _make_shuttle("DialogueFarPlayer", 204, Vector2(20000, 0))   # zone radius 8000
+
+	# Direct-call sanity first: the SAME station/ship pair must read
+	# out_of_zone through PortControl before we blame the dialogue layer.
+	var direct: Dictionary = PortControl.request_docking(station, player)
+	_assert(direct.get("outcome", "") == "out_of_zone",
+		"out-of-zone dialogue: direct PortControl call reads out_of_zone (got %s)" % str(direct.get("outcome")))
+
+	var dm = Engine.get_singleton("DialogueManager")
+	var resource = load("res://dialogue/port_control.dialogue")
+	var states: Array = [{"station": station, "player": player}, DialogueScratch.scratch()]
+	var line = await dm.get_next_dialogue_line(resource, "start", states)
+	var docking_resp = null
+	for r in line.responses:
+		if r.text == "Request docking.":
+			docking_resp = r
+	if docking_resp == null:
+		_assert(false, "out-of-zone dialogue: 'Request docking.' offered")
+		_free_if_valid(player); _free_if_valid(station)
+		return
+
+	var reply = await dm.get_next_dialogue_line(resource, docking_resp.next_id, states)
+	_assert(reply != null, "out-of-zone dialogue: request returns a line")
+	if reply != null:
+		_assert("outside our control zone" in reply.text,
+			"out-of-zone dialogue: speaks the out-of-zone line (got: %s)" % reply.text)
+	_assert(player.docking_grant == null, "out-of-zone dialogue: no grant issued")
+	if reply != null:
+		var looped = await dm.get_next_dialogue_line(resource, reply.next_id, states)
+		_assert(looped != null, "out-of-zone dialogue: loops back to the menu instead of ending")
+
+	_free_if_valid(player); _free_if_valid(station)
 
 # ---------------------------------------------------------------------------
 # Scenario 1: the dialogue's "request docking" mutation path (via
@@ -283,10 +344,10 @@ func _run_scenario_2_slip_allocation() -> void:
 	var bays_a: Array = _all_bays(station_a)
 	var station_b = _make_station("SlipB", PortControl.STYLE_AUTOMATED, 2)
 
-	var req1 = _make_shuttle("Req1", 70, Vector2(9999, 9999))
-	var req1b = _make_shuttle("Req1b", 73, Vector2(9999, 9999))
-	var req2 = _make_shuttle("Req2", 71, Vector2(9999, 9999))
-	var req3 = _make_shuttle("Req3", 72, Vector2(9999, 9999))
+	var req1 = _make_shuttle("Req1", 70, Vector2(4000, 4000))
+	var req1b = _make_shuttle("Req1b", 73, Vector2(4000, 4000))
+	var req2 = _make_shuttle("Req2", 71, Vector2(4000, 4000))
+	var req3 = _make_shuttle("Req3", 72, Vector2(4000, 4000))
 
 	var g1 = station_a.request_docking_via_control(req1)
 	var g1b = station_a.request_docking_via_control(req1b)
@@ -380,7 +441,7 @@ func _step_scenario_3(delta: float) -> void:
 func _run_scenario_4_fast_path_parity() -> void:
 	print("--- Scenario 4: fast-path button vs dialogue-equivalent mutation parity ---")
 	var station_fast = _make_station("Parity", PortControl.STYLE_AUTOMATED, 1)
-	var ship_fast = _make_shuttle("FastShuttle", 90, Vector2(9999, 9999))
+	var ship_fast = _make_shuttle("FastShuttle", 90, Vector2(4000, 4000))
 
 	var control := DockingControl.new()
 	main_node.add_child(control)
@@ -402,7 +463,7 @@ func _run_scenario_4_fast_path_parity() -> void:
 	# second station (twin setup) produces the SAME outcome SHAPE via the
 	# literal method the .dialogue "do" line invokes.
 	var station_dlg = _make_station("ParityDlg", PortControl.STYLE_AUTOMATED, 2)
-	var ship_dlg = _make_shuttle("DlgShuttle", 91, Vector2(9999, 9999))
+	var ship_dlg = _make_shuttle("DlgShuttle", 91, Vector2(4000, 4000))
 	var dlg_result: Dictionary = station_dlg.request_docking_via_control(ship_dlg)
 	_assert(dlg_result.get("outcome", "") == "granted", "scenario 4: dialogue-path mutation issues a granted outcome")
 	_assert(dlg_result["grant"].keys() == ship_fast.docking_grant.keys(),
@@ -487,7 +548,7 @@ func _run_scenario_6_style_degradation() -> void:
 
 	# AUTOMATED: grants immediately.
 	var auto_station = _make_station("Auto6", PortControl.STYLE_AUTOMATED, 1)
-	var auto_ship = _make_shuttle("Auto6Ship", 100, Vector2(9999, 9999))
+	var auto_ship = _make_shuttle("Auto6Ship", 100, Vector2(4000, 4000))
 	var auto_result = auto_station.request_docking_via_control(auto_ship)
 	_assert(auto_result.get("outcome") == "granted", "scenario 6: AUTOMATED grants on the first request")
 
@@ -495,7 +556,7 @@ func _run_scenario_6_style_degradation() -> void:
 	# station is a fresh instance (fresh instance_id), so PortControl's
 	# per-station stall counter never leaks in from an earlier scenario.
 	var min_station = _make_station("Minimal6", PortControl.STYLE_MINIMAL, 2)
-	var min_ship = _make_shuttle("Min6Ship", 101, Vector2(9999, 9999))
+	var min_ship = _make_shuttle("Min6Ship", 101, Vector2(4000, 4000))
 	var min_result_1 = min_station.request_docking_via_control(min_ship)
 	_assert(min_result_1.get("outcome") == "stalled", "scenario 6: MINIMAL stalls on the first request (deterministic, no grant issued)")
 	_assert(min_ship.docking_grant == null, "scenario 6: a stalled MINIMAL request issues no grant")
@@ -508,7 +569,7 @@ func _run_scenario_6_style_degradation() -> void:
 	_assert(not staffed_name.ends_with("Control"), "scenario 6: STAFFED surfaces a personal name, not '...Control' (got '%s')" % staffed_name)
 	_assert(not staffed_station.available_npcs.is_empty() and staffed_station.available_npcs[0].character_name == staffed_name,
 		"scenario 6: STAFFED station's broadcast NPC name matches the personal dockmaster name")
-	var staffed_ship = _make_shuttle("Staffed6Ship", 102, Vector2(9999, 9999))
+	var staffed_ship = _make_shuttle("Staffed6Ship", 102, Vector2(4000, 4000))
 	var staffed_result = staffed_station.request_docking_via_control(staffed_ship)
 	_assert(staffed_result.get("outcome") == "granted", "scenario 6: STAFFED still yields a valid grant")
 
@@ -539,3 +600,4 @@ func _finalize() -> void:
 			printerr("  FAIL: ", f)
 		printerr(">>> [TEST FAILED] test_port_control_comms <<<")
 		get_tree().quit(1)
+

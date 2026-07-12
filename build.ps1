@@ -1,4 +1,7 @@
 # build.ps1 - Build and package Project Deep Space
+param (
+    [switch]$Force
+)
 function Normalize-ProcessPath {
     if ($env:PATH) {
         $env:Path = $env:PATH
@@ -15,6 +18,9 @@ $godotPath = "$PSScriptRoot\Godot_v4.4.1-stable_win64.exe"
 $buildDir = "$PSScriptRoot\build"
 $windowsBuildDir = "$buildDir\windows"
 $exportPath = "$windowsBuildDir\ProjectDeepSpace.exe"
+$buildVersion = Get-Date -Format "yyyy-MM-dd.HHmmss"
+
+Write-Host "Build Version: $buildVersion" -ForegroundColor Cyan
 
 # 1. Verification
 if (-not (Test-Path $godotPath)) {
@@ -103,10 +109,15 @@ foreach ($r in $runners) {
 }
 
 if (-not $testsPassed) {
-    Write-Host "BUILD ABORTED: One or more tests failed." -ForegroundColor Red
-    exit 1
+    if ($Force) {
+        Write-Host "WARNING: One or more tests failed, but -Force was specified. Proceeding with build..." -ForegroundColor Yellow
+    } else {
+        Write-Host "BUILD ABORTED: One or more tests failed." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "All tests passed successfully." -ForegroundColor Green
 }
-Write-Host "All tests passed successfully." -ForegroundColor Green
 
 # 3. Check and Install Export Templates
 $templateDir = "$env:APPDATA\Godot\export_templates\4.4.1.stable"
@@ -134,6 +145,7 @@ if (Test-Path $buildDir) {
 New-Item -ItemType Directory -Force -Path $windowsBuildDir | Out-Null
 
 # 4. Export Windows Desktop Build
+Set-Content -Path "$PSScriptRoot\version.txt" -Value $buildVersion
 Write-Host "Exporting Windows Desktop build to $exportPath..." -ForegroundColor Cyan
 $godotArgs = "--path `"$PSScriptRoot`" --headless --export-release `"Windows Desktop`" `"$exportPath`""
 $process = Start-Process -FilePath $godotPath -ArgumentList $godotArgs -Wait -PassThru -NoNewWindow
@@ -154,9 +166,11 @@ if ($process.ExitCode -ne 0 -or -not (Test-Path $exportPath)) {
 Write-Host "Export successful!" -ForegroundColor Green
 
 # 7. Packaging
-$zipName = "ProjectDeepSpace_Windows.zip"
+$zipName = "ProjectDeepSpace_Windows_v$buildVersion.zip"
 $zipPath = "$buildDir\$zipName"
 Write-Host "Packaging build into $zipPath..." -ForegroundColor Cyan
+
+Set-Content -Path "$windowsBuildDir\version.txt" -Value $buildVersion
 
 $tmpFile = "$windowsBuildDir\ProjectDeepSpace.tmp"
 if (Test-Path $tmpFile) { Remove-Item $tmpFile -Force }
@@ -169,3 +183,7 @@ $zipSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
 Write-Host "Build Complete!" -ForegroundColor Green
 Write-Host "Executable: $exportPath ($exeSize MB)"
 Write-Host "ZIP: $zipPath ($zipSize MB)"
+
+if (-not $testsPassed) {
+    Write-Host "`nWARNING: This build contains broken tests (-Force was used)!" -ForegroundColor Yellow
+}

@@ -106,6 +106,16 @@ func _physics_process(delta: float) -> void:
 				if pos_err < pos_tolerance and captured.linear_velocity.length() < settle_speed and ang_err < 0.2:
 					state = State.DOCKED
 					_dock_timer = dock_duration
+					# Engineering-log entry on the DOCKED transition (the
+					# moment the clamps actually have the ship) -- the
+					# player-facing record that docking succeeded, alongside
+					# the repair/damage entries M40 already logs.
+					if captured.has_method("log_event"):
+						var host_label: String = ""
+						var host = get_parent()
+						if host != null:
+							host_label = str(host.get("ship_name")) if host.get("ship_name") != null else host.name
+						captured.log_event("info", "Docked at %s berth %s" % [host_label, slip_id])
 		State.DOCKED:
 			if not _valid(captured):
 				_release()
@@ -222,8 +232,28 @@ func _berth_pos_for(ship) -> Vector2:
 
 func _release() -> void:
 	if _valid(captured):
+		# Log only a release FROM DOCKED (a completed stay) -- an aborted
+		# capture never actually docked, and logging those would spam the
+		# engineering log on every timeout/retry cycle.
+		if state == State.DOCKED and captured.has_method("log_event"):
+			captured.log_event("info", "Released from berth " + slip_id)
 		captured.wants_dock = false
 		captured.docking_bay = null
+		# The docking transaction with THIS station is over (completed hold,
+		# manual undock, aborted capture, or clamp snap) -- consume the grant
+		# so the slip returns to the pool IMMEDIATELY. Without this, a
+		# departed ship's grant kept its slip reserved until the 120s
+		# countdown or zone-exit, which with two cargo shuttles cycling could
+		# hold BOTH of a station's physically-empty berths against the player
+		# for long stretches ("Negative, we have no open berths" with an
+		# empty dock -- found via the berth-check logging this fix shipped
+		# with). Only clear a grant this bay's own host issued -- a grant
+		# from some OTHER authority is none of this bay's business.
+		var grant = captured.get("docking_grant")
+		var host = get_parent()
+		if grant != null and host != null and host.has_method("get_port_zone"):
+			if grant.get("authority", "") == host.get_port_zone().get("authority", ""):
+				captured.docking_grant = null
 	captured = null
 	slip_claimed = false
 	state = State.EMPTY

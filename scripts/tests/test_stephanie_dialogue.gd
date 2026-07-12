@@ -34,6 +34,7 @@ const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const HomeClusterOverlay = preload("res://scripts/story/home_cluster_overlay.gd")
 const StoryCharacters = preload("res://scripts/story/characters.gd")
+const DialogueScratch = preload("res://scripts/dialogue_scratch.gd")
 
 const DOCK_WAIT_MAX_FRAMES := 900
 
@@ -139,7 +140,7 @@ func _run() -> void:
 	player.position = Vector2(50000, 50000)   # far from Ironhold -> undocked
 	main_node.add_child(player)
 
-	var states: Array = [{"station": station, "player": player, "story": StoryState, "missions": player.mission_log}]
+	var states: Array = [{"station": station, "player": player, "story": StoryState, "missions": player.mission_log}, DialogueScratch.scratch()]
 
 	# --- Phase 1: mission offer visible pre-flag, status not yet visible ---
 	var line = await dm.get_next_dialogue_line(resource, "start", states)

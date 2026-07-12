@@ -72,40 +72,41 @@ const SLIP_MARKER_RADIUS_PX := 10.0
 # it reads as "controlled space", not a threat/classification color. Kept
 # distinct (lower alpha, no fill) so a docked-in-Ironhold nav map doesn't
 # double up two full-strength gold rings once a lane is also drawn.
-const ZONE_BOUNDARY_COLOR := Color(1.0, 0.85, 0.2, 0.35)
+# M46 (revised) -- zone geometry is BACKGROUND terrain, not a foreground
+# element: it draws first inside the world transform (right after the grid,
+# under everything else), in colors blended ~halfway toward the nav panel's
+# background (0.05, 0.05, 0.1) so contacts/lanes/markers always pop over it,
+# with THICKER strokes so it still reads as a boundary at a glance rather
+# than a wire. The zone the player is inside is emphasized; every other
+# station dims further.
+const ZONE_BOUNDARY_COLOR := Color(0.52, 0.45, 0.15, 0.55)
+const ZONE_BOUNDARY_DIM_COLOR := Color(0.52, 0.45, 0.15, 0.22)
+const ZONE_RING_WIDTH := 4.0        # / map_zoom at draw time
 
-# M46 -- every controlled station's ring/disc now draws (design_ideas/
-# port_zones_and_channels.md "Visibility": "a no-fly zone you can't see until
-# you're in it defeats the purpose"), not just the one the player is inside.
-# The zone the player is currently inside keeps the full-strength
-# ZONE_BOUNDARY_COLOR above; every other controlled station's ring dims to
-# this much lower alpha instead -- same hue, so it's still legible as
-# "controlled space" at a glance without competing with the emphasized ring.
-const ZONE_BOUNDARY_DIM_COLOR := Color(1.0, 0.85, 0.2, 0.10)
-
-# M46 -- exclusion disc (no-fly annulus, hull -> exclusion_radius). A
-# distinct, warmer hue from the plain gold control ring/lane/slip family
-# above -- a keep-out texture should read differently from "clearance"/
-# "controlled space" lines, not just as a fainter version of the same ring.
-# Same emphasized/dimmed split as the control ring: the zone the player is
-# inside reads brighter than every other controlled station's disc.
-const EXCLUSION_DISC_COLOR := Color(1.0, 0.55, 0.15, 0.55)
-const EXCLUSION_DISC_DIM_COLOR := Color(1.0, 0.55, 0.15, 0.18)
+# Keep-back zone (two circles + hatch, warmer hue than the control-ring gold
+# so "keep out" reads differently from "controlled space"): the outer
+# boundary at exclusion_radius, the hard inner keep-out ring at
+# keep_out_radius (PortZone.derive_keep_out_radius), and 45-degree hatching
+# between hull and outer boundary. Same emphasized/dimmed and blended-toward-
+# background treatment as the control ring.
+const EXCLUSION_DISC_COLOR := Color(0.52, 0.3, 0.12, 0.5)
+const EXCLUSION_DISC_DIM_COLOR := Color(0.52, 0.3, 0.12, 0.2)
+const EXCLUSION_HATCH_WIDTH := 3.0  # / map_zoom at draw time
 
 # Hatch line spacing, in WORLD units (constant rhythm across zoom -- same
 # "world-unit dash rhythm" convention as CONTRACT_DASH_LEN/CONTRACT_GAP_LEN).
 const EXCLUSION_HATCH_SPACING := 150.0
 
-# M46 -- docking channel corridor half-width. Wider than the M34 approach
-# lane's LANE_HALF_WIDTH (120u -- a fine steering guide) since the channel is
-# the "only legal way through the no-fly disc" cutout, not a precision
-# trajectory aid; sized to comfortably clear DockingBay._try_capture()'s
-# capture hemisphere (a ship anywhere in front of the berth within
-# capture_radius, not a narrow cone -- see docking_bay.gd) with margin,
-# without eating so much of the disc that a modest exclusion_radius (~1500u
-# for a medium station) reads as mostly open.
-const CHANNEL_HALF_WIDTH := 300.0
+# M46 (revised) -- the channel through the keep-back zone is a 90-degree CONE
+# (PortChannel.sector_polygon/lane_edges) centered on the assigned berth's
+# approach axis: both circles gap over the cone's span, the sector's radial
+# edges are the drawn lane edges, and a centerline guide runs down the middle
+# ending where the docking clamps take over (PortChannel.guide_points).
+# These are ACTIONABLE aids, not background terrain -- they keep the bright
+# gold so they pop over the subdued zone drawing.
 const CHANNEL_EDGE_COLOR := Color(1.0, 0.85, 0.2, 0.7)
+const GUIDE_LEAD_LENGTH := 800.0        # guide extends this far outward past the engage point
+const GUIDE_ENGAGE_MARKER_PX := 6.0     # screen-px diamond at "clamps take you from here"
 
 # M41 -- contract markers (see scripts/story/contract_feed.gd) are NAV
 # knowledge, never a sensor detection -- a known coordinate/area/place, the
@@ -563,7 +564,12 @@ func _draw() -> void:
 		
 	# Draw origin reference
 	draw_circle(Vector2.ZERO, 10.0, Color(0.2, 0.2, 0.5))
-		
+
+	# M35/M46 -- controlled-zone rings + keep-back discs: BACKGROUND terrain,
+	# drawn first (right after the grid) so every other element -- own-ship,
+	# contacts, lanes, contract markers, lasers -- reads on top of it.
+	_draw_controlled_zones(current_state.get("current_port_zone", null), current_state.get("docking_grant", null))
+
 	# Draw velocity vector
 	if show_velocity_vectors and vel.length() > 0:
 		draw_line(pos, pos + vel * 2.0, Color(0.5, 0.5, 0.0), 2.0 / map_zoom)
@@ -679,15 +685,10 @@ func _draw() -> void:
 		if comms_range > 0.0:
 			draw_arc(pos, comms_range, 0, TAU, 64, Color(0.8, 0.4, 1.0, 0.4), 2.0 / map_zoom)
 
-	# M35/M46 -- controlled-zone rings + exclusion discs, drawn UNDER contacts
-	# (before the contacts loop in z-order, per roadmap scope) so a contact
-	# blip/outline sitting on a boundary always reads on top of it, never the
-	# reverse.
-	_draw_controlled_zones(current_state.get("current_port_zone", null), current_state.get("docking_grant", null))
-
-	# M41 -- GO_TO_AREA search rings, same "drawn under contacts" z-order as
-	# the zone boundary ring above (a search-area ring the player is standing
-	# inside should never occlude a real contact sitting on it).
+	# M41 -- GO_TO_AREA search rings, drawn under contacts (a search-area ring
+	# the player is standing inside should never occlude a real contact
+	# sitting on it). Zone rings/discs draw even earlier -- see the
+	# _draw_controlled_zones call right after the grid above.
 	var contracts: Array = current_state.get("contracts", [])
 	_draw_contract_rings(contracts)
 
@@ -1062,6 +1063,16 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) ->
 # trivially bounded per the same cardinality note those functions already
 # make.
 func _draw_controlled_zones(current_authority, grant) -> void:
+	# Knowledge gating: a port zone is COMMS knowledge (the authority
+	# broadcasts its boundaries), so it only draws while the player and the
+	# station are in mutual comms range -- same weaker-of-the-two-ranges rule
+	# the datalink uses (ship.gd's relay block). Without this, every
+	# controlled station in the loaded cluster drew its rings map-wide.
+	var player_pos: Vector2 = current_state.get("pos", Vector2.ZERO)
+	var player_comms: float = current_state.get("comms_range", 0.0)
+	if player_comms <= 0.0:
+		return
+
 	for s in get_tree().get_nodes_in_group("ships"):
 		if not s.has_method("get_port_zone"):
 			continue
@@ -1074,31 +1085,84 @@ func _draw_controlled_zones(current_authority, grant) -> void:
 		if not zone_boundary_visible(radius, map_zoom):
 			continue
 
+		var link_range: float = min(player_comms, s.get_comms_range() if s.has_method("get_comms_range") else 0.0)
+		if player_pos.distance_to(s.global_position) > link_range:
+			continue
+
 		var authority: String = zone.get("authority", "")
 		var emphasized: bool = authority != "" and authority == current_authority
-		draw_arc(s.global_position, radius, 0, TAU, 64,
-			ZONE_BOUNDARY_COLOR if emphasized else ZONE_BOUNDARY_DIM_COLOR, 2.0 / map_zoom)
+		var ring_color: Color = ZONE_BOUNDARY_COLOR if emphasized else ZONE_BOUNDARY_DIM_COLOR
+		var disc_color: Color = EXCLUSION_DISC_COLOR if emphasized else EXCLUSION_DISC_DIM_COLOR
+		draw_arc(s.global_position, radius, 0, TAU, 64, ring_color, ZONE_RING_WIDTH / map_zoom)
 
 		var exclusion_radius: float = float(zone.get("exclusion_radius", 0.0))
 		if exclusion_radius <= 0.0:
 			continue
+		var keep_out_radius: float = float(zone.get("keep_out_radius", 0.0))
 
-		# Channel cutout: only when the player's grant is FOR THIS station's
+		# Channel: only when the player's grant is FOR THIS station's
 		# authority AND names a concrete slip (any-open grants -- slip_id ""
-		# -- have no single berth to align a channel to, per roadmap scope).
+		# -- have no single berth to align a cone to, per roadmap scope).
 		var channel_polygon := PackedVector2Array()
-		var mouth = null
-		var berth_pos = null
+		var theta0: float = NAN
+		var bay_node: Node = null
 		if grant != null and grant.get("authority", "") == authority and authority != "" and grant.get("slip_id", "") != "":
-			var bay: Node = _assigned_bay_for_station(s, grant)
-			if bay != null:
-				berth_pos = bay.global_position
-				mouth = PortChannel.mouth_point(berth_pos, bay.global_rotation, s.global_position, exclusion_radius)
-				channel_polygon = PortChannel.polygon(berth_pos, bay.global_rotation, s.global_position, exclusion_radius, CHANNEL_HALF_WIDTH)
+			bay_node = _assigned_bay_for_station(s, grant)
+			if bay_node != null:
+				theta0 = PortChannel.axis_angle(bay_node.global_position, bay_node.global_rotation, s.global_position, exclusion_radius)
+				if not is_nan(theta0):
+					# The hatch cut reaches the HULL (the berth sits inside
+					# the keep-out ring -- the open cone must run all the way
+					# down to it), not just the keep-out radius.
+					channel_polygon = PortChannel.sector_polygon(s.global_position, theta0, s.get_bounding_radius(), exclusion_radius)
 
-		_draw_exclusion_disc(s, exclusion_radius, emphasized, channel_polygon)
-		if mouth != null and berth_pos != null:
-			_draw_channel_edges(mouth, berth_pos)
+		var has_channel: bool = not is_nan(theta0)
+
+		# The two keep-back circles: full rings normally; when the channel is
+		# open, both gap over the cone's angular span ("gaps open when berth
+		# assigned... lines up with inner and outer gaps").
+		_draw_gappable_ring(s.global_position, exclusion_radius, theta0, disc_color, has_channel)
+		if keep_out_radius > 0.0 and keep_out_radius < exclusion_radius:
+			_draw_gappable_ring(s.global_position, keep_out_radius, theta0, disc_color, has_channel)
+
+		_draw_exclusion_hatch(s, exclusion_radius, disc_color, channel_polygon)
+
+		if has_channel and bay_node != null:
+			var edges: Array = PortChannel.lane_edges(s.global_position, theta0, keep_out_radius, exclusion_radius)
+			for edge in edges:
+				draw_line(edge[0], edge[1], CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
+			_draw_docking_guide(bay_node, s.global_position, exclusion_radius)
+
+# One keep-back circle: a full ring, or -- while the docking cone is open --
+# an arc leaving the cone's [theta0 - half, theta0 + half] span open.
+func _draw_gappable_ring(center: Vector2, r: float, theta0: float, color: Color, gapped: bool) -> void:
+	if gapped and not is_nan(theta0):
+		draw_arc(center, r, theta0 + PortChannel.CONE_HALF_ANGLE, theta0 - PortChannel.CONE_HALF_ANGLE + TAU, 48, color, ZONE_RING_WIDTH / map_zoom)
+	else:
+		draw_arc(center, r, 0, TAU, 64, color, ZONE_RING_WIDTH / map_zoom)
+
+# The centerline docking guide: a bright lead-in line down the middle of the
+# open cone, ending at the point where the docking clamps take over
+# (PortChannel.guide_points -- with current station tuning that's the cone
+# mouth, since the bay's capture reach covers the whole disc), marked with a
+# small screen-space diamond: fly onto the diamond with your grant and the
+# berth takes you from there.
+func _draw_docking_guide(bay: Node, station_center: Vector2, exclusion_radius: float) -> void:
+	var capture_radius: float = bay.get("capture_radius") if bay.get("capture_radius") != null else 0.0
+	var g: Dictionary = PortChannel.guide_points(bay.global_position, bay.global_rotation, station_center, exclusion_radius, capture_radius, GUIDE_LEAD_LENGTH)
+	if g.is_empty():
+		return
+	var engage: Vector2 = g["engage"]
+	var start: Vector2 = g["start"]
+	if start.distance_to(engage) > 0.01:
+		draw_line(start, engage, CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
+	var m: float = GUIDE_ENGAGE_MARKER_PX / map_zoom
+	var diamond := PackedVector2Array([
+		engage + Vector2(0, -m), engage + Vector2(m, 0),
+		engage + Vector2(0, m), engage + Vector2(-m, 0),
+		engage + Vector2(0, -m),
+	])
+	draw_polyline(diamond, CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
 
 # M46 -- resolves the DockingBay this grant is assigned to AT a specific
 # station (as opposed to _draw_docking_nav_aids' version, which first has to
@@ -1114,22 +1178,20 @@ func _assigned_bay_for_station(station: Node, grant) -> Node:
 		return null
 	return assigned_bay_for(bays, grant)
 
-# M46 -- draws one station's exclusion disc: diagonal hatch (45 degrees,
-# EXCLUSION_HATCH_SPACING world units apart, constant screen-width stroke)
-# across the annulus from the hull to exclusion_radius, plus the annulus
-# boundary circle. When `channel_polygon` is non-empty, hatch segments are
-# clipped against it (Geometry2D.clip_polyline_with_polygon -- the same
-# polygon-clip primitive ship_silhouette.gd already uses elsewhere in this
-# codebase) so the channel reads as an open cut through the hatching rather
-# than just another line drawn over it.
-func _draw_exclusion_disc(station: Node, exclusion_radius: float, emphasized: bool, channel_polygon: PackedVector2Array) -> void:
+# M46 -- one station's keep-back hatching: diagonal 45-degree lines,
+# EXCLUSION_HATCH_SPACING world units apart, spanning hull -> exclusion
+# boundary. When `channel_polygon` (the open docking cone) is non-empty,
+# hatch segments are clipped against it (Geometry2D.clip_polyline_with_polygon
+# -- the same polygon-clip primitive ship_silhouette.gd already uses) so the
+# cone reads as an open cut through the hatching. The boundary CIRCLES are
+# drawn separately (_draw_gappable_ring) so they can gap over the cone span.
+func _draw_exclusion_hatch(station: Node, exclusion_radius: float, color: Color, channel_polygon: PackedVector2Array) -> void:
 	var inner_radius: float = station.get_bounding_radius()
 	if exclusion_radius <= inner_radius:
 		return # station's own hull already fills (or exceeds) the disc -- nothing to hatch
 
 	var center: Vector2 = station.global_position
-	var color: Color = EXCLUSION_DISC_COLOR if emphasized else EXCLUSION_DISC_DIM_COLOR
-	var width: float = 1.5 / map_zoom
+	var width: float = EXCLUSION_HATCH_WIDTH / map_zoom
 	var has_channel: bool = channel_polygon.size() >= 3
 
 	for seg in exclusion_hatch_lines(inner_radius, exclusion_radius, EXCLUSION_HATCH_SPACING):
@@ -1142,8 +1204,6 @@ func _draw_exclusion_disc(station: Node, exclusion_radius: float, emphasized: bo
 					draw_polyline(piece, color, width)
 		else:
 			draw_line(p1, p2, color, width)
-
-	draw_arc(center, exclusion_radius, 0, TAU, 64, color, width)
 
 # M46 -- pure geometry for the exclusion-disc hatch: parallel 45-degree line
 # segments spanning the annulus from inner_radius (hull) to outer_radius
@@ -1184,21 +1244,6 @@ static func exclusion_hatch_lines(inner_radius: float, outer_radius: float, spac
 		else:
 			out.append([v * o - u * t_outer, v * o + u * t_outer])
 	return out
-
-# M46 -- draws the channel's two edges (NavCorridor.corridor, same helper the
-# M34 lane already uses) from the exclusion boundary mouth down to the
-# berth. Distinct from _draw_lane below (which draws the fine steering
-# guide/centerline) -- this is the boundary of the cut through the hatching,
-# so a granted ship sees both "here's the legal corridor" (this) and "here's
-# exactly where to fly within it" (the lane).
-func _draw_channel_edges(mouth: Vector2, berth_pos: Vector2) -> void:
-	var corridor: Dictionary = NavCorridor.corridor(PackedVector2Array([mouth, berth_pos]), CHANNEL_HALF_WIDTH)
-	var left_edge: PackedVector2Array = corridor.get("left_edge", PackedVector2Array())
-	var right_edge: PackedVector2Array = corridor.get("right_edge", PackedVector2Array())
-	if left_edge.size() < 2 or right_edge.size() < 2:
-		return
-	draw_polyline(left_edge, CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
-	draw_polyline(right_edge, CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
 
 # M41 -- GO_TO_AREA search-area rings, one per contract entry whose kind is
 # GO_TO_AREA and radius > 0.0 (contract_feed.gd only sets a radius for that

@@ -84,11 +84,14 @@ $psi.RedirectStandardError = $true
 
 $proc = New-Object System.Diagnostics.Process
 $proc.StartInfo = $psi
+$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 [void]$proc.Start()
 $stdOutTask = $proc.StandardOutput.ReadToEndAsync()
 $stdErrTask = $proc.StandardError.ReadToEndAsync()
 
 $exitedInTime = $proc.WaitForExit($TEST_TIMEOUT_SEC * 1000)
+$stopwatch.Stop()
+$latency = $stopwatch.Elapsed.TotalSeconds.ToString("F2")
 if (-not $exitedInTime) {
     # Hung: kill the process so the async stdout/stderr pipes close and their
     # ReadToEndAsync tasks complete -- only then is it safe to read .Result
@@ -114,10 +117,10 @@ if (-not $exitedInTime) {
 }
 
 if ($proc.ExitCode -eq 0 -and $logContent -match "\[TEST PASSED\]") {
-    Write-Host "`n  >>> [TEST PASSED] $TestName <<<" -ForegroundColor Green
+    Write-Host "`n  >>> [TEST PASSED] $TestName (${latency}s) <<<" -ForegroundColor Green
     exit 0
 } else {
-    Write-Host "`n  >>> [TEST FAILED] $TestName <<<" -ForegroundColor Red
+    Write-Host "`n  >>> [TEST FAILED] $TestName (${latency}s) <<<" -ForegroundColor Red
     Write-Host "Exit Code: $($proc.ExitCode)"
     Write-Host "Log Output:"
     Write-Host $logContent

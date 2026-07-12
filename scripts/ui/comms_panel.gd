@@ -1,5 +1,7 @@
 extends Control
 
+const DialogueScratch = preload("res://scripts/dialogue_scratch.gd")
+
 var current_state: Dictionary = {}
 
 var vsplit: VSplitContainer
@@ -307,7 +309,17 @@ func _dialogue_game_states() -> Array:
 		station = null
 	var player = _get_my_ship()
 	var missions = player.mission_log if player != null else null
-	return [{"station": station, "player": player, "story": StoryState, "missions": missions}]
+	# DialogueScratch.scratch(): pre-declared assignment targets for the
+	# `do x = ...` temporaries .dialogue files use. DialogueManager can only
+	# assign to a name that already exists on a game state -- without this,
+	# the assignment errored AFTER the right-hand side ran, so e.g. port
+	# control ISSUED the grant but `outcome` stayed unset and the conversation
+	# spoke the else-branch "Negative, we have no open berths" over a real
+	# grant (the long-standing text/state mismatch). Rebuilt fresh per line
+	# fetch, so temps can't leak between conversations; within ONE fetch (the
+	# mutation -> condition -> spoken-line walk) DM holds the same array, which
+	# is all the temporaries need.
+	return [{"station": station, "player": player, "story": StoryState, "missions": missions}, DialogueScratch.scratch()]
 
 func _get_my_ship() -> Node:
 	var ship_node_name = "Ship_" + str(multiplayer.get_unique_id())

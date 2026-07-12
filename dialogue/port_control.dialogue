@@ -12,6 +12,13 @@ else
 		do slip = grant["slip_id"]
 		Port Control: Copy that. Cleared to berth {{ slip }}. Welcome in.
 		=> END
+	elif outcome == "already_docked"
+		do slip = result["slip_id"]
+		Port Control: Check your board -- you are already berthed at {{ slip }}.
+		=> start
+	elif outcome == "out_of_zone"
+		Port Control: Negative, you are outside our control zone. Close range and re-request.
+		=> start
 	elif outcome == "stalled"
 		Port Control: Stand by...
 		=> start

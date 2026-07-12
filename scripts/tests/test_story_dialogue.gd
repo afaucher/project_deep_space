@@ -88,7 +88,7 @@ func _run_dialogue_flow() -> void:
 		_finalize()
 		return
 
-	var states: Array = [{"station": giver, "player": player, "story": StoryState, "missions": player.mission_log}]
+	var states: Array = [{"station": giver, "player": player, "story": StoryState, "missions": player.mission_log}, preload("res://scripts/dialogue_scratch.gd").scratch()]
 
 	# Before accepting: no flag, no mission.
 	_assert(StoryState.has_flag("todd_mission_offered") == false, "story dialogue: flag not set before the conversation")

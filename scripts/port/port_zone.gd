@@ -32,3 +32,17 @@ const EXCLUSION_RADIUS_FACTOR := 6.0
 
 static func derive_exclusion_radius(hull_bounding_radius: float) -> float:
 	return hull_bounding_radius * EXCLUSION_RADIUS_FACTOR
+
+# The INNER keep-out ring of the two-circle keep-back model (design_ideas/
+# port_zones_and_channels.md "Geometry", revised): a hard circle just off the
+# hull ("farther than the radius of the ship") that the docking cone's gap
+# opens through when a berth is assigned. The outer circle (exclusion_radius
+# above) is deliberately much larger, allowing off-angle approaches down the
+# 90-degree cone; this inner one is the do-not-cross line everywhere the cone
+# isn't open. Derived, like the outer radius, so every station is consistent
+# for free; no authored override yet (add one to port_zone when a story
+# station needs it).
+const KEEP_OUT_RADIUS_FACTOR := 2.0
+
+static func derive_keep_out_radius(hull_bounding_radius: float) -> float:
+	return hull_bounding_radius * KEEP_OUT_RADIUS_FACTOR

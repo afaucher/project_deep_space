@@ -67,13 +67,43 @@ static func get_controller_name(station) -> String:
 # fast-path button. Returns a Dictionary describing the outcome so callers
 # (dialogue text, UI banner) can present it without re-deriving state:
 #   {"outcome": "granted", "grant": <DockingGrant dict>}
+#   {"outcome": "already_docked", "slip_id": String} -- this ship is physically at one of THIS station's berths right now
+#   {"outcome": "out_of_zone"}        -- requester isn't inside this authority's control zone; a grant issued now would
+#                                        silently expire on the very next tick (_update_docking_grant's zone check), which
+#                                        read as "permission granted then nothing happened" -- surface it instead
 #   {"outcome": "no_berths"}          -- station.issue_docking_grant() denied (pool full)
 #   {"outcome": "stalled"}            -- MINIMAL style, still within its stall window; no grant issued, no pool call wasted
 # station.issue_docking_grant(ship) is the M32 single pool allocator
 # (ship.gd) -- called here and ONLY here, so the dialogue path and the
-# fast-path button can never diverge on outcome.
+# fast-path button can never diverge on outcome. verbose=true here (this is
+# the player/comms path, a handful of calls) turns on the allocator's
+# per-berth check log; the NPC AI's direct issue_docking_grant() calls stay
+# quiet (they retry every tick while a pool is full).
 static func request_docking(station, ship) -> Dictionary:
 	var style: String = get_style(station)
+
+	# Already at one of this station's berths (CAPTURING or DOCKED): asking
+	# for permission again is a no-op, not a denial -- without this, a docked
+	# ship's own bay reads non-EMPTY and the OTHER berth's availability
+	# decides the answer, so port control would either double-grant a second
+	# slip or say "no open berths" to a ship sitting on its dock.
+	var bay = ship.get("docking_bay")
+	if bay != null and bay.get_parent() == station:
+		return {"outcome": "already_docked", "slip_id": bay.slip_id}
+
+	# Outside the control zone: don't issue a grant that _update_docking_grant
+	# will kill next tick (its zone check compares against M31 membership).
+	# GEOMETRIC test, not the ship's current_port_zone field -- membership
+	# only updates on physics ticks, so a synchronous request right after
+	# spawn (tests, scripted scenes) would false-deny on a stale field. The
+	# radius gets the same PORT_ZONE_EXIT_MARGIN dead band membership uses,
+	# so a ship hovering exactly on the boundary can't be granted here and
+	# instantly expired there.
+	var zone: Dictionary = station.get_port_zone() if station.has_method("get_port_zone") else {}
+	if not zone.is_empty():
+		var zone_radius: float = float(zone.get("radius", 0.0))
+		if zone_radius > 0.0 and not PortZone.contains(station.global_position, zone_radius, ship.position):
+			return {"outcome": "out_of_zone"}
 
 	if style == STYLE_MINIMAL:
 		var sid: int = station.get_instance_id()
@@ -85,7 +115,7 @@ static func request_docking(station, ship) -> Dictionary:
 		# counter at/above the threshold so subsequent requests keep succeeding
 		# (a single retry clears it, per the roadmap: "re-request to retry").
 
-	var grant = station.issue_docking_grant(ship)
+	var grant = station.issue_docking_grant(ship, true)
 	if grant == null:
 		return {"outcome": "no_berths"}
 	return {"outcome": "granted", "grant": grant}

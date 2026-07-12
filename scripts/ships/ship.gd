@@ -259,10 +259,23 @@ var cargo_captured_seen: bool = false
 # Returns null when the station has no port_zone (permission is a property of
 # a controlled zone -- callers should just set wants_dock directly at an open
 # station) or when no berth is free ("no berths").
-func issue_docking_grant(ship) -> Variant:
+func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 	var zone: Dictionary = get_port_zone()
 	if zone.is_empty():
 		return null
+
+	# Idempotent re-request: a ship that already holds a live grant from THIS
+	# authority gets the SAME grant back with a fresh countdown, not a second
+	# trip through the pool (which would either double-book it a new slip or
+	# -- if everything else is reserved -- absurdly deny a ship we already
+	# cleared). Found while chasing "can't get docking permission".
+	var existing = ship.get("docking_grant")
+	if existing != null and existing.get("authority", "") == zone.get("authority", ""):
+		existing["time_left"] = GRANT_DURATION
+		if verbose:
+			print("[PORT] %s: %s already holds slip '%s' -- grant renewed" % [
+				zone.get("authority", "?"), ship.name, existing.get("slip_id", "")])
+		return existing
 
 	var bays: Array = []
 	for c in get_children():
@@ -271,7 +284,7 @@ func issue_docking_grant(ship) -> Variant:
 	if bays.is_empty():
 		return null
 
-	var reserved_slips: Dictionary = {}   # slip_id -> true, for live assigned grants elsewhere
+	var reserved_slips: Dictionary = {}   # slip_id -> holder ship name, for live assigned grants elsewhere
 	for s in get_tree().get_nodes_in_group("ships"):
 		if s == ship: continue
 		var g = s.get("docking_grant")
@@ -279,7 +292,7 @@ func issue_docking_grant(ship) -> Variant:
 		if g.get("authority", "") != zone.get("authority", ""): continue
 		var sid: String = g.get("slip_id", "")
 		if sid != "":
-			reserved_slips[sid] = true
+			reserved_slips[sid] = s.name
 
 	var free_bays: Array = []
 	for b in bays:
@@ -289,7 +302,27 @@ func issue_docking_grant(ship) -> Variant:
 			continue
 		free_bays.append(b)
 
+	# Berth-check log (player/comms path only -- NPC AI retries every tick
+	# while a pool is full, which would flood the log): one line per bay with
+	# the exact reason it is or isn't available, so a "no open berths" denial
+	# is never a mystery again.
+	if verbose:
+		var occupant: String
+		for b in bays:
+			if b.state != DockingBay.State.EMPTY:
+				occupant = b.captured.name if b.captured != null else "?"
+				print("[PORT] %s: berth '%s' %s (%s)" % [
+					zone.get("authority", "?"), b.slip_id,
+					["EMPTY", "CAPTURING", "DOCKED"][b.state], occupant])
+			elif reserved_slips.has(b.slip_id):
+				print("[PORT] %s: berth '%s' EMPTY but reserved by %s's grant" % [
+					zone.get("authority", "?"), b.slip_id, reserved_slips[b.slip_id]])
+			else:
+				print("[PORT] %s: berth '%s' free" % [zone.get("authority", "?"), b.slip_id])
+
 	if free_bays.is_empty():
+		if verbose:
+			print("[PORT] %s: DENIED %s -- no free berths" % [zone.get("authority", "?"), ship.name])
 		return null   # no berths
 
 	var grant: Dictionary = {
@@ -316,6 +349,9 @@ func issue_docking_grant(ship) -> Variant:
 				best_bay = b
 		grant["slip_id"] = best_bay.slip_id
 
+	if verbose:
+		print("[PORT] %s: GRANTED %s slip '%s'" % [
+			zone.get("authority", "?"), ship.name, grant.get("slip_id", "(any open)")])
 	ship.docking_grant = grant
 	return grant
 
@@ -1243,8 +1279,11 @@ func _ready() -> void:
 	# -- so a story overlay's authored override always wins over this default,
 	# and get_bounding_radius() below already has ship_components to measure
 	# (authored in _init(), which already ran).
-	if not port_zone.is_empty() and float(port_zone.get("exclusion_radius", 0.0)) <= 0.0:
-		port_zone["exclusion_radius"] = PortZone.derive_exclusion_radius(get_bounding_radius())
+	if not port_zone.is_empty():
+		if float(port_zone.get("exclusion_radius", 0.0)) <= 0.0:
+			port_zone["exclusion_radius"] = PortZone.derive_exclusion_radius(get_bounding_radius())
+		if float(port_zone.get("keep_out_radius", 0.0)) <= 0.0:
+			port_zone["keep_out_radius"] = PortZone.derive_keep_out_radius(get_bounding_radius())
 
 	mass = get_ship_mass()
 	inertia = get_ship_inertia()
