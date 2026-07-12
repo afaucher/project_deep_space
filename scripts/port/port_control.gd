@@ -118,6 +118,20 @@ static func request_docking(station, ship) -> Dictionary:
 	var grant = station.issue_docking_grant(ship, true)
 	if grant == null:
 		return {"outcome": "no_berths"}
+
+	# Surface clearance: a grant alone is just PERMISSION -- DockingBay._try_
+	# capture() only considers a ship that has wants_dock=true (see
+	# _dockable_seeking()). Setting it HERE, in the single shared issuance
+	# path, means "granted" always actually flies the capture regardless of
+	# which UI route asked -- previously this only happened in docking_control.
+	# gd's fast-path button handler, so a grant issued through the comms
+	# dialogue ("Cleared to berth...") left the ship's wants_dock flag
+	# untouched: the player could fly to and sit exactly on the berth marker
+	# forever with nothing happening, because the ship was never actually
+	# SEEKING capture. Confirmed against the DockingBay capture gate: this is
+	# the wants_dock precondition, not a positioning/geometry issue.
+	ship.dockable = true
+	ship.wants_dock = true
 	return {"outcome": "granted", "grant": grant}
 
 # Top-level context-flip control logic (fast path). is_docked = the ship is

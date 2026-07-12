@@ -47,12 +47,9 @@ func _on_pressed() -> void:
 		return
 	if target_station == null:
 		return
+	# Surfacing clearance (wants_dock=true on a granted outcome) now happens
+	# INSIDE PortControl.request_docking() itself, so the dialogue path gets
+	# the exact same behavior -- previously only this button raised it,
+	# which left a dialogue-issued grant permanently unfulfilled.
 	var result: Dictionary = PortControl.request_docking(target_station, player_ship)
-	if result.get("outcome", "") == "granted":
-		# Surface clearance = raise wants_dock so the ship actually flies the
-		# capture -- the fast path runs hail->request->grant->clearance in one
-		# press; without this the grant would sit unused until something else
-		# set wants_dock.
-		player_ship.dockable = true
-		player_ship.wants_dock = true
 	docking_requested.emit(result)

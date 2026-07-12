@@ -164,6 +164,19 @@ func _run_dialogue_traversal_check() -> void:
 			"dialogue traversal: the spoken line reflects the grant (got: %s)" % line2.text)
 		_assert(player.docking_grant != null and str(player.docking_grant.get("slip_id", "")) in line2.text,
 			"dialogue traversal: the spoken line names the assigned slip")
+	# Regression: a grant issued via the comms/dialogue route must actually
+	# fly the capture, not just sit as unused permission. wants_dock used to
+	# be raised ONLY by the fast-path "Request Docking" button
+	# (docking_control.gd) -- a player who talked to Port Control instead got
+	# "Cleared to berth X", flew to and sat exactly on the correct berth
+	# marker, and nothing ever happened, because the ship was never actually
+	# SEEKING capture (DockingBay._dockable_seeking() gates on wants_dock).
+	# Fixed by raising it inside PortControl.request_docking() itself (the
+	# ONE shared issuance path both routes call), not per-caller.
+	_assert(player.get("wants_dock") == true,
+		"dialogue traversal: a granted dialogue request also raises wants_dock (the ship actually seeks capture)")
+	_assert(player.get("dockable") == true,
+		"dialogue traversal: a granted dialogue request also confirms dockable")
 
 	_free_if_valid(player); _free_if_valid(station)
 
