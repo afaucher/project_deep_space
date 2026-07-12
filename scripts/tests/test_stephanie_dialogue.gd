@@ -172,21 +172,54 @@ func _run() -> void:
 				_assert(_find_response_exact(after_refusal, "Ask about repairs.") != null,
 					"stephanie: after the refusal the menu returns ('Ask about repairs.' offered again)")
 
-	# --- Phase 3: accept the mission ---
+	# --- Phase 3a: hearing the pitch does NOT commit -- asking what's wrong
+	# must never auto-accept; the mutations moved onto the explicit player
+	# accept line ("the player should always have an accept line").
 	line = await dm.get_next_dialogue_line(resource, "start", states)
 	offer_resp = _find_response(line, "something's bugging you")
 	_assert(offer_resp != null, "stephanie: mission-offer response still visible before accepting")
+	var pitch_line = null
 	if offer_resp != null:
-		var accept_line = await dm.get_next_dialogue_line(resource, offer_resp.next_id, states)
-		_assert(accept_line != null, "stephanie: accepting yields a reply line")
-		_assert(StoryState.has_flag("todd_mission_accepted"), "stephanie: accepting sets todd_mission_accepted")
-		var mission = player.mission_log.get_mission("check_on_todd")
-		_assert(mission != null, "stephanie: accepting starts check_on_todd on the player's real mission_log")
-		if mission != null:
-			_assert(mission["objectives"].size() == 3, "stephanie: check_on_todd should carry 3 objectives, got %d" % mission["objectives"].size())
-			if mission["objectives"].size() > 0:
-				_assert(mission["objectives"][0]["kind"] == "GO_TO_AREA",
-					"stephanie: first objective should be GO_TO_AREA, got '%s'" % mission["objectives"][0]["kind"])
+		pitch_line = await dm.get_next_dialogue_line(resource, offer_resp.next_id, states)
+		_assert(pitch_line != null, "stephanie: asking yields her pitch line")
+		_assert(not StoryState.has_flag("todd_mission_accepted"), "stephanie: hearing the pitch does NOT set the flag")
+		_assert(player.mission_log.get_mission("check_on_todd") == null, "stephanie: hearing the pitch does NOT start the mission")
+		_assert(pitch_line == null or _find_response(pitch_line, "I'll go check on him") != null,
+			"stephanie: the pitch offers an explicit accept line")
+		_assert(pitch_line == null or _find_response(pitch_line, "things to do first") != null,
+			"stephanie: the pitch offers an explicit decline line")
+
+	# --- Phase 3b: declining leaves everything unset and loops back ---
+	if pitch_line != null:
+		var decline_resp = _find_response(pitch_line, "things to do first")
+		if decline_resp != null:
+			var decline_line = await dm.get_next_dialogue_line(resource, decline_resp.next_id, states)
+			_assert(decline_line != null, "stephanie: declining yields her comeback line")
+			_assert(not StoryState.has_flag("todd_mission_accepted"), "stephanie: declining does NOT set the flag")
+			_assert(player.mission_log.get_mission("check_on_todd") == null, "stephanie: declining does NOT start the mission")
+			if decline_line != null:
+				var after_decline = await dm.get_next_dialogue_line(resource, decline_line.next_id, states)
+				_assert(after_decline != null and _find_response(after_decline, "something's bugging you") != null,
+					"stephanie: after declining, the menu returns and the offer is still available")
+
+	# --- Phase 3c: explicit accept fires the mutations ---
+	line = await dm.get_next_dialogue_line(resource, "start", states)
+	offer_resp = _find_response(line, "something's bugging you")
+	if offer_resp != null:
+		pitch_line = await dm.get_next_dialogue_line(resource, offer_resp.next_id, states)
+		var accept_resp = _find_response(pitch_line, "I'll go check on him") if pitch_line != null else null
+		_assert(accept_resp != null, "stephanie: accept line present on the second ask too")
+		if accept_resp != null:
+			var accept_line = await dm.get_next_dialogue_line(resource, accept_resp.next_id, states)
+			_assert(accept_line != null, "stephanie: accepting yields a reply line")
+			_assert(StoryState.has_flag("todd_mission_accepted"), "stephanie: accepting sets todd_mission_accepted")
+			var mission = player.mission_log.get_mission("check_on_todd")
+			_assert(mission != null, "stephanie: accepting starts check_on_todd on the player's real mission_log")
+			if mission != null:
+				_assert(mission["objectives"].size() == 3, "stephanie: check_on_todd should carry 3 objectives, got %d" % mission["objectives"].size())
+				if mission["objectives"].size() > 0:
+					_assert(mission["objectives"][0]["kind"] == "GO_TO_AREA",
+						"stephanie: first objective should be GO_TO_AREA, got '%s'" % mission["objectives"][0]["kind"])
 
 	# --- Phase 4: re-entering start shows the status response instead of the offer ---
 	line = await dm.get_next_dialogue_line(resource, "start", states)

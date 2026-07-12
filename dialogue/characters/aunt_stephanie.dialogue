@@ -9,11 +9,15 @@ Aunt Stephanie: Well, there's my favorite trouble. What do you need, Hun?
 		Aunt Stephanie: Hun, I can't fix what I can't touch. Get that ship into my dock, then we'll talk.
 	=> start
 - You look like something's bugging you. [if not story.has_flag("todd_mission_accepted") /]
-	do story.set_flag("todd_mission_accepted")
-	do missions.start_mission_by_id("check_on_todd")
 	Aunt Stephanie: It's your cousin Todd. Three weeks, not one call. Even for him that's a new record. It's probably nothing -- probably broke his antenna again and can't be bothered -- but I want eyes on him, Hun. Just in case.
-	Aunt Stephanie: Head out to the Slag Bay field -- his place is parked in there somewhere. If you can't raise him, ask the neighbors; those folks see everything. And tell that boy his aunt says to CALL.
-	=> start
+	- I'll go check on him.
+		do story.set_flag("todd_mission_accepted")
+		do missions.start_mission_by_id("check_on_todd")
+		Aunt Stephanie: Head out to the Slag Bay field -- his place is parked in there somewhere. If you can't raise him, ask the neighbors; those folks see everything. And tell that boy his aunt says to CALL.
+		=> start
+	- I've got things to do first.
+		Aunt Stephanie: Mm. Don't make me ask twice, Hun.
+		=> start
 - Any word from Todd? [if story.has_flag("todd_mission_accepted") /]
 	Aunt Stephanie: Not a peep -- which means you still owe me a flyby, Hun. Slag Bay field. Go.
 	=> start
