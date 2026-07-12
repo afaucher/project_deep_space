@@ -39,6 +39,7 @@ func setup(main) -> void:
 	_run_lane_geometry_scenario()
 	_run_assignment_binding_scenario()
 	_run_no_grant_scenario()
+	_run_berth_clearance_scenario()
 
 	_finalize()
 
@@ -215,6 +216,66 @@ func _run_no_grant_scenario() -> void:
 		"an empty bays list resolves to null regardless of grant contents")
 	_assert(NavigationPanel.open_bays_for([]).is_empty(),
 		"an empty bays list has no open bays either")
+
+	_free_if_valid(station)
+
+# ---------------------------------------------------------------------------
+# Scenario 4 -- DockingBay.berth_pos_for_bounding_radius: the nav-aid marker/
+# lane draw position must be the CLEARANCE-ADJUSTED seat, not the raw
+# authored global_position. Regression for "the gold ring is half inside the
+# station and not where NPCs seem to dock": a real medium station's
+# docking_port rect sits close enough to center (~195u for Ironhold's
+# dock_main) that the required standoff (hull + ship + CLEARANCE_MARGIN)
+# always exceeds it, so the SAME push-out DockingBay._servo already flies
+# ships to (via _berth_pos_for) must also drive what the nav panel draws --
+# using the raw position silently drew the marker somewhere a ship never
+# actually stops.
+# ---------------------------------------------------------------------------
+func _run_berth_clearance_scenario() -> void:
+	var station := MediumStation.new()
+	station.name = "ClearanceStation"
+	station.owner_id = 1
+	station.iff_tags = ["TEAM_PLAYER"]
+	station.position = Vector2.ZERO
+	main_node.add_child(station)
+
+	# A berth mounted close to center -- inside where a real ship's bounding
+	# radius + margin would require it to stand off.
+	var close_bay := DockingBay.new()
+	close_bay.slip_id = "close_slip"
+	close_bay.position = Vector2(0.0, 100.0)   # 100u from station center
+	close_bay.rotation = deg_to_rad(90.0)
+	station.add_child(close_bay)
+
+	var ship_radius := 50.0
+	var host_radius: float = station.get_bounding_radius()
+	var required: float = host_radius + ship_radius + DockingBay.CLEARANCE_MARGIN
+	var seat: Vector2 = close_bay.berth_pos_for_bounding_radius(ship_radius)
+
+	_assert(required > 100.0,
+		"berth clearance: this station's required standoff (%.1f) exceeds the raw berth distance (100u) -- the scenario actually exercises the push-out branch" % required)
+	_assert(absf(seat.distance_to(station.global_position) - required) < 0.01,
+		"berth clearance: the adjusted seat sits exactly `required` from the station center (got %.2f, want %.2f)" % [seat.distance_to(station.global_position), required])
+	_assert(seat.distance_to(station.global_position) > close_bay.global_position.distance_to(station.global_position),
+		"berth clearance: the adjusted seat is FARTHER from center than the raw authored position -- it clears the hull instead of sitting inside it")
+	_assert(seat.distance_to(station.global_position) > host_radius,
+		"berth clearance: the adjusted seat sits OUTSIDE the station's own hull bounding radius (never half-inside the station)")
+	# Direction is preserved -- only the distance changes (DockingBay's own
+	# comment: "the standoff moves the seat, not the facing").
+	var raw_dir: Vector2 = (close_bay.global_position - station.global_position).normalized()
+	var seat_dir: Vector2 = (seat - station.global_position).normalized()
+	_assert(raw_dir.distance_to(seat_dir) < 0.001,
+		"berth clearance: the adjusted seat lies along the SAME direction from center as the raw berth position")
+
+	# A berth already far enough out (well beyond any plausible standoff)
+	# needs no adjustment -- the seat equals the raw position exactly.
+	var far_bay := DockingBay.new()
+	far_bay.slip_id = "far_slip"
+	far_bay.position = Vector2(0.0, 50000.0)
+	station.add_child(far_bay)
+	var far_seat: Vector2 = far_bay.berth_pos_for_bounding_radius(ship_radius)
+	_assert(far_seat == far_bay.global_position,
+		"berth clearance: a berth already clear of the required standoff is returned unchanged")
 
 	_free_if_valid(station)
 

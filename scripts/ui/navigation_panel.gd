@@ -1335,13 +1335,23 @@ func _draw_docking_nav_aids(grant) -> void:
 	if bays.is_empty():
 		return
 
+	# Marker/lane positions must use the CLEARANCE-ADJUSTED seat
+	# (DockingBay.berth_pos_for_bounding_radius), not the raw authored
+	# global_position -- for a berth mounted close to a large hull the two
+	# differ by hundreds of units, and the raw position can sit inside the
+	# station's own footprint (the "ring is half inside the station" bug).
+	# Keyed on the PLAYER's own bounding_radius since that's whose approach
+	# this aid illustrates; already on the packet (see the own-ship bounds
+	# read near the top of _draw()).
+	var player_radius: float = current_state.get("bounding_radius", 50.0)
+
 	var assigned: Node = assigned_bay_for(bays, grant)
 	if assigned != null:
 		# Specific slip: THAT bay bright/authority-colored, every other slip at
 		# this station dimmed -- and draw the one lane down to it.
 		for b in bays:
-			_draw_slip_marker(b, b == assigned)
-		_draw_lane(assigned.global_position, assigned.global_rotation)
+			_draw_slip_marker(b, b.berth_pos_for_bounding_radius(player_radius), b == assigned)
+		_draw_lane(assigned.berth_pos_for_bounding_radius(player_radius), assigned.global_rotation)
 	else:
 		# Any-open grant (slip_id == "") -- highlight ALL open slips equally,
 		# no single lane (nothing specific to line up on; roadmap M34 scope).
@@ -1350,15 +1360,17 @@ func _draw_docking_nav_aids(grant) -> void:
 		for b in open_bays:
 			open_set[b] = true
 		for b in bays:
-			_draw_slip_marker(b, open_set.has(b))
+			_draw_slip_marker(b, b.berth_pos_for_bounding_radius(player_radius), open_set.has(b))
 
-func _draw_slip_marker(bay: Node, highlighted: bool) -> void:
+func _draw_slip_marker(bay: Node, berth_pos: Vector2, highlighted: bool) -> void:
 	var color: Color = SLIP_HIGHLIGHT_COLOR if highlighted else SLIP_DIM_COLOR
 	var r: float = SLIP_MARKER_RADIUS_PX / map_zoom
-	var p: Vector2 = bay.global_position
+	var p: Vector2 = berth_pos
 	draw_arc(p, r, 0, TAU, 16, color, (3.0 if highlighted else 2.0) / map_zoom)
 	# Small heading tick so the berth's facing (approach direction) reads at a
-	# glance, not just its position.
+	# glance, not just its position. Heading is unaffected by the clearance
+	# standoff (DockingBay's own comment: "the standoff moves the seat, not
+	# the facing"), so bay.global_rotation is still correct here.
 	var tip: Vector2 = p + Vector2.RIGHT.rotated(bay.global_rotation) * r * 2.0
 	draw_line(p, tip, color, (3.0 if highlighted else 2.0) / map_zoom)
 	# The assigned berth is THE target -- "I expected a small zone near the

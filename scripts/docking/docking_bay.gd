@@ -218,14 +218,29 @@ func _servo(ship) -> void:
 # it tracks a (slowly) rotating/drifting station. Heading is unchanged -- the
 # standoff moves the seat, not the facing.
 func _berth_pos_for(ship) -> Vector2:
+	if ship == null or not ship.has_method("get_bounding_radius"):
+		return global_position
+	return berth_pos_for_bounding_radius(ship.get_bounding_radius())
+
+# Public variant of the above that doesn't need a live ship node -- only its
+# bounding radius. A UI draw call (navigation_panel.gd's docking nav aids) has
+# no ship Node reference for a berth it's merely illustrating, just the
+# player's own bounding_radius already carried on the state packet; before
+# this existed, the nav panel drew the marker/lane at the raw authored pose
+# (global_position) instead of this clearance-adjusted seat, which for a
+# berth mounted close to a large hull (e.g. Ironhold's dock_main sits ~195u
+# out while the required standoff is 264(hull) + ship + 25(margin) =~ 300u+)
+# put the marker HALF INSIDE the station -- nowhere near where a ship (NPC or
+# player) actually comes to rest.
+func berth_pos_for_bounding_radius(other_bounding_radius: float) -> Vector2:
 	var host = get_parent()
-	if host == null or not host.has_method("get_bounding_radius") or not ship.has_method("get_bounding_radius"):
+	if host == null or not host.has_method("get_bounding_radius"):
 		return global_position
 	var out_vec: Vector2 = global_position - host.global_position
 	var berth_dist: float = out_vec.length()
 	if berth_dist < 0.001:
 		return global_position
-	var required: float = host.get_bounding_radius() + ship.get_bounding_radius() + CLEARANCE_MARGIN
+	var required: float = host.get_bounding_radius() + other_bounding_radius + CLEARANCE_MARGIN
 	if required <= berth_dist:
 		return global_position
 	return host.global_position + out_vec / berth_dist * required
