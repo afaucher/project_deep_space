@@ -3,17 +3,27 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 const Steering = preload("res://scripts/ai/steering.gd")
 
 var _hold_pos: Vector2 = Vector2.ZERO
+var _hold_rot: float = 0.0
 var _initialized: bool = false
 
-# Station Keeping: Uses RCS/engines to maintain an exact global position.
-# Mobile ships will dodge obstacles and return to their hold coordinate.
-# Massive structures will simply soak hits and re-center.
+# Station Keeping: Uses RCS/engines to maintain an exact global position AND
+# attitude. Mobile ships will dodge obstacles and return to their hold
+# coordinate. Massive structures will simply soak hits and re-center.
+#
+# Attitude matters as much as position: a station's DockingBay berth poses
+# rotate with the hull, so a station left spinning (e.g. clipped by a cargo
+# shuttle) turns every capture into an endless orbit-chase -- the servo drags
+# the ship after a berth that never stops moving, CAPTURING never settles,
+# and the berth pool wedges shut ("no open berths" forever). Holding the
+# INITIAL rotation (not actor.rotation, which spins along with the hull and
+# holds nothing) is what lets the attitude controller actively despin.
 func tick(actor: Node, _blackboard) -> int:
 	if actor == null:
 		return SUCCESS
-		
+
 	if not _initialized:
 		_hold_pos = actor.position
+		_hold_rot = actor.rotation
 		_initialized = true
 		
 	var to_hold = _hold_pos - actor.position
@@ -37,9 +47,11 @@ func tick(actor: Node, _blackboard) -> int:
 		
 	var steer = desired_vel - actor.linear_velocity
 	
-	# If we are basically on station and not moving, just hold heading.
+	# If we are basically on station and not moving, hold the ORIGINAL
+	# attitude (never actor.rotation -- that target spins with the hull and
+	# corrects nothing; see the despin note above).
 	if steer.length() < 1.0 and desired_vel.length() < 1.0:
-		actor.apply_control_input(0.0, 0.0, actor.rotation, 0, 1)
+		actor.apply_control_input(0.0, 0.0, _hold_rot, 0, 1)
 		actor.apply_rcs_input(Vector2.ZERO, 0.0)
 		return SUCCESS
 		

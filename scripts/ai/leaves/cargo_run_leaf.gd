@@ -78,6 +78,14 @@ func tick(actor: Node, _blackboard) -> int:
 			idx = min(idx + 1, route.size() - 1)
 		actor.patrol_index = idx
 		actor.cargo_docking = false
+	elif not actor.cargo_captured_seen and not actor.wants_dock:
+		# Released WITHOUT ever docking -- the bay aborted the capture
+		# (CAPTURE_TIMEOUT on an unwinnable chase, or a clamp snap) and
+		# _release() cleared wants_dock. Without this branch the shuttle
+		# cruises the approach point forever with wants_dock down, never
+		# capturable again. Drop back to TRANSIT: the arrival check re-runs,
+		# re-requests a grant, and re-raises wants_dock cleanly.
+		actor.cargo_docking = false
 	else:
 		var grant = actor.get("docking_grant")
 		if grant != null and grant.get("slip_id", "") != "":

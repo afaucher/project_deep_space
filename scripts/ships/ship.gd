@@ -74,6 +74,7 @@ const ROTATION_TRACKING_GAIN := 10.0  # required_alpha = omega_error * this -- h
 # but the formulas that feed them are shared across every ship and live here.
 const REACTOR_HEAT_COEFFICIENT := 2.0 # reactor_heat = this * reactor power slider (0-1)
 const OVERHEAT_DAMAGE_RATE := 10.0    # HP/sec drained from reactors while current_heat is pegged at max_heat
+const STRUCTURE_DESPIN_RATE := 0.15   # rad/s^2 a live STRUCTURE sheds residual spin at (see the despin block in _physics_process)
 const PASSIVE_COMPONENT_HEAT := 0.1   # flat heat leak per powered, alive, non-hull component
 const PASSIVE_COMPONENT_EM := 0.5     # flat EM leak per powered, alive, non-hull component
 const REACTOR_HEAT_FLOOR := 10.0      # a reactor's own resting heat even with no load
@@ -301,7 +302,19 @@ func issue_docking_grant(ship) -> Variant:
 	if slip_policy == "any_open":
 		pass   # slip_id stays "", reserve nothing -- claimed at capture instead
 	else:
-		grant["slip_id"] = free_bays[0].slip_id   # "assigned" (default): reserve one concrete slip
+		# "assigned" (default): reserve one concrete slip -- the free bay
+		# NEAREST the requester, so an arriving ship is never assigned the
+		# berth on the station's far side (a far-side approach path crosses
+		# the station's own hull, which is how a cargo shuttle clipped
+		# Ironhold and set it spinning -- the campaign docking-wedge bug).
+		var best_bay = free_bays[0]
+		var best_d: float = INF
+		for b in free_bays:
+			var d: float = b.global_position.distance_to(ship.position)
+			if d < best_d:
+				best_d = d
+				best_bay = b
+		grant["slip_id"] = best_bay.slip_id
 
 	ship.docking_grant = grant
 	return grant
@@ -1425,6 +1438,20 @@ func _physics_process(delta: float) -> void:
 	if is_multiplayer_authority():
 		_process_repairs(delta)
 		_check_eng_log_crossings()
+
+	# Station despin: a STRUCTURE's DockingBay berth poses rotate with the
+	# hull, so residual spin (a shuttle clipping the hull imparts it) turns
+	# every capture into an endless orbit-chase and wedges the berth pool
+	# shut -- the campaign "no berths + stale indicator" bug.
+	# StationKeepingLeaf despins a LIVE station by holding its initial
+	# attitude; this explicit decay is the body-level safety net covering
+	# AI-less/sandbox/damaged stations (fiction: automated attitude jets).
+	# Explicit move_toward, NOT angular_damp: measured damp decay ran ~6x
+	# weaker than nominal here, too slow to unwedge docking. Sheds the
+	# observed 0.4-0.8 rad/s bump spin in ~2-5s; a hulk keeps whatever spin
+	# it died with (dead installations don't fire attitude jets).
+	if ship_tier == ComponentSpec.Tier.STRUCTURE and not is_dead and angular_velocity != 0.0:
+		angular_velocity = move_toward(angular_velocity, 0.0, STRUCTURE_DESPIN_RATE * delta)
 
 	if is_multiplayer_authority():
 		for w in get_components_by_type("weapons"):

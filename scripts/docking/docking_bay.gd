@@ -56,9 +56,21 @@ const UNDOCK_PUSH_SPEED := 80.0
 # the authored berth distance.
 const CLEARANCE_MARGIN := 25.0
 
+# A capture that hasn't settled into DOCKED within this many seconds aborts
+# and frees the bay. Without it, a chase that can never settle -- most
+# concretely a berth pose orbiting on a spinning station (the campaign
+# "port control says negative but the indicator shows" bug) -- wedges the
+# bay in CAPTURING forever: the berth pool reads permanently full, and the
+# captured ship's grant countdown stays frozen (see
+# Ship._update_docking_grant's fulfilled pause), keeping stale docking
+# indicators alive. Generous vs the ~0.5s spring time constant: a healthy
+# capture settles in a few seconds even from the capture radius' edge.
+const CAPTURE_TIMEOUT := 20.0
+
 var state: int = State.EMPTY
 var captured = null
 var _dock_timer := 0.0
+var _capture_timer := 0.0
 
 func _enter_tree() -> void:
 	add_to_group("docking_bays")
@@ -78,15 +90,19 @@ func _physics_process(delta: float) -> void:
 			if not _valid(captured):
 				_release()
 			else:
+				_capture_timer += delta
+				if _capture_timer > CAPTURE_TIMEOUT:
+					_release()   # unwinnable capture -- free the bay (see CAPTURE_TIMEOUT)
+					return
 				_servo(captured)
 				var port_offset = _get_captured_port_offset(captured)
 				var port_global_offset = port_offset.rotated(captured.rotation)
 				var pos_err: float = _berth_pos_for(captured).distance_to(captured.position + port_global_offset)
-				
+
 				var port_heading = _get_captured_port_heading(captured)
 				var target_rot = global_rotation + PI - port_heading
 				var ang_err: float = abs(wrapf(target_rot - captured.rotation, -PI, PI))
-				
+
 				if pos_err < pos_tolerance and captured.linear_velocity.length() < settle_speed and ang_err < 0.2:
 					state = State.DOCKED
 					_dock_timer = dock_duration
@@ -143,6 +159,7 @@ func _try_capture() -> void:
 		captured = best
 		captured.docking_bay = self   # claim it so no other bay double-captures
 		state = State.CAPTURING
+		_capture_timer = 0.0
 		# M32 -- any-open grant (slip_id == ""): claim THIS bay's slip at the
 		# moment of capture so a second any-open holder flown at the same bay
 		# can't also land here (see _dockable_seeking()'s any-open branch).
