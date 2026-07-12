@@ -129,15 +129,46 @@ func _physics_process(delta: float) -> void:
 			if docker.docking_bay == null:
 				_assert(docker.docking_grant == null,
 					"scenario 1: auto-release consumed the docker's grant")
+				# --- Scenario 5: departure corridor. The grant is gone, but
+				# departing_slip must be stamped with the SAME slip so the nav
+				# panel keeps the exit channel open (see ship.gd's own
+				# comment) -- regression for "once you are released, the path
+				# turns back into a hatch, you can't get out of the zone
+				# before it closes".
+				_assert(not docker.departing_slip.is_empty(),
+					"scenario 5: release stamps departing_slip (channel stays drawable)")
+				_assert(docker.departing_slip.get("authority", "") == station.get_port_zone().get("authority", ""),
+					"scenario 5: departing_slip names this station's authority")
+				_assert(docker.departing_slip.get("slip_id", "") == docked_slip,
+					"scenario 5: departing_slip names the just-released slip")
 				# The freed slip must be grantable to someone else IMMEDIATELY
 				# -- not after a 120s countdown or a zone exit.
 				var res: Dictionary = PortControl.request_docking(station, bystander)
 				_assert(res.get("outcome") == "granted",
 					"scenario 1: bystander granted immediately after the release (got %s)" % str(res.get("outcome")))
-				phase = 90
+				phase = 2
 			elif t > 40.0:
 				_assert(false, "bay never auto-released the docker (t=%.1f)" % t)
 				phase = 90
+		2:
+			# Still deep inside the exclusion disc (just released, hasn't
+			# moved) -- departing_slip must NOT have cleared yet.
+			_assert(not docker.departing_slip.is_empty(),
+				"scenario 5: departing_slip survives while still inside the exclusion disc")
+			# Teleport clear of the exclusion boundary (station.get_port_zone()
+			# derives exclusion_radius for a controlled MediumStation; well
+			# outside it regardless of the exact derived value) and tick once
+			# -- _update_departing_slip (ship.gd) must clear it.
+			var far: Vector2 = station.global_position + Vector2(1000000.0, 0.0)
+			var xf: Transform2D = docker.global_transform
+			xf.origin = far
+			PhysicsServer2D.body_set_state(docker.get_rid(), PhysicsServer2D.BODY_STATE_TRANSFORM, xf)
+			docker.position = far
+			phase = 3
+		3:
+			_assert(docker.departing_slip.is_empty(),
+				"scenario 5: departing_slip clears once the ship exits the exclusion boundary")
+			phase = 90
 		90:
 			_finish()
 

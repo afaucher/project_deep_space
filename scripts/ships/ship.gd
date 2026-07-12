@@ -205,6 +205,22 @@ var docking_bay = null   # the DockingBay currently claiming this hull, else nul
 # future "authority handed off to a relay" wrinkle without a struct change).
 var docking_grant = null
 
+# M46 follow-up -- departure corridor grace state, DELIBERATELY separate from
+# docking_grant. The grant is consumed IMMEDIATELY on bay release (see
+# DockingBay._release()) so the slip returns to the pool for a new arrival
+# right away -- but the nav panel's channel/hatch-gap only ever opened while
+# a live grant existed, so the instant a ship was released the channel
+# slammed shut behind it, even while it was still sitting deep inside the
+# no-fly disc ("once you are released, the path turns back into a hatch, you
+# can't get out of the zone before it closes"). departing_slip carries just
+# enough shape ({"authority", "slip_id"}) for the SAME bay-resolution helpers
+# a real grant uses (see navigation_panel._draw_controlled_zones) to keep
+# drawing the channel toward the berth just departed, purely for visibility
+# -- it reserves nothing in the allocator. {} = not departing. Set on release
+# (DockingBay._release()), cleared once the ship exits the departed
+# station's exclusion_radius (see _update_departing_slip below).
+var departing_slip: Dictionary = {}
+
 # M32 -- per-tick countdown expiry (NOT an absolute clock -- deterministic,
 # no clock injection needed). Decremented by delta each physics tick while the
 # grant is unfulfilled (ship not yet CAPTURING/DOCKED); frozen once fulfilled
@@ -661,6 +677,34 @@ func _update_docking_grant(delta: float) -> void:
 	if expired:
 		transient_events.append({"type": "grant_expired", "authority": docking_grant.get("authority", "")})
 		docking_grant = null
+
+# M46 follow-up -- clears departing_slip (see that var's own comment) once
+# this ship has actually flown clear of the departed station's exclusion
+# boundary, so the nav panel's channel drawing keeps a departing ship's exit
+# corridor open for exactly as long as it's still inside the disc, not one
+# frame past release. Same "ships" group scan _update_port_zone_membership
+# already uses. If the station can't be resolved (destroyed since release,
+# or authored no exclusion_radius at all) there's nothing left to wait on --
+# clear immediately rather than leaving a stale reference sitting forever.
+func _update_departing_slip() -> void:
+	if departing_slip.is_empty():
+		return
+
+	var authority: String = departing_slip.get("authority", "")
+	var station: Node = null
+	for s in get_tree().get_nodes_in_group("ships"):
+		if s == self or not s.has_method("get_port_zone"): continue
+		if s.get_port_zone().get("authority", "") == authority:
+			station = s
+			break
+
+	if station == null:
+		departing_slip = {}
+		return
+
+	var exclusion_radius: float = float(station.get_port_zone().get("exclusion_radius", 0.0))
+	if exclusion_radius <= 0.0 or position.distance_to(station.global_position) > exclusion_radius:
+		departing_slip = {}
 
 # M28 -- pre-solve velocity, cached at the TOP of _physics_process each tick.
 # body_entered fires AFTER the physics solver has already applied the bounce
@@ -1419,6 +1463,20 @@ func _ready() -> void:
 		bay.rotation = comp.get("heading", 0.0)
 		if comp.has("capture_radius"):
 			bay.capture_radius = comp["capture_radius"]
+		elif not port_zone.is_empty():
+			# M46 follow-up -- a controlled station's DEFAULT capture_radius
+			# (5000u) used to reach WAY past the drawn no-fly disc
+			# (exclusion_radius, ~1584u for a medium station): the clamp
+			# would engage long before a player ever saw the boundary they'd
+			# just crossed ("the docking clamp takes over way far away from
+			# the target"). Clamp the default down to the disc itself so
+			# capture only ever engages once you're visibly inside the zone
+			# the game actually shows you. Only the DEFAULT is clamped -- a
+			# docking_port component that explicitly authors its own
+			# capture_radius (the `if` branch above) is left alone.
+			var exclusion_radius: float = float(port_zone.get("exclusion_radius", 0.0))
+			if exclusion_radius > 0.0:
+				bay.capture_radius = min(bay.capture_radius, exclusion_radius)
 		# slip_id is now the string ID of the docking port component.
 		bay.slip_id = comp["id"]
 		# Only docking ports with 'has_servo': false are completely fixed. Most can rotate +/- degrees or move along a rail.
@@ -1542,6 +1600,7 @@ func _physics_process(delta: float) -> void:
 	if is_multiplayer_authority() and not is_dead:
 		_update_port_zone_membership()
 		_update_docking_grant(delta)
+		_update_departing_slip()
 
 	# M40 -- repair tick (host-side only; early-outs internally when
 	# active_repairs is empty, so a ship that never hosts a repair pays zero

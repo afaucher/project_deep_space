@@ -212,6 +212,13 @@ func _spawn_player_ship(id: int, at = null) -> void:
 	ship.name = "Ship_" + str(id)
 	ship.owner_id = id
 	ship.iff_tags = ["TEAM_PLAYER"]
+	# manual_undock=false (Ship's default) auto-releases from a berth after
+	# dock_duration (~1.5s) -- correct for NPC/cargo traffic on a patrol
+	# loop, but a HUMAN player docking to talk to a station's crew or sit for
+	# repairs must not be yanked back out mid-conversation. This is the only
+	# spawn path for a player-controlled ship (NPCs are spawned elsewhere via
+	# their own AI/traffic systems), so it's safe to always set here.
+	ship.manual_undock = true
 	if at != null:
 		ship.position = at
 	else:
@@ -447,6 +454,12 @@ func _distribute_state() -> void:
 			},
 			"transient_events": ship.transient_events.duplicate(true),
 			"docking_grant": ship.docking_grant,
+			# M46 follow-up -- departing_slip (ship.gd's own comment): a
+			# {"authority","slip_id"} shape mirroring just enough of
+			# docking_grant for navigation_panel to keep drawing the exit
+			# channel toward a berth this ship JUST released from, until it
+			# actually clears the disc. {} once cleared/not departing.
+			"departing_slip": ship.departing_slip,
 			# M35 -- current_port_zone is just the authority NAME string (see
 			# ship.gd), the same small-value-with-no-other-path-in shape as
 			# M34's docking_grant field above (see that milestone's "Packet

@@ -11,11 +11,19 @@ enum State { EMPTY, CAPTURING, DOCKED }
 
 # Servo tuning, accel-space (mass-normalized): a = K_SPRING*pos_err - K_DAMP*vel;
 # force = mass*a. K_DAMP ~ 2*sqrt(K_SPRING) is ~critical damping (draw in, no
-# overshoot). K_SPRING=4 -> ~0.5s time constant, settles in a few seconds.
-const K_SPRING := 4.0
-const K_DAMP := 4.0
-const K_ROT := 6.0
-const K_ROT_DAMP := 5.0
+# overshoot).
+#
+# Softened from the original K_SPRING=4/K_DAMP=4 (~0.5s time constant) after
+# player feedback ("the docking clamp really yanks you") -- roughly half the
+# stiffness, ~1s time constant, same critically-damped ratio so it still
+# settles cleanly without overshoot/oscillation, just less violently. Paired
+# with the capture_radius clamp above (docking_port loop, ship.gd) which
+# stops capture from engaging so far out that the initial pos_err -- and
+# therefore the initial jerk -- was large to begin with.
+const K_SPRING := 2.0
+const K_DAMP := 2.83   # ~2*sqrt(K_SPRING), critically damped
+const K_ROT := 3.0
+const K_ROT_DAMP := 3.46   # ~2*sqrt(K_ROT), critically damped
 
 # Yield strength of the clamp (distance error before it snaps). Allows forceful breakaway.
 const YIELD_STRENGTH := 200.0
@@ -63,7 +71,7 @@ const CLEARANCE_MARGIN := 25.0
 # bay in CAPTURING forever: the berth pool reads permanently full, and the
 # captured ship's grant countdown stays frozen (see
 # Ship._update_docking_grant's fulfilled pause), keeping stale docking
-# indicators alive. Generous vs the ~0.5s spring time constant: a healthy
+# indicators alive. Generous vs the spring's ~1s time constant: a healthy
 # capture settles in a few seconds even from the capture radius' edge.
 const CAPTURE_TIMEOUT := 20.0
 
@@ -267,8 +275,18 @@ func _release() -> void:
 		var grant = captured.get("docking_grant")
 		var host = get_parent()
 		if grant != null and host != null and host.has_method("get_port_zone"):
-			if grant.get("authority", "") == host.get_port_zone().get("authority", ""):
+			var host_authority: String = host.get_port_zone().get("authority", "")
+			if grant.get("authority", "") == host_authority:
 				captured.docking_grant = null
+				# Departure corridor: keep the CHANNEL drawable (not the
+				# slip reservation, already freed above) until the ship
+				# actually clears the exclusion boundary -- see
+				# departing_slip's own comment on ship.gd. Applies to any
+				# release from a granted stay, not just a completed DOCKED
+				# hold -- an aborted capture (CAPTURE_TIMEOUT) leaves the
+				# ship just as deep inside the disc and just as in need of
+				# an exit path.
+				captured.departing_slip = {"authority": host_authority, "slip_id": slip_id}
 	captured = null
 	slip_claimed = false
 	state = State.EMPTY

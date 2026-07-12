@@ -370,6 +370,7 @@ var show_sensor_arcs: bool = false
 var show_contact_labels: bool = true
 var show_velocity_vectors: bool = true
 var show_grid: bool = true
+var show_port_control: bool = true
 
 func _ready() -> void:
 	clip_contents = true # Ensure drawings don't bleed out of panel
@@ -409,6 +410,7 @@ func _ready() -> void:
 	_add_toggle(overlay, "Contact Labels", "show_contact_labels")
 	_add_toggle(overlay, "Velocity Vectors", "show_velocity_vectors")
 	_add_toggle(overlay, "Grid", "show_grid")
+	_add_toggle(overlay, "Port Control", "show_port_control")
 
 # Binds a checkbox directly to one of this panel's own show_* bool properties
 # by name, instead of hand-writing a near-identical CheckButton + closure for
@@ -573,7 +575,8 @@ func _draw() -> void:
 	# M35/M46 -- controlled-zone rings + keep-back discs: BACKGROUND terrain,
 	# drawn first (right after the grid) so every other element -- own-ship,
 	# contacts, lanes, contract markers, lasers -- reads on top of it.
-	_draw_controlled_zones(current_state.get("current_port_zone", null), current_state.get("docking_grant", null))
+	if show_port_control:
+		_draw_controlled_zones(current_state.get("current_port_zone", null), current_state.get("docking_grant", null), current_state.get("departing_slip", {}))
 
 	# Draw velocity vector
 	if show_velocity_vectors and vel.length() > 0:
@@ -734,7 +737,14 @@ func _draw() -> void:
 	# above) so a mission marker never gets lost under a dense sensor picture.
 	_draw_contract_pins(contracts)
 
-	_draw_docking_nav_aids(current_state.get("docking_grant", null))
+	# The M34 berth marker/lane are ARRIVAL aids ("fly here to dock") -- keyed
+	# on a live grant only, NOT departing_slip. Departure keeps the CHANNEL
+	# open (_draw_controlled_zones, above/below) so there's a legal path back
+	# out, but not the marker/lane -- once released you already know where
+	# the berth is; "you can see yourself out." Gated by the same "Port
+	# Control" toggle as the zone/channel drawing above.
+	if show_port_control:
+		_draw_docking_nav_aids(current_state.get("docking_grant", null))
 
 	# Draw active lasers
 	for laser in active_lasers:
@@ -1067,7 +1077,7 @@ func _draw_contact_outline(contact: Dictionary, c_pos: Vector2, alpha: float) ->
 # -- a handful of controlled stations on screen, not hundreds, so this is
 # trivially bounded per the same cardinality note those functions already
 # make.
-func _draw_controlled_zones(current_authority, grant) -> void:
+func _draw_controlled_zones(current_authority, grant, departing_slip: Dictionary = {}) -> void:
 	# Knowledge gating: a port zone is COMMS knowledge (the authority
 	# broadcasts its boundaries), so it only draws while the player and the
 	# station are in mutual comms range -- same weaker-of-the-two-ranges rule
@@ -1105,14 +1115,26 @@ func _draw_controlled_zones(current_authority, grant) -> void:
 			continue
 		var keep_out_radius: float = float(zone.get("keep_out_radius", 0.0))
 
-		# Channel: only when the player's grant is FOR THIS station's
-		# authority AND names a concrete slip (any-open grants -- slip_id ""
-		# -- have no single berth to align a cone to, per roadmap scope).
+		# Channel: open for a live grant with a specific slip AT THIS station
+		# (any-open grants -- slip_id "" -- have no single berth to align a
+		# cone to, per roadmap scope), OR for departing_slip -- a ship that
+		# JUST released from this station keeps its exit channel drawn until
+		# it actually clears the disc (see ship.gd's departing_slip comment;
+		# without this the channel slammed shut the instant a grant was
+		# consumed on release, even while the ship was still deep inside).
+		# Either source normalizes to the same {"authority","slip_id"} shape
+		# assigned_bay_for() already reads.
+		var channel_slip: Dictionary = {}
+		if grant != null and grant.get("authority", "") == authority and authority != "" and grant.get("slip_id", "") != "":
+			channel_slip = grant
+		elif departing_slip.get("authority", "") == authority and authority != "" and departing_slip.get("slip_id", "") != "":
+			channel_slip = departing_slip
+
 		var channel_polygon := PackedVector2Array()
 		var theta0: float = NAN
 		var bay_node: Node = null
-		if grant != null and grant.get("authority", "") == authority and authority != "" and grant.get("slip_id", "") != "":
-			bay_node = _assigned_bay_for_station(s, grant)
+		if not channel_slip.is_empty():
+			bay_node = _assigned_bay_for_station(s, channel_slip)
 			if bay_node != null:
 				theta0 = PortChannel.axis_angle(bay_node.global_position, bay_node.global_rotation, s.global_position, exclusion_radius)
 				if not is_nan(theta0):
