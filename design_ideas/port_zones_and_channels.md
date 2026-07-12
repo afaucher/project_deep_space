@@ -63,17 +63,32 @@ Principles that keep the use cases coherent:
   circles GAP over the cone's span (the gaps line up by construction), the
   sector's radial edges are the drawn lane edges, and the hatch is clipped
   out of the sector all the way down to the hull. Everyone else still sees
-  closed rings.
-- **Docking guide**: a bright centerline down the middle of the cone ending
-  at the point where the docking clamps take over
-  (`PortChannel.guide_points`: `min(bay capture_radius, mouth)` — with
-  current tuning, capture reach covers the whole disc, so the engage marker
-  sits at the cone mouth), marked with a diamond: hit it with a grant and
-  the berth takes you from there.
+  closed rings. The cone's edges are ZONE geometry (subdued, background) —
+  they show the legal corridor's boundary, not the precise path; see
+  "Approach guide" below for the actionable aid.
 - **Departure**: the channel stays open while the grant is held; the grant
   is CONSUMED on bay release (undock/auto-release — landed with the grant-
   lifecycle fix), and M47 adds expiry on exclusion-boundary exit for the
   departure leg.
+
+## Approach guide (pre-existing M34 aid, not new geometry)
+
+A first pass at this rework added a second "docking guide" — a bright
+centerline + diamond ending where `PortChannel.guide_points` computed the
+docking clamps' engage point, `min(bay.capture_radius, distance-to-mouth)`.
+**Removed** after first playtest ("I can't tell where to hit — only three
+lines to the edge of the no-fly zone and one little diamond dot"): every
+station's `capture_radius` (default 5000u) is larger than its whole
+`exclusion_radius` (~1584u for a medium station), so that `min()` always
+resolved to the mouth — the diamond always sat at the FAR edge of the no-fly
+disc, nowhere near the berth, and it duplicated an aid that already existed
+and already worked: the M34 lane/slip marker
+(`navigation_panel._draw_docking_nav_aids`/`_draw_lane`, predates M46). That
+marker — a filled gold ring with a heading tick right at the assigned
+berth, plus a bright lane corridor running 1500u out from the berth — is
+the actual "small zone near the station," and stayed bright/prominent while
+the new cone geometry's colors were dimmed to zone-background levels so the
+two stop competing for attention.
 
 ## Visibility
 
@@ -83,11 +98,12 @@ comms range (weaker-of-the-two-ranges, same rule as the datalink). Within
 that: every controlled station in comms range draws, the zone the player is
 inside emphasized, others dimmer; zoom-gated via `zone_boundary_visible`.
 
-Zone drawing is BACKGROUND terrain, not a foreground element: it draws at
-the bottom of the nav map's world-space stack (right after the grid), in
-colors blended toward the panel background with thicker strokes — every
-contact, lane, marker, and laser reads on top of it. The channel edges and
-guide stay bright full-gold: they're actionable aids, not terrain.
+Zone drawing (control ring, keep-back circles, hatch, cone edges) is
+BACKGROUND terrain, not a foreground element: it draws at the bottom of the
+nav map's world-space stack (right after the grid), in colors blended toward
+the panel background with thicker strokes — every contact, lane, marker, and
+laser reads on top of it. The M34 approach guide (lane + slip marker) stays
+bright full-gold: it's the actionable aid, not terrain.
 
 ## Ship's log
 

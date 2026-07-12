@@ -65,7 +65,7 @@ const LANE_EDGE_COLOR := Color(1.0, 0.85, 0.2, 0.25)
 # bay's berth position. Divided by map_zoom at draw time (same
 # constant-screen-width pattern as the "2.0 / map_zoom" line widths already
 # used throughout this file) so it reads the same size on screen at any zoom.
-const SLIP_MARKER_RADIUS_PX := 10.0
+const SLIP_MARKER_RADIUS_PX := 16.0
 
 # M35 -- zone boundary ring color. Same gold family as the M34 slip/lane
 # markers (SLIP_HIGHLIGHT_COLOR) -- "authority-colored" per the roadmap, i.e.
@@ -99,14 +99,12 @@ const EXCLUSION_HATCH_SPACING := 150.0
 
 # M46 (revised) -- the channel through the keep-back zone is a 90-degree CONE
 # (PortChannel.sector_polygon/lane_edges) centered on the assigned berth's
-# approach axis: both circles gap over the cone's span, the sector's radial
-# edges are the drawn lane edges, and a centerline guide runs down the middle
-# ending where the docking clamps take over (PortChannel.guide_points).
-# These are ACTIONABLE aids, not background terrain -- they keep the bright
-# gold so they pop over the subdued zone drawing.
-const CHANNEL_EDGE_COLOR := Color(1.0, 0.85, 0.2, 0.7)
-const GUIDE_LEAD_LENGTH := 800.0        # guide extends this far outward past the engage point
-const GUIDE_ENGAGE_MARKER_PX := 6.0     # screen-px diamond at "clamps take you from here"
+# approach axis: both circles gap over the cone's span, and the sector's
+# radial edges are drawn to show the legal corridor's boundary. Still ZONE
+# geometry (background, subdued) -- the ACTIONABLE "fly here" cue is the M34
+# lane/slip marker (_draw_docking_nav_aids below), bright gold, which already
+# runs from well outside this boundary all the way to the berth.
+const CHANNEL_EDGE_COLOR := Color(0.55, 0.42, 0.12, 0.5)
 
 # M41 -- contract markers (see scripts/story/contract_feed.gd) are NAV
 # knowledge, never a sensor detection -- a known coordinate/area/place, the
@@ -1127,11 +1125,27 @@ func _draw_controlled_zones(current_authority, grant) -> void:
 
 		_draw_exclusion_hatch(s, exclusion_radius, disc_color, channel_polygon)
 
-		if has_channel and bay_node != null:
+		if has_channel:
+			# Radial cone edges: SUBDUED like the rest of the keep-back zone
+			# (this is still zone/background geometry -- "here's the legal
+			# corridor through the wall" -- not the precision approach
+			# guide). The actionable "fly here" cue is the M34 lane/slip
+			# marker below (_draw_docking_nav_aids/_draw_lane), which already
+			# runs bright gold from well outside the boundary all the way to
+			# the berth. A separate bright "docking guide" line used to be
+			# drawn here too, ending in a diamond at
+			# min(bay.capture_radius, distance-to-mouth) -- but every
+			# station's capture_radius (default 5000u) is LARGER than its
+			# whole exclusion disc (~1584u for a medium station), so that
+			# min() always resolved to the mouth: the diamond sat at the
+			# FAR edge of the no-fly zone, nowhere near the berth, and
+			# duplicated/outshone the M34 lane that already does this job
+			# correctly. Removed rather than fixed -- the M34 lane already
+			# solves "where do I actually fly", this cone only needs to show
+			# the legal corridor's boundary.
 			var edges: Array = PortChannel.lane_edges(s.global_position, theta0, keep_out_radius, exclusion_radius)
 			for edge in edges:
-				draw_line(edge[0], edge[1], CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
-			_draw_docking_guide(bay_node, s.global_position, exclusion_radius)
+				draw_line(edge[0], edge[1], CHANNEL_EDGE_COLOR, ZONE_RING_WIDTH / map_zoom)
 
 # One keep-back circle: a full ring, or -- while the docking cone is open --
 # an arc leaving the cone's [theta0 - half, theta0 + half] span open.
@@ -1140,29 +1154,6 @@ func _draw_gappable_ring(center: Vector2, r: float, theta0: float, color: Color,
 		draw_arc(center, r, theta0 + PortChannel.CONE_HALF_ANGLE, theta0 - PortChannel.CONE_HALF_ANGLE + TAU, 48, color, ZONE_RING_WIDTH / map_zoom)
 	else:
 		draw_arc(center, r, 0, TAU, 64, color, ZONE_RING_WIDTH / map_zoom)
-
-# The centerline docking guide: a bright lead-in line down the middle of the
-# open cone, ending at the point where the docking clamps take over
-# (PortChannel.guide_points -- with current station tuning that's the cone
-# mouth, since the bay's capture reach covers the whole disc), marked with a
-# small screen-space diamond: fly onto the diamond with your grant and the
-# berth takes you from there.
-func _draw_docking_guide(bay: Node, station_center: Vector2, exclusion_radius: float) -> void:
-	var capture_radius: float = bay.get("capture_radius") if bay.get("capture_radius") != null else 0.0
-	var g: Dictionary = PortChannel.guide_points(bay.global_position, bay.global_rotation, station_center, exclusion_radius, capture_radius, GUIDE_LEAD_LENGTH)
-	if g.is_empty():
-		return
-	var engage: Vector2 = g["engage"]
-	var start: Vector2 = g["start"]
-	if start.distance_to(engage) > 0.01:
-		draw_line(start, engage, CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
-	var m: float = GUIDE_ENGAGE_MARKER_PX / map_zoom
-	var diamond := PackedVector2Array([
-		engage + Vector2(0, -m), engage + Vector2(m, 0),
-		engage + Vector2(0, m), engage + Vector2(-m, 0),
-		engage + Vector2(0, -m),
-	])
-	draw_polyline(diamond, CHANNEL_EDGE_COLOR, 2.0 / map_zoom)
 
 # M46 -- resolves the DockingBay this grant is assigned to AT a specific
 # station (as opposed to _draw_docking_nav_aids' version, which first has to
@@ -1365,11 +1356,16 @@ func _draw_slip_marker(bay: Node, highlighted: bool) -> void:
 	var color: Color = SLIP_HIGHLIGHT_COLOR if highlighted else SLIP_DIM_COLOR
 	var r: float = SLIP_MARKER_RADIUS_PX / map_zoom
 	var p: Vector2 = bay.global_position
-	draw_arc(p, r, 0, TAU, 16, color, 2.0 / map_zoom)
+	draw_arc(p, r, 0, TAU, 16, color, (3.0 if highlighted else 2.0) / map_zoom)
 	# Small heading tick so the berth's facing (approach direction) reads at a
 	# glance, not just its position.
 	var tip: Vector2 = p + Vector2.RIGHT.rotated(bay.global_rotation) * r * 2.0
-	draw_line(p, tip, color, 2.0 / map_zoom)
+	draw_line(p, tip, color, (3.0 if highlighted else 2.0) / map_zoom)
+	# The assigned berth is THE target -- "I expected a small zone near the
+	# station" -- so give it a filled core in addition to the ring, distinct
+	# from every dimmed/unassigned slip marker at this station.
+	if highlighted:
+		draw_circle(p, r * 0.35, color)
 
 func _draw_lane(berth_pos: Vector2, berth_heading: float) -> void:
 	var lane: Dictionary = lane_corridor(berth_pos, berth_heading, LANE_LENGTH, LANE_HALF_WIDTH)

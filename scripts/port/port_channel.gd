@@ -111,25 +111,6 @@ static func lane_edges(center: Vector2, theta0: float, keep_out_radius: float, o
 		out.append([center + dir * max(keep_out_radius, 0.0), center + dir * outer_radius])
 	return out
 
-# The centerline docking guide: a segment along the approach axis ending at
-# the point where the docking clamps take over ("hitting it should dock you"):
-#   engage = berth_pos + outward * min(capture_radius, distance(berth, mouth))
-# -- the bay's capture reach, capped at the mouth (with the current station
-# tuning, capture_radius 5000u >> the boundary, so engage IS the mouth: a
-# granted ship touching the open cone mouth is already inside clamp range and
-# the berth servo takes it from there). `start` extends lead_length beyond the
-# engage point along the axis so the guide reads as a lead-in line pointing
-# down the middle of the cone. Returns {} when there is no mouth.
-static func guide_points(berth_pos: Vector2, berth_heading: float, station_center: Vector2, boundary_radius: float, capture_radius: float, lead_length: float) -> Dictionary:
-	var mouth = mouth_point(berth_pos, berth_heading, station_center, boundary_radius)
-	if mouth == null:
-		return {}
-	var outward: Vector2 = Vector2.RIGHT.rotated(berth_heading)
-	var mouth_dist: float = berth_pos.distance_to(mouth)
-	var engage_dist: float = min(max(capture_radius, 0.0), mouth_dist)
-	var engage: Vector2 = berth_pos + outward * engage_dist
-	return {"engage": engage, "start": engage + outward * max(lead_length, 0.0)}
-
 # Point-in-channel test against a polygon sector_polygon() already built --
 # delegates to Geometry2D.is_point_in_polygon (the same primitive
 # ship_silhouette.gd/test_collision_shapes.gd already use elsewhere in this

@@ -1,13 +1,22 @@
 extends Node
 
-# M46 acceptance -- docking channel geometry. Pure fixtures, no scene/physics 
+# M46 acceptance -- docking channel geometry. Pure fixtures, no scene/physics
 # needed -- PortChannel is a static helper. Covers:
 #   1. mouth_point + axis_angle derivation.
 #   2. sector_polygon derivation and containment.
 #   3. lane_edges correctly returning exactly two segments.
-#   4. guide_points correctly capped at the mouth boundary.
-#   5. contains() rejects points outside the outer_radius, inside the inner_radius, or off-angle.
-#   6. Degenerate inputs (zero/negative outer radius, inner >= outer, zero angle) return empty.
+#   4. contains() rejects points outside the outer_radius, inside the inner_radius, or off-angle.
+#   5. Degenerate inputs (zero/negative outer radius, inner >= outer, zero angle) return empty.
+#
+# guide_points() was REMOVED (was here as scenario 4): with every station's
+# capture_radius (default 5000u) larger than its whole exclusion disc
+# (~1584u for a medium station), its min(capture_radius, mouth_dist) always
+# resolved to the mouth -- the drawn "docking guide" diamond always sat at
+# the FAR edge of the no-fly zone, nowhere near the berth, which was exactly
+# the "I can't tell where to hit" bug report. The M34 lane/slip marker
+# (navigation_panel.gd's _draw_docking_nav_aids/_draw_lane, predates M46)
+# already draws the correct actionable approach guide right down to the
+# berth -- this was pure duplication with worse numbers, not a second aid.
 
 const PortChannel = preload("res://scripts/port/port_channel.gd")
 
@@ -24,7 +33,6 @@ func setup(main) -> void:
 	_run_mouth_and_axis_scenario()
 	_run_sector_polygon_scenario()
 	_run_lane_edges_scenario()
-	_run_guide_points_scenario()
 	_run_contains_rejection_scenario()
 	_run_degenerate_scenario()
 
@@ -63,29 +71,6 @@ func _run_lane_edges_scenario() -> void:
 	_assert(edges.size() == 2, "lane_edges: returns exactly two edges")
 	if edges.size() == 2:
 		_assert(edges[0].size() == 2 and edges[1].size() == 2, "lane_edges: each edge is a line segment")
-
-func _run_guide_points_scenario() -> void:
-	var capture = 5000.0
-	var lead = 500.0
-	var guide = PortChannel.guide_points(BERTH_POS, BERTH_HEADING, STATION_CENTER, OUTER_RADIUS, capture, lead)
-	_assert(not guide.is_empty(), "guide_points: returns valid points")
-	if not guide.is_empty():
-		var engage = guide.get("engage", Vector2.ZERO)
-		# Since capture is 5000, engage is capped at the mouth
-		var mouth = PortChannel.mouth_point(BERTH_POS, BERTH_HEADING, STATION_CENTER, OUTER_RADIUS)
-		_assert(engage.distance_to(mouth) < 0.01, "guide_points: engage capped at mouth")
-		_assert(guide.get("start", Vector2.ZERO).distance_to(engage) - lead < 0.01,
-			"guide_points: start extends lead_length beyond engage")
-
-	# A tighter capture radius pulls the engage point INSIDE the cone, short
-	# of the mouth -- the "clamps take you from here" marker moves inward with
-	# the bay's actual reach.
-	var tight = PortChannel.guide_points(BERTH_POS, BERTH_HEADING, STATION_CENTER, OUTER_RADIUS, 300.0, lead)
-	_assert(not tight.is_empty(), "guide_points: tight capture radius still resolves")
-	if not tight.is_empty():
-		var engage_t: Vector2 = tight.get("engage", Vector2.ZERO)
-		_assert(engage_t.distance_to(BERTH_POS) - 300.0 < 0.01 and engage_t.distance_to(BERTH_POS) > 299.0,
-			"guide_points: engage sits exactly capture_radius from the berth when that's short of the mouth")
 
 func _run_contains_rejection_scenario() -> void:
 	var theta = PortChannel.axis_angle(BERTH_POS, BERTH_HEADING, STATION_CENTER, OUTER_RADIUS)
