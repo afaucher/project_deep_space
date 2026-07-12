@@ -61,12 +61,6 @@ const SLIP_DIM_COLOR := Color(0.5, 0.45, 0.25, 0.35)
 const LANE_CENTERLINE_COLOR := Color(1.0, 0.85, 0.2, 0.8)
 const LANE_EDGE_COLOR := Color(1.0, 0.85, 0.2, 0.25)
 
-# Berth pose marker radius, in screen pixels -- a small ring/cross at the
-# bay's berth position. Divided by map_zoom at draw time (same
-# constant-screen-width pattern as the "2.0 / map_zoom" line widths already
-# used throughout this file) so it reads the same size on screen at any zoom.
-const SLIP_MARKER_RADIUS_PX := 16.0
-
 # M35 -- zone boundary ring color. Same gold family as the M34 slip/lane
 # markers (SLIP_HIGHLIGHT_COLOR) -- "authority-colored" per the roadmap, i.e.
 # it reads as "controlled space", not a threat/classification color. Kept
@@ -1364,7 +1358,13 @@ func _draw_docking_nav_aids(grant) -> void:
 
 func _draw_slip_marker(bay: Node, berth_pos: Vector2, highlighted: bool) -> void:
 	var color: Color = SLIP_HIGHLIGHT_COLOR if highlighted else SLIP_DIM_COLOR
-	var r: float = SLIP_MARKER_RADIUS_PX / map_zoom
+	# Drawn TO SCALE at the bay's own pos_tolerance (docking_bay.gd: "settled
+	# when within this of the berth") -- this is the literal DOCKED-state
+	# position gate (also needs speed < settle_speed and ang_err < 0.2rad,
+	# not drawn), not a fixed screen-pixel marker. It legitimately shrinks/
+	# grows with zoom like everything else in world space; at typical
+	# navigation zoom it's the honest answer to "how big is the sweet spot".
+	var r: float = max(bay.pos_tolerance, 1.0)
 	var p: Vector2 = berth_pos
 	draw_arc(p, r, 0, TAU, 16, color, (3.0 if highlighted else 2.0) / map_zoom)
 	# Small heading tick so the berth's facing (approach direction) reads at a
