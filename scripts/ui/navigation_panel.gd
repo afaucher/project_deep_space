@@ -39,6 +39,7 @@ const ShipSilhouette = preload("res://scripts/components/ship_silhouette.gd")
 const NavCorridor = preload("res://scripts/nav/nav_corridor.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const PortChannel = preload("res://scripts/port/port_channel.gd")
+const ExclusionHatch = preload("res://scripts/port/exclusion_hatch.gd")
 
 # M34 -- Docking nav aids (assigned slip highlight + approach lane). See
 # implementation_plans/m31_m36_port_authority_roadmap.md, M34 scope.
@@ -85,11 +86,23 @@ const ZONE_RING_WIDTH := 4.0        # / map_zoom at draw time
 # background treatment as the control ring.
 const EXCLUSION_DISC_COLOR := Color(0.52, 0.3, 0.12, 0.5)
 const EXCLUSION_DISC_DIM_COLOR := Color(0.52, 0.3, 0.12, 0.2)
-const EXCLUSION_HATCH_WIDTH := 3.0  # / map_zoom at draw time
 
-# Hatch line spacing, in WORLD units (constant rhythm across zoom -- same
-# "world-unit dash rhythm" convention as CONTRACT_DASH_LEN/CONTRACT_GAP_LEN).
+# Hatch fill (ExclusionHatch.hatch_fragments): filled diagonal stripes, drawn
+# TO SCALE in world units like the rest of the zone geometry (not a
+# constant-screen-width stroke) -- spacing is center-to-center, stripe_width
+# a fraction of that so stripe/gap read roughly evenly.
 const EXCLUSION_HATCH_SPACING := 150.0
+const EXCLUSION_HATCH_STRIPE_WIDTH := 60.0
+
+# Only hatched between keep_out_radius and exclusion_radius (the softer,
+# off-angle-tolerated approach band) -- the hard hull->keep_out_radius disc
+# is deliberately left UNHATCHED, marked only by its own boundary ring, so
+# the stripe texture never crosses/overlaps that inner ring (design_ideas/
+# port_zones_and_channels.md: "we draw the diagonal strips through the
+# inner ring" -- the earlier line-hatch only ever punched a hole for the
+# hull, never for keep_out_radius). Falls back to the station's own hull
+# bounding radius for a zone with no authored keep_out_radius (see
+# _draw_exclusion_hatch below).
 
 # M46 (revised) -- the channel through the keep-back zone is a 90-degree CONE
 # (PortChannel.sector_polygon/lane_edges) centered on the assigned berth's
@@ -1117,7 +1130,7 @@ func _draw_controlled_zones(current_authority, grant) -> void:
 		if keep_out_radius > 0.0 and keep_out_radius < exclusion_radius:
 			_draw_gappable_ring(s.global_position, keep_out_radius, theta0, disc_color, has_channel)
 
-		_draw_exclusion_hatch(s, exclusion_radius, disc_color, channel_polygon)
+		_draw_exclusion_hatch(s, exclusion_radius, keep_out_radius, disc_color, channel_polygon)
 
 		if has_channel:
 			# Radial cone edges: SUBDUED like the rest of the keep-back zone
@@ -1163,72 +1176,25 @@ func _assigned_bay_for_station(station: Node, grant) -> Node:
 		return null
 	return assigned_bay_for(bays, grant)
 
-# M46 -- one station's keep-back hatching: diagonal 45-degree lines,
-# EXCLUSION_HATCH_SPACING world units apart, spanning hull -> exclusion
-# boundary. When `channel_polygon` (the open docking cone) is non-empty,
-# hatch segments are clipped against it (Geometry2D.clip_polyline_with_polygon
-# -- the same polygon-clip primitive ship_silhouette.gd already uses) so the
-# cone reads as an open cut through the hatching. The boundary CIRCLES are
-# drawn separately (_draw_gappable_ring) so they can gap over the cone span.
-func _draw_exclusion_hatch(station: Node, exclusion_radius: float, color: Color, channel_polygon: PackedVector2Array) -> void:
-	var inner_radius: float = station.get_bounding_radius()
+# M46 (revised) -- one station's keep-back hatching, filled (not stroked)
+# diagonal stripes computed by ExclusionHatch via Geometry2D polygon boolean
+# ops (see that file's header for why: generic boundary-clipping instead of
+# per-boundary ray/circle math). Hatched ONLY between keep_out_radius and
+# exclusion_radius (see EXCLUSION_HATCH_SPACING's comment) -- falls back to
+# the station's own hull bounding radius when no keep_out_radius is
+# authored/derived. `channel_polygon`, when non-empty, is subtracted the same
+# way as the two boundary circles, so the open docking cone reads as a clean
+# cut through the hatching with no extra logic here.
+func _draw_exclusion_hatch(station: Node, exclusion_radius: float, keep_out_radius: float, color: Color, channel_polygon: PackedVector2Array) -> void:
+	var inner_radius: float = keep_out_radius if keep_out_radius > 0.0 else station.get_bounding_radius()
 	if exclusion_radius <= inner_radius:
-		return # station's own hull already fills (or exceeds) the disc -- nothing to hatch
+		return # nothing outside the keep-out boundary to hatch
 
-	var center: Vector2 = station.global_position
-	var width: float = EXCLUSION_HATCH_WIDTH / map_zoom
-	var has_channel: bool = channel_polygon.size() >= 3
-
-	for seg in exclusion_hatch_lines(inner_radius, exclusion_radius, EXCLUSION_HATCH_SPACING):
-		var p1: Vector2 = center + seg[0]
-		var p2: Vector2 = center + seg[1]
-		if has_channel:
-			var clipped: Array = Geometry2D.clip_polyline_with_polygon(PackedVector2Array([p1, p2]), channel_polygon)
-			for piece in clipped:
-				if piece.size() >= 2:
-					draw_polyline(piece, color, width)
-		else:
-			draw_line(p1, p2, color, width)
-
-# M46 -- pure geometry for the exclusion-disc hatch: parallel 45-degree line
-# segments spanning the annulus from inner_radius (hull) to outer_radius
-# (exclusion boundary), spaced `spacing` world units apart (constant rhythm
-# across zoom, same idea as CONTRACT_DASH_LEN's world-unit dash rhythm).
-# Returns STATION-LOCAL [p1, p2] segment pairs (station center at the
-# origin) -- the caller translates to world space by adding the station's
-# global_position. Pure/testable: no draw_* calls, no node state.
-#
-# Geometry: hatch lines run along direction u=(1,1)/sqrt(2), offset along the
-# perpendicular v=(1,-1)/sqrt(2) by o = k * spacing for integer k. Since u/v
-# are orthonormal, a line at perpendicular offset o intersects a circle of
-# radius R at local parameter t = +/- sqrt(R^2 - o^2) (real only when
-# |o| <= R). For |o| <= inner_radius the line also crosses the inner (hull)
-# disc, splitting the outer-circle chord into two segments, one on each side
-# of the hull; for inner_radius < |o| <= outer_radius the whole outer chord
-# already clears the hull -- one segment.
-static func exclusion_hatch_lines(inner_radius: float, outer_radius: float, spacing: float) -> Array:
-	var out: Array = []
-	if outer_radius <= inner_radius or outer_radius <= 0.0 or spacing <= 0.0:
-		return out
-
-	var u := Vector2(1.0, 1.0).normalized()
-	var v := Vector2(1.0, -1.0).normalized()
-	var k_min: int = int(ceil(-outer_radius / spacing))
-	var k_max: int = int(floor(outer_radius / spacing))
-
-	for k in range(k_min, k_max + 1):
-		var o: float = float(k) * spacing
-		if abs(o) > outer_radius:
-			continue
-		var t_outer: float = sqrt(max(0.0, outer_radius * outer_radius - o * o))
-		if abs(o) <= inner_radius:
-			var t_inner: float = sqrt(max(0.0, inner_radius * inner_radius - o * o))
-			if t_inner < t_outer:
-				out.append([v * o - u * t_outer, v * o - u * t_inner])
-				out.append([v * o + u * t_inner, v * o + u * t_outer])
-		else:
-			out.append([v * o - u * t_outer, v * o + u * t_outer])
-	return out
+	var fragments: Array = ExclusionHatch.hatch_fragments(
+		station.global_position, exclusion_radius, inner_radius,
+		EXCLUSION_HATCH_SPACING, EXCLUSION_HATCH_STRIPE_WIDTH, channel_polygon)
+	for frag in fragments:
+		draw_colored_polygon(frag, color)
 
 # M41 -- GO_TO_AREA search-area rings, one per contract entry whose kind is
 # GO_TO_AREA and radius > 0.0 (contract_feed.gd only sets a radius for that

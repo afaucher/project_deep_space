@@ -19,10 +19,20 @@ class_name PortChannel
 # axis are still legal, with the two big circles doing the actual keep-back.
 const CONE_HALF_ANGLE := PI / 4.0
 
-# Arc tessellation for sector_polygon: segments per arc. 8 over a 90-degree
-# arc = ~11 degrees per segment, indistinguishable from a true arc at map
-# zoom while keeping the hatch-clip polygon cheap.
-const ARC_STEPS := 8
+# Arc tessellation for sector_polygon: segments per arc. Originally 8 (~11
+# degrees/segment) when this polygon was only ever used to clip a thin
+# STROKED line (Geometry2D.clip_polyline_with_polygon) -- indistinguishable
+# from a true arc at map zoom there. Raised to 24 (~3.75 degrees/segment at
+# the production 90-degree cone) once this polygon was ALSO used to subtract
+# FILLED area (ExclusionHatch.hatch_fragments): a chord-approximated arc
+# bulges slightly INSIDE the true circle between vertices (sagitta =
+# R*(1-cos(half_segment_angle))), and at 8 steps that inward bulge was wide
+# enough (order 5-10 world units at a medium station's exclusion_radius) to
+# leave a visible sliver of un-subtracted hatch fill poking into the open
+# channel near its outer edge -- caught by test_exclusion_hatch's wedge-
+# exclusion scenario. At 24 steps the sagitta is under 1 unit even for a
+# wider-than-production 120-degree test wedge.
+const ARC_STEPS := 24
 
 # Where the berth's approach axis crosses the OUTER boundary circle: a ray
 # from berth_pos outward along Vector2.RIGHT.rotated(berth_heading),
