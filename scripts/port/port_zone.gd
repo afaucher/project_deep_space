@@ -33,16 +33,24 @@ const EXCLUSION_RADIUS_FACTOR := 6.0
 static func derive_exclusion_radius(hull_bounding_radius: float) -> float:
 	return hull_bounding_radius * EXCLUSION_RADIUS_FACTOR
 
-# The INNER keep-out ring of the two-circle keep-back model (design_ideas/
-# port_zones_and_channels.md "Geometry", revised): a hard circle just off the
-# hull ("farther than the radius of the ship") that the docking cone's gap
-# opens through when a berth is assigned. The outer circle (exclusion_radius
-# above) is deliberately much larger, allowing off-angle approaches down the
-# 90-degree cone; this inner one is the do-not-cross line everywhere the cone
-# isn't open. Derived, like the outer radius, so every station is consistent
-# for free; no authored override yet (add one to port_zone when a story
-# station needs it).
-const KEEP_OUT_RADIUS_FACTOR := 2.0
+# Capture-zone default derivation (design_ideas/port_zones_and_channels.md
+# "Terminology" -- capture zone): the docking clamp's physical reach is
+# meant to read as a short-range robotic arm / a very-short-range force
+# field grabbing a ship that's already lined up on approach, NOT a giant net
+# that can snatch a ship out of open space. It must stay MUCH smaller than
+# exclusion_radius even though the two are conceptually independent (a
+# capture zone is centered on the docking point, not the station center, so
+# there's no containment relationship to enforce -- this factor just keeps
+# it small by construction for any station size).
+#
+# Deriving proportionally to the HOST's own hull bounding radius (rather
+# than a flat constant) scales sensibly whether the host is a compact small
+# station or a sprawling medium one: 1.5x lands a medium station (Ironhold,
+# ~264u hull) at ~396u -- about a quarter of its exclusion_radius (~1584u,
+# factor 6.0) -- and a small station (~180u hull) at ~270u, both comfortably
+# larger than pos_tolerance (60u) + settle_speed (25u/s) reaction margins
+# without being anywhere near exclusion-zone scale.
+const CAPTURE_RADIUS_FACTOR := 1.5
 
-static func derive_keep_out_radius(hull_bounding_radius: float) -> float:
-	return hull_bounding_radius * KEEP_OUT_RADIUS_FACTOR
+static func derive_capture_radius(hull_bounding_radius: float) -> float:
+	return hull_bounding_radius * CAPTURE_RADIUS_FACTOR

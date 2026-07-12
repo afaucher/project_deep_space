@@ -111,9 +111,11 @@ func _start_dock_undock() -> void:
 	shuttle.name = "Docker"
 	shuttle.owner_id = 60
 	shuttle.iff_tags = ["TEAM_PLAYER"]
-	# In the bay's approach hemisphere (+Y of the port), within capture_radius.
+	# In the bay's approach hemisphere (+Y of the port), well inside the
+	# derived capture_radius (~396u for a medium station's ~264u hull -- see
+	# PortZone.derive_capture_radius).
 	var fwd: Vector2 = Vector2.RIGHT.rotated(bay.global_rotation)
-	shuttle.position = bay.global_position + fwd * 400.0
+	shuttle.position = bay.global_position + fwd * 200.0
 	shuttle.dockable = true
 	shuttle.wants_dock = true
 	shuttle.manual_undock = true   # hold until we say undock
@@ -229,7 +231,7 @@ func _start_specific_slip() -> void:
 	shuttle = CargoShuttle.new()
 	shuttle.owner_id = 63
 	var fwd: Vector2 = Vector2.RIGHT.rotated(bay.global_rotation)
-	shuttle.position = bay.global_position + fwd * 400.0
+	shuttle.position = bay.global_position + fwd * 200.0
 	shuttle.dockable = true
 	shuttle.wants_dock = true
 	main_node.add_child(shuttle)
@@ -260,7 +262,7 @@ func _start_any_open() -> void:
 	shuttle = CargoShuttle.new()
 	shuttle.owner_id = 64
 	var fwd: Vector2 = Vector2.RIGHT.rotated(bay.global_rotation)
-	shuttle.position = bay.global_position + fwd * 400.0
+	shuttle.position = bay.global_position + fwd * 200.0
 	shuttle.dockable = true
 	shuttle.wants_dock = true
 	main_node.add_child(shuttle)

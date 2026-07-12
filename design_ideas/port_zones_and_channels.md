@@ -45,50 +45,88 @@ Principles that keep the use cases coherent:
   authored fields plus the player's grant state. Promoting a station up the
   ladder is a data edit.
 
-## Geometry (revised after first playtest)
+## Terminology (settled 2026-07, after a round of visible confusion)
+
+The words below are the ONLY vocabulary for this system — code comments,
+this doc, and conversation should all use them consistently. Established
+after `keep_out_radius` (a second policy ring) and a misread "yellow circle"
+(actually the slip marker, not the capture zone) turned out to be
+misunderstandings, not designed behavior:
+
+- **exclusion_radius** — the distance no ship should be from the station
+  unless it's docking, docked, or undocking. A single threshold (`port_zone`
+  field, derived: hull bounding radius × 6, ~1584u for a medium station).
+- **exclusion zone** — the AREA no ship should be in (the disc from the
+  station's hull out to exclusion_radius). Hatched. Might trigger a response
+  in a future milestone; today it's advisory for the player (see
+  "Rules and enforcement") and mandatory for NPC traffic.
+- **capture zone** — a circle ADJACENT TO THE STATION, centered on the
+  DOCKING POINT (not the station center), sized by `DockingBay.
+  capture_radius`. Typically large enough to make grabbing the ship easy.
+  This is the ONLY area the docking clamp applies (`DockingBay._try_
+  capture()`'s reach). Its size is independent of exclusion_radius — it can
+  extend past the exclusion boundary on the far side, since it's centered
+  off-axis from the station.
+- **docking point** — the exact spot the clamp tries to hold you
+  (`DockingBay.berth_pos_for_bounding_radius()`, the clearance-adjusted
+  seat — NOT the raw authored `docking_port` component position, which can
+  sit inside the station's own hull for a berth mounted close to a large
+  hull).
+- **docking corridor** — the area a specific-slip grant opens through the
+  exclusion zone, connecting the exclusion boundary to the capture zone. A
+  90° cone (`PortChannel`, half-angle 45°) centered on the docking point's
+  approach axis.
+- **the guide** — a line down the center of the corridor
+  (`PortChannel.guide_segment`), from the corridor's mouth (where it crosses
+  exclusion_radius) to wherever it enters the capture zone. Past that point
+  the clamp's own reach takes over, so the corridor's job is done.
+
+There is deliberately NO second inner ring/"keep-out" policy boundary. An
+earlier revision derived one (`keep_out_radius`, hull × 2) as its own drawn
+ring and hatch boundary — that was solving a purely VISUAL problem ("don't
+hatch on top of the station, it's hard to see") with a policy-shaped fix.
+The hatch's inner bound is just the station's own hull bounding radius now
+— nothing more.
+
+## Geometry
 
 - **Control ring** (existing `port_zone.radius`, e.g. Ironhold 8000): where
-  rules apply. Banner on crossing — unchanged semantics.
-- **Keep-back zone = two circles + hatch** (replacing the first-pass single
-  disc + narrow rectangle channel):
-  - **Inner keep-out ring** (`keep_out_radius`, derived: hull bounding
-    radius × 2): the hard do-not-cross line just off the hull.
-  - **Outer boundary** (`exclusion_radius`, derived: hull bounding
-    radius × 6, ~1584u for a medium station): much larger, so approaches can
-    come in well off-axis.
-  - 45° hatching fills hull → outer boundary. Both radii derived by default
-    (every station consistent for free), authored/`port_patch` override wins.
-- **Channel = a 90° cone** (`PortChannel`, half-angle 45°) centered on the
-  assigned berth's approach axis, opened only by a specific-slip grant: both
-  circles GAP over the cone's span (the gaps line up by construction), the
-  sector's radial edges are the drawn lane edges, and the hatch is clipped
-  out of the sector all the way down to the hull. Everyone else still sees
-  closed rings. The cone's edges are ZONE geometry (subdued, background) —
-  they show the legal corridor's boundary, not the precise path; see
-  "Approach guide" below for the actionable aid.
-- **Departure**: the channel stays open while the grant is held; the grant
-  is CONSUMED on bay release (undock/auto-release — landed with the grant-
-  lifecycle fix), and M47 adds expiry on exclusion-boundary exit for the
-  departure leg.
-
-## Approach guide (pre-existing M34 aid, not new geometry)
-
-A first pass at this rework added a second "docking guide" — a bright
-centerline + diamond ending where `PortChannel.guide_points` computed the
-docking clamps' engage point, `min(bay.capture_radius, distance-to-mouth)`.
-**Removed** after first playtest ("I can't tell where to hit — only three
-lines to the edge of the no-fly zone and one little diamond dot"): every
-station's `capture_radius` (default 5000u) is larger than its whole
-`exclusion_radius` (~1584u for a medium station), so that `min()` always
-resolved to the mouth — the diamond always sat at the FAR edge of the no-fly
-disc, nowhere near the berth, and it duplicated an aid that already existed
-and already worked: the M34 lane/slip marker
-(`navigation_panel._draw_docking_nav_aids`/`_draw_lane`, predates M46). That
-marker — a filled gold ring with a heading tick right at the assigned
-berth, plus a bright lane corridor running 1500u out from the berth — is
-the actual "small zone near the station," and stayed bright/prominent while
-the new cone geometry's colors were dimmed to zone-background levels so the
-two stop competing for attention.
+  rules apply. Banner on crossing — unchanged semantics. Separate from the
+  exclusion zone below (a much larger, outer zone — comms rules and speed
+  advisory, not the no-fly boundary).
+- **Exclusion zone**: one boundary ring at `exclusion_radius`, 45° hatching
+  filling hull → `exclusion_radius`. Derived by default (every station
+  consistent for free), authored/`port_patch` override wins.
+- **Docking corridor**: opened only by a specific-slip grant. The exclusion
+  ring GAPS over the corridor's angular span, the hatch is clipped out of
+  the same sector all the way down to the hull, and the sector's radial
+  edges are drawn as the corridor's boundary. Everyone else still sees a
+  closed ring. The corridor's edges are ZONE geometry (subdued, background)
+  — they show the legal path's boundary, not the precise line to fly; that's
+  the guide, drawn brighter down the corridor's centerline, from the mouth
+  to where it enters the capture zone.
+- **Capture zone**: a circle at the docking point, radius
+  `DockingBay.capture_radius`, drawn dim/informational (not a precision
+  target) for the assigned bay while a grant is held. DEFAULT capture radius
+  is derived (`PortZone.derive_capture_radius`, hull bounding radius × 1.5)
+  for EVERY docking_port that doesn't author its own — deliberately
+  independent of exclusion_radius, not clamped against it: a short-range
+  docking arm / a very-short-range force field ("shouldn't just grab random
+  passing ships out of space"), much smaller than the exclusion zone by
+  construction (~396u vs ~1584u for a medium station), not because it's
+  contained within it.
+- **The M34 marker/lane** (predates this arc): a small ring at
+  `pos_tolerance` (the literal DOCKED-state acceptance gate — NOT the
+  capture zone) plus a bright lane running from well outside the corridor
+  down to the docking point. Bright full-gold, unlike everything else on
+  this list — it's the precision "fly exactly here" aid, keyed to a LIVE
+  grant only.
+- **Departure**: the corridor and guide stay open while the ship is inside
+  `exclusion_radius`, via `Ship.departing_slip` (stamped on bay release,
+  cleared on exiting the boundary) — separate from `docking_grant`, which
+  is consumed immediately on release so the slip frees for a new arrival.
+  The M34 marker/lane do NOT use `departing_slip` — arrival-only aids; once
+  released you already know where the berth is.
 
 ## Visibility
 
@@ -97,13 +135,15 @@ station's rings/disc draw ONLY while the player and station are in mutual
 comms range (weaker-of-the-two-ranges, same rule as the datalink). Within
 that: every controlled station in comms range draws, the zone the player is
 inside emphasized, others dimmer; zoom-gated via `zone_boundary_visible`.
+All of it (control ring, exclusion zone, corridor, capture zone, guide, M34
+marker/lane) is gated by one nav-panel toggle: "Port Control".
 
-Zone drawing (control ring, keep-back circles, hatch, cone edges) is
+Zone drawing (control ring, exclusion zone, hatch, corridor edges) is
 BACKGROUND terrain, not a foreground element: it draws at the bottom of the
 nav map's world-space stack (right after the grid), in colors blended toward
 the panel background with thicker strokes — every contact, lane, marker, and
-laser reads on top of it. The M34 approach guide (lane + slip marker) stays
-bright full-gold: it's the actionable aid, not terrain.
+laser reads on top of it. The guide and the M34 marker/lane stay bright
+full-gold: they're actionable aids, not terrain.
 
 ## Ship's log
 

@@ -1,15 +1,20 @@
 extends RefCounted
 class_name PortChannel
 
-# M46 (revised) -- docking channel geometry: the keep-back zone is TWO circles
-# (a hard inner keep-out ring just off the hull, and a much larger outer
-# boundary allowing off-angle approaches -- see PortZone.derive_keep_out_radius
-# / derive_exclusion_radius), and the channel a specific-slip grant opens
-# through it is a 90-DEGREE CONE (an annular sector) centered on the assigned
-# berth's approach axis, not the earlier narrow rectangle. Both circles gap
-# where the cone crosses them ("lines up with inner and outer gaps"); the
-# sector's radial edges are the drawn docking-lane edges; a centerline guide
-# marks where the docking clamps take over (see guide_points).
+# M46 (revised) -- docking corridor geometry. Terminology (design_ideas/
+# port_zones_and_channels.md):
+#   exclusion zone   -- the disc from the station's hull out to
+#                        exclusion_radius (PortZone.derive_exclusion_radius);
+#                        no ship should be there unless docking-related.
+#   docking corridor -- the area a specific-slip grant opens through the
+#                        exclusion zone, so a granted ship has a legal path
+#                        in. A 90-DEGREE CONE (an annular sector) centered on
+#                        the assigned berth's approach axis -- this file's
+#                        sector_polygon/lane_edges.
+#   capture zone      -- a circle centered on the DOCKING POINT (not the
+#                        station center), sized by DockingBay.capture_radius
+#                        -- drawn by navigation_panel.gd, not this file
+#                        (PortChannel has no notion of capture_radius).
 #
 # Pure static helper, no scene/node state -- PortZone/NavCorridor house style,
 # fixture-testable (test_port_channel.gd) with no station/bay/grant object.
@@ -106,20 +111,42 @@ static func sector_polygon(center: Vector2, theta0: float, inner_radius: float, 
 	pts.append(pts[0])
 	return pts
 
-# The cone's two radial lane edges, spanning the inner keep-out ring's gap
-# endpoint to the outer boundary's gap endpoint at theta0 +/- half_angle --
-# "the docking lane is an edge around the annulus in that 90-degree cone,
-# lines up with inner and outer gaps". Returns [[a1, b1], [a2, b2]] world-
-# space segment pairs, or [] for degenerate input.
-static func lane_edges(center: Vector2, theta0: float, keep_out_radius: float, outer_radius: float, half_angle: float = CONE_HALF_ANGLE) -> Array:
-	if outer_radius <= 0.0 or outer_radius <= keep_out_radius or half_angle <= 0.0:
+# The cone's two radial lane edges, spanning inner_radius (the corridor's
+# near end -- typically the station's hull) to outer_radius (the exclusion
+# boundary) at theta0 +/- half_angle -- "the docking lane is an edge around
+# the annulus in that 90-degree cone". Returns [[a1, b1], [a2, b2]]
+# world-space segment pairs, or [] for degenerate input.
+static func lane_edges(center: Vector2, theta0: float, inner_radius: float, outer_radius: float, half_angle: float = CONE_HALF_ANGLE) -> Array:
+	if outer_radius <= 0.0 or outer_radius <= inner_radius or half_angle <= 0.0:
 		return []
 	var out: Array = []
 	for sgn in [-1.0, 1.0]:
 		var a: float = theta0 + sgn * half_angle
 		var dir := Vector2(cos(a), sin(a))
-		out.append([center + dir * max(keep_out_radius, 0.0), center + dir * outer_radius])
+		out.append([center + dir * max(inner_radius, 0.0), center + dir * outer_radius])
 	return out
+
+# The guide (design_ideas terminology: "a line down the center of the
+# corridor"): a segment along the docking point's approach axis, from the
+# mouth (where the corridor crosses the exclusion boundary, boundary_radius)
+# to wherever it enters the capture zone -- a circle centered on the docking
+# point itself with radius capture_radius. Past that point the clamp's own
+# reach takes over; the corridor's job (a legal path THROUGH the exclusion
+# zone) is done. Since the capture-zone circle is centered ON this same axis
+# (at docking_point), the axis enters it at exactly
+# docking_point + outward * min(capture_radius, mouth_dist) -- capped at the
+# mouth so the guide never overshoots the corridor's own outer end even if
+# capture_radius is larger than the corridor is long. Returns {} when there
+# is no mouth (see mouth_point's null cases).
+static func guide_segment(docking_point: Vector2, berth_heading: float, station_center: Vector2, boundary_radius: float, capture_radius: float) -> Dictionary:
+	var mouth = mouth_point(docking_point, berth_heading, station_center, boundary_radius)
+	if mouth == null:
+		return {}
+	var outward: Vector2 = Vector2.RIGHT.rotated(berth_heading)
+	var mouth_dist: float = docking_point.distance_to(mouth)
+	var engage_dist: float = min(max(capture_radius, 0.0), mouth_dist)
+	var engage: Vector2 = docking_point + outward * engage_dist
+	return {"mouth": mouth, "engage": engage}
 
 # Point-in-channel test against a polygon sector_polygon() already built --
 # delegates to Geometry2D.is_point_in_polygon (the same primitive

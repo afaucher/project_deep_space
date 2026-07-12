@@ -1,24 +1,24 @@
 extends RefCounted
 class_name ExclusionHatch
 
-# M46 (revised) -- keep-back zone hatch FILL via POLYGON BOOLEAN OPS instead
+# M46 (revised) -- EXCLUSION ZONE hatch FILL via POLYGON BOOLEAN OPS instead
 # of hand-derived ray/circle line-segment math (the earlier
-# navigation_panel.exclusion_hatch_lines approach, now removed). That
-# per-line math only ever punched a hole for ONE inner boundary (the hull);
-# extending it to also respect keep_out_radius AND the open channel wedge
-# meant re-deriving ray/circle intersections by hand for every new boundary,
-# and it never actually got the keep-out ring treatment (design_ideas/
-# port_zones_and_channels.md: "we draw the diagonal strips through the inner
-# ring").
+# navigation_panel.exclusion_hatch_lines approach, now removed). The exclusion
+# zone is the disc from a station's hull out to exclusion_radius; the inner
+# bound passed to hatch_fragments() is the station's own hull bounding radius
+# -- a pure VISUAL choice (don't hatch on top of the hull's own drawing),
+# not a second policy boundary. There is no separate "keep-out ring" -- an
+# earlier revision derived one, but it was only ever meant to stop hatching
+# from rendering under the station.
 #
-# Polygon ops sidestep this generically: build a field of diagonal stripe
-# RECTANGLES covering the whole disc, then INTERSECT with the outer boundary
-# circle and SUBTRACT the inner boundary circle (and the open channel wedge,
-# when present) via Geometry2D's built-in polygon clipper -- the exact same
-# primitive ship_silhouette.gd already uses for hull-outline boolean ops
-# (Geometry2D.clip_polygons/merge_polygons; is_polygon_clockwise to detect a
-# hole-wound result fragment). Any future boundary shape is one more clip
-# call, not new math.
+# Polygon ops sidestep hand-derived boundary math generically: build a field
+# of diagonal stripe RECTANGLES covering the whole disc, then INTERSECT with
+# the outer boundary circle and SUBTRACT the inner (hull) circle -- and the
+# open docking-corridor wedge, when a grant has one -- via Geometry2D's
+# built-in polygon clipper, the exact same primitive ship_silhouette.gd
+# already uses for hull-outline boolean ops (Geometry2D.clip_polygons/
+# merge_polygons). Any future boundary shape is one more clip call, not new
+# math.
 #
 # Pure static helper, no scene/node state -- PortZone/PortChannel/NavCorridor
 # house style (RefCounted, static funcs only), fixture-testable with no

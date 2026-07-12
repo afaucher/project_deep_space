@@ -78,12 +78,15 @@ const ZONE_BOUNDARY_COLOR := Color(0.52, 0.45, 0.15, 0.55)
 const ZONE_BOUNDARY_DIM_COLOR := Color(0.52, 0.45, 0.15, 0.22)
 const ZONE_RING_WIDTH := 4.0        # / map_zoom at draw time
 
-# Keep-back zone (two circles + hatch, warmer hue than the control-ring gold
-# so "keep out" reads differently from "controlled space"): the outer
-# boundary at exclusion_radius, the hard inner keep-out ring at
-# keep_out_radius (PortZone.derive_keep_out_radius), and 45-degree hatching
-# between hull and outer boundary. Same emphasized/dimmed and blended-toward-
-# background treatment as the control ring.
+# Exclusion zone (hull -> exclusion_radius, warmer hue than the control-ring
+# gold so "no-fly" reads differently from "controlled space"): a single
+# boundary ring at exclusion_radius plus 45-degree hatching filling the
+# whole disc down to the hull. There is no second inner ring/policy boundary
+# -- the hatch's inner bound is just the station's own hull bounding radius,
+# a pure visual choice (don't hatch on top of the hull's own drawing), not a
+# distinct "keep-out" zone (design_ideas/port_zones_and_channels.md
+# terminology). Same emphasized/dimmed and blended-toward-background
+# treatment as the control ring.
 const EXCLUSION_DISC_COLOR := Color(0.52, 0.3, 0.12, 0.5)
 const EXCLUSION_DISC_DIM_COLOR := Color(0.52, 0.3, 0.12, 0.2)
 
@@ -94,15 +97,16 @@ const EXCLUSION_DISC_DIM_COLOR := Color(0.52, 0.3, 0.12, 0.2)
 const EXCLUSION_HATCH_SPACING := 150.0
 const EXCLUSION_HATCH_STRIPE_WIDTH := 60.0
 
-# Only hatched between keep_out_radius and exclusion_radius (the softer,
-# off-angle-tolerated approach band) -- the hard hull->keep_out_radius disc
-# is deliberately left UNHATCHED, marked only by its own boundary ring, so
-# the stripe texture never crosses/overlaps that inner ring (design_ideas/
-# port_zones_and_channels.md: "we draw the diagonal strips through the
-# inner ring" -- the earlier line-hatch only ever punched a hole for the
-# hull, never for keep_out_radius). Falls back to the station's own hull
-# bounding radius for a zone with no authored keep_out_radius (see
-# _draw_exclusion_hatch below).
+# The capture zone: a circle centered on the DOCKING POINT (not the station
+# center), sized to DockingBay.capture_radius -- "the only area the docking
+# clamp applies" (design_ideas/port_zones_and_channels.md terminology).
+# Distinct from the small SLIP_HIGHLIGHT_COLOR ring at pos_tolerance (the
+# precise DOCKED-state acceptance gate) -- this is the much larger physics
+# reach of the clamp, drawn dim/informational since it's not something to
+# aim at precisely, just something to know exists. Only drawn for the
+# ASSIGNED bay while a live grant is held (same gating as the M34 marker/
+# lane -- see _draw_docking_nav_aids).
+const CAPTURE_ZONE_COLOR := Color(1.0, 0.85, 0.2, 0.18)
 
 # M46 (revised) -- the channel through the keep-back zone is a 90-degree CONE
 # (PortChannel.sector_polygon/lane_edges) centered on the assigned berth's
@@ -1087,6 +1091,14 @@ func _draw_controlled_zones(current_authority, grant, departing_slip: Dictionary
 	var player_comms: float = current_state.get("comms_range", 0.0)
 	if player_comms <= 0.0:
 		return
+	# The DOCKING POINT (design_ideas terminology: "the exact spot the clamp
+	# tries to hold you") is the clearance-adjusted seat
+	# (DockingBay.berth_pos_for_bounding_radius), not the raw authored bay
+	# position -- same fix as the M34 marker/lane, needed here too for the
+	# guide's exact endpoint math (its angle is unaffected either way, since
+	# the standoff only moves the seat along the same axis, but its length
+	# is not).
+	var player_radius: float = current_state.get("bounding_radius", 50.0)
 
 	for s in get_tree().get_nodes_in_group("ships"):
 		if not s.has_method("get_port_zone"):
@@ -1113,7 +1125,6 @@ func _draw_controlled_zones(current_authority, grant, departing_slip: Dictionary
 		var exclusion_radius: float = float(zone.get("exclusion_radius", 0.0))
 		if exclusion_radius <= 0.0:
 			continue
-		var keep_out_radius: float = float(zone.get("keep_out_radius", 0.0))
 
 		# Channel: open for a live grant with a specific slip AT THIS station
 		# (any-open grants -- slip_id "" -- have no single berth to align a
@@ -1138,43 +1149,46 @@ func _draw_controlled_zones(current_authority, grant, departing_slip: Dictionary
 			if bay_node != null:
 				theta0 = PortChannel.axis_angle(bay_node.global_position, bay_node.global_rotation, s.global_position, exclusion_radius)
 				if not is_nan(theta0):
-					# The hatch cut reaches the HULL (the berth sits inside
-					# the keep-out ring -- the open cone must run all the way
-					# down to it), not just the keep-out radius.
+					# The hatch cut reaches the HULL -- the corridor's whole
+					# job is to connect the exclusion boundary down to the
+					# capture zone at the docking point, and the docking
+					# point itself sits close to the hull.
 					channel_polygon = PortChannel.sector_polygon(s.global_position, theta0, s.get_bounding_radius(), exclusion_radius)
 
 		var has_channel: bool = not is_nan(theta0)
 
-		# The two keep-back circles: full rings normally; when the channel is
-		# open, both gap over the cone's angular span ("gaps open when berth
-		# assigned... lines up with inner and outer gaps").
+		# The exclusion boundary ring: full circle normally; when the
+		# corridor is open, it gaps over the cone's angular span ("gaps open
+		# when berth assigned"). There is no second inner ring -- the hatch
+		# fill's inner bound is just the hull (see _draw_exclusion_hatch).
 		_draw_gappable_ring(s.global_position, exclusion_radius, theta0, disc_color, has_channel)
-		if keep_out_radius > 0.0 and keep_out_radius < exclusion_radius:
-			_draw_gappable_ring(s.global_position, keep_out_radius, theta0, disc_color, has_channel)
 
-		_draw_exclusion_hatch(s, exclusion_radius, keep_out_radius, disc_color, channel_polygon)
+		_draw_exclusion_hatch(s, exclusion_radius, disc_color, channel_polygon)
 
-		if has_channel:
-			# Radial cone edges: SUBDUED like the rest of the keep-back zone
-			# (this is still zone/background geometry -- "here's the legal
-			# corridor through the wall" -- not the precision approach
-			# guide). The actionable "fly here" cue is the M34 lane/slip
-			# marker below (_draw_docking_nav_aids/_draw_lane), which already
-			# runs bright gold from well outside the boundary all the way to
-			# the berth. A separate bright "docking guide" line used to be
-			# drawn here too, ending in a diamond at
-			# min(bay.capture_radius, distance-to-mouth) -- but every
-			# station's capture_radius (default 5000u) is LARGER than its
-			# whole exclusion disc (~1584u for a medium station), so that
-			# min() always resolved to the mouth: the diamond sat at the
-			# FAR edge of the no-fly zone, nowhere near the berth, and
-			# duplicated/outshone the M34 lane that already does this job
-			# correctly. Removed rather than fixed -- the M34 lane already
-			# solves "where do I actually fly", this cone only needs to show
-			# the legal corridor's boundary.
-			var edges: Array = PortChannel.lane_edges(s.global_position, theta0, keep_out_radius, exclusion_radius)
+		if has_channel and bay_node != null:
+			# Radial corridor edges: SUBDUED like the rest of the exclusion
+			# zone (this is still zone/background geometry -- "here's the
+			# legal corridor through the wall"). Inner bound is the hull,
+			# matching the hatch cutout above (no separate inner ring).
+			var edges: Array = PortChannel.lane_edges(s.global_position, theta0, s.get_bounding_radius(), exclusion_radius)
 			for edge in edges:
 				draw_line(edge[0], edge[1], CHANNEL_EDGE_COLOR, ZONE_RING_WIDTH / map_zoom)
+
+			# The guide: a line down the corridor's center, from the mouth
+			# (where the corridor crosses the exclusion boundary) to wherever
+			# it enters the capture zone -- past that point the clamp's own
+			# reach takes over, so the corridor's job is done. An earlier
+			# version of this ended in a diamond at min(bay.capture_radius,
+			# distance-to-mouth), removed when capture_radius still defaulted
+			# to 5000u (always collapsing to the mouth, landing nowhere near
+			# the berth). Safe to bring back now that capture_radius is
+			# bounded -- and now that the capture zone itself is drawn
+			# (_draw_docking_nav_aids), the guide's endpoint is finally
+			# self-explanatory instead of an unexplained stop partway out.
+			var docking_point: Vector2 = bay_node.berth_pos_for_bounding_radius(player_radius)
+			var guide: Dictionary = PortChannel.guide_segment(docking_point, bay_node.global_rotation, s.global_position, exclusion_radius, bay_node.capture_radius)
+			if not guide.is_empty():
+				draw_line(guide["mouth"], guide["engage"], CHANNEL_EDGE_COLOR, (ZONE_RING_WIDTH * 1.3) / map_zoom)
 
 # One keep-back circle: a full ring, or -- while the docking cone is open --
 # an arc leaving the cone's [theta0 - half, theta0 + half] span open.
@@ -1198,19 +1212,19 @@ func _assigned_bay_for_station(station: Node, grant) -> Node:
 		return null
 	return assigned_bay_for(bays, grant)
 
-# M46 (revised) -- one station's keep-back hatching, filled (not stroked)
-# diagonal stripes computed by ExclusionHatch via Geometry2D polygon boolean
-# ops (see that file's header for why: generic boundary-clipping instead of
-# per-boundary ray/circle math). Hatched ONLY between keep_out_radius and
-# exclusion_radius (see EXCLUSION_HATCH_SPACING's comment) -- falls back to
-# the station's own hull bounding radius when no keep_out_radius is
-# authored/derived. `channel_polygon`, when non-empty, is subtracted the same
-# way as the two boundary circles, so the open docking cone reads as a clean
-# cut through the hatching with no extra logic here.
-func _draw_exclusion_hatch(station: Node, exclusion_radius: float, keep_out_radius: float, color: Color, channel_polygon: PackedVector2Array) -> void:
-	var inner_radius: float = keep_out_radius if keep_out_radius > 0.0 else station.get_bounding_radius()
+# M46 (revised) -- one station's exclusion-zone hatching, filled (not
+# stroked) diagonal stripes computed by ExclusionHatch via Geometry2D polygon
+# boolean ops (see that file's header for why: generic boundary-clipping
+# instead of per-boundary ray/circle math). Hatched from the station's own
+# hull bounding radius (a pure visual choice -- don't hatch on top of the
+# hull's own drawing, no separate policy boundary) out to exclusion_radius.
+# `channel_polygon`, when non-empty, is subtracted the same way as the hull,
+# so the open docking corridor reads as a clean cut through the hatching
+# with no extra logic here.
+func _draw_exclusion_hatch(station: Node, exclusion_radius: float, color: Color, channel_polygon: PackedVector2Array) -> void:
+	var inner_radius: float = station.get_bounding_radius()
 	if exclusion_radius <= inner_radius:
-		return # nothing outside the keep-out boundary to hatch
+		return # station's own hull already fills (or exceeds) the disc -- nothing to hatch
 
 	var fragments: Array = ExclusionHatch.hatch_fragments(
 		station.global_position, exclusion_radius, inner_radius,
@@ -1329,11 +1343,22 @@ func _draw_docking_nav_aids(grant) -> void:
 
 	var assigned: Node = assigned_bay_for(bays, grant)
 	if assigned != null:
+		# The capture zone (design_ideas terminology: "a wide circle...
+		# centered on the docking point... the only area the docking clamp
+		# applies") -- drawn for the assigned bay only, BEFORE the marker/
+		# lane so those precision aids read on top of it, not the other way
+		# around. This is the answer to "what was the yellow circle?" going
+		# forward: the SLIP marker below is pos_tolerance (the small DOCKED-
+		# state acceptance gate); this is the much larger physics reach of
+		# the clamp itself, which was never drawn before now.
+		var docking_point: Vector2 = assigned.berth_pos_for_bounding_radius(player_radius)
+		draw_arc(docking_point, assigned.capture_radius, 0, TAU, 48, CAPTURE_ZONE_COLOR, ZONE_RING_WIDTH / map_zoom)
+
 		# Specific slip: THAT bay bright/authority-colored, every other slip at
 		# this station dimmed -- and draw the one lane down to it.
 		for b in bays:
 			_draw_slip_marker(b, b.berth_pos_for_bounding_radius(player_radius), b == assigned)
-		_draw_lane(assigned.berth_pos_for_bounding_radius(player_radius), assigned.global_rotation)
+		_draw_lane(docking_point, assigned.global_rotation)
 	else:
 		# Any-open grant (slip_id == "") -- highlight ALL open slips equally,
 		# no single lane (nothing specific to line up on; roadmap M34 scope).

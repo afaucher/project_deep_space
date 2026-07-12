@@ -307,7 +307,7 @@ func _run_scenario_1_grant_mutation() -> void:
 	_assert(s1_bay != null, "scenario 1: station grows a DockingBay")
 
 	var fwd: Vector2 = Vector2.RIGHT.rotated(s1_bay.global_rotation)
-	s1_shuttle = _make_shuttle("S1Shuttle", 60, s1_bay.global_position + fwd * 400.0)
+	s1_shuttle = _make_shuttle("S1Shuttle", 60, s1_bay.global_position + fwd * 200.0)
 	s1_shuttle.dockable = true
 
 	# THE mutation path: same call the .dialogue "do" line makes.
@@ -506,7 +506,7 @@ func _run_scenario_5_context_flip() -> void:
 	s5_bay = _med_bay(s5_station)
 
 	var fwd: Vector2 = Vector2.RIGHT.rotated(s5_bay.global_rotation)
-	s5_shuttle = _make_shuttle("S5Shuttle", 95, s5_bay.global_position + fwd * 400.0)
+	s5_shuttle = _make_shuttle("S5Shuttle", 95, s5_bay.global_position + fwd * 200.0)
 	s5_shuttle.dockable = true
 	s5_shuttle.manual_undock = true
 

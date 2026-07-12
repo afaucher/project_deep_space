@@ -93,8 +93,8 @@ func tick(actor: Node, _blackboard) -> int:
 			if station != null:
 				for b in station.get_berths():
 					if b.slip_id == grant.get("slip_id", ""):
-						var approach_pt = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 2000.0
-						_cruise_to(actor, approach_pt)
+						var approach_pt = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * _approach_distance(b)
+						_cruise_to(actor, approach_pt, station.position)
 						return RUNNING
 		# Fallback if no slip is assigned yet (e.g. uncontrolled station).
 		# Seek the first bay's approach point so we can enter its capture cone.
@@ -103,8 +103,8 @@ func tick(actor: Node, _blackboard) -> int:
 			var bays = station.get_berths()
 			if bays.size() > 0:
 				var b = bays[0]
-				var approach_pt = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 2000.0
-				_cruise_to(actor, approach_pt)
+				var approach_pt = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * _approach_distance(b)
+				_cruise_to(actor, approach_pt, station.position)
 				return RUNNING
 				
 		actor.apply_control_input(0.0, 0.0, (target - actor.position).angle(), 1, 1)
@@ -132,12 +132,40 @@ func _find_station_at(actor: Node, waypoint: Vector2):
 			best_d = d
 	return best
 
-func _cruise_to(actor: Node, target: Vector2) -> void:
+# The approach waypoint must land INSIDE the bay's own capture zone (design_
+# ideas/port_zones_and_channels.md "Terminology") or the servo never engages
+# -- the shuttle just cruises to the waypoint and idles there forever, never
+# actually docking. Used to be a flat 2000u, safe back when capture_radius
+# defaulted to a flat 5000u; now that capture_radius is derived per-station
+# (PortZone.derive_capture_radius, a short-range docking arm, ~396u for a
+# medium station) a fixed 2000u overshoots it entirely. 80% of the bay's own
+# capture_radius keeps real margin inside the boundary regardless of station
+# size.
+func _approach_distance(bay: Node) -> float:
+	return bay.capture_radius * 0.8
+
+# `exclude_pos` defaults to `target` -- correct for the TRANSIT-phase call
+# (steering straight at the station's own position, which IS what
+# Steering.steer()'s exclusion check matches against: "if this obstacle's
+# position is basically exclude_pos, don't dodge it"). The DOCKING-phase
+# calls steer toward an APPROACH POINT offset from the station (near the
+# capture zone, not the station's own center) and must pass the station's
+# OWN position explicitly instead -- passing the approach point there was a
+# latent bug (the exclusion never actually matched the station, since an
+# approach point is never within the station's own bounding radius of its
+# center) that went unnoticed while capture engaged almost instantly under
+# the old 5000u default; once capture_radius shrank to a real short-range
+# value (PortZone.derive_capture_radius), ships spent enough real flight
+# time in this phase for the bug to surface as an orbit around the station
+# (avoidance treating the very thing being approached as an obstacle).
+func _cruise_to(actor: Node, target: Vector2, exclude_pos = null) -> void:
+	if exclude_pos == null:
+		exclude_pos = target
 	var desired: Vector2 = target - actor.position
 	if desired.length() > 0.01:
 		desired = desired.normalized()
 	# Avoid obstacles in transit, but not the destination station itself.
-	var avoided: Vector2 = Steering.steer(actor, desired, target)
+	var avoided: Vector2 = Steering.steer(actor, desired, exclude_pos)
 	var desired_vel: Vector2 = avoided.normalized() * CARGO_CRUISE
 	var steer: Vector2 = desired_vel - actor.linear_velocity
 	if steer.length() < 10.0:

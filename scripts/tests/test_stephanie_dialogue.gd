@@ -244,8 +244,10 @@ func _dock_and_check_repairs(dm, resource, station, player, states) -> void:
 	if bay == null:
 		return
 
+	# Comfortably inside the derived capture_radius (~396u for a medium
+	# station's ~264u hull -- see PortZone.derive_capture_radius).
 	var fwd: Vector2 = Vector2.RIGHT.rotated(bay.global_rotation)
-	player.position = bay.global_position + fwd * 400.0
+	player.position = bay.global_position + fwd * 200.0
 
 	var result: Dictionary = station.request_docking_via_control(player)
 	_assert(result.get("outcome", "") == "granted", "stephanie: docking request granted")

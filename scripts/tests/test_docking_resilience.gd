@@ -63,9 +63,12 @@ func setup(main) -> void:
 			bay = b
 	_assert(bay != null, "scenario 1: assigned bay found")
 
-	# Park the shuttle inside the capture cone, then freeze it so the spring
-	# can never seat it -- the capture must abort instead of wedging.
-	var approach: Vector2 = bay.global_position + Vector2.RIGHT.rotated(bay.global_rotation) * 600.0
+	# Park the shuttle inside the capture zone, then freeze it so the spring
+	# can never seat it -- the capture must abort instead of wedging. 200u is
+	# comfortably inside the derived capture_radius (PortZone.
+	# derive_capture_radius -- a short-range docking arm, ~396u for a medium
+	# station's ~264u hull, not the old flat 5000u default).
+	var approach: Vector2 = bay.global_position + Vector2.RIGHT.rotated(bay.global_rotation) * 200.0
 	var xform: Transform2D = shuttle.global_transform
 	xform.origin = approach
 	PhysicsServer2D.body_set_state(shuttle.get_rid(), PhysicsServer2D.BODY_STATE_TRANSFORM, xform)

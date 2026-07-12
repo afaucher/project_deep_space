@@ -261,7 +261,11 @@ func _phase_3_process(delta: float) -> void:
 var station = null
 var bay = null
 var freighter = null
-const PHASE4_START_OFFSET := Vector2(400, 700)
+# Comfortably inside MediumStation's derived capture_radius (~396u for its
+# ~264u hull -- see PortZone.derive_capture_radius, a short-range docking
+# arm, not the old flat 5000u default). The freighter never flies under its
+# own power here -- capture-then-spring-pull IS the approach.
+const PHASE4_START_OFFSET := Vector2(150, 260)
 const PHASE4_APPROACH_TIMEOUT := 20.0
 var dock_time: float = -1.0
 var docking_subphase: int = 0 # 0 = approach/capture, 1 = hold-then-release

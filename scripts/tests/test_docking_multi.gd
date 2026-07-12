@@ -16,7 +16,24 @@ const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const NO_SLAM_MIN := 150.0
 const APPROACH_TIMEOUT := 14.0
 const EXTRA_BERTHS := [Vector2(0, -300), Vector2(300, 0), Vector2(-300, 0)]
-const SHUTTLE_STARTS := [Vector2(0, 900), Vector2(0, -900), Vector2(900, 0), Vector2(-900, 0)]
+# Each berth faces OUTWARD (away from the station center, per the "M32
+# controlled-station parity"/hemisphere-capture convention -- _try_capture()
+# only grabs a ship in front of the port, dir_to_ship.dot(bay_forward) > 0),
+# so a shuttle must sit FURTHER from center than its target berth, not
+# between the berth and the center. The default bay (SmallStation's own
+# authored docking_port, at (0,135), heading +Y) additionally has a SMALL
+# derived capture_radius now (~275u for its ~184u hull -- see
+# PortZone.derive_capture_radius, a short-range docking arm, not the old
+# flat 5000u default) since it goes through Ship._ready()'s derivation loop,
+# unlike the three EXTRA_BERTHS bays (hand-built via DockingBay.new(),
+# bypassing that loop -- they keep DockingBay's own unmodified default and
+# have generous reach regardless of distance). Each start below sits ~150u
+# beyond its corresponding berth along the correct outward axis -- inside
+# the default bay's shrunk capture_radius where that applies, comfortably
+# inside the other three's much larger one either way, and short enough to
+# settle within APPROACH_TIMEOUT under the softened servo spring (K_SPRING
+# halved for a gentler pull-in -- see docking_bay.gd).
+const SHUTTLE_STARTS := [Vector2(0, 300), Vector2(0, -450), Vector2(450, 0), Vector2(-450, 0)]
 
 var main_node: Node = null
 var failures: Array = []

@@ -138,7 +138,7 @@ func _run_scenario_a_docked_repair() -> void:
 		return
 
 	var fwd: Vector2 = Vector2.RIGHT.rotated(a_bay.global_rotation)
-	a_shuttle = _make_shuttle("RepairShuttleA", 60, a_bay.global_position + fwd * 400.0)
+	a_shuttle = _make_shuttle("RepairShuttleA", 60, a_bay.global_position + fwd * 200.0)
 
 	a_comp = a_shuttle.get_component("comms_array")
 	a_comp["health"] = 5.0
@@ -214,7 +214,7 @@ func _run_scenario_c_undock_stops_repair() -> void:
 		return
 
 	var fwd: Vector2 = Vector2.RIGHT.rotated(c_bay.global_rotation)
-	c_shuttle = _make_shuttle("RepairShuttleC", 61, c_bay.global_position + fwd * 400.0)
+	c_shuttle = _make_shuttle("RepairShuttleC", 61, c_bay.global_position + fwd * 200.0)
 	c_shuttle.manual_undock = true   # hold DOCKED until we explicitly undock
 
 	c_comp = c_shuttle.get_component("comms_array")

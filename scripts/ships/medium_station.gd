@@ -288,11 +288,12 @@ func _init() -> void:
 
 	# M31 -- Ironhold is the controlled hub (AUTOMATED authority style, see
 	# implementation_plans/m31_m36_port_authority_roadmap.md). Radius picked to
-	# comfortably contain the docking approach: the berth sits at 340u and
-	# DockingBay's default capture_radius is 5000u (docking_bay.gd), so 8000u
-	# gives a couple thousand units of clearance beyond the capture radius for
-	# the hail-and-request approach before a ship is even in range to dock --
-	# well outside the ~210u hull collision circle. M33 -- `style` is a new
+	# comfortably contain the docking approach: the berth sits at 340u, well
+	# outside the ~210u hull collision circle, with room for the hail-and-
+	# request approach before a ship is even inside the exclusion zone
+	# (~1584u, derived) or capture zone (~396u, derived -- see
+	# PortZone.derive_capture_radius; a short-range docking arm, not the old
+	# 5000u default this comment used to cite). M33 -- `style` is a new
 	# top-level key (NOT inside `rules`, which is reserved for M35's rule
 	# dispatch): drives the port-control NPC's name + dialogue flavor +
 	# reliability (see scripts/port/port_control.gd).

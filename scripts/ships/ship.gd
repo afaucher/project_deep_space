@@ -1326,8 +1326,6 @@ func _ready() -> void:
 	if not port_zone.is_empty():
 		if float(port_zone.get("exclusion_radius", 0.0)) <= 0.0:
 			port_zone["exclusion_radius"] = PortZone.derive_exclusion_radius(get_bounding_radius())
-		if float(port_zone.get("keep_out_radius", 0.0)) <= 0.0:
-			port_zone["keep_out_radius"] = PortZone.derive_keep_out_radius(get_bounding_radius())
 
 	mass = get_ship_mass()
 	inertia = get_ship_inertia()
@@ -1463,20 +1461,20 @@ func _ready() -> void:
 		bay.rotation = comp.get("heading", 0.0)
 		if comp.has("capture_radius"):
 			bay.capture_radius = comp["capture_radius"]
-		elif not port_zone.is_empty():
-			# M46 follow-up -- a controlled station's DEFAULT capture_radius
-			# (5000u) used to reach WAY past the drawn no-fly disc
-			# (exclusion_radius, ~1584u for a medium station): the clamp
-			# would engage long before a player ever saw the boundary they'd
-			# just crossed ("the docking clamp takes over way far away from
-			# the target"). Clamp the default down to the disc itself so
-			# capture only ever engages once you're visibly inside the zone
-			# the game actually shows you. Only the DEFAULT is clamped -- a
-			# docking_port component that explicitly authors its own
-			# capture_radius (the `if` branch above) is left alone.
-			var exclusion_radius: float = float(port_zone.get("exclusion_radius", 0.0))
-			if exclusion_radius > 0.0:
-				bay.capture_radius = min(bay.capture_radius, exclusion_radius)
+		else:
+			# Capture zone (design_ideas/port_zones_and_channels.md
+			# "Terminology"): a short-range docking arm / an extremely
+			# short-range force field, NOT a giant net that can snatch a
+			# ship out of open space -- see PortZone.derive_capture_radius
+			# for the factor/reasoning. Applies to EVERY docking_port
+			# (station or ship, controlled zone or not) that doesn't
+			# explicitly author its own capture_radius; deliberately
+			# independent of exclusion_radius/port_zone, not clamped
+			# against it -- an earlier version of this derivation only ran
+			# for controlled stations and capped the OLD 5000u default down
+			# to exclusion_radius scale (~1584u for a medium station),
+			# which was still far too large to read as "short range".
+			bay.capture_radius = PortZone.derive_capture_radius(get_bounding_radius())
 		# slip_id is now the string ID of the docking port component.
 		bay.slip_id = comp["id"]
 		# Only docking ports with 'has_servo': false are completely fixed. Most can rotate +/- degrees or move along a rail.

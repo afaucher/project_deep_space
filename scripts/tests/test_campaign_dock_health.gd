@@ -91,7 +91,10 @@ func _try_dock() -> bool:
 	player.wants_dock = true
 	for b in ironhold.get_berths():
 		if b.slip_id == result["grant"].get("slip_id", ""):
-			var approach: Vector2 = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 800.0
+			# 200u is comfortably inside the derived capture_radius (~396u
+			# for Ironhold's ~264u hull -- see PortZone.derive_capture_radius,
+			# a short-range docking arm, not the old flat 5000u default).
+			var approach: Vector2 = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 200.0
 			var xform: Transform2D = player.global_transform
 			xform.origin = approach
 			PhysicsServer2D.body_set_state(player.get_rid(), PhysicsServer2D.BODY_STATE_TRANSFORM, xform)

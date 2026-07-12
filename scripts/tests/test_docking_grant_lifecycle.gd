@@ -91,11 +91,13 @@ func setup(main) -> void:
 		"scenario 2: re-request refreshed the countdown (%.0f)" % docker.docking_grant.get("time_left", 0.0))
 	docked_slip = first_slip
 
-	# Park the docker in its assigned bay's capture cone; the berth servo
-	# (Ironhold-style has_servo bays) pulls it to DOCKED from here.
+	# Park the docker in its assigned bay's capture zone; the berth servo
+	# (Ironhold-style has_servo bays) pulls it to DOCKED from here. 200u is
+	# comfortably inside the derived capture_radius (~396u for a medium
+	# station's ~264u hull -- see PortZone.derive_capture_radius).
 	for b in station.get_berths():
 		if b.slip_id == first_slip:
-			var approach: Vector2 = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 600.0
+			var approach: Vector2 = b.global_position + Vector2.RIGHT.rotated(b.global_rotation) * 200.0
 			var xform: Transform2D = docker.global_transform
 			xform.origin = approach
 			PhysicsServer2D.body_set_state(docker.get_rid(), PhysicsServer2D.BODY_STATE_TRANSFORM, xform)

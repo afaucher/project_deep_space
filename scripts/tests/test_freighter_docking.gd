@@ -47,7 +47,13 @@ var prev_velocity: Vector2 = Vector2.ZERO
 var max_velocity_delta: float = 0.0
 
 const APPROACH_TIMEOUT := 20.0
-const START_OFFSET := Vector2(400, 700)
+# Comfortably inside MediumStation's derived capture_radius (~396u for its
+# ~264u hull -- see PortZone.derive_capture_radius, a short-range docking
+# arm, not the old flat 5000u default) while still meaningfully off the
+# berth (>150u -- see the start_dist assertion below). The freighter never
+# flies under its own power in this test; capture-then-spring-pull IS the
+# approach, so the start position must already be within reach.
+const START_OFFSET := Vector2(150, 260)
 
 var max_observed_speed: float = 0.0
 
@@ -118,7 +124,7 @@ func _physics_process(delta: float) -> void:
 		if bay.state == DockingBay.State.DOCKED:
 			dock_time = t
 			var spd: float = freighter.linear_velocity.length()
-			_assert(start_dist > 500.0, "freighter should start well off the berth (was %.0f)" % start_dist)
+			_assert(start_dist > 150.0, "freighter should start well off the berth (was %.0f)" % start_dist)
 			_assert(spd < bay.settle_speed, "docked freighter should be settled/slow (spd=%.1f)" % spd)
 			_assert(is_finite(freighter.position.x) and is_finite(freighter.position.y), "docked position must be finite")
 			# The production standoff must seat the freighter in the band
