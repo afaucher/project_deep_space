@@ -1935,11 +1935,19 @@ func _physics_process(delta: float) -> void:
 		for s in get_tree().get_nodes_in_group("ships"):
 			if s == self or s.is_dead: continue
 
+			# Early-out on OUR range before asking for theirs: link_range is
+			# min(self, theirs), so a ship beyond self_comms_range can never
+			# link regardless of its own radio -- and s.get_comms_range() is
+			# a scan of s's whole component list, far pricier than one
+			# distance check. Strictly conservative, zero behavior change.
+			var dist: float = position.distance_to(s.position)
+			if dist > self_comms_range: continue
+
 			var their_comms_range = s.get_comms_range()
 			if their_comms_range <= 0.0: continue
 
 			var link_range = min(self_comms_range, their_comms_range)
-			if position.distance_to(s.position) > link_range: continue
+			if dist > link_range: continue
 
 			# Transponder receive logic (omni-directional radio, no IFF or LoS required)
 			var t_data = s.get_active_transponder_data()
