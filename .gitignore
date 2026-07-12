@@ -21,4 +21,4 @@ Thumbs.db
 
 # Python (generate_audio.py helper)
 __pycache__/
-*.pyc
+*.pycversion.txt
