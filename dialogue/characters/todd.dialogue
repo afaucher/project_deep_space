@@ -1,5 +1,48 @@
 ~ start
+if story.has_flag("todd_found")
+	Todd: Antenna's still on order -- Prell says two weeks, which in Prell time is anybody's guess.
+	=> handoff
+Todd: ...hello? HELLO? Ha -- a voice! Do you have any idea how long-- wait. I know that voice. Aunt Steph sent you, didn't she.
+- She did. Three weeks, Todd.
+	do story.set_flag("todd_found")
+	do missions.notify_talked_to("Todd")
+	Todd: Three weeks? It has not been three-- ...huh. It has been three weeks.
+	=> antenna
 
-Todd: [M44 placeholder -- Todd's conversation is the arc's centerpiece and is co-authored in M44. Hailing him inside his collapsed comms range works today; the real words land next milestone.]
-- Goodbye.
-	=> END
+~ antenna
+Todd: Look, it's not a story. Took an unlucky rock to the antenna in that last gravel storm. Snapped clean off. Replacement's already on order -- Prell's handling it. Prell knows a guy for everything.
+- Prell told me they'd never heard of you. [if story.has_flag("asked_prell_about_todd") /]
+	Todd: Ha! And THAT is why I like Prell.
+	=> mine
+- So why no runner, no message, nothing?
+	=> mine
+
+~ mine
+Todd: Honest truth? I barely noticed the time going. The mine's eating me alive -- doubles, triples. Half the rigs are down and no parts are coming, so we're stripping the dead ones to keep the rest breathing. Fix one, two more go down. You sleep, you eat, you're back in the seat.
+Todd: ...Do you think I should have called her?
+- Yes.
+	=> present_offer
+- She wasn't angry. Just worried.
+	=> present_offer
+
+~ present_offer
+Todd: Yeah. ...Then at least I've got something for her. Come dock and take it.
+Todd: She mentioned once she'd like one of these -- said they're impossible to find anymore. Well. I found one. Sitting in the guts of the third rig we stripped, barely used.
+=> handoff
+
+~ handoff
+if story.has_flag("todd_present_given")
+	Todd: Present's handled -- it's on you now. And tell her I'm calling the second the antenna's up. Swear.
+	- Goodbye.
+		=> END
+elif player.is_docked_at(station)
+	do story.set_flag("todd_present_given")
+	do story.grant_item("stephanies_present")
+	Todd: There. Sealed and padded. Don't shake it, don't scan it -- she opens it first. That's the whole point.
+	Todd: And... thanks for coming out. Tell her I'm calling the second the antenna's up. Swear.
+	- Goodbye.
+		=> END
+else
+	Todd: Clamp's open whenever you are -- dock and I'll hand it over.
+	- Goodbye.
+		=> END
