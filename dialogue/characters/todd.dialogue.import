@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://bu3at1fwvm6i7"
+path="res://.godot/imported/todd.dialogue-c28d69a4d0e7c710b96020cb56a9f2ce.tres"
+
+[deps]
+
+source_file="res://dialogue/characters/todd.dialogue"
+dest_files=["res://.godot/imported/todd.dialogue-c28d69a4d0e7c710b96020cb56a9f2ce.tres"]
+
+[params]
+
+defaults=true

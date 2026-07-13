@@ -43,19 +43,26 @@ static func build() -> ClusterDef:
 	_station(def, 12, "Deepcut", SmallStation, Vector2(90000, -170000), "outpost")
 
 	# --- Asteroid fields on the outposts (loader expands into individual rocks) ---
-	def.add_field({"center": Vector2(150000, 110000), "radius": 10000.0, "count": 18, "seed": 1})
+	# Slag Bay's field is the M43 search field -- expanded (10k -> 16k, rocks
+	# scaled to keep density) so all five Drift homes fit inside it with real
+	# flying distance between them (the check_on_todd search is elimination
+	# across the whole field, see the roadmap's M43 section).
+	def.add_field({"center": Vector2(150000, 110000), "radius": 16000.0, "count": 32, "seed": 1})
 	def.add_field({"center": Vector2(-70000, 90000), "radius": 12000.0, "count": 22, "seed": 2})
 	def.add_field({"center": Vector2(90000, -170000), "radius": 9000.0, "count": 15, "seed": 3})
 
-	# --- Mobile Homes (civilian habitats) parked in the outposts' fields ---
-	# Slag Bay homes
+	# --- Mobile Homes (civilian habitats), all parked in the Slag Bay field ---
+	# M43 -- one community, one search area ("ask the neighbors; those folks
+	# see everything"): the residents are Todd's neighbors, so they live where
+	# the mission looks. Spread across the expanded field so eliminating the
+	# unnamed contacts takes real flying; Claim 42 (Todd) sits out on the far
+	# spinward edge, furthest from the field's mouth (and where Wex's rambling
+	# actually points, for a player who listens).
 	_home(def, 200, "Hermit's Rest", Vector2(145000, 115000), "hermits_rest")
-	_home(def, 201, "Claim 42", Vector2(155000, 105000), "claim_42")
-	# Coldreach homes
-	_home(def, 202, "The Deep Freeze", Vector2(-75000, 95000), "deep_freeze")
-	_home(def, 203, "Lucky Strike", Vector2(-65000, 85000), "lucky_strike")
-	# Deepcut homes
-	_home(def, 204, "Rock Bottom", Vector2(95000, -175000), "rock_bottom")
+	_home(def, 201, "Claim 42", Vector2(159000, 99000), "claim_42")
+	_home(def, 202, "The Deep Freeze", Vector2(140000, 103000), "deep_freeze")
+	_home(def, 203, "Lucky Strike", Vector2(154000, 121000), "lucky_strike")
+	_home(def, 204, "Rock Bottom", Vector2(162000, 114000), "rock_bottom")
 
 	# --- Beacon road: Ironhold (0,0) -> Drift Market (200000,40000) ---
 	# Seven interior beacons at ~25k spacing (well inside the 50k comms range, so

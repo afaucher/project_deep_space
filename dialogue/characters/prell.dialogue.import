@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://bf2xsh2xfvvcp"
+path="res://.godot/imported/prell.dialogue-654e805751c101b674914b4ae6315aef.tres"
+
+[deps]
+
+source_file="res://dialogue/characters/prell.dialogue"
+dest_files=["res://.godot/imported/prell.dialogue-654e805751c101b674914b4ae6315aef.tres"]
+
+[params]
+
+defaults=true

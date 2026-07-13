@@ -32,7 +32,45 @@ const REGISTRY: Dictionary = {
 		"dialogue": "res://dialogue/characters/aunt_stephanie.dialogue",
 		"home_sid": "ironhold",
 	},
-	# M43 adds "todd" (Claim 42) and the four other Drift residents here.
+	# M43 -- the Drift residents (Todd's neighbors in the Slag Bay field).
+	# "Mae & Gus" is one registry entry / one NPCProfile for the couple --
+	# their .dialogue file alternates the two speakers within the single
+	# conversation, which reads better than two separate hail targets on one
+	# tiny home.
+	"mae_and_gus": {
+		"name": "Mae & Gus",
+		"role": "retired miners",
+		"dialogue": "res://dialogue/characters/mae_and_gus.dialogue",
+		"home_sid": "hermits_rest",
+	},
+	"wex": {
+		"name": "Wex",
+		"role": "resident",
+		"dialogue": "res://dialogue/characters/wex.dialogue",
+		"home_sid": "deep_freeze",
+	},
+	"dost": {
+		"name": "Dost",
+		"role": "prospector",
+		"dialogue": "res://dialogue/characters/dost.dialogue",
+		"home_sid": "lucky_strike",
+	},
+	"prell": {
+		"name": "Prell",
+		"role": "resident",
+		"dialogue": "res://dialogue/characters/prell.dialogue",
+		"home_sid": "rock_bottom",
+	},
+	# Todd's registry entry lands in M43 so hailing Claim 42 inside his
+	# collapsed comms range resolves an NPC; his .dialogue is an explicit
+	# placeholder until M44 (the conversation is the arc's centerpiece and is
+	# co-authored -- see the roadmap's M44 "fiction is co-authored" note).
+	"todd": {
+		"name": "Todd",
+		"role": "cousin",
+		"dialogue": "res://dialogue/characters/todd.dialogue",
+		"home_sid": "claim_42",
+	},
 }
 
 static func get_character(id: String) -> Dictionary:

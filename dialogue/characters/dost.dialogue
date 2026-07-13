@@ -1,0 +1,9 @@
+~ start
+
+Dost: This claim is registered, defended, and NOT for sale. State your business or clear off.
+- Asking about a neighbor. Todd. [if story.has_flag("todd_mission_accepted") /]
+	Dost: Didn't ask your business so I could answer questions. Boy keeps to his side of the field, I keep to mine. Clear off.
+	=> END
+- Just passing through.
+	Dost: Pass through faster.
+	=> END

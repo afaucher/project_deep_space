@@ -1,0 +1,13 @@
+~ start
+
+Mae: Company! Gus, put the kettle on, we've got company.
+Gus: Kettle's been broke six years, Mae.
+- Ask about Todd. [if story.has_flag("todd_mission_accepted") /]
+	Mae: Todd? Sweet kid -- fixed our water reclaimer that once. We figured he just wanted quiet. Folks come out here for quiet.
+	Gus: Hadn't heard him on the net in... what, three weeks? ...Didn't think anything of it. Should we have thought something of it?
+	=> start
+- Just saying hello.
+	Mae: Aren't you sweet. Not many wave anymore.
+	=> start
+- Goodbye.
+	=> END

@@ -37,6 +37,19 @@ function Test-ImportsStale {
         [Parameter(Mandatory = $true)][string]$ProjectRoot
     )
 
+    # A brand-NEW imported-type asset has no .import sidecar at all yet, so
+    # the sidecar scan below can't see it -- ResourceLoader.exists() then
+    # fails on it in every headless run until an import pass happens (this
+    # bit for real when M43 added four new .dialogue files). Checked per
+    # extension Godot actually imports in this project (.dialogue is the
+    # only hand-authored one) rather than globbing everything, to avoid
+    # false-staling extensions Godot ignores.
+    $dialogueSources = Get-ChildItem -Path $ProjectRoot -Recurse -Filter "*.dialogue" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\\.godot\\' }
+    foreach ($src in $dialogueSources) {
+        if (-not (Test-Path -LiteralPath "$($src.FullName).import")) { return $true }
+    }
+
     $importFiles = Get-ChildItem -Path $ProjectRoot -Recurse -Filter "*.import" -File -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -notmatch '\\\.godot\\' }
 

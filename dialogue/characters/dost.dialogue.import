@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://5uabuh72dtij"
+path="res://.godot/imported/dost.dialogue-ec52bd2c99220d48b88169d5928f0bad.tres"
+
+[deps]
+
+source_file="res://dialogue/characters/dost.dialogue"
+dest_files=["res://.godot/imported/dost.dialogue-ec52bd2c99220d48b88169d5928f0bad.tres"]
+
+[params]
+
+defaults=true

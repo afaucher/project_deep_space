@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://ca87cp6650ah6"
+path="res://.godot/imported/mae_and_gus.dialogue-d52dbcc4f17ca4fdb80de59861671aae.tres"
+
+[deps]
+
+source_file="res://dialogue/characters/mae_and_gus.dialogue"
+dest_files=["res://.godot/imported/mae_and_gus.dialogue-d52dbcc4f17ca4fdb80de59861671aae.tres"]
+
+[params]
+
+defaults=true

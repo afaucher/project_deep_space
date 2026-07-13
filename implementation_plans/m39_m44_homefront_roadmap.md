@@ -267,11 +267,26 @@ brief ("explain why he's not answering", not "fear the worst"), and
 "living in a cold hull" strains the fiction. Damaged-transmitter also
 locks the theme together: the family mechanic, the apology present.
 
-- Small distinct dialogues for the non-cousin residents (4 homes), each
-  with a breadcrumb hint when the mission is active ("Ain't seen 'em on
-  the net for weeks — check the north edge of the field", keyed off story
-  flags). Residents exist even without the mission (world feels lived-in);
-  the hint lines are mission-gated.
+- **(Revised at pickup, 2026-07)** All five homes live in ONE community —
+  the Slag Bay field, expanded (10k → 16k radius) to fit them with real
+  flying distance between them. The original layout spread them across
+  three outposts' fields, which made the search trivial (one named + one
+  unnamed contact in the search area).
+- **(Revised)** Two of the four neighbor homes are ANONYMOUS, not chatty:
+  `transponder_share_name: false` (an existing ship.gd mechanism — they
+  broadcast "UNKNOWN" but comms stay healthy). They're false positives for
+  the elimination search, and they give the mission its two kinds of
+  silence: the anonymous homes WON'T talk (hail them, they answer — go
+  away / don't know him), Todd CAN'T talk (dead air until you close to his
+  collapsed range). Learning that difference is the search.
+- The cast (fiction approved in-session): Hermit's Rest — Mae & Gus,
+  retired mining couple, hadn't heard from Todd and didn't think it odd.
+  The Deep Freeze — Wex, loony rambling with the arc's one real buried
+  clue (antenna snapped in the gravel storm, lights still on, spinward
+  edge). Lucky Strike — Dost, anonymous, tells you to clear off. Rock
+  Bottom — Prell, anonymous, doesn't know Todd, barely talks. Breadcrumb
+  content is mission-gated (`[if story.has_flag("todd_mission_accepted")]`);
+  the residents themselves exist regardless (world feels lived-in).
 - Todd's home: comms component `range` collapsed (damaged) — one number,
   authored as a `component_overrides` entry in the story overlay
   (`"claim_42": {component_overrides: {comms_array: {range: 1500.0}}}`),

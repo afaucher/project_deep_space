@@ -1,0 +1,16 @@
+[remap]
+
+importer="dialogue_manager"
+importer_version=18
+type="Resource"
+uid="uid://dnromvufw7daa"
+path="res://.godot/imported/wex.dialogue-977a22fa945229fefe487f5ada79dccc.tres"
+
+[deps]
+
+source_file="res://dialogue/characters/wex.dialogue"
+dest_files=["res://.godot/imported/wex.dialogue-977a22fa945229fefe487f5ada79dccc.tres"]
+
+[params]
+
+defaults=true

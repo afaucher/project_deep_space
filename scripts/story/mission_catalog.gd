@@ -29,9 +29,11 @@ const MISSIONS: Dictionary = {
 				"id": "search_field",
 				"kind": "GO_TO_AREA",
 				"text": "Search the Slag Bay field",
-				# Slag Bay's asteroid field (home_cluster.gd) -- Todd's home,
-				# Claim 42, sits inside it at (155000, 105000).
-				"target": {"center": Vector2(150000, 110000), "radius": 12000.0},
+				# Slag Bay's asteroid field (home_cluster.gd) -- expanded to
+				# 16k for M43 so all five Drift homes fit inside the search
+				# area. Todd's home, Claim 42, sits on the far spinward edge
+				# at (159000, 99000), ~14.2k out.
+				"target": {"center": Vector2(150000, 110000), "radius": 16000.0},
 			},
 			{
 				"id": "talk_todd",

@@ -1,0 +1,13 @@
+~ start
+
+Prell: ...Yes?
+- Looking for a man named Todd. [if story.has_flag("todd_mission_accepted") /]
+	Prell: Don't know him.
+	- He lives in this field.
+		Prell: People live all over. We done?
+		=> END
+	- Sorry to bother you.
+		=> END
+- Sorry, wrong channel.
+	Prell: Mm.
+	=> END
