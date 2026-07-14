@@ -50,6 +50,21 @@ var finished: bool = false
 var phys_samples_us: Array = []     # one entry per physics frame
 var ships_samples: Array = []       # live "ships" group census per physics frame
 var missile_samples: Array = []     # live Missile-instance count per physics frame
+# Engine-side load monitors, sampled alongside the script-side probes so the
+# UNattributed share of the tick (total minus PerfProbe tags) can be split
+# between "our script" and "Godot's own physics" -- collision-pair count is
+# the direct driver of broadphase/narrowphase/solver cost.
+var active_obj_samples: Array = []  # Performance.PHYSICS_2D_ACTIVE_OBJECTS
+var pair_samples: Array = []        # Performance.PHYSICS_2D_COLLISION_PAIRS
+var island_samples: Array = []      # Performance.PHYSICS_2D_ISLAND_COUNT
+# Wall-clock time between consecutive physics frames, measured directly with
+# Time.get_ticks_usec. TIME_PHYSICS_PROCESS is known to HOLD a stale reading
+# across many frames (see test_perf_baseline's WARMUP_FRAMES note), which can
+# inflate averages/percentiles after a stall -- under --fixed-fps the loop
+# never sleeps, so wall delta per frame is the honest total cost (physics +
+# process + engine overhead) to cross-check the monitor against.
+var wall_samples_us: Array = []
+var _last_frame_us: int = -1
 
 func setup(main) -> void:
 	main_node = main
@@ -77,7 +92,15 @@ func setup(main) -> void:
 	var ship_count := get_tree().get_nodes_in_group("ships").size()
 	print("  scene census: %d members of the 'ships' group at start (%d frigates)" % [ship_count, SHIPS_PER_SIDE * 2])
 
-	PerfProbe.enabled = true
+	# M45_PROBE_OFF=1: leave PerfProbe disabled and measure the raw tick only.
+	# The attribution table costs real time to collect (~57 ships x ~11
+	# begin/end pairs each = >1000 ticks_usec+dict ops per frame, each landing
+	# OUTSIDE its own tag) -- comparing avg TIME_PHYSICS_PROCESS between a
+	# probed and an unprobed run is how that observer overhead is quantified.
+	if OS.get_environment("M45_PROBE_OFF") == "1":
+		print("  [probe-off] PerfProbe stays disabled -- raw tick measurement only")
+	else:
+		PerfProbe.enabled = true
 
 func _physics_process(_delta: float) -> void:
 	if finished:
@@ -94,6 +117,13 @@ func _physics_process(_delta: float) -> void:
 	phys_samples_us.append(phys_us)
 	ships_samples.append(all_ships.size())
 	missile_samples.append(missile_count)
+	active_obj_samples.append(Performance.get_monitor(Performance.PHYSICS_2D_ACTIVE_OBJECTS))
+	pair_samples.append(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS))
+	island_samples.append(Performance.get_monitor(Performance.PHYSICS_2D_ISLAND_COUNT))
+	var now_us := Time.get_ticks_usec()
+	if _last_frame_us >= 0:
+		wall_samples_us.append(now_us - _last_frame_us)
+	_last_frame_us = now_us
 
 	if frame >= MEASURE_FRAMES:
 		_finish()
@@ -166,6 +196,29 @@ func _finish() -> void:
 	print("\n=== Performance.TIME_PHYSICS_PROCESS over %d frames (whole window, includes ramp-up) ===" % n)
 	print("  avg=%.3fms  p95=%.3fms  max=%.3fms  peak_ships=%d  peak_missiles=%d" % [
 		avg_us / 1000.0, p95_us / 1000.0, max_us / 1000.0, peak_ships, peak_missiles])
+
+	# --- Engine-side physics load (see the sample-time comment above) ---
+	var sums := [0.0, 0.0, 0.0]
+	var peaks := [0.0, 0.0, 0.0]
+	var mon_arrays: Array = [active_obj_samples, pair_samples, island_samples]
+	for m in range(3):
+		for v in mon_arrays[m]:
+			sums[m] += v
+			peaks[m] = max(peaks[m], v)
+	print("  engine load: active_objects avg=%.1f peak=%d  |  collision_pairs avg=%.1f peak=%d  |  islands avg=%.1f peak=%d" % [
+		sums[0] / n, int(peaks[0]), sums[1] / n, int(peaks[1]), sums[2] / n, int(peaks[2])])
+
+	# --- Wall-clock cross-check (see wall_samples_us comment above) ---
+	var wn := wall_samples_us.size()
+	if wn > 0:
+		var wtotal := 0.0
+		for v in wall_samples_us:
+			wtotal += v
+		var wsorted: Array = wall_samples_us.duplicate()
+		wsorted.sort()
+		var wp95: float = wsorted[clampi(int(ceil(wn * 0.95)) - 1, 0, wn - 1)]
+		print("  wall-clock/frame: avg=%.3fms  p95=%.3fms  max=%.3fms  (%d frames)" % [
+			(wtotal / wn) / 1000.0, wp95 / 1000.0, float(wsorted[wn - 1]) / 1000.0, wn])
 
 	# --- PerfProbe attribution table (same format as test_perf_baseline) ---
 	var rep: Dictionary = PerfProbe.report(n)

@@ -31,9 +31,17 @@ func _ready() -> void:
 		push_error("MissileController must be a child of a Ship")
 
 func _physics_process(delta: float) -> void:
+	# Guidance body lives in _guidance_tick so its early returns can't skip
+	# the PerfProbe end() -- this controller runs per missile per frame and
+	# was previously invisible in the attribution table (untagged).
+	PerfProbe.begin("missile_controller")
+	_guidance_tick(delta)
+	PerfProbe.end("missile_controller")
+
+func _guidance_tick(delta: float) -> void:
 	if not multiplayer.is_server(): return
 	if ship.is_dead: return
-	
+
 	age += delta
 
 	# Evasive jink: periodically re-roll a small heading offset so the missile weaves,

@@ -1689,6 +1689,13 @@ func request_undock() -> void:
 		docking_bay.release_with_push()
 
 func _physics_process(delta: float) -> void:
+	# Whole-callback attribution envelope: the inner tags below only cover the
+	# named blocks, so "total tick minus tagged sum" couldn't distinguish
+	# untagged SHIP script (steering/forces/etc.) from the engine's own physics
+	# step. ship_tick_total = everything this callback spends; subtract the
+	# inner tags to get the untagged-script remainder. (Verified: no early
+	# returns in this function, so the begin/end pair always matches.)
+	PerfProbe.begin("ship_tick_total")
 	# M28 -- cache PRE-solve velocity for this tick before the physics engine's
 	# own integration/collision response can alter linear_velocity. This is what
 	# _on_body_entered reads for v_impact -- by the time that signal fires later
@@ -2256,6 +2263,7 @@ func _physics_process(delta: float) -> void:
 			if hit_traces[i]["time_remaining"] <= 0.0:
 				hit_traces.remove_at(i)
 			i -= 1
+	PerfProbe.end("ship_tick_total")
 
 func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 	var use_range = active_range if active_range > 0.0 else sensor["range"]

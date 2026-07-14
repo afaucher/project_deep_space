@@ -57,6 +57,16 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   outcome jitters — assert *robustly* (margins/majorities, e.g. test_ai_duel),
   not on an exact frame or a unanimous sweep.
 - **Kill stragglers** if a run hangs: `taskkill //F //IM Godot_v4.4.1-stable_win64.exe`.
+- **`Performance.TIME_PHYSICS_PROCESS` HOLDS stale readings across frames** —
+  it refreshes on its own cadence, so one slow frame's value is re-read for
+  many consecutive per-frame samples (a 160ms kill-wave stall once poisoned
+  ~3s of samples). Averages/percentiles built from per-frame reads of this
+  monitor overreport badly: the combat perf sim's monitor-based avg claimed
+  17.9ms while direct wall-clock deltas (`Time.get_ticks_usec` between physics
+  frames — honest under `--fixed-fps`, which never sleeps) measured 9.2ms for
+  the SAME run. Trust the monitor for "did a spike happen", never for
+  averages; `perf_combat.gd` samples both side by side. `p95 == max` in a
+  report is the tell that held values dominated the tail.
 - **`FileAccess.store_line` buffers** — a CSV being written may read back 0 lines
   until the file is flushed/closed.
 - Long-running commands get auto-backgrounded by the harness; wait for the
