@@ -2113,15 +2113,47 @@ func _physics_process(delta: float) -> void:
 				# Do not merge contacts representing ourselves (avoids "ghosts" at our own position)
 				if external_contact.get("instance_id", -1) == get_instance_id():
 					continue
-				
+
+				# A relayed track is ONE HOP OLD: age it by delta on receipt.
+				# Without this, two linked ships holding the same stale track
+				# echo-lock each other -- each ship ages its own copy (+delta,
+				# decay loop above) then reads the peer's copy, which hasn't
+				# been aged yet this tick (or was itself just reset by reading
+				# OUR last-tick copy), so the peer's always looks one tick
+				# "fresher" and freshest-wins takes its frozen (age, pos)...
+				# on BOTH sides, every tick, forever. Symptoms (playtest):
+				# contacts never expire while comms-linked (last_seen_timer
+				# pinned near 0, CONTACT_TIMEOUT unreachable) and visibly
+				# stick where last really seen (the merge overwrites the
+				# dead-reckoned pos with the frozen echoed one) -- then all
+				# "start moving again" the moment the link drops. With the
+				# hop cost, a round-trip echo ages 2 ticks while the local
+				# copy aged only 1, so the echo can never win a STRICT
+				# freshest-wins compare; a genuinely fresher track (a real
+				# detection, age 0 at the sensing ship) still propagates at
+				# the documented one-tick-of-latency-per-hop.
+				var relayed_age: float = external_contact.get("last_seen_timer", 0.0) + delta
+
+				# Never import data already past the local expiry policy. The
+				# decay loop above erases a track at CONTACT_TIMEOUT, but two
+				# linked ships cross that line on the same tick(s) offset by
+				# processing order -- without this gate, each ship's just-
+				# erased track gets re-imported from the peer's not-yet-erased
+				# zombie copy, both resurrecting each other forever (observed:
+				# age climbing past 28s on a 20s timeout, entry never gone).
+				if relayed_age > CONTACT_TIMEOUT:
+					continue
+
 				if not active_contacts.has(c_id):
-					active_contacts[c_id] = external_contact.duplicate(true)
+					var imported: Dictionary = external_contact.duplicate(true)
+					imported["last_seen_timer"] = relayed_age
+					active_contacts[c_id] = imported
 				else:
 					var c = active_contacts[c_id]
-					if external_contact["last_seen_timer"] < c["last_seen_timer"]:
+					if relayed_age < c.get("last_seen_timer", 0.0):
 						c["pos"] = external_contact["pos"]
 						c["vel"] = external_contact["vel"]
-						c["last_seen_timer"] = external_contact["last_seen_timer"]
+						c["last_seen_timer"] = relayed_age
 						c["resolution"] = min(c["resolution"], external_contact["resolution"])
 	PerfProbe.end("datalink_relay")
 

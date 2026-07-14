@@ -61,6 +61,24 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   until the file is flushed/closed.
 - Long-running commands get auto-backgrounded by the harness; wait for the
   completion notification, then read the log file.
+- **A sleeping RigidBody2D's collision shape does NOT follow a script-side
+  reposition.** Godot puts an idle body (near-zero velocity, no forces) to
+  sleep; once asleep, neither `.position = ...` nor
+  `PhysicsServer2D.body_set_state(rid, BODY_STATE_TRANSFORM, xform)` alone
+  updates its broad/narrow-phase collision data — `intersect_shape`/
+  `intersect_ray` keep finding it at its OLD location indefinitely (not just
+  one frame), even though `.position`/`.global_position` correctly report the
+  new value. Confirmed by direct repro: a Frigate at rest, teleported to
+  500,000 units away, still triggered a 5000-range sensor's `intersect_shape`
+  query every tick, forever — `.position` printed the new location but the
+  physics-server geometry never moved. The fix is to explicitly wake it:
+  `body.sleeping = false` after the reposition. `test_docking_resilience.gd`
+  and friends already use `body_set_state` to teleport test ships (the ONLY
+  reliable way — plain `.position=` isn't enough either), but do this
+  immediately at setup, before the body has a chance to fall asleep; a test
+  that teleports an already-settled/idle ship mid-run needs the explicit
+  wake-up too, or its sensor/LOS assertions will silently test against a
+  ghost location.
 
 ## GDScript traps hit in this codebase
 
