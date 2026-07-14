@@ -111,11 +111,11 @@ const COMPONENT_BANDS := {
 		Tier.STRUCTURE: {"damage": [300.0, 4000.0], "range": [2000.0, 8000.0], "cooldown_max": [0.2, 3.0]},
 	},
 	"missile": {
-		Tier.DRONE: {"range": [5000.0, 20000.0], "cooldown_max": [1.0, 10.0]},
-		Tier.LIGHT: {"range": [10000.0, 30000.0], "cooldown_max": [1.0, 10.0]},
-		Tier.MEDIUM: {"range": [20000.0, 40000.0], "cooldown_max": [1.0, 10.0]},
-		Tier.HEAVY: {"range": [28000.0, 60000.0], "cooldown_max": [1.0, 10.0]},
-		Tier.STRUCTURE: {"range": [20000.0, 60000.0], "cooldown_max": [1.0, 10.0]},
+		Tier.DRONE: {"range": [5000.0, 20000.0], "cooldown_max": [5.0, 30.0]},
+		Tier.LIGHT: {"range": [10000.0, 30000.0], "cooldown_max": [5.0, 30.0]},
+		Tier.MEDIUM: {"range": [20000.0, 40000.0], "cooldown_max": [5.0, 30.0]},
+		Tier.HEAVY: {"range": [28000.0, 60000.0], "cooldown_max": [5.0, 30.0]},
+		Tier.STRUCTURE: {"range": [20000.0, 60000.0], "cooldown_max": [5.0, 30.0]},
 	},
 	"living_quarters": {
 		# M27 -- LIGHT (pinnace passenger cabin) + HEAVY (freighter crew quarters)

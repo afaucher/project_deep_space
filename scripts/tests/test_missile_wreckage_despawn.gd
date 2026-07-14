@@ -17,7 +17,8 @@ extends Node
 #      stopped with it, so the linger runs on its own wreckage clock.
 #
 # Both missiles run simultaneously, far apart, so the whole test is one
-# ~27-simulated-second window (~2s wall under --fixed-fps 60).
+# window of FUEL_LIFETIME + WRECKAGE_LINGER (~136 simulated seconds --
+# --fixed-fps 60 keeps the wall-clock cost to a few seconds).
 #
 # Run: ./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --run-test test_missile_wreckage_despawn
 
@@ -25,7 +26,7 @@ const Missile = preload("res://scripts/ships/missile.gd")
 const MissileControllerScript = preload("res://scripts/missile_controller.gd")
 
 const FUEL_FRAMES := 900          # FUEL_LIFETIME 15s * 60
-const LINGER_FRAMES := 600        # WRECKAGE_LINGER 10s * 60
+const LINGER_FRAMES := 7200       # WRECKAGE_LINGER 120s * 60
 const MARGIN_FRAMES := 90         # 1.5s of slack around each boundary
 
 var main_scene

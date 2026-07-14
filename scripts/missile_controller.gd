@@ -27,8 +27,10 @@ const JINK_MAX_ANGLE := deg_to_rad(10.0) # max evasive offset from the target be
 # EM-dark) for a while; the despawn then uses the same
 # purge_despawned_contact path as detonation so observers' tracks clean up
 # per the selected contact-cleanup mode instead of ghosting for the full
-# CONTACT_TIMEOUT.
-const WRECKAGE_LINGER := 10.0
+# CONTACT_TIMEOUT. 2 minutes: long enough that battlefield debris feels
+# persistent to a player watching the aftermath, while still bounding the
+# dead-ship population (steady-state dead weight = death rate x this).
+const WRECKAGE_LINGER := 120.0
 
 var ship: RigidBody2D
 var target_id: String = ""
