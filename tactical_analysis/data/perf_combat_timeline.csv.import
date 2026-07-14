@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://xc4x0ip0sxq0"
+
+[deps]
+
+files=["res://tactical_analysis/data/perf_combat_timeline.avg.translation", "res://tactical_analysis/data/perf_combat_timeline.max.translation", "res://tactical_analysis/data/perf_combat_timeline.max.translation", "res://tactical_analysis/data/perf_combat_timeline.max.translation"]
+
+source_file="res://tactical_analysis/data/perf_combat_timeline.csv"
+dest_files=["res://tactical_analysis/data/perf_combat_timeline.avg.translation", "res://tactical_analysis/data/perf_combat_timeline.max.translation", "res://tactical_analysis/data/perf_combat_timeline.max.translation", "res://tactical_analysis/data/perf_combat_timeline.max.translation"]
+
+[params]
+
+compress=true
+delimiter=0

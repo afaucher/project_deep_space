@@ -2194,76 +2194,91 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 	
 	var bins = {}
 	
+	# Perf (combat investigation, follow-up to M45): per-hit work used to run
+	# in a fixed order -- get_signature() (5 ship_components scans + AABB/
+	# bounding-radius geometry), THEN a per-hit LOS raycast, THEN the
+	# angle-in-cone check LAST -- so a hit outside the sensor's own arc still
+	# paid for signature-building and a raycast before being discarded. For a
+	# narrow-arc sensor (a missile's seeker is 120 of 360 degrees) in a
+	# crowded battle, most in-range hits ARE off-axis, so that was mostly
+	# wasted work every sweep. Reordered so the CHEAPEST, purely
+	# position-based check (angle-in-cone -- needs only collider.position,
+	# no signature, no raycast) runs first and rejects off-axis hits before
+	# either expensive step. The cone check and the raycast/EM-noise-floor
+	# checks are independent AND-ed conditions -- reordering them changes
+	# nothing about the FINAL accepted set (same bins, same field values),
+	# only how much work a REJECTED hit costs.
 	for hit in results:
 		var collider = hit.collider
 		if collider == self:
 			continue
-		
-		if collider.has_method("get_signature"):
-			var sig = collider.get_signature()
-			
-			var dist = origin.distance_to(collider.position)
+		if not collider.has_method("get_signature"):
+			continue
 
-			var ray_query = PhysicsRayQueryParameters2D.create(origin, collider.position)
-			ray_query.exclude = [self]
-			var ray_res = space_state.intersect_ray(ray_query)
-			if ray_res and ray_res.collider != collider:
-				continue # Blocked by obstacle
+		var dist = origin.distance_to(collider.position)
+		var angle = (collider.position - origin).angle()
+		var rel_angle = wrapf(angle - SENSOR_HEADING, -PI, PI)
+		var half_arc = ARC_WIDTH / 2.0
+		if rel_angle < -half_arc or rel_angle > half_arc:
+			continue # Off-axis -- reject before paying for signature/raycast
 
-			# Heat (sig["heat"]) intentionally has NO distance/direction falloff
-			# model, unlike EM above -- an active sensor that detects the target
-			# at all (range/arc/LOS) reports its true current_heat unmodified.
-			# This is a deliberate scope cut for now, not an oversight: give heat
-			# the same observation-fidelity treatment as EM later if it's wanted.
-			var angle = (collider.position - origin).angle()
-			var angle_from_target = wrapf(angle + PI, -PI, PI)
+		var ray_query = PhysicsRayQueryParameters2D.create(origin, collider.position)
+		ray_query.exclude = [self]
+		var ray_res = space_state.intersect_ray(ray_query)
+		if ray_res and ray_res.collider != collider:
+			continue # Blocked by obstacle
 
-			if sensor.get("sensor_type", "active") == "passive_em":
-				# Sums every emitter's own contribution (omni rear-bias or
-				# directional cone falloff per _received_em_power) instead of
-				# one rear-biased scalar plus a sensor-only cone bolt-on.
-				var em_power = Utils.get_directional_em(sig, angle_from_target)
+		var sig = collider.get_signature()
 
-				var received_em = em_power * (EM_FALLOFF_REFERENCE_DISTANCE / max(EM_FALLOFF_REFERENCE_DISTANCE, dist))
-				if received_em < PASSIVE_EM_NOISE_FLOOR:
-					continue # Passive EM only detects targets above noise floor (after falloff)
+		# Heat (sig["heat"]) intentionally has NO distance/direction falloff
+		# model, unlike EM above -- an active sensor that detects the target
+		# at all (range/arc/LOS) reports its true current_heat unmodified.
+		# This is a deliberate scope cut for now, not an oversight: give heat
+		# the same observation-fidelity treatment as EM later if it's wanted.
+		var angle_from_target = wrapf(angle + PI, -PI, PI)
 
-				# Report what was actually received (direction + distance
-				# falloff applied), not the raw broadcast value -- otherwise
-				# the directional model only ever gated detection, never what
-				# gets classified/displayed once detected.
-				sig["em_noise"] = received_em
-			else:
-				# Active sensors (M38): facing matters even against a radar
-				# lock, but detection stays distance-independent for now --
-				# no falloff term, just the directional weighting.
-				sig["em_noise"] = Utils.get_directional_em(sig, angle_from_target)
-				if collider.get("ship_components") != null:
-					sig["cross_section"] = RadarCrossSection.cross_section_at_angle(collider, angle_from_target) * collider.signature_multiplier
+		if sensor.get("sensor_type", "active") == "passive_em":
+			# Sums every emitter's own contribution (omni rear-bias or
+			# directional cone falloff per _received_em_power) instead of
+			# one rear-biased scalar plus a sensor-only cone bolt-on.
+			var em_power = Utils.get_directional_em(sig, angle_from_target)
 
-			var rel_angle = wrapf(angle - SENSOR_HEADING, -PI, PI)
-			var half_arc = ARC_WIDTH / 2.0
+			var received_em = em_power * (EM_FALLOFF_REFERENCE_DISTANCE / max(EM_FALLOFF_REFERENCE_DISTANCE, dist))
+			if received_em < PASSIVE_EM_NOISE_FLOOR:
+				continue # Passive EM only detects targets above noise floor (after falloff)
 
-			if rel_angle >= -half_arc and rel_angle <= half_arc:
-				var cone_local_angle = rel_angle + half_arc
-				var bin_idx = int(cone_local_angle / BIN_ANGLE)
-				if bin_idx >= NUM_BINS: bin_idx = NUM_BINS - 1
-				if bin_idx < 0: bin_idx = 0
+			# Report what was actually received (direction + distance
+			# falloff applied), not the raw broadcast value -- otherwise
+			# the directional model only ever gated detection, never what
+			# gets classified/displayed once detected.
+			sig["em_noise"] = received_em
+		else:
+			# Active sensors (M38): facing matters even against a radar
+			# lock, but detection stays distance-independent for now --
+			# no falloff term, just the directional weighting.
+			sig["em_noise"] = Utils.get_directional_em(sig, angle_from_target)
+			if collider.get("ship_components") != null:
+				sig["cross_section"] = RadarCrossSection.cross_section_at_angle(collider, angle_from_target) * collider.signature_multiplier
 
-				if not bins.has(bin_idx):
-					bins[bin_idx] = []
+		var cone_local_angle = rel_angle + half_arc
+		var bin_idx = int(cone_local_angle / BIN_ANGLE)
+		if bin_idx >= NUM_BINS: bin_idx = NUM_BINS - 1
+		if bin_idx < 0: bin_idx = 0
 
-				sig["_raw_pos"] = collider.position
-				sig["_raw_dist"] = dist
-				sig["instance_id"] = collider.get_instance_id()
-				if sensor.get("sensor_type", "active") == "passive_em":
-					sig.erase("cross_section")
-					sig.erase("heat") # passive EM doesn't sense heat at all, by design
-					sig.erase("density")
-					# sig["em_noise"] is already the received (direction +
-					# distance falloff applied) value set above.
-					
-				bins[bin_idx].append(sig)
+		if not bins.has(bin_idx):
+			bins[bin_idx] = []
+
+		sig["_raw_pos"] = collider.position
+		sig["_raw_dist"] = dist
+		sig["instance_id"] = collider.get_instance_id()
+		if sensor.get("sensor_type", "active") == "passive_em":
+			sig.erase("cross_section")
+			sig.erase("heat") # passive EM doesn't sense heat at all, by design
+			sig.erase("density")
+			# sig["em_noise"] is already the received (direction +
+			# distance falloff applied) value set above.
+
+		bins[bin_idx].append(sig)
 	
 	var sweep_output = []
 	var merge_mode = DebugSettings.get_choice("signature_merge")

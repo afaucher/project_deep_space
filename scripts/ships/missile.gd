@@ -23,10 +23,27 @@ func _init() -> void:
 	max_speed = 3000.0
 
 	ship_components = [
+		# Perf (combat investigation, follow-up to M45): range dropped from
+		# 30000 -> 12000. A missile always INHERITS its lock at launch
+		# (missile_behavior.gd copies the firing ship's own contact for
+		# target_contact_id straight onto the new missile) -- the seeker's
+		# only job after that is REFRESHING an already-known target as the
+		# missile closes, not discovering one from across the whole weapon
+		# envelope. 12000 comfortably covers the AI's actual engagement range
+		# (test_ai_duel.gd's START_RANGE=8000, "the new AI's optimal broadside
+		# range") with margin, while a smaller intersect_shape query circle
+		# catches fewer bodies to begin with -- this sensor refreshes at 10Hz
+		# (refresh_interval 0.1) and, unlike a ship, is the ONLY sensor on the
+		# hull, so with dozens of missiles simultaneously in flight (Missile
+		# extends Ship -- every one pays the full per-ship sim) it dominated
+		# the combat-case sensor_sweep cost. Verified against test_missile_ai
+		# (short-range lock/hit scenarios) and test_ai_duel (DOMINANCE_RATIO=
+		# 4.0 -- a shrunk seeker that broke lock-refresh would show up as
+		# weakened new-AI performance there) before landing.
 		{"id": "seeker", "type": "sensors", "rect": Rect2(5, -2, 5, 4), "health": 10.0, "max_health": 10.0, "density": 20.0,
 			"heat": 0.0, "base_em_emission": 10.0, "em_emission": 10.0,
 			"sensor_type": "active", "active": true, "heading": 0.0, "arc_width": PI / 1.5, # 120 degree forward cone
-			"range": 30000.0, "resolution": 5.0, "timer": 0.0, "refresh_interval": 0.1, "num_bins": 60},
+			"range": 12000.0, "resolution": 5.0, "timer": 0.0, "refresh_interval": 0.1, "num_bins": 60},
 		{"id": "warhead", "type": "hull", "rect": Rect2(-2, -3, 7, 6), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
 		{"id": "hull_body", "type": "hull", "rect": Rect2(-10, -3, 8, 6), "health": 30.0, "max_health": 30.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0},
 		{"id": "engine_main", "type": "engines", "rect": Rect2(-15, -4, 5, 8), "health": 20.0, "max_health": 20.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "power_rating": 10.0, "thrust_rating": 2991.0, "torque_rating": 435.65},
