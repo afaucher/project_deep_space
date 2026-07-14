@@ -41,7 +41,7 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 	# same extrapolation and overshoot the aim by a second full vel*pos_timer.
 	var target_aim_pos = contact["pos"]
 	var global_mount_pos = ship.position + ship.get_component_origin(comp).rotated(ship.rotation)
-	var component_health_ratio = ship.get_component_health_ratio(comp["id"])
+	var component_health_ratio = ship._component_health_ratio(comp)
 
 	# Find the actual body
 	var space_state = ship.get_world_2d().direct_space_state

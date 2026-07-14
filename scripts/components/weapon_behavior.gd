@@ -6,7 +6,12 @@ class_name WeaponBehavior
 func can_fire(ship: Ship, comp: Dictionary, target_contact_id: String) -> bool:
 	if comp["ammo"] <= 0 or comp["cooldown"] > 0.0:
 		return false
-	if not ship.is_component_powered(comp["id"]):
+	# `comp` is the weapon's dict itself -- use the dict-direct power check
+	# (Ship._component_powered, the single source of truth is_component_powered
+	# delegates to) instead of an id-based rescan of the whole component list.
+	# PD's assign loop calls can_fire per (target, laser) pair, so that rescan
+	# was a real per-frame cost under missile saturation.
+	if not ship._component_powered(comp):
 		return false
 	if ship.active_contacts.has(target_contact_id):
 		var real_target_pos = ship.active_contacts[target_contact_id]["pos"]

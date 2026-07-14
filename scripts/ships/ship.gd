@@ -881,12 +881,32 @@ func get_health_fraction() -> float:
 func get_comms_range() -> float:
 	var best_range = 0.0
 	for c in get_components_by_type("comms"):
-		if is_component_powered(c["id"]):
+		if _component_powered(c):
 			best_range = max(best_range, c.get("range", 0.0))
 	return best_range
 
+# Memoized: ship_components MEMBERSHIP is fixed after construction -- every
+# runtime change (damage, repair, power toggles, hulk()) mutates fields on the
+# existing dicts, never adds/removes entries; the only membership change in
+# the codebase is whole-array REASSIGNMENT (subclass _init design() calls,
+# tests injecting a synthetic layout), which the is_same() identity guard
+# catches and rebuilds on. Callers were already receiving live dict references
+# (filter() copied the array, not the dicts) and no call site mutates the
+# returned ARRAY itself, so sharing one cached array per type is observably
+# identical -- it just stops paying a fresh O(n) filter + allocation on every
+# call. That mattered: the physics tick calls this ~10x per ship per frame
+# (weapons cooldown, heat/EM x5, sensor sweep, PD...), and get_signature()
+# (5 calls) runs per sweep-HIT and per datalink link on top of that.
+var _comps_by_type_cache: Dictionary = {}
+var _comps_by_type_source: Array = []
+
 func get_components_by_type(type: String) -> Array:
-	return ship_components.filter(func(c): return c["type"] == type)
+	if not is_same(_comps_by_type_source, ship_components):
+		_comps_by_type_cache = {}
+		_comps_by_type_source = ship_components
+	if not _comps_by_type_cache.has(type):
+		_comps_by_type_cache[type] = ship_components.filter(func(c): return c["type"] == type)
+	return _comps_by_type_cache[type]
 
 func get_component(comp_id: String) -> Dictionary:
 	for c in ship_components:
@@ -899,7 +919,7 @@ func get_component_origin(comp: Dictionary) -> Vector2:
 
 func get_active_transponder_data() -> Dictionary:
 	for c in get_components_by_type("comms"):
-		if is_component_powered(c["id"]) and c.get("transponder_active", true):
+		if _component_powered(c) and c.get("transponder_active", true):
 			var custom_name = c.get("transponder_custom_name", "")
 			var data = {
 				"name": custom_name if custom_name != "" else ship_name,
@@ -960,9 +980,13 @@ func get_ship_inertia() -> float:
 # Weighted by health and gated by powered state, same as get_sys_health.
 func get_total_rating(sys_type: String, field: String) -> float:
 	var total = 0.0
+	# Dict-direct fast paths (`c` is already in hand -- see _component_powered's
+	# comment): the id-based lookups here re-scanned ship_components per
+	# component, making every get_total_rating call O(n^2). This backs
+	# max_thrust/max_torque/power_rating/power_ratio, ~8 calls per ship per tick.
 	for c in ship_components:
-		if c["type"] == sys_type and is_component_powered(c["id"]):
-			total += c.get(field, 0.0) * get_component_health_ratio(c["id"])
+		if c["type"] == sys_type and _component_powered(c):
+			total += c.get(field, 0.0) * _component_health_ratio(c)
 	return total
 
 func get_max_rating(sys_type: String, field: String) -> float:
@@ -1341,11 +1365,25 @@ func get_signature() -> Dictionary:
 		"vel": linear_velocity,
 		"sensors": active_sensor_sweeps,
 		"sensor_config": get_components_by_type("sensors"),
-		"em_emitters": get_components_by_type("reactor") + get_components_by_type("engines") + get_components_by_type("sensors") + get_components_by_type("weapons"),
+		"em_emitters": _get_em_emitters(),
 		"contacts": active_contacts,
 		"bounding_radius": get_bounding_radius(),
 		"aabb": get_local_aabb()
 	}
+
+# em_emitters for get_signature(): the reactor+engines+sensors+weapons concat
+# used to be rebuilt (4 filters + a merge allocation) on EVERY get_signature()
+# call -- and that runs per sweep-hit and per datalink link. Memoized under a
+# reserved key in the same identity-guarded cache as get_components_by_type,
+# so it rebuilds if and only if ship_components is reassigned. Same live dict
+# references as before; consumers only iterate (Utils.get_directional_em).
+func _get_em_emitters() -> Array:
+	if not is_same(_comps_by_type_source, ship_components):
+		_comps_by_type_cache = {}
+		_comps_by_type_source = ship_components
+	if not _comps_by_type_cache.has("__em_emitters"):
+		_comps_by_type_cache["__em_emitters"] = get_components_by_type("reactor") + get_components_by_type("engines") + get_components_by_type("sensors") + get_components_by_type("weapons")
+	return _comps_by_type_cache["__em_emitters"]
 
 func _ready() -> void:
 	comms_ledger = CommsLedger.new()
@@ -1683,7 +1721,7 @@ func _physics_process(delta: float) -> void:
 			# normalizes the field, so this is belt-and-suspenders for that failure.
 			if w.get("cooldown", 0.0) > 0:
 				var cooldown_rate = 1.0
-				var ratio = get_component_health_ratio(w["id"])
+				var ratio = _component_health_ratio(w)
 				if ratio > 0.0:
 					cooldown_rate = ratio
 				w["cooldown"] -= delta * cooldown_rate
@@ -1841,7 +1879,9 @@ func _physics_process(delta: float) -> void:
 		var heat_gen = 0.0
 		var reactor_heat = REACTOR_HEAT_COEFFICIENT
 		var ship_reactor_rating = get_total_power_rating("reactor")
-		var ship_max_thrust = get_ship_max_thrust()
+		# Same value already computed at the top of this tick for the throttle
+		# controller; nothing between there and here mutates engine components.
+		var ship_max_thrust = active_max_thrust
 
 		var total_reactor_heat = 0.0
 		for rct in get_components_by_type("reactor"):
@@ -1940,11 +1980,11 @@ func _physics_process(delta: float) -> void:
 		var active_sensor_efficiency = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
 
 		for sensor in get_components_by_type("sensors"):
-			if not is_component_powered(sensor["id"]):
+			if not _component_powered(sensor):
 				active_sensor_sweeps[sensor["id"]] = []
 				continue
 
-			var sensor_health_ratio = get_component_health_ratio(sensor["id"])
+			var sensor_health_ratio = _component_health_ratio(sensor)
 			if sensor_health_ratio <= 0.0 or active_sensor_efficiency <= 0.1:
 				continue
 
@@ -2121,6 +2161,10 @@ func _physics_process(delta: float) -> void:
 			# correlates with (rather than duplicates) any independent
 			# sensor detection of s.
 			var self_report_id = "TRK-%03d" % (abs(s.get_instance_id()) % 1000)
+			# One get_signature() per link (it was called twice -- once for the
+			# "signature" field, once for classify_contact -- and it's not free:
+			# component-list assembly + bounding geometry per call).
+			var s_sig = s.get_signature()
 			var relayed_contacts = s.active_contacts.duplicate()
 			relayed_contacts[self_report_id] = {
 				"id": self_report_id,
@@ -2129,9 +2173,9 @@ func _physics_process(delta: float) -> void:
 				"vel": s.linear_velocity,
 				"resolution": 0.0,
 				"pos_timer": 0.0,
-				"signature": s.get_signature(),
+				"signature": s_sig,
 				"last_seen_timer": 0.0,
-				"classification": Ship.classify_contact(s.get_signature(), iff_tags)
+				"classification": Ship.classify_contact(s_sig, iff_tags)
 			}
 
 			for c_id in relayed_contacts:
@@ -2518,11 +2562,11 @@ func _can_sense_point(point: Vector2) -> bool:
 	for sensor in get_components_by_type("sensors"):
 		if sensor.get("sensor_type", "active") != "active":
 			continue
-		if not is_component_powered(sensor["id"]):
+		if not _component_powered(sensor):
 			continue
 		if not sensor.get("active", true):
 			continue
-		var health_ratio = get_component_health_ratio(sensor["id"])
+		var health_ratio = _component_health_ratio(sensor)
 		if health_ratio <= 0.0:
 			continue
 		var origin = position + get_component_origin(sensor).rotated(rotation)
@@ -2726,7 +2770,7 @@ func is_group_volley_ready(group_id: String, weapon_type: String) -> bool:
 			continue
 		if w["ammo"] <= 0:                      # out of ammo -- never wait on it
 			continue
-		if not is_component_powered(w["id"]):   # disabled / unpowered -- never wait on it
+		if not _component_powered(w):   # disabled / unpowered -- never wait on it
 			continue
 		live += 1
 		if w.get("cooldown", 0.0) <= 0.0:
@@ -2754,7 +2798,7 @@ func _process_point_defense() -> void:
 	var max_ready_range = 0.0
 	for w in get_components_by_type("weapons"):
 		if w["weapon_type"] == "laser" and w["ammo"] > 0 and w["cooldown"] <= 0.0:
-			if is_component_powered(w["id"]):
+			if _component_powered(w):
 				ready_lasers.append(w["id"])
 				ready_weapon_data[w["id"]] = w
 				max_ready_range = max(max_ready_range, w["range"])
