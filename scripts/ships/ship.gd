@@ -633,14 +633,34 @@ func get_port_zone() -> Dictionary:
 # Hysteresis: enter uses the authored radius; once inside, a ship only counts
 # as having exited once past radius + PORT_ZONE_EXIT_MARGIN, so hovering right
 # on the boundary doesn't thrash enter/exit every frame.
+# Frame-scoped shared cache of controlled stations (non-empty port_zone).
+# Every ship's _update_port_zone_membership used to rescan the ENTIRE "ships"
+# group itself -- O(ships^2) get_port_zone() calls per tick, and in a pure
+# combat scene (no stations at all) every single one answered "no". Same
+# frame-cache pattern as _get_reactor_power_rating_cached: rebuilt once per
+# physics frame by whichever ship asks first, no invalidation hooks to miss --
+# a zone assigned mid-frame lands next frame at worst (1/60s), and in practice
+# zones are only set at construction/cluster-promote time anyway.
+static var _port_authority_cache: Array = []
+static var _port_authority_cache_frame: int = -1
+
+func _get_port_authorities() -> Array:
+	var frame := Engine.get_physics_frames()
+	if _port_authority_cache_frame != frame:
+		_port_authority_cache = []
+		for s in get_tree().get_nodes_in_group("ships"):
+			if not s.get_port_zone().is_empty():
+				_port_authority_cache.append(s)
+		_port_authority_cache_frame = frame
+	return _port_authority_cache
+
 func _update_port_zone_membership() -> void:
 	var nearest_authority = null
 	var nearest_dist: float = INF
 
-	for s in get_tree().get_nodes_in_group("ships"):
+	for s in _get_port_authorities():
 		if s == self: continue
 		var zone: Dictionary = s.get_port_zone()
-		if zone.is_empty(): continue
 
 		var radius: float = zone.get("radius", 0.0)
 		var authority: String = zone.get("authority", "")
@@ -1676,7 +1696,9 @@ func _physics_process(delta: float) -> void:
 	_prev_linear_velocity = linear_velocity
 
 	if is_multiplayer_authority() and not is_dead:
+		PerfProbe.begin("port_zone_membership")
 		_update_port_zone_membership()
+		PerfProbe.end("port_zone_membership")
 		_update_docking_grant(delta)
 		_update_departing_slip()
 
@@ -1769,11 +1791,7 @@ func _physics_process(delta: float) -> void:
 	# Enforce absolute speed limit (Reactor Safety Governor)
 	if linear_velocity.length() > max_speed:
 		linear_velocity = linear_velocity.normalized() * max_speed
-	
-	# Enforce absolute speed limit (Reactor Safety Governor)
-	if linear_velocity.length() > max_speed:
-		linear_velocity = linear_velocity.normalized() * max_speed
-	
+
 	# Time-Optimal Rotational Controller (Square-root curve braking)
 	var angle_diff = wrapf(target_heading - rotation, -PI, PI)
 	
@@ -2276,15 +2294,20 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 		var collider = hit.collider
 		if collider == self:
 			continue
-		if not collider.has_method("get_signature"):
-			continue
 
+		# Cone check before has_method(): every collider has a position, so
+		# the pure-float angle test is the cheapest reject available -- the
+		# StringName method lookup only runs for hits that are actually
+		# on-axis. Independent AND-ed conditions; final accepted set unchanged.
 		var dist = origin.distance_to(collider.position)
 		var angle = (collider.position - origin).angle()
 		var rel_angle = wrapf(angle - SENSOR_HEADING, -PI, PI)
 		var half_arc = ARC_WIDTH / 2.0
 		if rel_angle < -half_arc or rel_angle > half_arc:
 			continue # Off-axis -- reject before paying for signature/raycast
+
+		if not collider.has_method("get_signature"):
+			continue
 
 		var ray_query = PhysicsRayQueryParameters2D.create(origin, collider.position)
 		ray_query.exclude = [self]
