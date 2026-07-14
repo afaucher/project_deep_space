@@ -733,8 +733,14 @@ func _update_perf_readout() -> void:
 	_perf_phys_ema = lerp(_perf_phys_ema, phys_pct, PERF_EMA)
 	_perf_fps_ema = lerp(_perf_fps_ema, fps, PERF_EMA)
 	var idle_pct: float = clampf(100.0 - _perf_phys_ema, 0.0, 100.0)
-	_perf_label.text = "FPS %d  |  phys %d%% busy / %d%% idle  |  proc %.1f ms" % [
-		int(round(_perf_fps_ema)), int(round(_perf_phys_ema)), int(round(idle_pct)), proc_ms]
+	# Ship count is the direct denominator for "phys % busy" -- every live
+	# member of the "ships" group (stations included; they run the same
+	# Ship._physics_process) gets a tick each frame, so this is the number
+	# that actually explains a change in the phys/proc readings next to it.
+	# Not EMA'd -- it's an exact live count, not a noisy per-frame sample.
+	var ship_count: int = get_tree().get_nodes_in_group("ships").size()
+	_perf_label.text = "FPS %d  |  ships %d  |  phys %d%% busy / %d%% idle  |  proc %.1f ms" % [
+		int(round(_perf_fps_ema)), ship_count, int(round(_perf_phys_ema)), int(round(idle_pct)), proc_ms]
 
 func _process(delta: float) -> void:
 	_update_perf_readout()
