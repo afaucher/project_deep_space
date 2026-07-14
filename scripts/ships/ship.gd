@@ -1761,8 +1761,11 @@ func _physics_process(delta: float) -> void:
 
 	var forward = Vector2.RIGHT.rotated(rotation)
 	var current_forward_speed = linear_velocity.dot(forward)
-	
-	var active_max_thrust = get_ship_max_thrust()
+
+	# Hulk shortcut: every component is permanently unpowered after hulk()
+	# (see the lean heat/EM path below), so these rating sums are provably 0
+	# -- skip the two O(n) scans instead of computing zeros.
+	var active_max_thrust = 0.0 if is_dead else get_ship_max_thrust()
 
 	if linear_mode == 0:
 		# Direct Throttle Control
@@ -1801,8 +1804,8 @@ func _physics_process(delta: float) -> void:
 
 	# Time-Optimal Rotational Controller (Square-root curve braking)
 	var angle_diff = wrapf(target_heading - rotation, -PI, PI)
-	
-	var ship_max_torque = get_ship_max_torque()
+
+	var ship_max_torque = 0.0 if is_dead else get_ship_max_torque()
 
 	var torque = 0.0
 	var active_max_torque = 0.0
@@ -1900,7 +1903,47 @@ func _physics_process(delta: float) -> void:
 
 	# --- Heat & Engineering Logic ---
 	PerfProbe.begin("heat_em_component_loop")
-	if is_multiplayer_authority():
+	if is_multiplayer_authority() and is_dead:
+		# LEAN HULK PATH -- an exact reduction of the live path below for the
+		# state a hulk is permanently in: hulk() forces powered_on=false on
+		# every component, set_component_power refuses dead ships, and repairs
+		# never heal a hulk (M40), so _component_powered is false for
+		# everything and every rating/sys-health scan the live path runs is
+		# identically zero. With the 2-minute wreckage linger, dead ships are
+		# a large standing share of a battle's census -- skipping their
+		# all-zero scans is pure win. What still visibly evolves on wreckage
+		# (kept, formula-identical to the live path with is_powered=false):
+		# the ship heat pool radiating away at the passive rate, per-component
+		# damage-heat bursts decaying, a freshly-killed reactor's EM whiteout
+		# pulse draining, a damaged engine's EM stutter, and weapon fire
+		# pulses decaying via their behavior tick -- so an EM-loud death
+		# transient settles to genuinely EM-dark wreckage instead of freezing.
+		current_heat_gen = 0.0
+		current_heat = clampf(current_heat - PASSIVE_HEAT_DISSIPATION_RATE * delta, 0.0, max_heat)
+		# A ship that died pegged AT max_heat keeps cooking its reactors until
+		# the pool dips below max -- same rule as the live path's overheat block.
+		if current_heat >= max_heat:
+			for c in ship_components:
+				if c["type"] == "reactor":
+					c["health"] -= OVERHEAT_DAMAGE_RATE * delta
+		var dead_weapon_em = 0.0
+		for comp in ship_components:
+			comp["heat"] = _decay_damage_heat(comp, delta)
+			if comp["type"] == "reactor":
+				comp["em_emission"] = _update_reactor_whiteout(comp, delta)
+			elif comp["type"] == "engines":
+				var engine_health_ratio = _component_health_ratio(comp)
+				comp["em_emission"] = abs(actual_throttle) * comp.get("power_rating", 0.0) * engine_health_ratio + _engine_damage_oscillation(comp, engine_health_ratio, delta)
+			elif comp["type"] == "weapons":
+				WeaponBehaviorRegistry.get_behavior(comp["weapon_type"]).tick(self, comp, delta)
+				# Same as the live path's post-tick write: guarantees the key
+				# exists even if a behavior's tick() didn't set it.
+				comp["em_emission"] = comp.get("em_emission", 0.0)
+				dead_weapon_em += comp["em_emission"]
+			else:
+				comp["em_emission"] = 0.0
+		em_signature = dead_weapon_em
+	elif is_multiplayer_authority():
 		PerfProbe.begin("he_totals")
 		var heat_gen = 0.0
 		var reactor_heat = REACTOR_HEAT_COEFFICIENT
@@ -2008,7 +2051,10 @@ func _physics_process(delta: float) -> void:
 	# behavior.
 	PerfProbe.begin("sensor_sweep")
 	if DebugSettings.get_choice("perf_sensors") == DebugSettings.PerfSubsystem.ON:
-		var active_sensor_efficiency = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
+		# Hulk shortcut: a dead ship's sensors are all unpowered, so every
+		# iteration below exits at the powered check before reading this --
+		# skip the two O(n) health scans that would only produce an unused 0.
+		var active_sensor_efficiency = 0.0 if is_dead else get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
 
 		for sensor in get_components_by_type("sensors"):
 			if not _component_powered(sensor):
