@@ -22,6 +22,14 @@ func tick(actor: Node, blackboard) -> int:
 		var contact = actor.active_contacts[c_id]
 		if contact.get("classification", "") != "UNIDENTIFIED VESSEL":
 			continue
+		# Fire discipline (Ship.FIRE_STALENESS_MAX): a track nobody has
+		# actually seen in a while is a dead-reckoned guess about where a
+		# ship USED to be -- never worth acquiring as a weapons target.
+		# Without this gate the AI chased and volleyed at ghosts coasting
+		# toward CONTACT_TIMEOUT (and, before the relay echo-lock fix, at
+		# permanently-frozen ones).
+		if contact.get("last_seen_timer", 0.0) > actor.FIRE_STALENESS_MAX:
+			continue
 		var d = actor.position.distance_to(contact["pos"])
 		if d > engagement_radius:
 			continue

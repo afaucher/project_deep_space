@@ -93,6 +93,16 @@ const UNKNOWN_DENSITY_DEFAULT := 500.0 # density assumed when a signature omits 
 
 # Sensor fusion / contact tracking (_physics_process contact decay + correlate-tracks).
 const CONTACT_TIMEOUT := 20.0          # seconds with no fresh detection before a tracked contact is dropped
+# AI fire discipline: never open fire on a track older than this (last_seen_
+# timer -- own sensors or hop-aged relay data both count; see the datalink
+# relay's one-hop-old rule). Enforced at target ACQUISITION (acquire_target_
+# leaf skips stale tracks entirely) AND at the trigger (fire_opportunity_leaf
+# holds fire if its blackboard target has gone stale since acquisition) --
+# a dead-reckoned ghost coasting toward CONTACT_TIMEOUT is a place a ship
+# USED to be, not something worth a laser's heat or a full missile volley.
+# Missiles in flight have their own (stricter) pos_timer-based lock rules in
+# missile_controller.gd; PD is safe via its live-instance checks.
+const FIRE_STALENESS_MAX := 3.0
 const CONTACT_CORRELATION_RANGE := 2000.0 # max distance (no instance_id match) to fuse a new blip into an existing contact instead of starting a new one
 const CONTACT_RESOLUTION_STALE_TIME := 0.3 # seconds since the last position update before a coarser-resolution bin is allowed to override position anyway
 const CONTACT_FUSION_SMOOTHING := 0.8  # lerp weight toward each new reading -- shared by pos/vel/cross_section/heat/em_noise so none of them drift out of sync with the others

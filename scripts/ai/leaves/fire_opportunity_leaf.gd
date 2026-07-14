@@ -20,6 +20,15 @@ func tick(actor: Node, blackboard) -> int:
 	var target_id = blackboard.get_value("target_id")
 	var target_pos = blackboard.get_value("target_pos")
 
+	# Trigger-side fire discipline (belt to acquire_target_leaf's suspenders --
+	# see Ship.FIRE_STALENESS_MAX): even with a published blackboard target,
+	# hold fire if its track has vanished or gone stale since acquisition.
+	# Never spend a laser's heat, let alone a synchronized missile volley, on
+	# a dead-reckoned ghost.
+	var contact: Dictionary = actor.active_contacts.get(target_id, {})
+	if contact.is_empty() or contact.get("last_seen_timer", 0.0) > actor.FIRE_STALENESS_MAX:
+		return SUCCESS
+
 	var groups = actor.get_weapon_groups()
 	for gid in groups:
 		var ids = groups[gid]
