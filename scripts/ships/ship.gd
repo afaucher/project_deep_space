@@ -797,16 +797,32 @@ func get_sys_max_health(sys_type: String) -> float:
 func is_component_powered(comp_id: String) -> bool:
 	for c in ship_components:
 		if c["id"] == comp_id:
-			if not (c.get("powered_on", true) and c["health"] > 0.0):
-				return false
-			# Reactor/hull don't draw power from a reactor themselves -- every
-			# other type cascades off ship-wide reactor output, so killing or
-			# switching off every reactor goes dark everywhere downstream,
-			# and recovers automatically the instant a reactor comes back on.
-			if c["type"] == "reactor" or c["type"] == "hull":
-				return true
-			return _get_reactor_power_rating_cached() > 0.0
+			return _component_powered(c)
 	return false
+
+# Perf follow-up to the M45 fix below: heat_em_component_loop's own callers
+# (the passive heat/EM pass, the main per-component update loop, and
+# _engine_heat_contribution/_reactor_heat_contribution) already hold the
+# component dict directly while iterating ship_components -- calling
+# is_component_powered(comp["id"]) from inside that loop re-scans the WHOLE
+# array by id to re-find the exact dict already in hand, an O(n) rescan
+# nested inside an O(n) outer loop (genuinely O(n^2), not just "called more
+# than needed" -- PerfProbe's heat_em_component_loop tag tied sensor_sweep
+# for the top combat-tick cost once sensor_sweep itself was fixed). This is
+# the single source of truth for the "powered" rule -- is_component_powered()
+# above just scans to find the dict, then delegates here -- so any caller
+# already holding the dict (this file's own heat/EM code) can skip the scan
+# entirely with zero risk of drifting from the id-based lookup's behavior.
+func _component_powered(c: Dictionary) -> bool:
+	if not (c.get("powered_on", true) and c["health"] > 0.0):
+		return false
+	# Reactor/hull don't draw power from a reactor themselves -- every
+	# other type cascades off ship-wide reactor output, so killing or
+	# switching off every reactor goes dark everywhere downstream,
+	# and recovers automatically the instant a reactor comes back on.
+	if c["type"] == "reactor" or c["type"] == "hull":
+		return true
+	return _get_reactor_power_rating_cached() > 0.0
 
 # M45 perf fix: is_component_powered() is called O(component count) times per
 # ship per physics frame (heat/EM loop, get_total_rating/get_max_rating for
@@ -842,8 +858,12 @@ func _get_reactor_power_rating_cached() -> float:
 func get_component_health_ratio(comp_id: String) -> float:
 	for c in ship_components:
 		if c["id"] == comp_id:
-			return max(0.0, c["health"]) / max(1.0, c["max_health"])
+			return _component_health_ratio(c)
 	return 0.0
+
+# Dict-direct fast path, same reasoning as _component_powered above.
+func _component_health_ratio(c: Dictionary) -> float:
+	return max(0.0, c["health"]) / max(1.0, c["max_health"])
 
 # Surviving fraction of TOTAL component health (1.0 pristine, 0.0 gutted). Used by the AI
 # disengage trigger; also useful for UI / threat assessment.
@@ -973,9 +993,9 @@ func get_ship_max_torque() -> float:
 # ratio driving inefficiency. Reduces to "ship-wide heat, thrust_share = 1.0"
 # for any ship with exactly one engine (every ship today).
 func _engine_heat_contribution(comp: Dictionary, throttle: float, applied_torque: float, max_torque_now: float, ship_max_thrust: float) -> float:
-	if not is_component_powered(comp["id"]) or ship_max_thrust <= 0.0:
+	if not _component_powered(comp) or ship_max_thrust <= 0.0:
 		return 0.0
-	var ratio = get_component_health_ratio(comp["id"])
+	var ratio = _component_health_ratio(comp)
 	var inefficiency = max(1.0, 1.0 / max(0.1, ratio))
 	var thrust_share = (comp.get("thrust_rating", 0.0) * ratio) / ship_max_thrust
 	var h = abs(throttle) * 10.0 * inefficiency * thrust_share
@@ -986,9 +1006,9 @@ func _engine_heat_contribution(comp: Dictionary, throttle: float, applied_torque
 # slider-driven reactor heat by each reactor's share of total live power_rating
 # instead of pooling the same value into every reactor component.
 func _reactor_heat_contribution(comp: Dictionary, reactor_heat_total: float, ship_reactor_rating: float) -> float:
-	if not is_component_powered(comp["id"]) or ship_reactor_rating <= 0.0:
+	if not _component_powered(comp) or ship_reactor_rating <= 0.0:
 		return 0.0
-	var ratio = get_component_health_ratio(comp["id"])
+	var ratio = _component_health_ratio(comp)
 	var reactor_share = (comp.get("power_rating", 0.0) * ratio) / ship_reactor_rating
 	return reactor_heat_total * reactor_share
 
@@ -1834,7 +1854,7 @@ func _physics_process(delta: float) -> void:
 		var passive_heat = 0.0
 		var passive_em = 0.0
 		for comp in ship_components:
-			if comp["type"] != "hull" and is_component_powered(comp["id"]):
+			if comp["type"] != "hull" and _component_powered(comp):
 				passive_heat += PASSIVE_COMPONENT_HEAT
 				passive_em += PASSIVE_COMPONENT_EM
 
@@ -1876,16 +1896,16 @@ func _physics_process(delta: float) -> void:
 					sensor_em += s.get("base_em_emission", 0.0) * sensor_power_ratio
 		
 		for comp in ship_components:
-			var is_powered = is_component_powered(comp["id"])
+			var is_powered = _component_powered(comp)
 			var b_heat = PASSIVE_COMPONENT_HEAT if (is_powered and comp["type"] != "hull") else 0.0
 			var b_em = PASSIVE_COMPONENT_EM if (is_powered and comp["type"] != "hull") else 0.0
 
 			if comp["type"] == "reactor":
 				comp["heat"] = (REACTOR_HEAT_FLOOR + _reactor_heat_contribution(comp, reactor_heat, ship_reactor_rating) if is_powered else 0.0) + _decay_damage_heat(comp, delta)
-				comp["em_emission"] = (comp.get("power_rating", 0.0) * get_component_health_ratio(comp["id"]) if is_powered else 0.0) + _update_reactor_whiteout(comp, delta)
+				comp["em_emission"] = (comp.get("power_rating", 0.0) * _component_health_ratio(comp) if is_powered else 0.0) + _update_reactor_whiteout(comp, delta)
 			elif comp["type"] == "engines":
 				comp["heat"] = b_heat + _engine_heat_contribution(comp, actual_throttle, torque, active_max_torque, ship_max_thrust) + _decay_damage_heat(comp, delta)
-				var engine_health_ratio = get_component_health_ratio(comp["id"])
+				var engine_health_ratio = _component_health_ratio(comp)
 				comp["em_emission"] = b_em + abs(actual_throttle) * comp.get("power_rating", 0.0) * engine_health_ratio + _engine_damage_oscillation(comp, engine_health_ratio, delta)
 			elif comp["type"] == "sensors":
 				comp["heat"] = b_heat + (SENSOR_HEAT_FLOOR if is_powered else 0.0) + _decay_damage_heat(comp, delta)
