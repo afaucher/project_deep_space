@@ -309,14 +309,14 @@ present is — gets written WITH the user, not drafted unilaterally. Bring
 the structural skeleton (branch points, state reads/writes, mutation
 hooks) to that conversation; leave the words blank until it happens.
 
-- The mission definition: Stephanie grants → GO_TO_AREA (the chosen
-  outpost's field, radius ~12k) → TALK_TO Todd (satisfied by hailing him
-  inside his collapsed comms range; the conversation is the arc's
-  centerpiece — why the transmitter's dead, a bit of family texture,
-  branch flavor by what the player asked the neighbors) → Todd's mutation
-  grants `quest_items["stephanies_present"]` → DELIVER to Stephanie at
-  Ironhold → completion, Stephanie's payoff lines, flag set for future
-  arcs.
+- The mission definition: Stephanie grants → GO_TO_AREA (the Slag Bay
+  field, radius 16k since M43's expansion) → TALK_TO Todd (satisfied by
+  hailing him inside his collapsed comms range; the conversation is the
+  arc's centerpiece — why the transmitter's dead, a bit of family
+  texture, branch flavor by what the player asked the neighbors) → Todd's
+  mutation grants `quest_items["stephanies_present"]` → DELIVER to
+  Stephanie at Ironhold → completion, Stephanie's payoff lines, flag set
+  for future arcs.
 - Which home is Todd's: FIXED (decided) — testable, and the breadcrumbs
   are authored against it. Randomized variants are a later-arc idea.
 - The E2E headless test: drive the entire flow — accept at Ironhold, warp
@@ -326,6 +326,36 @@ hooks) to that conversation; leave the words blank until it happens.
   DialogueManager, assert the present lands in quest_items, return,
   deliver, assert mission COMPLETE and Stephanie's dialogue branches to
   post-mission text.
+
+**Status: part 1 SHIPPED (Todd's conversation, commit 99a795c, 2026-07).**
+Fiction co-authored and approved in-session; family canon recorded in
+design_ideas/homefront_family.md (Stephanie is aunt to BOTH cousins;
+Todd's parents out of the picture; voice recognition, never ship). What
+shipped beyond the sketch above:
+
+- Todd's conversation (dialogue/characters/todd.dialogue, placeholder
+  gone): antenna broke on an unlucky rock in the gravel storm (agrees
+  with Wex), replacement ordered THROUGH Prell, mine overwork explains
+  the three silent weeks, "Do you think I should have called her?" beat.
+- The Prell callback: prell.dialogue's ask branch sets
+  `asked_prell_about_todd` (even as Prell stonewalls); Todd's dialogue
+  offers "Prell told me they'd never heard of you" only on that flag —
+  "And THAT is why I like Prell."
+- The present is UNDISCLOSED (revised from an early named-tool draft):
+  handed over sealed, the reveal belongs to Stephanie's payoff. Handoff
+  is DOCK-GATED via player.is_docked_at(station) — "come dock and take
+  it" is literal; `todd_present_given` guards against any re-grant.
+- talk_todd completes via MissionLog.notify_talked_to on first contact;
+  mission advances to deliver_present. Covered by test_todd_dialogue.
+
+**Part 2 REMAINING (the arc close — fiction still to co-author):**
+- Stephanie's delivery branch: a response offered while carrying
+  `stephanies_present` (+ deliver_present active), the REVEAL of what the
+  box actually is (the headline open decision), notify_delivered
+  completing the mission, payoff lines, a completion flag for future arcs.
+- Her post-mission revisit state: "Any word from Todd?" needs a new
+  answer once he's found/mission complete.
+- The E2E headless test above.
 
 ## Order & dependencies
 
