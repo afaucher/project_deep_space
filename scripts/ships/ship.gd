@@ -2718,11 +2718,25 @@ func _process_point_defense() -> void:
 	if not is_instance_valid(main_node): return
 
 	var ready_lasers = []
+	# w_id -> its already-fetched component dict. Built here (where we're
+	# already iterating the weapon list and holding `w` directly) so the sort
+	# comparator and the assign loop below never need to re-look-up a weapon
+	# by id via get_component()/is_component_powered() -- both are LINEAR
+	# scans over the whole ship_components array, and re-deriving something
+	# we've already verified once here was the actual pd_assign spike (see
+	# the comment on that block): every (target, laser) pair checked in the
+	# assign loop used to pay for a fresh get_component() scan, on top of
+	# can_fire()'s own is_component_powered() scan re-verifying a power state
+	# that cannot change mid-tick. With ~90 tracked missiles and several
+	# ready lasers re-walked across multiple assignment passes, that was
+	# hundreds of thousands of wasted string comparisons in one bad frame.
+	var ready_weapon_data: Dictionary = {}
 	var max_ready_range = 0.0
 	for w in get_components_by_type("weapons"):
 		if w["weapon_type"] == "laser" and w["ammo"] > 0 and w["cooldown"] <= 0.0:
 			if is_component_powered(w["id"]):
 				ready_lasers.append(w["id"])
+				ready_weapon_data[w["id"]] = w
 				max_ready_range = max(max_ready_range, w["range"])
 
 	if ready_lasers.is_empty():
@@ -2731,7 +2745,7 @@ func _process_point_defense() -> void:
 	# Shortest-range first, so a target gets the smallest laser that can
 	# actually reach it -- reserving longer-range lasers for farther targets
 	# instead of spending them on whatever's first in the component list.
-	ready_lasers.sort_custom(func(a, b): return get_component(a)["range"] < get_component(b)["range"])
+	ready_lasers.sort_custom(func(a, b): return ready_weapon_data[a]["range"] < ready_weapon_data[b]["range"])
 
 	var behavior = WeaponBehaviorRegistry.get_behavior("laser")
 
@@ -2741,6 +2755,12 @@ func _process_point_defense() -> void:
 	# range via can_fire() below, not a flat ship-wide number -- this filter
 	# is just "could ANY ready laser conceivably reach this" to avoid sorting
 	# targets nothing can touch.
+	# Sub-tags (gather / sort / the assignment loop, timed separately) --
+	# PerfProbe attribution otherwise lumps the whole function into one
+	# "weapons_pd" total, which couldn't distinguish "gathering/sorting
+	# targets" from "the assignment loop" as the spike's actual source (it
+	# was the latter -- see pd_assign's own comment below).
+	PerfProbe.begin("pd_gather")
 	var targets = []
 	for c_id in active_contacts:
 		var contact = active_contacts[c_id]
@@ -2752,17 +2772,21 @@ func _process_point_defense() -> void:
 		var dist = position.distance_to(body.position)
 		if dist > max_ready_range: continue
 		targets.append({"c_id": c_id, "body": body, "dist": dist, "shots_fired": contact.get("pd_shots_fired", 0)})
+	PerfProbe.end("pd_gather")
 
+	PerfProbe.begin("pd_sort")
 	targets.sort_custom(func(a, b):
 		if a["shots_fired"] != b["shots_fired"]:
 			return a["shots_fired"] < b["shots_fired"]
 		return a["dist"] < b["dist"])
+	PerfProbe.end("pd_sort")
 
 	# One pass only assigns each target its single highest-priority laser --
 	# with fewer targets than ready lasers (the common single-missile case)
 	# that left the rest idle instead of concentrating fire. Keep re-passing
 	# the same priority-ordered target list until every ready laser has
 	# fired or none of them can reach any remaining target.
+	PerfProbe.begin("pd_assign")
 	var fired_any = true
 	while not ready_lasers.is_empty() and fired_any:
 		fired_any = false
@@ -2773,7 +2797,7 @@ func _process_point_defense() -> void:
 			var body = t["body"]
 
 			for w_id in ready_lasers:
-				var weapon_data = get_component(w_id)
+				var weapon_data = ready_weapon_data[w_id]
 
 				if behavior.can_fire(self, weapon_data, c_id):
 					var start_pos = position + get_component_origin(weapon_data).rotated(rotation)
@@ -2792,6 +2816,7 @@ func _process_point_defense() -> void:
 					ready_lasers.erase(w_id)
 					fired_any = true
 					break
+	PerfProbe.end("pd_assign")
 
 
 
