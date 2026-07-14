@@ -65,6 +65,10 @@ var island_samples: Array = []      # Performance.PHYSICS_2D_ISLAND_COUNT
 # process + engine overhead) to cross-check the monitor against.
 var wall_samples_us: Array = []
 var _last_frame_us: int = -1
+# Hulks still in the scene: dead ships (fuel-out missiles hulk() but are never
+# freed; killed frigates persist as wreckage) keep paying the full per-ship
+# tick -- this census shows how much of the "ships" group is dead weight.
+var dead_samples: Array = []
 
 func setup(main) -> void:
 	main_node = main
@@ -110,9 +114,13 @@ func _physics_process(_delta: float) -> void:
 	var phys_us: float = Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1_000_000.0
 	var all_ships: Array = get_tree().get_nodes_in_group("ships")
 	var missile_count := 0
+	var dead_count := 0
 	for s in all_ships:
 		if s is Missile:
 			missile_count += 1
+		if s.is_dead:
+			dead_count += 1
+	dead_samples.append(dead_count)
 
 	phys_samples_us.append(phys_us)
 	ships_samples.append(all_ships.size())
@@ -220,6 +228,14 @@ func _finish() -> void:
 		print("  wall-clock/frame: avg=%.3fms  p95=%.3fms  max=%.3fms  (%d frames)" % [
 			(wtotal / wn) / 1000.0, wp95 / 1000.0, float(wsorted[wn - 1]) / 1000.0, wn])
 
+	var dead_sum := 0.0
+	var dead_peak := 0
+	for v in dead_samples:
+		dead_sum += v
+		dead_peak = max(dead_peak, v)
+	print("  dead-ship census: avg=%.1f peak=%d (of avg %.1f group members)" % [
+		dead_sum / n, dead_peak, _avg(ships_samples)])
+
 	# --- PerfProbe attribution table (same format as test_perf_baseline) ---
 	var rep: Dictionary = PerfProbe.report(n)
 	var tags: Array = rep.keys()
@@ -245,3 +261,9 @@ func _finish() -> void:
 
 	print("\nCombat perf sim complete.")
 	get_tree().quit(0)
+
+func _avg(arr: Array) -> float:
+	var t := 0.0
+	for v in arr:
+		t += v
+	return t / max(1, arr.size())

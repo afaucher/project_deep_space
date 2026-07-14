@@ -1901,6 +1901,7 @@ func _physics_process(delta: float) -> void:
 	# --- Heat & Engineering Logic ---
 	PerfProbe.begin("heat_em_component_loop")
 	if is_multiplayer_authority():
+		PerfProbe.begin("he_totals")
 		var heat_gen = 0.0
 		var reactor_heat = REACTOR_HEAT_COEFFICIENT
 		var ship_reactor_rating = get_total_power_rating("reactor")
@@ -1949,8 +1950,10 @@ func _physics_process(delta: float) -> void:
 			# take_damage()'s own death check (line ~910) exactly.
 			if not is_dead and (is_sys_destroyed("reactor") or is_sys_destroyed("hull")):
 				hulk()
+		PerfProbe.end("he_totals")
 
 		# Update Component EM & Heat
+		PerfProbe.begin("he_em_prep")
 		var base_em = get_total_power_rating("reactor")
 		var current_em = base_em + (abs(actual_throttle) * get_total_power_rating("engines"))
 		var sensor_em = 0.0
@@ -1959,7 +1962,9 @@ func _physics_process(delta: float) -> void:
 			for s in get_components_by_type("sensors"):
 				if s.get("active", true):
 					sensor_em += s.get("base_em_emission", 0.0) * sensor_power_ratio
-		
+		PerfProbe.end("he_em_prep")
+
+		PerfProbe.begin("he_comp_loop")
 		for comp in ship_components:
 			var is_powered = _component_powered(comp)
 			var b_heat = PASSIVE_COMPONENT_HEAT if (is_powered and comp["type"] != "hull") else 0.0
@@ -1986,6 +1991,7 @@ func _physics_process(delta: float) -> void:
 				# of their own, but still carry combat-damage burst + decay.
 				comp["heat"] = _decay_damage_heat(comp, delta)
 				comp["em_emission"] = 0.0
+		PerfProbe.end("he_comp_loop")
 
 		# Computed after the loop above so weapon fire pulses (just updated by
 		# WeaponBehavior.tick()) are reflected the same frame instead of lagging
