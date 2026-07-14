@@ -17,12 +17,25 @@ const PROXIMITY_FUSE_RANGE := 100.0  # distance at which the warhead detonates
 const WARHEAD_DAMAGE := 250.0
 const JINK_INTERVAL := 0.25          # seconds between evasive heading re-rolls (~4 Hz) -- DebugSettings.missile_jink
 const JINK_MAX_ANGLE := deg_to_rad(10.0) # max evasive offset from the target bearing
+# How long a DEAD missile (fuel-out dud, or gutted by PD without detonating)
+# drifts as sensor-visible wreckage before despawning. Detonation already
+# frees the node immediately; without this, every dud lingered FOREVER as a
+# full Ship instance paying the entire per-ship physics tick -- the combat
+# perf census measured dead hulks (mostly missiles) at ~19% of the "ships"
+# group and climbing, an unbounded accumulation over a long fight. The linger
+# keeps the "it went dark and drifted" sensor read (classifies WRECKAGE,
+# EM-dark) for a while; the despawn then uses the same
+# purge_despawned_contact path as detonation so observers' tracks clean up
+# per the selected contact-cleanup mode instead of ghosting for the full
+# CONTACT_TIMEOUT.
+const WRECKAGE_LINGER := 10.0
 
 var ship: RigidBody2D
 var target_id: String = ""
 var age: float = 0.0
 var _jink_timer: float = 0.0
 var _jink_offset: float = 0.0
+var _wreckage_age: float = 0.0
 
 func _ready() -> void:
 	ship = get_parent()
@@ -35,7 +48,18 @@ func _physics_process(delta: float) -> void:
 	# the PerfProbe end() -- this controller runs per missile per frame and
 	# was previously invisible in the attribution table (untagged).
 	PerfProbe.begin("missile_controller")
-	_guidance_tick(delta)
+	if ship.is_dead:
+		# Dead missile (dud/fuel-out/PD kill that didn't detonate): drift as
+		# wreckage for WRECKAGE_LINGER, then despawn. Guidance's own is_dead
+		# early-return means this clock must run out here, not in there.
+		if multiplayer.is_server():
+			_wreckage_age += delta
+			if _wreckage_age > WRECKAGE_LINGER:
+				set_physics_process(false) # queue_free defers -- don't re-run while dying
+				Ship.purge_despawned_contact(ship.get_tree(), ship.get_instance_id(), ship.position)
+				ship.queue_free()
+	else:
+		_guidance_tick(delta)
 	PerfProbe.end("missile_controller")
 
 func _guidance_tick(delta: float) -> void:
