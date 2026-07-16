@@ -71,6 +71,15 @@ judgment call. The fix is a **two-layer split**:
 - **Standing is shareable.** Datalink already merges tracks; hostile/suspect
   markings ride along with attribution ("Patrol Alpha flagged: fired on
   Mule"). A patrol that saw the ambush makes the whole home faction react.
+- **The flag does not replace attribution — both rules ship together.**
+  Witnessed aggression stays the primary hostility trigger; the flag is the
+  shortcut for the unambiguous case. The canonical attribution case: firing
+  on a space station is a hostile act, full stop. The station is its own
+  witness and it's on the faction datalink, so the marking is instant and
+  shared — patrols flip immediately and open with DEMAND_SURRENDER (the
+  interdiction protocol, not a silent weapons-free). **This applies to the
+  player**: shoot a home station and Patrol Alpha turns, marks you, and
+  demands your surrender like anyone else. Comply and you're held, not shot.
 
 **Controlled space** = port zones + the beacon road corridor (within beacon
 comms range of the road). Inside it, ships are *required* to report name +

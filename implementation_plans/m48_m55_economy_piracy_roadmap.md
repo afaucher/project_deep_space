@@ -51,7 +51,10 @@ The enabling refactor; nothing else lands without it.
   Aggression event = attributed damage or a witnessed DEMAND_SURRENDER (M49).
 - Witness rule: an observer that (a) has a live track on the aggressor and
   (b) saw the aggression event marks HOSTILE and shares it on datalink with
-  attribution.
+  attribution. Ships and stations witness attacks on THEMSELVES too —
+  firing on a station is the canonical case: the station marks the shooter
+  instantly and the datalink spreads it, no third-party observer needed.
+  The pirate flag (below) is additive, not a replacement for this.
 - **The pirate flag ships in M48** as the first known-enemy flag: flying it
   → automatic HOSTILE to every non-pirate observer, no witnessing needed.
   This is deliberately double-duty: fiction-side it's "showing colors" (see
@@ -134,8 +137,18 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 - Witnessed-ambush escalation end-to-end: pirate demands surrender in
   patrol sensor sight → patrol marks HOSTILE (M48 rule), intercepts,
   engages on non-compliance.
+- The intercept protocol is faction-blind — it fires on ATTRIBUTED
+  aggression regardless of who the aggressor is, INCLUDING the player:
+  fire on a home station and the nearest patrol flips, marks you hostile
+  (the station's own witness event, datalinked), and opens with
+  DEMAND_SURRENDER. Complying player is held (shadowed, weapons tight),
+  not executed — same surrender guarantees as everyone else. What "held"
+  ultimately means for a player (fine? confiscation? standing decay?) is
+  M54+ content; M52 only guarantees the stop-shooting contract.
 - Tests: patrol saves a shuttle it can see; patrol answers an SOS from
-  beyond sensor range; surrendered pirate is captured (held, not shot).
+  beyond sensor range; surrendered pirate is captured (held, not shot);
+  player fires on a station → patrol demands surrender immediately, holds
+  fire while the player complies.
 
 ## M53 — Traffic guild + demand-driven cargo
 
