@@ -13,6 +13,9 @@ export_presets.cfg
 *.log
 test_logs/
 
+# Per-developer control remaps (InputBindings autoload writes this)
+input_bindings.cfg
+
 # Windows specific
 desktop.ini
 Thumbs.db

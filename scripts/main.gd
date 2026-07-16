@@ -12,6 +12,7 @@ const Asteroid = preload("res://scripts/asteroid.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 const MenuCompass = preload("res://scripts/ui/menu_compass.gd")
+const ControlsMenu = preload("res://scripts/ui/controls_menu.gd")
 const ClusterManager = preload("res://scripts/cluster/cluster_manager.gd")
 const ClusterLoader = preload("res://scripts/cluster/cluster_loader.gd")
 const HomeCluster = preload("res://scripts/cluster/home_cluster.gd")
@@ -29,6 +30,7 @@ var players = {}
 var asteroids = []
 var _next_sandbox_id: int = 900
 var menu_compass: Node2D
+var controls_menu: Control
 var cluster_manager = null   # the live campaign ClusterManager (null in sandbox)
 
 func _ready() -> void:
@@ -62,7 +64,24 @@ func _ready() -> void:
 	campaign_button.pressed.connect(_on_campaign_pressed)
 	menu.add_child(campaign_button)
 	menu.move_child(campaign_button, 1)
-	
+
+	# Controls remapping -- button at the bottom of the menu, screen added in
+	# code (same no-.tscn-edit pattern). While the screen is open the menu is
+	# hidden, which also disarms the menu_start quick-start below.
+	var controls_button := Button.new()
+	controls_button.name = "ControlsButton"
+	controls_button.text = "CONTROLS"
+	controls_button.pressed.connect(_on_controls_pressed)
+	menu.add_child(controls_button)
+
+	controls_menu = ControlsMenu.new()
+	ui_layer.add_child(controls_menu)
+	controls_menu.closed.connect(_on_controls_closed)
+
+	# Seed keyboard/gamepad focus so the menu is navigable without a mouse
+	# (D-pad / left stick move focus, A activates via the built-in ui_* map).
+	menu.get_node("LocalTestButton").grab_focus()
+
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 
@@ -127,6 +146,14 @@ func _on_campaign_pressed() -> void:
 	# Offline single-player campaign (the bubble is one-viewpoint; co-op deferred).
 	game_mode = GameMode.CAMPAIGN
 	_on_connection_established(true)
+
+func _on_controls_pressed() -> void:
+	menu.hide()
+	controls_menu.open()
+
+func _on_controls_closed() -> void:
+	menu.show()
+	menu.get_node("ControlsButton").grab_focus()
 
 func _on_join_pressed() -> void:
 	# For Phase 1 we can just join the first lobby we find, or we can request list
