@@ -45,7 +45,7 @@ judgment call. The fix is a **two-layer split**:
   | FRIENDLY | crypto-verified own side | IFF tag overlap (unforgeable handshake) | track loss (traitor/friendly-fire demotion: deferred edge case) |
   | NEUTRAL | identified, clean | broadcasting name + flag; flag not known-enemy; no live evidence on the track | resting state — no decay needed |
   | UNREPORTED | not identifying itself | no name + flag broadcast received for this track (anywhere) | instantly → NEUTRAL on reporting with a clean flag |
-  | SUSPICIOUS | judged worth watching | 1. challenge comply-window expired (controlled space) 2. dark/unreported contact loitering near a lane (~15k of a lane, <~20% max speed, >30s) 3. sustained intercept geometry toward a third ship (~20s closing lead-pursuit) 4. datalink report from ally (relays reason + attribution) 5. *(later)* transponder claim vs tracked position mismatch | decays → NEUTRAL after a clean interval (~3 min reporting, no new events); challenge compliance clears reason 1 immediately; track loss forgets |
+  | SUSPICIOUS | judged worth watching | 1. challenge comply-window expired (controlled space) 2. dark/unreported contact loitering near a lane (~15k of a lane, <~20% max speed, >30s) 3. sustained intercept geometry toward a third ship (~20s closing lead-pursuit) 4. datalink report from ally (relays reason + attribution) 5. claims a name on my faction's wanted-names list (names are cheap talk — suspicion, never auto-HOSTILE) 6. *(later)* transponder claim vs tracked position mismatch | decays → NEUTRAL after a clean interval (~3 min reporting, no new events); challenge compliance clears reason 1 immediately; track loss forgets (wanted-name suspicion re-enters on any new track claiming the name) |
   | HOSTILE | **earned** enemy | 1. attributed aggression (`attacker_id` == this track, vs me / my faction / anything I hold a live track on — stations witness attacks on themselves; see the angle rules below for the assistance exemption and stray-fire dampening) 2. DEMAND_SURRENDER heard from it, unless it flies one of MY authority flags (a police stop, not piracy — see below) 3. flying a known-enemy flag (pirate flag, day one) 4. player MARK HOSTILE 5. faction datalink share (with attribution) | **sticky for the life of the track — never decays**; the only way out is breaking the track (that is what laundering IS) |
 
   What each tier authorizes:
@@ -121,7 +121,23 @@ judgment call. The fix is a **two-layer split**:
   contact record. If the track is lost (dark, out of range, CONTACT_TIMEOUT)
   the judgment dies with it. This is deliberate and free: it's what makes
   "run dark, relight under a fresh name two hundred klicks away" actually
-  launder identity, with zero extra code.
+  launder identity, with zero extra code. But breaking the track is
+  necessary, NOT sufficient — laundering requires all three:
+  1. **Break the track faction-wide.** Datalink shares tracks, so the
+     judgment lives while ANY allied observer still holds the track. Dark
+     until CONTACT_TIMEOUT on the whole fused picture, not one pursuer.
+  2. **Come up under a new name.** Shared HOSTILE markings carry the
+     claimed name at the time onto a faction **wanted-names list**; a new
+     track claiming a wanted name enters at SUSPICIOUS (reason: "claims a
+     wanted name") — never auto-HOSTILE, because names are cheap talk and
+     an innocent could fly one by coincidence or malice. This also kills
+     the degenerate exploit of flickering the transponder through one
+     timeout period to reset aggro under the same identity.
+  3. **Report like a good citizen on re-entry** (fresh name, plausible
+     flag, transponder on) — the arrival looks like any other trader
+     coming in from a far berth.
+  The wormhole exit stays the trivially clean cash-in: the ship is simply
+  gone, and the guild's next arrival carries a fresh cover identity anyway.
 - **Standing is shareable.** Datalink already merges tracks; hostile/suspect
   markings ride along with attribution ("Patrol Alpha flagged: fired on
   Mule"). A patrol that saw the ambush makes the whole home faction react.

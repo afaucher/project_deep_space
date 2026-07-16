@@ -72,6 +72,11 @@ The enabling refactor; nothing else lands without it.
   that spawns opposing iff_tags and expects a fight migrates by hoisting
   the pirate flag on one side — no test-only standing backdoor. Audit
   test-by-test, but the fix per test is one line.
+- Faction **wanted-names list**: shared HOSTILE markings carry the claimed
+  name; a NEW track claiming a wanted name enters at SUSPICIOUS ("claims a
+  wanted name"), never auto-HOSTILE. This is what makes laundering require
+  a fresh identity instead of a transponder flicker (design doc: breaking
+  the track is necessary, not sufficient).
 - Player UI: contacts panel shows standing + reason; "MARK HOSTILE" button.
 - Tests: dark stranger is NOT auto-engaged; witnessed attack flips standing
   and propagates on datalink; manual flag works; track loss forgets.
@@ -114,8 +119,10 @@ The loop itself, with an **abstract take** (no physical cargo yet).
   flying colors from the start is reserved for operating in force, a later
   arrival-mix option) →
   TAKE (alongside-hold T seconds against a compliant victim = success) →
-  EXFIL dark → CASH-IN: wormhole exit, or relight far from the scene under
-  a fresh name (track loss does the laundering). Abort rules: patrol
+  EXFIL dark → CASH-IN: wormhole exit, or launder — stay dark until the
+  track dies on the WHOLE home datalink (not just the pursuer), relight
+  under a NEW name (the wanted-names rule makes the old one a liability),
+  and re-enter reporting like a citizen. Abort rules: patrol
   approach, victim armed/resisting, damage → flee.
 - Tests: scripted end-to-end run in a mini cluster (pirate arrives, goes
   dark, ambushes a shuttle, takes, exfils via wormhole); ambush aborts when
