@@ -55,6 +55,15 @@ The enabling refactor; nothing else lands without it.
   firing on a station is the canonical case: the station marks the shooter
   instantly and the datalink spreads it, no third-party observer needed.
   The pirate flag (below) is additive, not a replacement for this.
+- The three subjectivity rules from the design doc ship WITH the witness
+  rule (they are corrections to it, not extras): the assistance exemption
+  (attacking a target HOSTILE-to-me is not aggression), authority flags
+  (DEMAND_SURRENDER under a flag I consider legitimate is a police stop),
+  and stray-fire dampening (apparent target flips on first hit; third
+  parties and single stray hits go SUSPICIOUS first). Tests: patrol does
+  NOT flip on a ship engaging a patrol-marked pirate; bystander does not
+  flip on a militia-flag interdiction; one stray splash leaves a civilian
+  SUSPICIOUS of the patrol, not permanently HOSTILE.
 - **The pirate flag ships in M48** as the first known-enemy flag: flying it
   → automatic HOSTILE to every non-pirate observer, no witnessing needed.
   This is deliberately double-duty: fiction-side it's "showing colors" (see
@@ -175,7 +184,11 @@ The player enters the loop.
 - Mission generation from director state (first generated, non-authored
   missions): ESCORT (attach to a real cargo run; success = it docks alive;
   fail = it dies/loses cargo) and HUNT (patrol a lane area; success =
-  pirate destroyed or forced to surrender). Offered via the existing
+  pirate destroyed or forced to surrender — but the target must be marked
+  HOSTILE by home-faction standing first: under the assistance exemption,
+  killing an unmarked SUSPICIOUS contact makes YOU the aggressor from the
+  patrol's angle. The mission is force-the-reveal detective work and the
+  contract brief says so). Offered via the existing
   comms/contract surfaces; MissionLog gains the two objective kinds it's
   missing (ESCORT/KILL_OR_CAPTURE); ContractFeed markers already generalize.
 - Payment on completion; escort pay scales with pirate pressure (the guild

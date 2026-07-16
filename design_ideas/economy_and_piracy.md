@@ -46,7 +46,7 @@ judgment call. The fix is a **two-layer split**:
   | NEUTRAL | identified, clean | broadcasting name + flag; flag not known-enemy; no live evidence on the track | resting state — no decay needed |
   | UNREPORTED | not identifying itself | no name + flag broadcast received for this track (anywhere) | instantly → NEUTRAL on reporting with a clean flag |
   | SUSPICIOUS | judged worth watching | 1. challenge comply-window expired (controlled space) 2. dark/unreported contact loitering near a lane (~15k of a lane, <~20% max speed, >30s) 3. sustained intercept geometry toward a third ship (~20s closing lead-pursuit) 4. datalink report from ally (relays reason + attribution) 5. *(later)* transponder claim vs tracked position mismatch | decays → NEUTRAL after a clean interval (~3 min reporting, no new events); challenge compliance clears reason 1 immediately; track loss forgets |
-  | HOSTILE | **earned** enemy | 1. attributed aggression (`attacker_id` == this track, vs me / my faction / anything I hold a live track on — stations witness attacks on themselves) 2. DEMAND_SURRENDER heard from it (aggression by speech-act) 3. flying a known-enemy flag (pirate flag, day one) 4. player MARK HOSTILE 5. faction datalink share (with attribution) | **sticky for the life of the track — never decays**; the only way out is breaking the track (that is what laundering IS) |
+  | HOSTILE | **earned** enemy | 1. attributed aggression (`attacker_id` == this track, vs me / my faction / anything I hold a live track on — stations witness attacks on themselves; see the angle rules below for the assistance exemption and stray-fire dampening) 2. DEMAND_SURRENDER heard from it, unless it flies one of MY authority flags (a police stop, not piracy — see below) 3. flying a known-enemy flag (pirate flag, day one) 4. player MARK HOSTILE 5. faction datalink share (with attribution) | **sticky for the life of the track — never decays**; the only way out is breaking the track (that is what laundering IS) |
 
   What each tier authorizes:
 
@@ -69,6 +69,38 @@ judgment call. The fix is a **two-layer split**:
   a "mark hostile" button on the contacts panel (you saw the surrender
   demand on comms — that's your evidence), plus visibility into *why* an AI
   marked something.
+
+  **The ladder is per-observer (subjective) on purpose — these three rules
+  make it hold up from every angle** (stress-tested from the patrol's, the
+  victim's, a bystander's, the pirate's, and the player's viewpoints):
+
+  1. **Assistance exemption.** Attributed aggression against a target that
+     is already HOSTILE *to me* is not aggression — it's assistance. Without
+     this, a patrol flips on the player lawfully engaging a marked pirate,
+     and bystanders flip on patrols doing their job. The flip side is kept
+     deliberately: shooting a merely-SUSPICIOUS contact in front of a patrol
+     that holds no evidence DOES get you interdicted — that's what makes
+     hunt missions detective work (force the reveal or the surrender; get
+     the target marked before you fire), not sanctioned murder.
+  2. **Authority flags.** Each observer holds a list of flags whose
+     interdictions it considers legitimate (home civilians trust the militia
+     flag; pirates trust nothing). DEMAND_SURRENDER from an authority-flag
+     ship reads as a police stop, not a hostile act — otherwise every lawful
+     stop makes the police pirates from bystander angles. A pirate CAN spoof
+     the militia flag to freeze a victim — false colors, historically apt,
+     and attribution catches up the moment cargo changes hands.
+  3. **Stray-fire dampening.** The apparent TARGET of fire flips HOSTILE on
+     the first attributed hit; a third party — or the recipient of a single
+     stray hit from a ship not flying a known-enemy flag — goes SUSPICIOUS
+     first ("fired near me") and escalates to HOSTILE only on repetition.
+     Because HOSTILE never decays, without this one splash-damage accident
+     would permanently break a civilian's trust in the home patrol.
+
+  One more angle worth stating so nobody "fixes" it: **standing gates
+  reactive violence only.** The pirate tree is predatory — it selects
+  NEUTRAL victims by scoring and attacks them deliberately, bypassing the
+  acquire-target rule. Its victims and their rescuers mark IT hostile
+  through ordinary attribution; no special case exists or is needed.
 
 - **Flags are cheap talk.** The transponder gains a `flag` field — a public
   declaration of allegiance (trader guild, home militia, no flag). It is
