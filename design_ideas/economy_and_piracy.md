@@ -52,6 +52,17 @@ judgment call. The fix is a **two-layer split**:
   declaration of allegiance (trader guild, home militia, no flag). It is
   spoofable by design; crypto IFF tags remain unforgeable and are only for
   actual friendlies. A pirate flying a trader flag is the whole game.
+- **The pirate flag is a real flag anyone *could* fly** — and flying it makes
+  you automatically HOSTILE to every non-pirate (it is a standing declaration
+  of war; the one flag whose meaning is never ambiguous). Pirates therefore
+  normally run quiet: false colors in transit, dark on the hunt. **Showing
+  colors** is a deliberate act with mechanical weight: a pirate may hoist the
+  flag at the moment of DEMAND_SURRENDER (the historical Jolly Roger beat —
+  intimidation that makes the demand credible and tips the victim's
+  surrender-vs-run decision toward compliance), fly it openly when operating
+  in force (escorted, outgunning the local response), or never show it at
+  all and rely on force alone. This also keeps hostility legible: a flagged
+  demand needs no witness inference — everyone who hears it knows.
 - **Standing sticks to the track, not the hull.** It lives on the observer's
   contact record. If the track is lost (dark, out of range, CONTACT_TIMEOUT)
   the judgment dies with it. This is deliberate and free: it's what makes
@@ -80,7 +91,8 @@ clear of you. Outside controlled space, dark is legal — merely ominous.
 2. **Cargo ships under threat**: on DEMAND_SURRENDER (or being fired on),
    decide surrender-vs-run: baseline shuttles comply — cut thrust or stop,
    force transponder on, broadcast COMPLY; fast hulls (speed advantage over
-   the threat) run instead; everyone broadcasts SOS. Resume route when the
+   the threat) run instead; a demand under shown pirate colors weighs the
+   decision toward compliance; everyone broadcasts SOS. Resume route when the
    threat leaves. Surrendered is a hard ship state honored by ALL AI: pirates
    stop shooting compliant victims, patrols hold fire on surrendered pirates.
 3. **Patrols policing**: challenge UNREPORTED ships in controlled space
@@ -164,6 +176,11 @@ rule in CLAUDE.md).
 2. Hostility is earned per observer with an audit reason — never automatic
    from "not one of us".
 3. Flags are spoofable declarations; IFF tags stay crypto-truth.
+3a. The pirate flag exists as a flyable flag and is auto-HOSTILE to
+   non-pirates. Showing colors is an AI decision (at the demand, in force,
+   or never), and it is the clean test lever: a spawned ship flying the
+   pirate flag is hostile with zero setup — existing combat tests migrate
+   by hoisting it rather than through any test-only standing backdoor.
 4. Standing lives on the contact track → identity laundering falls out of
    existing sensor mechanics.
 5. Surrender is a hard state with behavioral guarantees on both sides.

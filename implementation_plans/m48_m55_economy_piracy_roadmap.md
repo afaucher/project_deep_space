@@ -52,11 +52,14 @@ The enabling refactor; nothing else lands without it.
 - Witness rule: an observer that (a) has a live track on the aggressor and
   (b) saw the aggression event marks HOSTILE and shares it on datalink with
   attribution.
-- `acquire_target_leaf` targets HOSTILE only. (This changes every combat
-  test's premise — most spawn opposing iff_tags and expect a fight. Provide
-  a compatibility rule: sandbox/test spawns can declare `known_enemy_flags`
-  or pre-marked standing so existing scenarios keep working; audit
-  test-by-test.)
+- **The pirate flag ships in M48** as the first known-enemy flag: flying it
+  → automatic HOSTILE to every non-pirate observer, no witnessing needed.
+  This is deliberately double-duty: fiction-side it's "showing colors" (see
+  M49/M50 — pirates normally run quiet), and test-side it's the migration
+  lever for `acquire_target_leaf` targeting HOSTILE only. Every combat test
+  that spawns opposing iff_tags and expects a fight migrates by hoisting
+  the pirate flag on one side — no test-only standing backdoor. Audit
+  test-by-test, but the fix per test is one line.
 - Player UI: contacts panel shows standing + reason; "MARK HOSTILE" button.
 - Tests: dark stranger is NOT auto-engaged; witnessed attack flips standing
   and propagates on datalink; manual flag works; track loss forgets.
@@ -73,7 +76,8 @@ The enabling refactor; nothing else lands without it.
   surrendered ship (both directions — this is fiction-critical, test it).
 - Cargo AI: on DEMAND_SURRENDER or attributed attack → surrender-or-run
   decision (speed ratio vs threat; baseline shuttles comply, fast hulls
-  run), always broadcast SOS.
+  run; a demand under shown pirate colors weighs toward compliance),
+  always broadcast SOS.
 - Patrol AI: CHALLENGE UNREPORTED ships in controlled space; give a comply
   window; non-compliance → SUSPICIOUS (escort/shadow, not engage).
 - SOS surfaces as NAV-layer data (ContractFeed-style marker; never injected
@@ -92,7 +96,11 @@ The loop itself, with an **abstract take** (no physical cargo yet).
   Same silhouettes as civilian variants (sensors can't out them).
 - Pirate tree: INFILTRATE (fly legit under cover flag) → go dark at a
   staging point → LURK near a lane → SELECT victim (unarmed, alone, no
-  witness with a live track in range) → INTERCEPT → DEMAND_SURRENDER →
+  witness with a live track in range) → INTERCEPT → DEMAND_SURRENDER,
+  optionally showing colors (hoisting the pirate flag at the demand for the
+  compliance bonus, at the cost of unambiguous hostility to any listener;
+  flying colors from the start is reserved for operating in force, a later
+  arrival-mix option) →
   TAKE (alongside-hold T seconds against a compliant victim = success) →
   EXFIL dark → CASH-IN: wormhole exit, or relight far from the scene under
   a fresh name (track loss does the laundering). Abort rules: patrol
