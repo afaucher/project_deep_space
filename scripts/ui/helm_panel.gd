@@ -141,7 +141,6 @@ class HeadingDial extends Control:
 			var rcol: Color = Color(1.0, 0.55, 0.1)  # orange -- distinct from yellow prograde
 			draw_line(center, tip2, rcol, 2.5)
 			draw_circle(tip2, 4.0, rcol)
-			draw_string(font, Vector2(6.0, font_size + 6.0), "Δv %.0f" % rv, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, rcol)
 
 class EngineSlider extends Control:
 	signal intent_changed(val: float)
@@ -301,6 +300,14 @@ var throttle_slider: EngineSlider
 var velocity_slider: EngineSlider
 var max_speed: float = 1000.0
 
+# Numeric readouts flanking the gauges: throttle setting LEFT of the throttle
+# gauge and current speed RIGHT of the velocity gauge. The speed number used
+# to draw inside the velocity gauge (EngineSlider.show_speed_number); it now
+# lives out here to the side. (The controlled-zone LIMIT line lives on the
+# engineering screen -- see engineering_panel.gd's zone_status_lbl.)
+var throttle_readout_lbl: Label
+var speed_readout_lbl: Label
+
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("helm_linear_toggle"):
 		if linear_mode == 0:
@@ -383,8 +390,18 @@ func _ready() -> void:
 	var engine_hbox = HBoxContainer.new()
 	engine_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	engine_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	engine_hbox.add_theme_constant_override("separation", 20)
-	
+	engine_hbox.add_theme_constant_override("separation", 16)
+
+	# Throttle setting readout -- LEFT of the throttle gauge, vertically centered
+	# against the tall slider.
+	throttle_readout_lbl = Label.new()
+	throttle_readout_lbl.text = "0%"
+	throttle_readout_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	throttle_readout_lbl.custom_minimum_size = Vector2(52, 0)
+	throttle_readout_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	throttle_readout_lbl.add_theme_font_size_override("font_size", 15)
+	engine_hbox.add_child(throttle_readout_lbl)
+
 	# Throttle Slider
 	var throttle_vbox = VBoxContainer.new()
 	var throttle_lbl = Label.new()
@@ -423,7 +440,7 @@ func _ready() -> void:
 	velocity_slider.is_active_control = false
 	velocity_slider.target_val = 0.0
 	velocity_slider.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	velocity_slider.show_speed_number = true # M35 -- velocity gauge only, see EngineSlider.show_speed_number
+	velocity_slider.show_speed_number = false # speed number now drawn in speed_readout_lbl to the right (see below)
 	velocity_slider.became_active.connect(func():
 		linear_mode = 1
 		velocity_slider.is_active_control = true
@@ -437,7 +454,17 @@ func _ready() -> void:
 	)
 	vel_vbox.add_child(velocity_slider)
 	engine_hbox.add_child(vel_vbox)
-	
+
+	# Speed readout -- RIGHT of the velocity gauge, vertically centered against
+	# the slider. (The controlled-zone limit/rules line lives on the
+	# engineering screen now -- see engineering_panel.gd.)
+	speed_readout_lbl = Label.new()
+	speed_readout_lbl.text = "0"
+	speed_readout_lbl.custom_minimum_size = Vector2(96, 0)
+	speed_readout_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	speed_readout_lbl.add_theme_font_size_override("font_size", 16)
+	engine_hbox.add_child(speed_readout_lbl)
+
 	vbox.add_child(engine_hbox)
 
 # M35 -- resolves a controlled zone's `rules` dict from its authority name.
@@ -566,6 +593,25 @@ func update_data(packet: Dictionary) -> void:
 	else:
 		# Velocity is active. Implied throttle is the actual PID output
 		throttle_slider.implied_val = actual_throttle
-		
+
+	# Flanking readouts. Throttle setting (LEFT) is the actual throttle as a
+	# signed percentage; speed (RIGHT) is forward speed, colored by the same
+	# three-state zone truth table the gauge ticks use, with the lateral-drift
+	# cue appended when it explains the color; the LIMIT line (under speed)
+	# echoes the controlling authority + its advisory.
+	throttle_readout_lbl.text = "%+d%%" % int(round(actual_throttle * 100.0))
+
+	var speed_text := "%d" % int(round(forward_speed))
+	if velocity_slider.show_drift_cue:
+		speed_text += "  lat %d" % int(round(lateral_speed))
+	speed_readout_lbl.text = speed_text
+	var speed_color := Color(0.8, 0.8, 0.8)
+	match velocity_slider.zone_speed_state:
+		PortRules.SpeedState.APPROACHING:
+			speed_color = Color(1.0, 0.7, 0.1)
+		PortRules.SpeedState.OVER:
+			speed_color = Color(1.0, 0.25, 0.15)
+	speed_readout_lbl.add_theme_color_override("font_color", speed_color)
+
 	throttle_slider.queue_redraw()
 	velocity_slider.queue_redraw()

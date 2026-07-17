@@ -2,6 +2,8 @@ extends Control
 
 signal component_power_toggled(component_id: String, is_active: bool)
 
+const PortRules = preload("res://scripts/port/port_rules.gd")
+
 const HIGHLIGHT_SENSOR_PEAK_EM_BONUS := 40.0 # flat display-only bump to "Peak EM" when the highlighted sensor is active
 const POWER_TOGGLE_DEBOUNCE_MSEC := 500 # how long a local power-button click is trusted over a conflicting server update
 
@@ -17,6 +19,13 @@ var comp_rows: Dictionary = {}
 
 var lbl_peak_em: Label
 var lbl_det_dist: Label
+
+# Controlled-zone status: ONE combined line merging the former helm/top-bar
+# "LIMIT" readout and the port-zone rules message -- "<authority> — <rules
+# summary>" (the summary already carries the speed advisory, i.e. the limit),
+# blank outside any zone. Placed here per playtest feedback; the engineering
+# screen is becoming the general ship-status surface.
+var zone_status_lbl: Label
 
 # M40 -- engineering log section. eng_log_rich mirrors Ship.eng_log
 # (newest entry LAST, matching the ring buffer's own append order -- see
@@ -205,7 +214,15 @@ func _ready() -> void:
 	title.add_theme_font_size_override("font_size", 16)
 	title.add_theme_color_override("font_color", Color(0.8, 0.6, 0.2))
 	main_vbox.add_child(title)
-	
+
+	# Combined controlled-zone status line ("<authority> — <rules summary>").
+	zone_status_lbl = Label.new()
+	zone_status_lbl.text = ""
+	zone_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	zone_status_lbl.add_theme_font_size_override("font_size", 13)
+	zone_status_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	main_vbox.add_child(zone_status_lbl)
+
 	# Top Gauges (Heat and EM)
 	top_hbox = HBoxContainer.new()
 	main_vbox.add_child(top_hbox)
@@ -323,6 +340,31 @@ func _ready() -> void:
 	eng_log_rich.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	main_vbox.add_child(eng_log_rich)
 
+# One combined line for the controlled zone the ship is in: authority plus the
+# rules summary (which already includes the speed advisory / limit). Resolves
+# the live zone rules from the authority string the same way helm_panel /
+# terminal_display do (a "ships" group scan). Blank outside any zone.
+func _update_zone_status(state: Dictionary) -> void:
+	if zone_status_lbl == null:
+		return
+	var authority = state.get("current_port_zone", null)
+	if authority == null or authority == "":
+		zone_status_lbl.text = ""
+		return
+	var rules: Dictionary = {}
+	for s in get_tree().get_nodes_in_group("ships"):
+		if not s.has_method("get_port_zone"):
+			continue
+		var zone: Dictionary = s.get_port_zone()
+		if zone.get("authority", "") == authority:
+			rules = zone.get("rules", {})
+			break
+	var summary: String = PortRules.banner_summary(rules)
+	if summary != "":
+		zone_status_lbl.text = "%s — %s" % [str(authority), summary]
+	else:
+		zone_status_lbl.text = str(authority)
+
 func _eng_log_severity_color(severity: String) -> String:
 	match severity:
 		Ship.ENG_LOG_SEVERITY_WARN:
@@ -365,7 +407,9 @@ func _update_eng_log(eng: Dictionary) -> void:
 
 func update_data(state: Dictionary) -> void:
 	current_state = state
-	
+
+	_update_zone_status(state)
+
 	if state.has("engineering"):
 		var eng = state["engineering"]
 
