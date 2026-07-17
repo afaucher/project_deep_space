@@ -46,7 +46,7 @@ judgment call. The fix is a **two-layer split**:
   | FRIENDLY | crypto-verified own side | IFF tag overlap (unforgeable handshake) | track loss (traitor/friendly-fire demotion: deferred edge case) |
   | NEUTRAL | identified, clean | broadcasting name + flag; flag not known-enemy | resting state — no decay needed |
   | UNREPORTED | not identifying itself | no name + flag broadcast received for this track (anywhere) | instantly → NEUTRAL on reporting with a clean flag |
-  | HOSTILE | **earned** enemy | 1. attributed aggression (`attacker_id` == this track, vs me / my faction / anything I hold a live track on — stations witness attacks on themselves; see the angle rules below for the assistance exemption and the attribution confidence gate) 2. DEMAND_SURRENDER heard from it, unless it flies one of MY authority flags (a police stop, not piracy) 3. flying a known-enemy flag (pirate flag, day one) 4. player MARK HOSTILE 5. faction datalink share (with attribution) | **sticky for the life of the track — never decays**; the only way out is breaking the track (that is what laundering IS) |
+  | HOSTILE | **earned** enemy | 1. attributed aggression (`attacker_id` == this track, vs me / my faction / anything I hold a live track on — stations witness attacks on themselves; see the angle rules below for the assistance exemption and the attribution confidence gate) 2. DEMAND(STOP) heard from it, unless it flies one of MY authority flags (a police stop, not piracy) 3. flying a known-enemy flag (pirate flag, day one) 4. player MARK HOSTILE 5. faction datalink share (with attribution) | **sticky for the life of the track — never decays**; the only way out is breaking the track (that is what laundering IS) |
 
   Every tier passes the "does it mean the same to everyone?" test: FRIENDLY is
   crypto truth, NEUTRAL/UNREPORTED are identity facts, and HOSTILE means
@@ -60,7 +60,7 @@ judgment call. The fix is a **two-layer split**:
   | Actor | FRIENDLY / NEUTRAL | UNREPORTED | HOSTILE |
   |---|---|---|---|
   | Weapons AI (`acquire_target`) | never | never | engage — *unless surrendered* |
-  | Patrols | ignore | controlled space: CHALLENGE (close, hail, ~20s window); outside: observe only | interdict: close, DEMAND_SURRENDER, engage on non-compliance |
+  | Patrols | ignore | controlled space: DEMAND(IDENTIFY) (close, hail, ~20s window); outside: observe only | interdict: close, DEMAND(STOP), engage on non-compliance |
   | Cargo / civilians | ignore | wide berth (steer around) | flee + SOS |
   | Port authority | grants issued | no dock grants until reported | grants denied; alarm |
   | Player UI | green / white | dim yellow, "NOT REPORTING" | red + reason; MARK HOSTILE is how the player writes this tier |
@@ -117,7 +117,7 @@ judgment call. The fix is a **two-layer split**:
      get the target marked before you fire), not sanctioned murder.
   2. **Authority flags.** Each observer holds a list of flags whose
      interdictions it considers legitimate (home civilians trust the militia
-     flag; pirates trust nothing). DEMAND_SURRENDER from an authority-flag
+     flag; pirates trust nothing). A DEMAND(STOP) from an authority-flag
      ship reads as a police stop, not a hostile act — otherwise every lawful
      stop makes the police pirates from bystander angles. A pirate CAN spoof
      the militia flag to freeze a victim — false colors, historically apt,
@@ -145,7 +145,7 @@ judgment call. The fix is a **two-layer split**:
   of war; the one flag whose meaning is never ambiguous). Pirates therefore
   normally run quiet: false colors in transit, dark on the hunt. **Showing
   colors** is a deliberate act with mechanical weight: a pirate may hoist the
-  flag at the moment of DEMAND_SURRENDER (the historical Jolly Roger beat —
+  flag at the moment of the STOP demand (the historical Jolly Roger beat —
   intimidation that makes the demand credible and tips the victim's
   surrender-vs-run decision toward compliance), fly it openly when operating
   in force (escorted, outgunning the local response), or never show it at
@@ -184,7 +184,7 @@ judgment call. The fix is a **two-layer split**:
   shortcut for the unambiguous case. The canonical attribution case: firing
   on a space station is a hostile act, full stop. The station is its own
   witness and it's on the faction datalink, so the marking is instant and
-  shared — patrols flip immediately and open with DEMAND_SURRENDER (the
+  shared — patrols flip immediately and open with DEMAND(STOP) (the
   interdiction protocol, not a silent weapons-free). **This applies to the
   player**: shoot a home station and Patrol Alpha turns, marks you, and
   demands your surrender like anyone else. Comply and you're held, not shot.
@@ -200,12 +200,12 @@ clear of you. Outside controlled space, dark is legal — merely ominous.
    arrive-legit (cover flag) → transit to a staging point in dark space →
    go dark → lurk near an off-road lane → pick a victim (scoring: unarmed,
    alone, no patrol/witness in range, cargo worth taking) → intercept →
-   DEMAND_SURRENDER via comms → loot the compliant victim (hold alongside) or
+   DEMAND(STOP) via comms → loot the compliant victim (hold alongside) or
    disengage if it runs and outpaces → exfil dark → cash in (wormhole exit,
    or relight + re-enter as "someone else"). Abort rules throughout: patrol
    inbound, victim armed, damage taken → flee, possibly SOS (pirates have
    friends too — later).
-2. **Cargo ships under threat**: on DEMAND_SURRENDER (or being fired on),
+2. **Cargo ships under threat**: on DEMAND(STOP) (or being fired on),
    decide surrender-vs-run: baseline shuttles comply — cut thrust or stop,
    force transponder on, broadcast COMPLY; fast hulls (speed advantage over
    the threat) run instead; a demand under shown pirate colors weighs the
@@ -215,7 +215,7 @@ clear of you. Outside controlled space, dark is legal — merely ominous.
 3. **Patrols policing**: the patrol's OWN suspicion assessment lives here
    (loitering off-lane, a claimed wanted-name, an ignored challenge) — it
    challenges UNREPORTED ships in controlled space (close to comms range,
-   CHALLENGE, give seconds to comply); witness aggression → mark HOSTILE
+   DEMAND(IDENTIFY), give seconds to relight); witness aggression → mark HOSTILE
    (shared standing) + broadcast the marking; respond to SOS beyond sensor
    range (comms is longer-ranged than sensors — by design); intercept before
    weapons: close, demand surrender, engage only on refusal/fire.
@@ -239,11 +239,17 @@ clear of you. Outside controlled space, dark is legal — merely ominous.
   pirate = "prey / threat / trap?"; cargo = "avoid?". Blackboard state, never
   the shared contact record; what's shareable is standing + explicit reports.
 - **Hail protocol** — structured machine-to-machine comms verbs (not
-  dialogue trees): CHALLENGE, DEMAND_SURRENDER, COMPLY, SOS, and a standing
-  broadcast (MARK_HOSTILE with reason). Rides the existing comms-range and
-  transient-event plumbing; the comms panel grows the player-facing verbs.
-- **Surrender state** — `surrendered` on Ship with hard guarantees (no
-  thrust or full stop, transponder forced on) and AI honor rules.
+  dialogue trees): `DEMAND {rung: IDENTIFY | STOP}` (one directive verb —
+  "surrender" is the receiver's interpretation, not a wire message; see
+  [comms_verbs.md](comms_verbs.md) for the differential that collapsed the
+  original CHALLENGE/DEMAND_SURRENDER pair), `COMPLY {in_reply_to}`,
+  `RELEASE`, `SOS {nature}`, and a standing broadcast (MARK_HOSTILE with
+  reason). Rides the existing comms-range and transient-event plumbing; the
+  comms panel grows the player-facing verbs.
+- **The honored stop** — stopped-under-compulsion on Ship (the state
+  formerly "surrendered") with hard guarantees (no thrust or full stop,
+  transponder forced on) and AI honor rules — one state whether the stop is
+  customs, arrest, or robbery.
 - **Damage attribution** — `take_damage` currently doesn't know the shooter.
   Witnessing and "aggression" need attacker identity plumbed through lasers
   and missiles (missiles already carry `owner_id`).

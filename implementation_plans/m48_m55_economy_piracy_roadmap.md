@@ -54,7 +54,8 @@ The enabling refactor; nothing else lands without it.
   HOSTILE. Standing dies with the track.
 - **Damage attribution**: `attacker_id` plumbed through take_damage and all
   weapon paths (lasers, missile warheads — missiles already know owner_id).
-  Aggression event = attributed damage or a witnessed DEMAND_SURRENDER (M49).
+  Aggression event = attributed damage or a witnessed non-authority
+  DEMAND(STOP) (M49).
 - Witness rule: an observer that (a) has a live track on the aggressor and
   (b) saw the aggression event marks HOSTILE and shares it on datalink with
   attribution. Ships and stations witness attacks on THEMSELVES too —
@@ -64,7 +65,7 @@ The enabling refactor; nothing else lands without it.
 - The three subjectivity rules from the design doc ship WITH the witness
   rule (they are corrections to it, not extras): the assistance exemption
   (attacking a target HOSTILE-to-me is not aggression), authority flags
-  (DEMAND_SURRENDER under a flag I consider legitimate is a police stop),
+  (a DEMAND(STOP) under a flag I consider legitimate is a police stop),
   and the attribution confidence gate (apparent target flips HOSTILE on
   first hit; third parties and single stray hits need N attributed hits via
   a HIDDEN counter on the track before flipping — no visible tier). Tests:
@@ -101,27 +102,51 @@ The enabling refactor; nothing else lands without it.
   entry. Standing is four clean tiers; `test_standing_rules`/`test_standing_e2e`
   updated; full gate green.
 
-## M49 — Hail protocol, surrender, challenge
+## M49 — Hail protocol, the DEMAND verb, the honored stop
+
+> **Revised before execution** — the original verb list (CHALLENGE,
+> DEMAND_SURRENDER, COMPLY, SOS) collapsed under a scenario differential:
+> CHALLENGE and DEMAND_SURRENDER differ ONLY in what's demanded, and
+> "surrender" is the receiver's interpretation, not a wire message (the
+> SUSPICIOUS lesson again). Full reasoning + scenario table in
+> [comms_verbs.md](../design_ideas/comms_verbs.md) — that doc is the spec.
 
 - Structured comms verbs (machine-to-machine, comms-range-gated, NOT
-  dialogue): CHALLENGE, DEMAND_SURRENDER, COMPLY, SOS, MARK_HOSTILE-report.
-  Ride the existing transient_events/comms plumbing.
-- `surrendered` ship state: cut thrust (or brake to stop), transponder
-  forced on, broadcast COMPLY. Hard AI honor rules: no leaf targets a
-  surrendered ship (both directions — this is fiction-critical, test it).
-- Cargo AI: on DEMAND_SURRENDER or attributed attack → surrender-or-run
-  decision (speed ratio vs threat; baseline shuttles comply, fast hulls
-  run; a demand under shown pirate colors weighs toward compliance),
-  always broadcast SOS.
-- Patrol AI: CHALLENGE UNREPORTED ships in controlled space; give a comply
-  window; non-compliance raises the patrol's own suspicion assessment
+  dialogue), riding the existing transient_events/comms plumbing:
+  - `DEMAND {rung: IDENTIFY | STOP, target}` — one directive verb, two
+    rungs. IDENTIFY compliance is *behavioral* (relight, keep flying — the
+    transponder is the answer, no reply verb). STOP implies IDENTIFY;
+    compliance is the honored state below.
+  - `COMPLY {in_reply_to}` — STOP rung only (the honored state must be
+    *declared*); in_reply_to required (simultaneous demands happen —
+    pirate strikes just as the patrol arrives).
+  - `RELEASE {target}` — resume; a held ship also resumes if the issuer
+    departs/dies.
+  - `SOS {nature: UNDER_ATTACK | DISABLED, pos, name, flag, threat?}` —
+    NAV-layer marker (never sensor fusion — the M41 rule); nature picks the
+    responder's posture (intercept vs rescue); carries identity, so SOS
+    counts as reporting; sendable on battery power; fake-SOS bait is
+    allowed emergent play.
+  - `MARK_HOSTILE report` — broadcast form of the M48 standing share.
+- **Stopped-under-compulsion** (the state formerly "surrendered"): brake to
+  stop, transponder forced on, COMPLY broadcast. One state whether the stop
+  is customs, arrest, or robbery — hard AI honor rules both directions (no
+  leaf targets a compliant stopped ship; fiction-critical, test it).
+- **Witness rule keyed on the rung** (extends the M48 aggression bus):
+  DEMAND(IDENTIFY) is never aggression; DEMAND(STOP) from a non-authority
+  flag is a witnessed aggression event, from a trusted flag a police stop.
+- Cargo AI: on DEMAND(STOP) or attributed attack → comply-or-run (speed
+  ratio vs threat; baseline shuttles comply, fast hulls run; shown pirate
+  colors weigh toward compliance), always broadcast SOS.
+- Patrol AI: DEMAND(IDENTIFY) at UNREPORTED ships in controlled space,
+  ~20s window; non-compliance raises the patrol's own suspicion assessment
   (escort/shadow, not engage) — a blackboard verdict, not a standing.
-- SOS surfaces as NAV-layer data (ContractFeed-style marker; never injected
-  into sensor fusion — the M41 rule).
-- Player comms panel: receive/send the verbs (a surrender demand arriving on
+  DEMAND(STOP) only with basis; engage only on refusal/fire.
+- Player comms panel: receive/send the verbs (a STOP demand arriving on
   YOUR panel from a dark contact is the fear moment the design wants).
-- Tests: demand→comply→resume cycle; fast ship runs; patrol challenge flow;
-  surrender honored under fire.
+- Tests: demand→comply→release/resume cycle; fast ship runs; patrol
+  IDENTIFY flow (relight ends it, no stop); honored stop under fire (both
+  directions); in_reply_to disambiguation under simultaneous demands.
 
 ## M50 — Pirate hulls + the piracy behavior tree
 
@@ -132,7 +157,7 @@ The loop itself, with an **abstract take** (no physical cargo yet).
   Same silhouettes as civilian variants (sensors can't out them).
 - Pirate tree: INFILTRATE (fly legit under cover flag) → go dark at a
   staging point → LURK near a lane → SELECT victim (unarmed, alone, no
-  witness with a live track in range) → INTERCEPT → DEMAND_SURRENDER,
+  witness with a live track in range) → INTERCEPT → DEMAND(STOP),
   optionally showing colors (hoisting the pirate flag at the demand for the
   compliance bonus, at the cost of unambiguous hostility to any listener;
   flying colors from the start is reserved for operating in force, a later
@@ -179,7 +204,7 @@ The loop itself, with an **abstract take** (no physical cargo yet).
   aggression regardless of who the aggressor is, INCLUDING the player:
   fire on a home station and the nearest patrol flips, marks you hostile
   (the station's own witness event, datalinked), and opens with
-  DEMAND_SURRENDER. Complying player is held (shadowed, weapons tight),
+  DEMAND(STOP). Complying player is held (shadowed, weapons tight),
   not executed — same surrender guarantees as everyone else. What "held"
   ultimately means for a player (fine? confiscation? standing decay?) is
   M54+ content; M52 only guarantees the stop-shooting contract.
