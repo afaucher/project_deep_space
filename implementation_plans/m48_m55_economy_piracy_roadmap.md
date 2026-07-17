@@ -40,11 +40,17 @@ The enabling refactor; nothing else lands without it.
 
 - Transponder gains a `flag` field (public allegiance declaration; spoofable
   data, distinct from crypto `iff_tags`). Fused into contact records.
+- **Model revised after M48 shipped** (see design doc): standing is FOUR
+  tiers, not five. "Suspicious" is NOT a standing — it has no shared meaning
+  (patrol "acting like a predator" vs pirate "prey/trap") and belongs in each
+  AI's own assessment, not the shared contact record. The shipped M48 code
+  carries a vestigial SUSPICIOUS tier and needs a small simplification (see
+  "M48 code delta" at the end of this section).
 - Per-observer **standing** on contact tracks: FRIENDLY / NEUTRAL /
-  UNREPORTED / SUSPICIOUS / HOSTILE + a reason string. Rules: crypto match →
-  FRIENDLY; name+flag reported and flag not known-bad → NEUTRAL; in
-  controlled space (port zones + beacon corridor) without reporting →
-  UNREPORTED; known-enemy flag or witnessed aggression or manual flag →
+  UNREPORTED / HOSTILE + a reason string. Rules: crypto match → FRIENDLY;
+  name+flag reported and flag not known-bad → NEUTRAL; not reporting →
+  UNREPORTED (a fact anywhere; only controlled space makes it a patrol
+  matter); known-enemy flag or witnessed aggression or manual flag →
   HOSTILE. Standing dies with the track.
 - **Damage attribution**: `attacker_id` plumbed through take_damage and all
   weapon paths (lasers, missile warheads — missiles already know owner_id).
@@ -59,11 +65,12 @@ The enabling refactor; nothing else lands without it.
   rule (they are corrections to it, not extras): the assistance exemption
   (attacking a target HOSTILE-to-me is not aggression), authority flags
   (DEMAND_SURRENDER under a flag I consider legitimate is a police stop),
-  and stray-fire dampening (apparent target flips on first hit; third
-  parties and single stray hits go SUSPICIOUS first). Tests: patrol does
-  NOT flip on a ship engaging a patrol-marked pirate; bystander does not
-  flip on a militia-flag interdiction; one stray splash leaves a civilian
-  SUSPICIOUS of the patrol, not permanently HOSTILE.
+  and the attribution confidence gate (apparent target flips HOSTILE on
+  first hit; third parties and single stray hits need N attributed hits via
+  a HIDDEN counter on the track before flipping — no visible tier). Tests:
+  patrol does NOT flip on a ship engaging a patrol-marked pirate; bystander
+  does not flip on a militia-flag interdiction; one stray splash does NOT
+  permanently mark a civilian's home patrol HOSTILE.
 - **The pirate flag ships in M48** as the first known-enemy flag: flying it
   → automatic HOSTILE to every non-pirate observer, no witnessing needed.
   This is deliberately double-duty: fiction-side it's "showing colors" (see
@@ -72,16 +79,26 @@ The enabling refactor; nothing else lands without it.
   that spawns opposing iff_tags and expects a fight migrates by hoisting
   the pirate flag on one side — no test-only standing backdoor. Audit
   test-by-test, but the fix per test is one line.
-- Faction **wanted-names list**: shared HOSTILE markings carry the claimed
-  name; a NEW track claiming a wanted name enters at SUSPICIOUS ("claims a
-  wanted name"), never auto-HOSTILE. This is what makes laundering require
-  a fresh identity instead of a transponder flicker (design doc: breaking
-  the track is necessary, not sufficient).
+- Faction **wanted-names list** (militia intel, NOT a standing): shared
+  HOSTILE markings carry the claimed name. A new track claiming a wanted name
+  stays NEUTRAL by standing (names are cheap talk) but draws the patrol's
+  *assessment* — a look, a challenge, a shadow (M52). This is what makes
+  laundering require a fresh identity instead of a transponder flicker
+  (design doc: breaking the track is necessary, not sufficient).
 - Player UI: contacts panel shows standing + reason; "MARK HOSTILE" button.
 - Tests: dark stranger is NOT auto-engaged; witnessed attack flips standing
   and propagates on datalink; manual flag works; track loss forgets.
 - **Risk**: the combat-test audit is the real cost of this milestone.
   Budget for it; it is the price of unwinding shoot-on-sight.
+- **M48 code delta** (post-ship simplification, folds the revised model into
+  the shipped 5-tier code): drop the `wanted-name → SUSPICIOUS` rule from
+  `Standing.compute_standing` (wanted-names become a patrol-assessment input
+  in M52, not a standing); keep the stray-fire logic but as a hidden
+  `aggro_hits` counter that flips HOSTILE at the threshold with NO
+  intermediate SUSPICIOUS write; remove the SUSPICIOUS decay block in
+  `ship.gd` and the SUSPICIOUS row from `contacts_panel`'s color map; the
+  `SUSPICIOUS` constant and severity entry can go once nothing writes it.
+  Small, test-covered, and leaves standing at four clean tiers.
 
 ## M49 — Hail protocol, surrender, challenge
 
@@ -96,7 +113,8 @@ The enabling refactor; nothing else lands without it.
   run; a demand under shown pirate colors weighs toward compliance),
   always broadcast SOS.
 - Patrol AI: CHALLENGE UNREPORTED ships in controlled space; give a comply
-  window; non-compliance → SUSPICIOUS (escort/shadow, not engage).
+  window; non-compliance raises the patrol's own suspicion assessment
+  (escort/shadow, not engage) — a blackboard verdict, not a standing.
 - SOS surfaces as NAV-layer data (ContractFeed-style marker; never injected
   into sensor fusion — the M41 rule).
 - Player comms panel: receive/send the verbs (a surrender demand arriving on
@@ -146,10 +164,13 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 
 ## M52 — Patrol interdiction + SOS response
 
-- Patrol tree grows: respond to SOS (comms range >> sensor range — fly to
-  the marker), INTERCEPT posture on SUSPICIOUS/HOSTILE (close and demand
-  surrender BEFORE weapons; engage on refusal/return fire), honor
-  surrender, resume patrol.
+- Patrol tree grows, and this is where the patrol's SUSPICION ASSESSMENT
+  lives (the former SUSPICIOUS-standing criteria — loiter off-lane, ignored
+  challenge, wanted-name — as blackboard scoring, not a contact-record tier):
+  respond to SOS (comms range >> sensor range — fly to the marker), INTERCEPT
+  posture on its own suspicion OR a HOSTILE standing (close and demand
+  surrender BEFORE weapons; engage on refusal/return fire), honor surrender,
+  resume patrol.
 - Witnessed-ambush escalation end-to-end: pirate demands surrender in
   patrol sensor sight → patrol marks HOSTILE (M48 rule), intercepts,
   engages on non-compliance.
@@ -193,9 +214,9 @@ The player enters the loop.
   fail = it dies/loses cargo) and HUNT (patrol a lane area; success =
   pirate destroyed or forced to surrender — but the target must be marked
   HOSTILE by home-faction standing first: under the assistance exemption,
-  killing an unmarked SUSPICIOUS contact makes YOU the aggressor from the
-  patrol's angle. The mission is force-the-reveal detective work and the
-  contract brief says so). Offered via the existing
+  killing a contact the patrol has NO evidence on makes YOU the aggressor
+  from the patrol's angle. The mission is force-the-reveal detective work and
+  the contract brief says so). Offered via the existing
   comms/contract surfaces; MissionLog gains the two objective kinds it's
   missing (ESCORT/KILL_OR_CAPTURE); ContractFeed markers already generalize.
 - Payment on completion; escort pay scales with pirate pressure (the guild

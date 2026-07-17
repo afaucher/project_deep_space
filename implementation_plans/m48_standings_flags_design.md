@@ -1,5 +1,19 @@
 # M48 — Standings & flags (IFF v2): detailed design
 
+> **Post-ship revision (standing is FOUR tiers, not five).** This doc
+> describes M48 AS BUILT, which shipped a `SUSPICIOUS` tier. The model was
+> revised afterward: "suspicious" has no shared meaning across roles (a
+> patrol's "acting like a predator" vs a pirate's "prey that might be a
+> trap"), so it does NOT belong on the shared contact record — it is each
+> AI's own role-specific assessment (behavior-tree blackboard). Standing is
+> now FRIENDLY / NEUTRAL / UNREPORTED / HOSTILE only. The shipped code below
+> keeps a vestigial SUSPICIOUS tier pending the small simplification tracked
+> as "M48 code delta" in the roadmap. Where this doc says a rule produces
+> SUSPICIOUS (the wanted-name rule; the stray-fire dampening), read the
+> roadmap's delta for the revised behavior. See
+> [economy_and_piracy.md](../design_ideas/economy_and_piracy.md) for the
+> four-tier model + the per-AI assessment layer.
+
 Parent: [m48_m55_economy_piracy_roadmap.md](m48_m55_economy_piracy_roadmap.md);
 vision + the full standing table live in
 [economy_and_piracy.md](../design_ideas/economy_and_piracy.md). This doc pins

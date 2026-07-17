@@ -32,43 +32,76 @@ judgment call. The fix is a **two-layer split**:
 
 - **Classification stays sensor truth** (what the physics says: vessel /
   ordnance / wreckage / asteroid, friendly-by-crypto or not). No change.
-- **Standing is judgment** — a per-observer ledger about a *tracked contact*.
-  Every entry criterion is an observable event with a threshold (each row is
-  a headless test), every entry carries a reason string, and UNREPORTED is a
-  location-independent FACT ("this track is not identifying itself" — which
-  is why a dark contact in deep space feels threatening) while the
-  *enforcement response* is location-dependent (only controlled space makes
-  it a patrol matter):
+- **Standing is the shared, objective disposition** — a per-observer ledger
+  about a *tracked contact*, but one whose tiers mean the SAME thing to every
+  observer that holds them, so they can ride the datalink and drive any AI or
+  the player UI. Four tiers; each carries a reason string; UNREPORTED is a
+  location-independent FACT ("this track is not identifying itself" — which is
+  why a dark contact in deep space feels threatening) while the *enforcement
+  response* to it is location-dependent (only controlled space makes it a
+  patrol matter):
 
   | Standing | Meaning | Entry criteria (any one; each carries a reason) | Exit / decay |
   |---|---|---|---|
   | FRIENDLY | crypto-verified own side | IFF tag overlap (unforgeable handshake) | track loss (traitor/friendly-fire demotion: deferred edge case) |
-  | NEUTRAL | identified, clean | broadcasting name + flag; flag not known-enemy; no live evidence on the track | resting state — no decay needed |
+  | NEUTRAL | identified, clean | broadcasting name + flag; flag not known-enemy | resting state — no decay needed |
   | UNREPORTED | not identifying itself | no name + flag broadcast received for this track (anywhere) | instantly → NEUTRAL on reporting with a clean flag |
-  | SUSPICIOUS | judged worth watching | 1. challenge comply-window expired (controlled space) 2. dark/unreported contact loitering near a lane (~15k of a lane, <~20% max speed, >30s) 3. sustained intercept geometry toward a third ship (~20s closing lead-pursuit) 4. datalink report from ally (relays reason + attribution) 5. claims a name on my faction's wanted-names list (names are cheap talk — suspicion, never auto-HOSTILE) 6. *(later)* transponder claim vs tracked position mismatch | decays → NEUTRAL after a clean interval (~3 min reporting, no new events); challenge compliance clears reason 1 immediately; track loss forgets (wanted-name suspicion re-enters on any new track claiming the name) |
-  | HOSTILE | **earned** enemy | 1. attributed aggression (`attacker_id` == this track, vs me / my faction / anything I hold a live track on — stations witness attacks on themselves; see the angle rules below for the assistance exemption and stray-fire dampening) 2. DEMAND_SURRENDER heard from it, unless it flies one of MY authority flags (a police stop, not piracy — see below) 3. flying a known-enemy flag (pirate flag, day one) 4. player MARK HOSTILE 5. faction datalink share (with attribution) | **sticky for the life of the track — never decays**; the only way out is breaking the track (that is what laundering IS) |
+  | HOSTILE | **earned** enemy | 1. attributed aggression (`attacker_id` == this track, vs me / my faction / anything I hold a live track on — stations witness attacks on themselves; see the angle rules below for the assistance exemption and the attribution confidence gate) 2. DEMAND_SURRENDER heard from it, unless it flies one of MY authority flags (a police stop, not piracy) 3. flying a known-enemy flag (pirate flag, day one) 4. player MARK HOSTILE 5. faction datalink share (with attribution) | **sticky for the life of the track — never decays**; the only way out is breaking the track (that is what laundering IS) |
+
+  Every tier passes the "does it mean the same to everyone?" test: FRIENDLY is
+  crypto truth, NEUTRAL/UNREPORTED are identity facts, and HOSTILE means
+  "treat as an enemy" — a disposition every allied ship agrees on and acts on
+  (shoot / flee / interdict the enemy). That shared meaning is exactly what
+  lets standing ride the datalink and paint the contacts panel. (What does
+  NOT pass that test — "suspicious" — is deliberately absent; see below.)
 
   What each tier authorizes:
 
-  | Actor | FRIENDLY / NEUTRAL | UNREPORTED | SUSPICIOUS | HOSTILE |
-  |---|---|---|---|---|
-  | Weapons AI (`acquire_target`) | never | never | never | engage — *unless surrendered* |
-  | Patrols | ignore | controlled space: CHALLENGE (close, hail, ~20s window); outside: observe only | intercept posture: divert, shadow, demand ID; stop-and-inspect once M55 lands; weapons tight | interdict: close, DEMAND_SURRENDER, engage on non-compliance |
-  | Cargo / civilians | ignore | wide berth (steer around) | evade: reroute, hold at station, pre-emptive SOS ("possible pirate near lane") | flee + SOS |
-  | Port authority | grants issued | no dock grants until reported | grants denied; sighting reported to faction | grants denied; alarm |
-  | Player UI | green / white | dim yellow, "NOT REPORTING" | orange + reason ("ignored challenge", "dark, loitering near lane") | red + reason; MARK HOSTILE is how the player writes this tier |
+  | Actor | FRIENDLY / NEUTRAL | UNREPORTED | HOSTILE |
+  |---|---|---|---|
+  | Weapons AI (`acquire_target`) | never | never | engage — *unless surrendered* |
+  | Patrols | ignore | controlled space: CHALLENGE (close, hail, ~20s window); outside: observe only | interdict: close, DEMAND_SURRENDER, engage on non-compliance |
+  | Cargo / civilians | ignore | wide berth (steer around) | flee + SOS |
+  | Port authority | grants issued | no dock grants until reported | grants denied; alarm |
+  | Player UI | green / white | dim yellow, "NOT REPORTING" | red + reason; MARK HOSTILE is how the player writes this tier |
 
   Notes: **surrendered is orthogonal to standing** (a surrendered pirate is
   still HOSTILE — standing records judgment, surrender gates weapons; that
   separation is what makes "held, not shot" enforceable in one place). Only
-  HOSTILE requires an act and only HOSTILE is permanent — the middle tiers
-  are deliberately forgiving, which stops the ladder from ratcheting the
-  cluster into war, and the pirate's laundering trick is that same
-  forgiveness working as intended. The thresholds (15k, 30s, 20s window,
-  3 min decay) are starting values to tune, not commitments. The player gets
-  a "mark hostile" button on the contacts panel (you saw the surrender
-  demand on comms — that's your evidence), plus visibility into *why* an AI
-  marked something.
+  HOSTILE is earned and only HOSTILE is permanent; NEUTRAL/UNREPORTED are
+  forgiving identity facts that flip the instant the transponder does — which
+  stops the ladder ratcheting the cluster into war, and is the same
+  forgiveness the pirate's laundering exploits. The player gets a "mark
+  hostile" button on the contacts panel (you saw the surrender demand on
+  comms — that's your evidence), plus visibility into *why* an AI marked
+  something.
+
+- **Suspicion is NOT a standing — it is each AI's own role-specific
+  assessment.** The load-bearing correction: "suspicious" has no shared
+  meaning, so it cannot live on the shared contact record. Ask what it means
+  to each role:
+  - **Patrol/militia:** a ship acting like a predator — dark, loitering
+    off-lane, ignoring a challenge, or claiming a name on the militia
+    wanted-list. Suspicion → close, challenge, shadow, stop-and-inspect.
+  - **Pirate:** almost the opposite. A NEUTRAL hauler is not "safe", it is
+    PREY; what makes a pirate wary is prey that looks like BAIT (a Q-ship
+    baiting pirates), a "trader" shadowing it (a patrol under false colors),
+    or a freighter armed above its class. Its real read is OPPORTUNITY
+    (worth taking, given witnesses / escort / escape route), with suspicion
+    only a modifier on that.
+  - **Cargo/civilian:** cruder still — anything not clearly friendly is a
+    thing to steer wide of; no "suspicion" state at all, just avoidance.
+
+  A patrol interdicts on suspicion; a same-faction cargo ship interdicts
+  nothing. "Suspicious → do what?" only has an answer once you know the
+  observer's role — which is the proof it belongs in the behavior tree, not
+  on the contact. So each AI computes its own threat/intent assessment on its
+  own blackboard from `standing` + observed behavior + its goals; the former
+  "SUSPICIOUS" criteria (loiter, intercept geometry, ignored challenge,
+  wanted-name) become INPUTS to the *patrol's* assessment specifically. What
+  spreads on the datalink is standing plus, at most, explicit REPORTS ("dark
+  contact loitering off lane 2 at (x,y)") that each recipient interprets
+  through its own role — never a shared "suspicion" verdict.
 
   **The ladder is per-observer (subjective) on purpose — these three rules
   make it hold up from every angle** (stress-tested from the patrol's, the
@@ -78,10 +111,10 @@ judgment call. The fix is a **two-layer split**:
      is already HOSTILE *to me* is not aggression — it's assistance. Without
      this, a patrol flips on the player lawfully engaging a marked pirate,
      and bystanders flip on patrols doing their job. The flip side is kept
-     deliberately: shooting a merely-SUSPICIOUS contact in front of a patrol
-     that holds no evidence DOES get you interdicted — that's what makes
-     hunt missions detective work (force the reveal or the surrender; get
-     the target marked before you fire), not sanctioned murder.
+     deliberately: shooting a contact the patrol has NO evidence on (not
+     HOSTILE to it) in front of it DOES get you interdicted — that's what
+     makes hunt missions detective work (force the reveal or the surrender;
+     get the target marked before you fire), not sanctioned murder.
   2. **Authority flags.** Each observer holds a list of flags whose
      interdictions it considers legitimate (home civilians trust the militia
      flag; pirates trust nothing). DEMAND_SURRENDER from an authority-flag
@@ -89,12 +122,13 @@ judgment call. The fix is a **two-layer split**:
      stop makes the police pirates from bystander angles. A pirate CAN spoof
      the militia flag to freeze a victim — false colors, historically apt,
      and attribution catches up the moment cargo changes hands.
-  3. **Stray-fire dampening.** The apparent TARGET of fire flips HOSTILE on
-     the first attributed hit; a third party — or the recipient of a single
-     stray hit from a ship not flying a known-enemy flag — goes SUSPICIOUS
-     first ("fired near me") and escalates to HOSTILE only on repetition.
-     Because HOSTILE never decays, without this one splash-damage accident
-     would permanently break a civilian's trust in the home patrol.
+  3. **Attribution confidence gate.** The apparent TARGET of fire flips
+     HOSTILE on the first attributed hit; a third party — or the recipient
+     of a single stray hit from a ship not flying a known-enemy flag —
+     needs repetition (N attributed hits) before it flips, tracked by a
+     HIDDEN counter on the track (not a visible tier). Because HOSTILE never
+     decays, without this one splash-damage accident would permanently break
+     a civilian's trust in the home patrol.
 
   One more angle worth stating so nobody "fixes" it: **standing gates
   reactive violence only.** The pirate tree is predatory — it selects
@@ -127,20 +161,24 @@ judgment call. The fix is a **two-layer split**:
      judgment lives while ANY allied observer still holds the track. Dark
      until CONTACT_TIMEOUT on the whole fused picture, not one pursuer.
   2. **Come up under a new name.** Shared HOSTILE markings carry the
-     claimed name at the time onto a faction **wanted-names list**; a new
-     track claiming a wanted name enters at SUSPICIOUS (reason: "claims a
-     wanted name") — never auto-HOSTILE, because names are cheap talk and
-     an innocent could fly one by coincidence or malice. This also kills
-     the degenerate exploit of flickering the transponder through one
-     timeout period to reset aggro under the same identity.
+     claimed name at the time onto a faction **wanted-names list** (militia
+     intel, not a standing). A new track claiming a wanted name is still
+     NEUTRAL by standing — names are cheap talk, an innocent could fly one
+     by coincidence or malice — but it draws the patrol's *assessment*: a
+     look, a challenge, a shadow. So laundering needs a genuinely fresh
+     identity, and the degenerate exploit of flickering the transponder
+     through one timeout to reset aggro under the SAME name is dead (the
+     wanted-name draws attention no matter how the track was reset).
   3. **Report like a good citizen on re-entry** (fresh name, plausible
      flag, transponder on) — the arrival looks like any other trader
      coming in from a far berth.
   The wormhole exit stays the trivially clean cash-in: the ship is simply
   gone, and the guild's next arrival carries a fresh cover identity anyway.
-- **Standing is shareable.** Datalink already merges tracks; hostile/suspect
-  markings ride along with attribution ("Patrol Alpha flagged: fired on
-  Mule"). A patrol that saw the ambush makes the whole home faction react.
+- **Standing is shareable.** Datalink already merges tracks; HOSTILE markings
+  ride along with attribution ("Patrol Alpha flagged: fired on Mule"), and a
+  patrol may also relay explicit REPORTS ("dark contact loitering off lane 2")
+  that each recipient reads through its own role. A patrol that saw the ambush
+  makes the whole home faction react.
 - **The flag does not replace attribution — both rules ship together.**
   Witnessed aggression stays the primary hostility trigger; the flag is the
   shortcut for the unambiguous case. The canonical attribution case: firing
@@ -174,11 +212,13 @@ clear of you. Outside controlled space, dark is legal — merely ominous.
    decision toward compliance; everyone broadcasts SOS. Resume route when the
    threat leaves. Surrendered is a hard ship state honored by ALL AI: pirates
    stop shooting compliant victims, patrols hold fire on surrendered pirates.
-3. **Patrols policing**: challenge UNREPORTED ships in controlled space
-   (close to comms range, CHALLENGE, give seconds to comply); witness
-   aggression → mark HOSTILE + broadcast the marking; respond to SOS beyond
-   sensor range (comms is longer-ranged than sensors — by design); intercept
-   before weapons: close, demand surrender, engage only on refusal/fire.
+3. **Patrols policing**: the patrol's OWN suspicion assessment lives here
+   (loitering off-lane, a claimed wanted-name, an ignored challenge) — it
+   challenges UNREPORTED ships in controlled space (close to comms range,
+   CHALLENGE, give seconds to comply); witness aggression → mark HOSTILE
+   (shared standing) + broadcast the marking; respond to SOS beyond sensor
+   range (comms is longer-ranged than sensors — by design); intercept before
+   weapons: close, demand surrender, engage only on refusal/fire.
 4. **Player missions**: escort (fly with a cargo run end-to-end; it arriving
    alive is the win) and hunt (patrol the lanes yourself, spot the dark
    contact, intercept — force surrender or destroy). Both paid in credits.
@@ -189,7 +229,15 @@ clear of you. Outside controlled space, dark is legal — merely ominous.
 
 ## Systems that need to exist
 
-- **Standings & flags (IFF v2)** — the ladder above. The foundation.
+- **Standings & flags (IFF v2)** — the four-tier shared disposition above
+  (FRIENDLY / NEUTRAL / UNREPORTED / HOSTILE) on the contact record, plus the
+  transponder flag. The foundation.
+- **Per-AI threat/intent assessment** — the role-specific layer suspicion
+  actually belongs in (NOT a standing): each behavior tree scores a contact
+  for ITS own goals from `standing` + observed behavior. Patrol =
+  "interdict-worthy?" (loiter off-lane, ignored challenge, wanted-name);
+  pirate = "prey / threat / trap?"; cargo = "avoid?". Blackboard state, never
+  the shared contact record; what's shareable is standing + explicit reports.
 - **Hail protocol** — structured machine-to-machine comms verbs (not
   dialogue trees): CHALLENGE, DEMAND_SURRENDER, COMPLY, SOS, and a standing
   broadcast (MARK_HOSTILE with reason). Rides the existing comms-range and
@@ -250,10 +298,18 @@ rule in CLAUDE.md).
 
 ## Design decisions locked by this doc
 
-1. Classification (sensor truth) and standing (judgment) are separate
-   layers; `classify_contact` is not overloaded.
+1. THREE layers, not one: classification (sensor truth) → standing (the
+   shared, objective disposition: FRIENDLY/NEUTRAL/UNREPORTED/HOSTILE) →
+   per-AI threat/intent assessment (role-specific, on the behavior tree's
+   blackboard). `classify_contact` is not overloaded; standing is not
+   overloaded with role-specific judgment.
 2. Hostility is earned per observer with an audit reason — never automatic
    from "not one of us".
+2a. "Suspicion" is NOT a standing — it has no shared meaning (a patrol's
+   "acting like a predator" vs a pirate's "prey that might be a trap" vs a
+   civilian's "avoid"), so it lives in each AI's assessment, never on the
+   shared contact record. Only dispositions that mean the same to every
+   holder (identity facts + earned HOSTILE) are standings.
 3. Flags are spoofable declarations; IFF tags stay crypto-truth.
 3a. The pirate flag exists as a flyable flag and is auto-HOSTILE to
    non-pirates. Showing colors is an AI decision (at the demand, in force,
