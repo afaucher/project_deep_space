@@ -16,7 +16,6 @@ signal mark_hostile_requested(c_id: String)
 # panels (also out of scope here), so this is its own small const.
 const _STANDING_COLORS := {
 	"HOSTILE": Color(0.85, 0.2, 0.2),
-	"SUSPICIOUS": Color(0.9, 0.55, 0.15),
 	"UNREPORTED": Color(0.75, 0.7, 0.25),
 	"NEUTRAL": Color(0.85, 0.85, 0.85),
 	"FRIENDLY": Color(0.2, 0.8, 0.2),

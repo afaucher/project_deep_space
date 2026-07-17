@@ -90,15 +90,16 @@ The enabling refactor; nothing else lands without it.
   and propagates on datalink; manual flag works; track loss forgets.
 - **Risk**: the combat-test audit is the real cost of this milestone.
   Budget for it; it is the price of unwinding shoot-on-sight.
-- **M48 code delta** (post-ship simplification, folds the revised model into
-  the shipped 5-tier code): drop the `wanted-name → SUSPICIOUS` rule from
-  `Standing.compute_standing` (wanted-names become a patrol-assessment input
-  in M52, not a standing); keep the stray-fire logic but as a hidden
-  `aggro_hits` counter that flips HOSTILE at the threshold with NO
-  intermediate SUSPICIOUS write; remove the SUSPICIOUS decay block in
-  `ship.gd` and the SUSPICIOUS row from `contacts_panel`'s color map; the
-  `SUSPICIOUS` constant and severity entry can go once nothing writes it.
-  Small, test-covered, and leaves standing at four clean tiers.
+- **M48 code delta — DONE** (post-ship simplification, folded the revised
+  model into the shipped 5-tier code): dropped the `wanted-name → SUSPICIOUS`
+  rule from `Standing.compute_standing` (wanted-names registry stays as the
+  M52 patrol-assessment input; `is_wanted` now called only by the patrol tree
+  when it lands); the stray-fire logic is now a hidden `aggro_hits` counter
+  that flips HOSTILE at the threshold with NO intermediate SUSPICIOUS write;
+  removed the SUSPICIOUS decay block in `ship.gd`, the SUSPICIOUS row from
+  `contacts_panel`'s color map, and the `SUSPICIOUS` constant + severity
+  entry. Standing is four clean tiers; `test_standing_rules`/`test_standing_e2e`
+  updated; full gate green.
 
 ## M49 — Hail protocol, surrender, challenge
 

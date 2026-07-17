@@ -53,17 +53,13 @@ func setup(_main) -> void:
 		{"name": "Raider", "flag": Standing.FLAG_PIRATE}, observer_a, Standing.HOSTILE, "flying"
 	])
 
-	# 4. Sticky SUSPICIOUS stays SUSPICIOUS until decay clears it (ship.gd's job, not this function's).
-	cases.append([
-		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}, "standing": "SUSPICIOUS", "standing_reason": "fired near Mule"},
-		{}, observer_a, Standing.SUSPICIOUS, "fired near Mule"
-	])
-
-	# 5. Transponder reporting a name on the wanted list -> SUSPICIOUS ("claims a wanted name").
+	# 4. A claimed name on the wanted list does NOT change standing -- suspicion
+	# is not a standing, it's the patrol's own assessment (which reads the
+	# wanted-names registry itself). A reporting ship stays NEUTRAL.
 	Standing.add_wanted(["TEAM_A"], "Mule")
 	cases.append([
 		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
-		{"name": "Mule", "flag": ""}, observer_a, Standing.SUSPICIOUS, "wanted name"
+		{"name": "Mule", "flag": ""}, observer_a, Standing.NEUTRAL, "reporting clean"
 	])
 
 	# 6. Transponder reporting a clean (non-wanted) name -> NEUTRAL.
@@ -135,7 +131,7 @@ func setup(_main) -> void:
 		passed += 1
 
 	# --- severity ordering ---------------------------------------------------
-	var order = ["", Standing.NEUTRAL, Standing.UNREPORTED, Standing.SUSPICIOUS, Standing.HOSTILE]
+	var order = ["", Standing.NEUTRAL, Standing.UNREPORTED, Standing.HOSTILE]
 	var order_ok = true
 	for i in range(order.size() - 1):
 		if not (Standing.severity(order[i]) < Standing.severity(order[i + 1])):
@@ -146,7 +142,7 @@ func setup(_main) -> void:
 	else:
 		failed += 1
 
-	if Standing.is_more_severe(Standing.HOSTILE, Standing.SUSPICIOUS) and not Standing.is_more_severe(Standing.NEUTRAL, Standing.HOSTILE) and not Standing.is_more_severe(Standing.SUSPICIOUS, Standing.SUSPICIOUS):
+	if Standing.is_more_severe(Standing.HOSTILE, Standing.UNREPORTED) and not Standing.is_more_severe(Standing.NEUTRAL, Standing.HOSTILE) and not Standing.is_more_severe(Standing.UNREPORTED, Standing.UNREPORTED):
 		passed += 1
 	else:
 		failed += 1

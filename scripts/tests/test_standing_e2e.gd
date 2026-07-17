@@ -204,10 +204,10 @@ func _tick_scenario_c() -> int:
 				printerr("  ASSERT FAILED: victim should flip HOSTILE on the first hit ('fired on us'), got standing=", v_c.get("standing", ""), " reason='", v_c.get("standing_reason", ""), "'")
 				return 0
 			var w_c: Dictionary = _find_contact(witness, attacker)
-			if w_c.get("standing", "") != Standing.SUSPICIOUS or w_c.get("aggro_hits", 0) != 1:
-				printerr("  ASSERT FAILED: witness should be dampened to SUSPICIOUS (aggro_hits=1) after 1 stray hit, got standing=", w_c.get("standing", ""), " aggro_hits=", w_c.get("aggro_hits", 0))
+			if w_c.get("standing", "") == Standing.HOSTILE or w_c.get("aggro_hits", 0) != 1:
+				printerr("  ASSERT FAILED: witness should hold a HIDDEN counter (aggro_hits=1, NOT hostile) after 1 stray hit, got standing=", w_c.get("standing", ""), " aggro_hits=", w_c.get("aggro_hits", 0))
 				return 0
-			print("  [PASS] first hit: victim flipped HOSTILE ('fired on us'), witness dampened to SUSPICIOUS (aggro_hits=1, reason='", w_c.get("standing_reason", ""), "')")
+			print("  [PASS] first hit: victim flipped HOSTILE ('fired on us'), witness counter at aggro_hits=1 (standing='", w_c.get("standing", ""), "', not hostile)")
 			phase = 3
 			step_frame = 0
 			return -1
@@ -221,10 +221,10 @@ func _tick_scenario_c() -> int:
 			if step_frame < 3:
 				return -1
 			var w_c2: Dictionary = _find_contact(witness, attacker)
-			if w_c2.get("standing", "") != Standing.SUSPICIOUS or w_c2.get("aggro_hits", 0) != 2:
-				printerr("  ASSERT FAILED: witness should still be dampened (aggro_hits=2, below STRAY_HITS_TO_HOSTILE) after 2 stray hits, got standing=", w_c2.get("standing", ""), " aggro_hits=", w_c2.get("aggro_hits", 0))
+			if w_c2.get("standing", "") == Standing.HOSTILE or w_c2.get("aggro_hits", 0) != 2:
+				printerr("  ASSERT FAILED: witness should still be below threshold (aggro_hits=2, NOT hostile) after 2 stray hits, got standing=", w_c2.get("standing", ""), " aggro_hits=", w_c2.get("aggro_hits", 0))
 				return 0
-			print("  [PASS] second hit: witness still dampened (aggro_hits=2)")
+			print("  [PASS] second hit: witness still below threshold (aggro_hits=2, not hostile)")
 			phase = 5
 			step_frame = 0
 			return -1
@@ -273,8 +273,8 @@ func _tick_scenario_d() -> int:
 				return -1
 			var e_c: Dictionary = _find_contact(observer, enforcer)
 			var std: String = e_c.get("standing", "")
-			if std == Standing.HOSTILE or std == Standing.SUSPICIOUS or e_c.get("aggro_hits", 0) != 0:
-				printerr("  ASSERT FAILED: assistance exemption should NOT flip/dampen the enforcer's standing, got standing='", std, "' aggro_hits=", e_c.get("aggro_hits", 0))
+			if std == Standing.HOSTILE or e_c.get("aggro_hits", 0) != 0:
+				printerr("  ASSERT FAILED: assistance exemption should NOT flip/count the enforcer's standing, got standing='", std, "' aggro_hits=", e_c.get("aggro_hits", 0))
 				return 0
 			print("  [PASS] assistance exemption held: engaging an already-HOSTILE target did not flip the witness's judgment of the enforcer (standing stays '", std, "')")
 			return 1

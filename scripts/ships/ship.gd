@@ -1947,26 +1947,6 @@ func _physics_process(delta: float) -> void:
 		if c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2:
 			c["pos"] += c["vel"] * delta
 
-		# M48 -- SUSPICIOUS decay: a clean interval of reporting with no new
-		# evidence forgives the ladder back to NEUTRAL (HOSTILE is sticky
-		# forever and never reaches this branch; track death forgets
-		# everything anyway, for free, via to_remove below). The decay clock
-		# only advances while the track has an active, reporting transponder
-		# -- reusing active_transponders here reads last tick's datalink pass
-		# (repopulated later this same tick), same one-tick lag as the
-		# correlate-update standing recompute above.
-		if c.get("standing", "") == Standing.SUSPICIOUS:
-			var decay_t_data: Dictionary = active_transponders.get(c.get("instance_id", -1), {})
-			if not decay_t_data.is_empty():
-				c["suspicion_timer"] = c.get("suspicion_timer", 0.0) + delta
-				if c["suspicion_timer"] > Standing.SUSPICION_DECAY:
-					c["standing"] = Standing.NEUTRAL
-					c["standing_reason"] = "clean interval elapsed"
-					c["suspicion_timer"] = 0.0
-					c["aggro_hits"] = 0
-			else:
-				c["suspicion_timer"] = 0.0
-
 		if c["last_seen_timer"] > CONTACT_TIMEOUT:
 			to_remove.append(c_id)
 	for c_id in to_remove:
@@ -2335,19 +2315,20 @@ func _physics_process(delta: float) -> void:
 			atk_c["standing"] = Standing.HOSTILE
 			atk_c["standing_reason"] = "attacked " + victim_name
 		elif atk_c.get("standing", "") != Standing.HOSTILE:
-			# Stray-fire dampening: SUSPICIOUS first, HOSTILE only on
-			# repetition. (Sticky HOSTILE already covers the "already
-			# escalated" case -- the elif guard just avoids downgrading the
-			# reason string on a HOSTILE track that keeps taking hits.)
+			# Attribution confidence gate: a stray hit on a THIRD party (not
+			# my faction) needs repetition before it flips the shooter HOSTILE
+			# -- one splash accident shouldn't permanently mark a ship (HOSTILE
+			# never decays). aggro_hits is a HIDDEN counter, NOT a standing:
+			# below the threshold the shooter's standing is left untouched (a
+			# "suspicious" tier would have no shared meaning -- that judgment,
+			# if any, is the observer's own assessment). At/over the threshold
+			# it flips HOSTILE. (Sticky HOSTILE covers the already-escalated
+			# case; the elif guard avoids re-touching a HOSTILE track's reason.)
 			var hits: int = atk_c.get("aggro_hits", 0) + 1
 			atk_c["aggro_hits"] = hits
 			if hits >= Standing.STRAY_HITS_TO_HOSTILE:
 				atk_c["standing"] = Standing.HOSTILE
 				atk_c["standing_reason"] = "sustained attack on " + victim_name
-			else:
-				atk_c["standing"] = Standing.SUSPICIOUS
-				atk_c["standing_reason"] = "fired near " + victim_name
-				atk_c["suspicion_timer"] = 0.0
 	PerfProbe.end("aggression_witness")
 
 	# Datalink Relay: friendly ships in mutual comms range and line-of-sight

@@ -1,16 +1,19 @@
 # M48 — Standings & flags (IFF v2): detailed design
 
-> **Post-ship revision (standing is FOUR tiers, not five).** This doc
-> describes M48 AS BUILT, which shipped a `SUSPICIOUS` tier. The model was
-> revised afterward: "suspicious" has no shared meaning across roles (a
-> patrol's "acting like a predator" vs a pirate's "prey that might be a
-> trap"), so it does NOT belong on the shared contact record — it is each
-> AI's own role-specific assessment (behavior-tree blackboard). Standing is
-> now FRIENDLY / NEUTRAL / UNREPORTED / HOSTILE only. The shipped code below
-> keeps a vestigial SUSPICIOUS tier pending the small simplification tracked
-> as "M48 code delta" in the roadmap. Where this doc says a rule produces
-> SUSPICIOUS (the wanted-name rule; the stray-fire dampening), read the
-> roadmap's delta for the revised behavior. See
+> **Post-ship revision (standing is FOUR tiers, not five) — APPLIED.** This
+> doc describes M48 AS ORIGINALLY BUILT, which shipped a `SUSPICIOUS` tier.
+> The model was revised afterward: "suspicious" has no shared meaning across
+> roles (a patrol's "acting like a predator" vs a pirate's "prey that might
+> be a trap"), so it does NOT belong on the shared contact record — it is
+> each AI's own role-specific assessment (behavior-tree blackboard). Standing
+> is now FRIENDLY / NEUTRAL / UNREPORTED / HOSTILE only, and the "M48 code
+> delta" from the roadmap **has been applied**: `compute_standing` no longer
+> produces SUSPICIOUS (the wanted-name rule now leaves standing NEUTRAL and
+> the registry feeds the future patrol assessment), the stray-fire logic is a
+> hidden `aggro_hits` counter that flips HOSTILE at threshold with no
+> intermediate tier, and the SUSPICIOUS decay / contacts-panel row / constant
+> are gone. **Wherever this doc below says a rule produces SUSPICIOUS, that is
+> the superseded original behavior.** See
 > [economy_and_piracy.md](../design_ideas/economy_and_piracy.md) for the
 > four-tier model + the per-AI assessment layer.
 
