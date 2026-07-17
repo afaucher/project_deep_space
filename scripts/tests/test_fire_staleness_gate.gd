@@ -67,7 +67,7 @@ func setup(main) -> void:
 	# track is 4s old -- past FIRE_STALENESS_MAX (3.0).
 	ship.active_contacts["TGT_STALE"] = {
 		"pos": Vector2(3000, 0), "vel": Vector2.ZERO,
-		"classification": "UNIDENTIFIED VESSEL",
+		"classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE",
 		"last_seen_timer": 4.0, "pos_timer": 4.0,
 	}
 	var ammo_before: int = _total_ammo(ship)
@@ -94,7 +94,7 @@ func setup(main) -> void:
 
 	ship3.active_contacts["TGT_LATE"] = {
 		"pos": Vector2(3000, 0), "vel": Vector2.ZERO,
-		"classification": "UNIDENTIFIED VESSEL",
+		"classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE",
 		"last_seen_timer": 0.0, "pos_timer": 0.0,
 	}
 	var r = acquire.tick(ship3, blackboard)

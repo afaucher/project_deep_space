@@ -79,6 +79,7 @@ func _promote(rec) -> void:
 		node.owner_id = 0 # 0 means server-owned NPC; rec.id overlaps with peer IDs
 		node.iff_tags = rec.iff_tags.duplicate(true)
 		node.ship_name = rec.name
+		node.authority_flags = rec.authority_flags.duplicate(true)
 	# Transform before add_child (body not yet in the physics world -> no teleport
 	# warning); velocities after, once it is registered.
 	node.position = rec.pos
@@ -90,6 +91,11 @@ func _promote(rec) -> void:
 		node.linear_velocity = rec.vel
 		node.angular_velocity = rec.ang_vel
 	rec.live_node = node
+	# M48 -- set_transponder_flag is an RPC (call_local) that walks
+	# ship_components, so it must run AFTER add_child (component list isn't
+	# normalized until _ready(), which fires on entering the tree).
+	if is_ship and rec.transponder_flag != "":
+		node.set_transponder_flag(rec.transponder_flag)
 	_rebrand_port_zone(node, rec.name)
 	_apply_overlay_decorations(rec, node)
 	if is_ship:

@@ -1,7 +1,26 @@
 extends Control
 
+# M48 -- Standings & flags (IFF v2): row color prefers standing over raw
+# classification for vessels, the selected row's detail line shows
+# standing (reason), and a MARK HOSTILE button lets the operator flag a
+# not-yet-hostile vessel directly (mark_contact_hostile -- the player-
+# judgment lever). Referenced via preload const, never bare class_name.
+const Standing = preload("res://scripts/combat/standing.gd")
+
 signal contact_pin_toggled(c_id: String, is_pinned: bool)
 signal selection_changed(c_id: String)
+signal mark_hostile_requested(c_id: String)
+
+# Local color map -- standing.gd is phase-1, not ours to touch, and
+# scripts/utils.gd's classification_color is shared with the nav/sensor
+# panels (also out of scope here), so this is its own small const.
+const _STANDING_COLORS := {
+	"HOSTILE": Color(0.85, 0.2, 0.2),
+	"SUSPICIOUS": Color(0.9, 0.55, 0.15),
+	"UNREPORTED": Color(0.75, 0.7, 0.25),
+	"NEUTRAL": Color(0.85, 0.85, 0.85),
+	"FRIENDLY": Color(0.2, 0.8, 0.2),
+}
 
 var current_state: Dictionary = {}
 var contact_panels: Dictionary = {}
@@ -227,6 +246,8 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var info: Label
 		var p_style: StyleBoxFlat
 
+		var mark_hostile_btn: Button
+
 		if contact_panels.has(c_id):
 			var refs = contact_panels[c_id]
 			panel = refs["panel"]
@@ -234,6 +255,7 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			header = refs["header"]
 			pin_btn = refs["pin_btn"]
 			info = refs["info"]
+			mark_hostile_btn = refs["mark_hostile_btn"]
 		else:
 			panel = PanelContainer.new()
 			p_style = StyleBoxFlat.new()
@@ -256,11 +278,20 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			pin_btn.toggled.connect(func(pressed): emit_signal("contact_pin_toggled", c_id, pressed))
 			header_hbox.add_child(pin_btn)
 
+			# M48 -- the player-judgment lever (mark_contact_hostile). Only
+			# ever shown for the selected vessel contact when it isn't
+			# already HOSTILE/FRIENDLY -- see the visibility update below.
+			mark_hostile_btn = Button.new()
+			mark_hostile_btn.text = "MARK HOSTILE"
+			mark_hostile_btn.visible = false
+			mark_hostile_btn.pressed.connect(func(): emit_signal("mark_hostile_requested", c_id))
+			header_hbox.add_child(mark_hostile_btn)
+
 			info = Label.new()
 			info.add_theme_font_size_override("font_size", 12)
 			vbox.add_child(info)
 
-			contact_panels[c_id] = {"panel": panel, "style": p_style, "header": header, "pin_btn": pin_btn, "info": info}
+			contact_panels[c_id] = {"panel": panel, "style": p_style, "header": header, "pin_btn": pin_btn, "info": info, "mark_hostile_btn": mark_hostile_btn}
 
 		# Parent to the correct section
 		var classification = c.get("classification", "UNKNOWN")
@@ -289,9 +320,18 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		else:
 			p_style.bg_color = Color(0.1, 0.1, 0.1, 0.8)
 			
-		var color = Color(0.8, 0.8, 0.8)
-		if classification_str == "FRIENDLY VESSEL": color = Color(0.2, 0.8, 0.2)
-		elif classification_str == "UNIDENTIFIED VESSEL": color = Color(0.8, 0.2, 0.2)
+		# M48 -- standing (an earned, per-observer judgment) takes priority
+		# over raw classification for a vessel's row color when present;
+		# non-vessels (ordnance/wreckage/asteroids) never carry a standing
+		# ("") and fall back to the pre-M48 classification coloring.
+		var standing: String = c.get("standing", "")
+		var color: Color
+		if standing != "" and _STANDING_COLORS.has(standing):
+			color = _STANDING_COLORS[standing]
+		else:
+			color = Color(0.8, 0.8, 0.8)
+			if classification_str == "FRIENDLY VESSEL": color = Color(0.2, 0.8, 0.2)
+			elif classification_str == "UNIDENTIFIED VESSEL": color = Color(0.8, 0.2, 0.2)
 		p_style.border_color = color
 		header.add_theme_color_override("font_color", color)
 		
@@ -318,9 +358,19 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0),
 			my_em_emit, Utils.format_dist(detect_dist)
 		]
-		
+		# M48 -- the selected contact's detail line shows standing (reason).
+		if c_id == selected_contact_id and standing != "":
+			var reason: String = c.get("standing_reason", "")
+			info.text += "\nStanding: %s (%s)" % [standing, reason]
+
 		# Update state without emitting signal
 		pin_btn.set_pressed_no_signal(c_id in pinned_list)
+
+		# M48 -- MARK HOSTILE: only the selected vessel contact, only while
+		# it isn't already HOSTILE or FRIENDLY (nothing left to declare).
+		var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
+		mark_hostile_btn.visible = (c_id == selected_contact_id and is_vessel
+			and standing != Standing.HOSTILE and standing != Standing.FRIENDLY)
 
 # ---------------------------------------------------------------------------
 # M41 -- "Contracts" section: one row per contract_feed.gd entry (the current

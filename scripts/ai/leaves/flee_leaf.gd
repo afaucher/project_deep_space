@@ -3,8 +3,11 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # M12c disengage action: run from the nearest hostile contact at full burn, nose pointed
 # away so thrust drives the ship clear. If nothing hostile is in range there is nothing
 # to flee, so just coast. Reached only when should_disengage has fired, so the ship is
-# deliberately NOT firing here -- it is breaking off, not fighting.
+# deliberately NOT firing here -- it is breaking off, not fighting. M48: "hostile" is
+# the earned Standing.HOSTILE judgment, not raw classification -- flee from the nearest
+# contact THIS ship has actually judged hostile.
 const Steering = preload("res://scripts/ai/steering.gd")
+const Standing = preload("res://scripts/combat/standing.gd")
 const FLEE_SPEED := 900.0
 
 func tick(actor: Node, _blackboard) -> int:
@@ -23,7 +26,7 @@ func _nearest_hostile_pos(actor: Node):
 	var best_dist = INF
 	for c_id in actor.active_contacts:
 		var c = actor.active_contacts[c_id]
-		if c.get("classification", "") != "UNIDENTIFIED VESSEL":
+		if c.get("standing", "") != Standing.HOSTILE:
 			continue
 		var d = actor.position.distance_to(c["pos"])
 		if d < best_dist:

@@ -17,6 +17,7 @@ const SilhouetteSampler = preload("res://scripts/sensors/silhouette_sampler.gd")
 const RadarCrossSection = preload("res://scripts/components/radar_cross_section.gd")
 const PortZone = preload("res://scripts/port/port_zone.gd")
 const PortControl = preload("res://scripts/port/port_control.gd")
+const Standing = preload("res://scripts/combat/standing.gd")
 
 # M31 -- port-zone membership hysteresis. A ship hovering right on a zone's
 # boundary would otherwise thrash zone_enter/zone_exit every tick (its position
@@ -422,6 +423,21 @@ var linear_mode: int = 0 # 0 = Throttle, 1 = Velocity
 var max_omega: float = 2.0
 var max_speed: float = 1000.0
 var iff_tags: Array = []
+
+# M48 -- Standings & flags (IFF v2). known_enemy_flags: any transponder flag
+# in this list reads as HOSTILE the instant it's seen (design_ideas/
+# economy_and_piracy.md's "flags are cheap talk except the pirate flag" --
+# everyone hates the black flag by default, day one). authority_flags: flags
+# this observer considers a legitimate interdiction authority (home
+# civilians trust the militia flag) -- fielded now, consumed by M49's
+# DEMAND_SURRENDER rules; unread in phase 1. launcher_instance_id: unused by
+# a normal Ship, set on a Missile instance at launch (missile_behavior.gd) so
+# missile_controller.gd's detonate() attributes warhead damage to the
+# launcher, not the missile itself.
+var known_enemy_flags: Array = [Standing.FLAG_PIRATE]
+var authority_flags: Array = []
+var launcher_instance_id: int = -1
+
 var available_npcs: Array[Resource] = []
 var comms_ledger: Node
 var mission_log: Node
@@ -943,7 +959,7 @@ func get_active_transponder_data() -> Dictionary:
 			var custom_name = c.get("transponder_custom_name", "")
 			var data = {
 				"name": custom_name if custom_name != "" else ship_name,
-				"flag": c.get("flag", "")
+				"flag": c.get("transponder_flag", "")
 			}
 			if not c.get("transponder_share_name", true):
 				data["name"] = "UNKNOWN"
@@ -1130,10 +1146,32 @@ var sfx_missile: AudioStreamPlayer
 # play and headless tests are not flooded with per-hit / per-shot prints.
 const COMBAT_DEBUG := true
 
-func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic") -> void:
+func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic", attacker_id: int = -1) -> void:
 	if is_dead: return
 
 	if COMBAT_DEBUG: print("[Damage] ", name, " taking ", amount, " ", damage_type, " damage at ", global_pos, " dir ", global_dir)
+
+	# M48 -- attribution. attacker_id is a trailing optional param (all
+	# existing callers, including every test that calls take_damage() with 3
+	# or fewer args, stay valid at the default -1, meaning "unknown/
+	# anonymous" -- e.g. a fallback hit with no position). A known attacker:
+	#   - flips OUR OWN track on the attacker to HOSTILE on the first hit,
+	#     regardless of hit count (per design_ideas/economy_and_piracy.md:
+	#     the apparent target of fire flips immediately) -- but only if we
+	#     already hold a track on them (no track -> the dark sniper stays
+	#     anonymous, we don't know who shot us).
+	#   - always posts to the aggression bus for witnesses to consume in
+	#     their own fusion tick, independent of whether we hold a track.
+	if attacker_id != -1:
+		var attacker_trk: String = "TRK-%03d" % (abs(attacker_id) % 1000)
+		if active_contacts.has(attacker_trk):
+			var atk_c: Dictionary = active_contacts[attacker_trk]
+			atk_c["standing"] = Standing.HOSTILE
+			atk_c["standing_reason"] = "fired on us"
+			var claimed_name: String = active_transponders.get(attacker_id, {}).get("name", "")
+			if claimed_name != "":
+				Standing.add_wanted(iff_tags, claimed_name)
+		Standing.post_aggression(attacker_id, get_instance_id(), global_pos, iff_tags, ship_name)
 
 	# Player-feedback hook: surface "we got hit" to this ship's own terminal (impact
 	# sound + controller punch + screen flash, scaled by amount). Cleared each frame
@@ -1297,7 +1335,13 @@ func _on_body_entered(other: Node) -> void:
 	var hit_pos: Vector2 = position + impact_dir * get_bounding_radius()
 
 	if COMBAT_DEBUG: print("[Collision] ", name, " hit ", other.name, " at v_impact=", v_impact, " dmg=", damage)
-	take_damage(damage, hit_pos, hit_dir, "kinetic")
+	# M48 -- attribute a ramming collision to the other ship (a station getting
+	# rammed is as much a hostile act as being shot at). Not every collision
+	# is with a ship (asteroids, debris) -- has_method("take_damage") is the
+	# same "is this a damageable ship-like body" test laser_behavior.gd's
+	# hit-query already uses, so Asteroid (no take_damage) is excluded.
+	var attacker_id: int = other.get_instance_id() if other.has_method("take_damage") else -1
+	take_damage(damage, hit_pos, hit_dir, "kinetic", attacker_id)
 
 func hulk() -> void:
 	is_dead = true
@@ -1489,7 +1533,7 @@ func _ready() -> void:
 			if not c.has("transponder_share_name"): c["transponder_share_name"] = true
 			if not c.has("transponder_share_location"): c["transponder_share_location"] = false
 			if not c.has("transponder_custom_name"): c["transponder_custom_name"] = ""
-			if not c.has("flag"): c["flag"] = ""
+			if not c.has("transponder_flag"): c["transponder_flag"] = ""
 
 		# Weapon runtime scratch fields. cooldown is pure state (always starts
 		# ready); ammo is required by the fire path. Authoring these per-weapon is
@@ -1606,6 +1650,11 @@ var active_contacts = {}
 var active_transponders = {}
 var next_contact_id: int = 1
 
+# M48 -- highest Standing.aggression_events seq this ship has already
+# consumed (witness consumption, fusion tick). Starts at 0; the bus's seq
+# counter starts at 1, so every event posted after this ship exists is seen.
+var last_aggression_seq: int = 0
+
 # Contact-cleanup tombstones (DebugSettings.MissileCleanup.VISIBLE). When a despawned
 # entity's track is purged from this ship, we remember its id here for a suppression
 # window so the datalink relay can't immediately re-import the same ghost from a linked
@@ -1672,6 +1721,22 @@ func set_sensor_target(target_id: String) -> void:
 	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
 		if multiplayer.get_remote_sender_id() != 0: pass
 	manual_sensor_target = target_id
+
+# M48 -- the player-judgment mechanic (design_ideas/economy_and_piracy.md's
+# "MARK HOSTILE is how the player writes this tier"), not a test-only
+# backdoor: it's also the legitimate lever for tests that need immediate
+# engagement without transponder plumbing (a comms-less hull can't declare a
+# flag, so there's no other legal way to mark it). Same RPC shape as the
+# other player-triggered setters above.
+@rpc("any_peer", "call_local")
+func mark_contact_hostile(c_id: String, reason: String = "flagged by operator") -> void:
+	if not is_multiplayer_authority(): return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	if not active_contacts.has(c_id):
+		return
+	var c: Dictionary = active_contacts[c_id]
+	c["standing"] = Standing.HOSTILE
+	c["standing_reason"] = reason
 
 # M32 -- player/AI-initiated undock. Only meaningful while actually captured
 # (docking_bay != null, i.e. CAPTURING or DOCKED) with manual_undock=true (see
@@ -1881,7 +1946,27 @@ func _physics_process(delta: float) -> void:
 		# Dead-reckon their position based on velocity
 		if c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2:
 			c["pos"] += c["vel"] * delta
-			
+
+		# M48 -- SUSPICIOUS decay: a clean interval of reporting with no new
+		# evidence forgives the ladder back to NEUTRAL (HOSTILE is sticky
+		# forever and never reaches this branch; track death forgets
+		# everything anyway, for free, via to_remove below). The decay clock
+		# only advances while the track has an active, reporting transponder
+		# -- reusing active_transponders here reads last tick's datalink pass
+		# (repopulated later this same tick), same one-tick lag as the
+		# correlate-update standing recompute above.
+		if c.get("standing", "") == Standing.SUSPICIOUS:
+			var decay_t_data: Dictionary = active_transponders.get(c.get("instance_id", -1), {})
+			if not decay_t_data.is_empty():
+				c["suspicion_timer"] = c.get("suspicion_timer", 0.0) + delta
+				if c["suspicion_timer"] > Standing.SUSPICION_DECAY:
+					c["standing"] = Standing.NEUTRAL
+					c["standing_reason"] = "clean interval elapsed"
+					c["suspicion_timer"] = 0.0
+					c["aggro_hits"] = 0
+			else:
+				c["suspicion_timer"] = 0.0
+
 		if c["last_seen_timer"] > CONTACT_TIMEOUT:
 			to_remove.append(c_id)
 	for c_id in to_remove:
@@ -2137,9 +2222,19 @@ func _physics_process(delta: float) -> void:
 				if bin.has("owner_id"): c["signature"]["owner_id"] = bin["owner_id"]
 				if bin.has("iff_tags"): c["signature"]["iff_tags"] = bin["iff_tags"]
 				if bin.has("instance_id"): c["instance_id"] = bin["instance_id"]
-				
+
 				c["classification"] = Ship.classify_contact(c["signature"], self.iff_tags)
-						
+
+				# M48 -- standing recomputes wherever classification does (this
+				# is the correlate-update path). The correlated transponder
+				# record is one tick old (active_transponders is repopulated
+				# later this same tick, in the datalink relay pass below) --
+				# fine and realistic per the design doc.
+				var t_data: Dictionary = active_transponders.get(c.get("instance_id", -1), {})
+				var std: Dictionary = Standing.compute_standing(c, t_data, self)
+				c["standing"] = std.get("standing", "")
+				c["standing_reason"] = std.get("reason", "")
+
 			c["last_seen_timer"] = 0.0
 		else:
 			# New contact
@@ -2147,9 +2242,9 @@ func _physics_process(delta: float) -> void:
 			if new_id == "":
 				new_id = "TRK-%03d" % next_contact_id
 				next_contact_id += 1
-			
+
 			var classification = Ship.classify_contact(bin, self.iff_tags)
-				
+
 			active_contacts[new_id] = {
 				"id": new_id,
 				"instance_id": bin.get("instance_id", -1),
@@ -2162,11 +2257,21 @@ func _physics_process(delta: float) -> void:
 					"heat": bin.get("heat", 0.0),
 					"em_noise": bin.get("em_noise", 0.0),
 					"density": bin.get("density", 0.0),
-					"owner_id": owner_id
+					"owner_id": owner_id,
+					"iff_tags": bin.get("iff_tags", [])
 				},
 				"last_seen_timer": 0.0,
 				"classification": classification
 			}
+
+			# M48 -- standing recomputes wherever classification does (this is
+			# the new-contact path). new_t_data keyed the same way the
+			# correlate-update path above reads active_transponders.
+			var new_t_data: Dictionary = active_transponders.get(bin.get("instance_id", -1), {})
+			var new_std: Dictionary = Standing.compute_standing(active_contacts[new_id], new_t_data, self)
+			active_contacts[new_id]["standing"] = new_std.get("standing", "")
+			active_contacts[new_id]["standing_reason"] = new_std.get("reason", "")
+
 			closest_contact_id = new_id
 
 		# M26: sample outline dots for this bin's target, on this sensor's own
@@ -2186,6 +2291,64 @@ func _physics_process(delta: float) -> void:
 					var sensor_range_effective: float = bin.get("sensor_range", sensor_comp.get("range", 0.0))
 					_sample_outline_dots(sensor_comp, sensor_range_effective, sensor_origin, active_contacts[closest_contact_id], target)
 	PerfProbe.end("contact_correlate")
+
+	# M48 -- witness consumption: the aggression bus is event-driven (usually
+	# empty -- see Standing.aggression_events), so this is not a per-contact
+	# scan, just a filter over new events since our own last_aggression_seq.
+	# The three angle rules from design_ideas/economy_and_piracy.md live here:
+	# assistance exemption (don't flip on a target already HOSTILE to me --
+	# that's assistance, not aggression), own-faction hits flip immediately,
+	# everything else is stray-fire dampened (aggro_hits) until
+	# STRAY_HITS_TO_HOSTILE.
+	PerfProbe.begin("aggression_witness")
+	Standing.prune_stale(delta)
+	var my_iid := get_instance_id()
+	for ev in Standing.aggression_events:
+		var ev_seq: int = ev.get("seq", 0)
+		if ev_seq <= last_aggression_seq:
+			continue
+		last_aggression_seq = ev_seq
+
+		var attacker_iid: int = ev.get("attacker_iid", -1)
+		var victim_iid: int = ev.get("victim_iid", -1)
+		if attacker_iid == my_iid or victim_iid == my_iid:
+			continue # own hit already handled in take_damage
+
+		var attacker_trk: String = "TRK-%03d" % (abs(attacker_iid) % 1000)
+		if not active_contacts.has(attacker_trk):
+			continue # no live track on the attacker -- can't witness what we can't see
+		var atk_c: Dictionary = active_contacts[attacker_trk]
+		if atk_c.get("last_seen_timer", 0.0) > FIRE_STALENESS_MAX:
+			continue # need a FRESH track to "see" it, same fire-discipline staleness gate as weapons
+
+		# Assistance exemption: if the victim's track (if we hold one) is
+		# already HOSTILE to us, this is assistance, not aggression -- ignore
+		# entirely (a patrol must not flip on the player lawfully engaging a
+		# marked pirate).
+		var victim_trk: String = "TRK-%03d" % (abs(victim_iid) % 1000)
+		if active_contacts.has(victim_trk) and active_contacts[victim_trk].get("standing", "") == Standing.HOSTILE:
+			continue
+
+		var victim_name: String = ev.get("victim_name", "target")
+		if _iff_tags_overlap(iff_tags, ev.get("victim_iff_tags", [])):
+			# My own faction hit -> HOSTILE immediately, no dampening.
+			atk_c["standing"] = Standing.HOSTILE
+			atk_c["standing_reason"] = "attacked " + victim_name
+		elif atk_c.get("standing", "") != Standing.HOSTILE:
+			# Stray-fire dampening: SUSPICIOUS first, HOSTILE only on
+			# repetition. (Sticky HOSTILE already covers the "already
+			# escalated" case -- the elif guard just avoids downgrading the
+			# reason string on a HOSTILE track that keeps taking hits.)
+			var hits: int = atk_c.get("aggro_hits", 0) + 1
+			atk_c["aggro_hits"] = hits
+			if hits >= Standing.STRAY_HITS_TO_HOSTILE:
+				atk_c["standing"] = Standing.HOSTILE
+				atk_c["standing_reason"] = "sustained attack on " + victim_name
+			else:
+				atk_c["standing"] = Standing.SUSPICIOUS
+				atk_c["standing_reason"] = "fired near " + victim_name
+				atk_c["suspicion_timer"] = 0.0
+	PerfProbe.end("aggression_witness")
 
 	# Datalink Relay: friendly ships in mutual comms range and line-of-sight
 	# share active_contacts via freshest-wins. This reruns from scratch every
@@ -2298,6 +2461,18 @@ func _physics_process(delta: float) -> void:
 				if not active_contacts.has(c_id):
 					var imported: Dictionary = external_contact.duplicate(true)
 					imported["last_seen_timer"] = relayed_age
+					# M48 -- datalink standing share: an imported track already
+					# carries the peer's judgment; relabel the reason so it
+					# reads as relayed, not directly observed, and feed
+					# wanted_names on a HOSTILE import same as the update path
+					# below.
+					var imported_standing: String = imported.get("standing", "")
+					if imported_standing != "":
+						imported["standing_reason"] = "datalink " + s.ship_name + ": " + imported.get("standing_reason", "")
+						if imported_standing == Standing.HOSTILE:
+							var imported_name: String = active_transponders.get(imported.get("instance_id", -1), {}).get("name", "")
+							if imported_name != "":
+								Standing.add_wanted(iff_tags, imported_name)
 					active_contacts[c_id] = imported
 				else:
 					var c = active_contacts[c_id]
@@ -2306,6 +2481,20 @@ func _physics_process(delta: float) -> void:
 						c["vel"] = external_contact["vel"]
 						c["last_seen_timer"] = relayed_age
 						c["resolution"] = min(c["resolution"], external_contact["resolution"])
+
+					# M48 -- standing share: severity compare-and-copy,
+					# independent of the freshest-wins pos/vel gate above (a
+					# peer's judgment is worth adopting even off a stale
+					# position echo -- standing rides the track id, not
+					# position freshness).
+					var peer_standing: String = external_contact.get("standing", "")
+					if peer_standing != "" and Standing.is_more_severe(peer_standing, c.get("standing", "")):
+						c["standing"] = peer_standing
+						c["standing_reason"] = "datalink " + s.ship_name + ": " + external_contact.get("standing_reason", "")
+						if peer_standing == Standing.HOSTILE:
+							var peer_name: String = active_transponders.get(c.get("instance_id", -1), {}).get("name", "")
+							if peer_name != "":
+								Standing.add_wanted(iff_tags, peer_name)
 	PerfProbe.end("datalink_relay")
 
 	if is_multiplayer_authority():
@@ -2732,6 +2921,18 @@ func set_transponder_share_location(active: bool) -> void:
 	for c in ship_components:
 		if c["type"] == "comms":
 			c["transponder_share_location"] = active
+			break
+
+# M48 -- flags are cheap talk (design_ideas/economy_and_piracy.md): a public,
+# spoofable declaration of allegiance broadcast over the transponder. Same
+# RPC shape as the sibling transponder_* setters above.
+@rpc("any_peer", "call_local")
+func set_transponder_flag(flag: String) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	for c in ship_components:
+		if c["type"] == "comms":
+			c["transponder_flag"] = flag
 			break
 
 @rpc("any_peer", "call_local")

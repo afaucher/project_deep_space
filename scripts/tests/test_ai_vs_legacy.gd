@@ -15,6 +15,9 @@ const Frigate = preload("res://scripts/ships/frigate.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 const LegacyAI = preload("res://scripts/ai_drone_controller.gd")
+# M48 -- the buoy needs a declared flag the attacker's default
+# known_enemy_flags=[FLAG_PIRATE] recognizes, or it never reads HOSTILE.
+const Standing = preload("res://scripts/combat/standing.gd")
 
 const TRIALS_PER_AI := 3
 const MAX_FRAMES := 1800          # 30s cap per trial
@@ -65,6 +68,7 @@ func _start_trial() -> void:
 	buoy.position = origin + Vector2(TARGET_RANGE, 0)
 	buoy.linear_velocity = Vector2.ZERO
 	main_node.add_child(buoy)
+	buoy.set_transponder_flag(Standing.FLAG_PIRATE)
 
 func _physics_process(_delta: float) -> void:
 	frames += 1

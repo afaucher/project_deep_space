@@ -11,6 +11,10 @@ extends Node
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 const LegacyAI = preload("res://scripts/ai_drone_controller.gd")
+# M48 -- standing now gates acquisition/flee (was raw "unidentified vessel"
+# classification). Mutual pirate flag makes both sides mutually HOSTILE via
+# the default known_enemy_flags=[FLAG_PIRATE] every ship already carries.
+const Standing = preload("res://scripts/combat/standing.gd")
 
 const TRIALS := 3
 const MAX_FRAMES := 3000          # 50s cap per duel
@@ -56,6 +60,7 @@ func _start_trial() -> void:
 	ship_new.position = origin
 	ship_new.rotation = 0.0
 	main_node.add_child(ship_new)
+	ship_new.set_transponder_flag(Standing.FLAG_PIRATE)
 	ship_new.add_child(AITreeFactory.build_default())
 
 	ship_legacy = Frigate.new()
@@ -65,6 +70,7 @@ func _start_trial() -> void:
 	ship_legacy.position = origin + Vector2(START_RANGE, 0)
 	ship_legacy.rotation = PI
 	main_node.add_child(ship_legacy)
+	ship_legacy.set_transponder_flag(Standing.FLAG_PIRATE)
 	ship_legacy.add_child(LegacyAI.new())
 
 	if full_health == 0.0:

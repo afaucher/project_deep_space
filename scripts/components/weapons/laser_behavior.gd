@@ -60,7 +60,8 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 			var hit_dir = (target_aim_pos - global_mount_pos).normalized()
 			if COMBAT_DEBUG: print("[Debug] Laser fired! global_mount_pos: ", global_mount_pos, " target_aim_pos: ", target_aim_pos, " hit_dir: ", hit_dir)
 			var actual_damage = comp["damage"] * component_health_ratio
-			body.take_damage(actual_damage, global_mount_pos, hit_dir, comp["weapon_type"])
+			# M48 -- attribute to the firing ship instance for standing/witness purposes.
+			body.take_damage(actual_damage, global_mount_pos, hit_dir, comp["weapon_type"], ship.get_instance_id())
 		elif body.has_method("get_signature"):
 			body.queue_free()
 

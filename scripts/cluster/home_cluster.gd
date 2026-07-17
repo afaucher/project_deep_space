@@ -16,6 +16,7 @@ const Wormhole = preload("res://scripts/wormhole.gd")
 const LightAttackCraft = preload("res://scripts/ships/light_attack_craft.gd")
 const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const MobileHome = preload("res://scripts/ships/mobile_home.gd")
+const Standing = preload("res://scripts/combat/standing.gd")
 
 # Home faction shares the player's tag so hubs read friendly and their station AI
 # never targets the player. Faction modelling proper is a later concern.
@@ -100,6 +101,7 @@ static func _station(def, id: int, name: String, hull: Script, pos: Vector2, rol
 		"id": id, "sid": sid, "name": name, "hull": hull,
 		"kind": ClusterEntity.Kind.STATION, "pos": pos, "role": role,
 		"iff_tags": HOME_IFF, "is_static": true,
+		"transponder_flag": Standing.FLAG_DRIFT,
 	})
 
 static func _beacon(def, id: int, name: String, pos: Vector2) -> void:
@@ -122,6 +124,10 @@ static func _patrol(def, id: int, name: String, hull: Script, center: Vector2, r
 		"kind": ClusterEntity.Kind.TRAFFIC, "pos": route[0],
 		"iff_tags": HOME_IFF, "is_static": false,
 		"behavior": {"route": route, "loop": true},
+		"transponder_flag": Standing.FLAG_DRIFT,
+		# M49 -- consumed by the not-yet-built DEMAND_SURRENDER rules; fielded
+		# now so patrols don't need reshaping later.
+		"authority_flags": [Standing.FLAG_DRIFT],
 	})
 
 # A cargo hauler shuttling between two stations (a fixed lane, looping). Starts at
@@ -137,6 +143,7 @@ static func _cargo(def, id: int, name: String, a: Vector2, b: Vector2) -> void:
 		"kind": ClusterEntity.Kind.TRAFFIC, "pos": start,
 		"iff_tags": HOME_IFF, "is_static": false,
 		"behavior": {"route": [a, b], "loop": true, "cargo": true},
+		"transponder_flag": Standing.FLAG_DRIFT,
 	})
 
 # A mobile home holding station in a specific location.
@@ -145,5 +152,6 @@ static func _home(def, id: int, name: String, pos: Vector2, sid: String = "") ->
 		"id": id, "sid": sid, "name": name, "hull": MobileHome,
 		"kind": ClusterEntity.Kind.STATION, "pos": pos,
 		"iff_tags": ["TEAM_CIVILIAN"], "is_static": true,
+		"transponder_flag": Standing.FLAG_CIVILIAN,
 	})
 

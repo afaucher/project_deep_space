@@ -39,6 +39,12 @@ static func load_into(def, manager, overlay = null, characters = null) -> void:
 		rec.iff_tags = tags.duplicate(true)
 		rec.is_static = e.get("is_static", false)
 		rec.behavior = e.get("behavior", null)
+		# M48 -- optional declared-allegiance fields (see cluster_entity.gd);
+		# absent for entities that carry no flag (asteroids, the wormhole,
+		# beacons).
+		rec.transponder_flag = e.get("transponder_flag", "")
+		var auth_flags: Array = e.get("authority_flags", [])
+		rec.authority_flags = auth_flags.duplicate(true)
 		_merge_overlay(rec, overlay, characters)
 		manager.add_record(rec)
 

@@ -21,6 +21,7 @@ const StoryCharacters = preload("res://scripts/story/characters.gd")
 const ContractFeed = preload("res://scripts/story/contract_feed.gd")
 const NavComputer = preload("res://scripts/nav/nav_computer.gd")
 const NavAutopilot = preload("res://scripts/nav/nav_autopilot.gd")
+const Standing = preload("res://scripts/combat/standing.gd")
 
 enum GameMode { SANDBOX, CAMPAIGN }
 
@@ -209,8 +210,11 @@ func _spawn_mobile_homes() -> void:
 		home.position = Vector2(randf_range(-8000, 8000), randf_range(-8000, 8000))
 		# Start them with zero velocity (holding station)
 		home.linear_velocity = Vector2.ZERO
-		
+
 		add_child(home)
+		# M48 -- declares non-combatant status; nobody's known_enemy_flags
+		# includes it by default, so mobile homes read NEUTRAL, not auto-targeted.
+		home.set_transponder_flag(Standing.FLAG_CIVILIAN)
 		players[home_id] = home
 		
 		# Give it the station AI so it holds its ground
@@ -251,6 +255,9 @@ func _spawn_player_ship(id: int, at = null) -> void:
 	else:
 		ship.position = Vector2(randf_range(-100, 100), randf_range(-100, 100))
 	add_child(ship)
+	# M48 -- the player flies the home-faction flag (transponder defaults on
+	# already); known_enemy_flags stays the Ship default ([FLAG_PIRATE]).
+	ship.set_transponder_flag(Standing.FLAG_DRIFT)
 	players[id] = ship
 
 # Campaign bootstrap: load the home cluster into a self-ticking ClusterManager,
@@ -375,6 +382,23 @@ func _spawn_ship(ship_script: Script, team: int) -> Node:
 	add_child(ship)
 	players[spawn_id] = ship
 
+	# M48 -- sandbox flags reproduce the pre-M48 iff-non-overlap warzone under
+	# the standing model. Enemies and pirates fly the black flag (HOSTILE to
+	# anyone flying the home flag -- the player and friendlies -- via their
+	# known_enemy_flags); friendlies fly the home flag but stay allied to the
+	# player through shared crypto iff_tags (FRIENDLY beats flag). Two ENEMY
+	# ships both fly the black flag yet stay mutually allied because their
+	# shared TEAM_ENEMY tag makes them crypto-FRIENDLY first; a PIRATE's
+	# unique tag shares with no one, so pirates read every black flag
+	# (including each other's) as HOSTILE -- the true-FFA behavior iff_for
+	# documents. Set AFTER add_child so _ready() has normalized the comms
+	# component that set_transponder_flag walks.
+	if team == ShipCatalog.Team.FRIENDLY:
+		ship.set_transponder_flag(Standing.FLAG_DRIFT)
+	else:
+		ship.set_transponder_flag(Standing.FLAG_PIRATE)
+		ship.known_enemy_flags = [Standing.FLAG_PIRATE, Standing.FLAG_DRIFT]
+
 	if ship.ship_tier == ComponentSpec.Tier.STRUCTURE:
 		ship.add_child(AITreeFactory.build_station())
 	else:
@@ -410,7 +434,11 @@ func _spawn_sensor_drone() -> void:
 	
 	add_child(ship)
 	players[drone_id] = ship
-	
+	# M48 -- a friendly scout flies the home flag so non-crypto-linked home
+	# ships read it as home rather than UNREPORTED (it's already FRIENDLY to
+	# the player via shared TEAM_PLAYER tags).
+	ship.set_transponder_flag(Standing.FLAG_DRIFT)
+
 	print("Spawned Sensor Drone ", drone_id, " at ", ship.position)
 
 func _spawn_buoy() -> void:

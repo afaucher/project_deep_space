@@ -11,6 +11,9 @@ extends Node
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
+# M48 -- the buoy needs a declared flag the drone's default
+# known_enemy_flags=[FLAG_PIRATE] recognizes, or it never reads HOSTILE.
+const Standing = preload("res://scripts/combat/standing.gd")
 
 var drone: Frigate
 var frames := 0
@@ -33,6 +36,7 @@ func setup(main) -> void:
 	target.position = Vector2(2500, 0)
 	target.linear_velocity = Vector2.ZERO
 	main.add_child(target)
+	target.set_transponder_flag(Standing.FLAG_PIRATE)
 
 func _physics_process(_delta: float) -> void:
 	frames += 1

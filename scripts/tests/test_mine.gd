@@ -21,6 +21,15 @@ extends Node
 const Mine = preload("res://scripts/ships/mine.gd")
 const LightAttackCraft = preload("res://scripts/ships/light_attack_craft.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
+# M48 -- the Mine hull carries no comms component (see mine.gd's
+# ship_components), so it can never RECEIVE a transponder flag (Ship's
+# datalink relay gates the whole transponder-receive loop on
+# self_comms_range > 0) -- a declared flag on the hostile LAC would be
+# broadcast into the void. mark_contact_hostile is the legitimate lever for
+# a comms-less hull (design doc: "a hull with no comms can't declare a
+# flag, so there's no other legal way to mark it"). The friendly LAC stays
+# FRIENDLY via the shared-tag crypto rule, which needs no transponder at all.
+const Standing = preload("res://scripts/combat/standing.gd")
 
 const MINE_POS := Vector2.ZERO
 const MINE_STATIONKEEP_TOLERANCE := 30.0
@@ -81,10 +90,24 @@ func setup(main) -> void:
 	friendly.linear_velocity = Vector2(DRIFT_SPEED, 0.0)
 	main_node.add_child(friendly)
 
+# M48 -- the mine has no comms, so find its own sensor track on the hostile
+# LAC (once its own sweep has correlated one) and flag it hostile directly.
+# Cheap to call every frame -- a no-op once the contact is already HOSTILE.
+func _mark_hostile_once_tracked() -> void:
+	if not is_instance_valid(mine) or not is_instance_valid(hostile):
+		return
+	var tid: int = hostile.get_instance_id()
+	for c_id in mine.active_contacts:
+		var c: Dictionary = mine.active_contacts[c_id]
+		if c.get("instance_id", -1) == tid and c.get("standing", "") != Standing.HOSTILE:
+			mine.mark_contact_hostile(c_id, "test hostile")
+			return
+
 func _physics_process(delta: float) -> void:
 	if finished or mine == null:
 		return
 	t += delta
+	_mark_hostile_once_tracked()
 
 	if is_instance_valid(mine):
 		var drift: float = mine.position.distance_to(MINE_POS)

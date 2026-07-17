@@ -3,6 +3,12 @@ extends Node
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Missile = preload("res://scripts/ships/missile.gd")
 const MissileController = preload("res://scripts/missile_controller.gd")
+# M48 -- these missiles are built directly (no launcher to inherit an
+# already-HOSTILE contact snapshot from -- see missile_behavior.gd) and the
+# Missile hull has no comms component, so they can never RECEIVE a
+# transponder flag either. mark_contact_hostile (same lever test_missile_ai
+# uses) is the only way they acquire f_ship at all.
+const Standing = preload("res://scripts/combat/standing.gd")
 
 var main_node
 var log_file: FileAccess
@@ -140,10 +146,12 @@ func _physics_process(delta: float) -> void:
 		
 	scenario_frames += 1
 	var config = configs[config_idx]
-	
+
+	_mark_target_hostile_for_missiles()
+
 	var any_active = false
 	var current_active_count = 0
-	
+
 	if not is_instance_valid(f_ship) or f_ship.is_dead:
 		# Ship is dead!
 		_finish_scenario(config, true)
@@ -166,6 +174,22 @@ func _physics_process(delta: float) -> void:
 		if scenario_frames > max_scenario_frames:
 			timeouts = current_active_count
 		_finish_scenario(config, false)
+
+# M48 -- see the const Standing comment above: find each live missile's own
+# track on f_ship and flag it hostile directly. Cheap no-op once a missile's
+# contact is already HOSTILE.
+func _mark_target_hostile_for_missiles() -> void:
+	if not is_instance_valid(f_ship):
+		return
+	var tid: int = f_ship.get_instance_id()
+	for m in missiles:
+		if not is_instance_valid(m) or m.is_dead:
+			continue
+		for c_id in m.active_contacts:
+			var c: Dictionary = m.active_contacts[c_id]
+			if c.get("instance_id", -1) == tid and c.get("standing", "") != Standing.HOSTILE:
+				m.mark_contact_hostile(c_id, "test target")
+				break
 
 func _finish_scenario(config, ship_killed) -> void:
 	var destroyed = config["volleys"] - hits - timeouts

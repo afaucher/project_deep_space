@@ -1,6 +1,8 @@
 extends Node
 class_name MissileController
 
+const Standing = preload("res://scripts/combat/standing.gd")
+
 # Guidance-law tuning. FUEL_LIFETIME bounds effective engagement range/time
 # together with the missile's own max_speed; the lock-related thresholds
 # trade lock stability against how easy a target is to break lock by breaking
@@ -105,6 +107,21 @@ func _guidance_tick(delta: float) -> void:
 		for c_id in ship.active_contacts:
 			var contact = ship.active_contacts[c_id]
 			var classification = contact.get("classification", "")
+			# M48 -- a missile is COMMITTED ORDNANCE, and the Missile hull has
+			# no comms component: it can never receive a transponder flag, so
+			# it can never independently compute Standing.HOSTILE (a re-sensed
+			# target reads UNREPORTED to it). Its LAUNCHER already made the
+			# hostile judgment at fire time -- the missile inherits that lock
+			# at launch. So reacquisition keys on CLASSIFICATION (any
+			# non-friendly vessel is a valid re-lock for a dumb weapon already
+			# loosed at a hostile), NOT on a standing the missile physically
+			# cannot earn. Gating reacquire on HOSTILE made the seeker
+			# permanently drop its lock the moment the inherited contact went
+			# stale (LOCK_LOSS_STALENESS), so every missile flew straight past
+			# -- gutting the primary weapon of every missile-armed AI and
+			# tripling time-to-kill. (This is the pre-M48 behavior; a missile
+			# "remembering" its designated target's identity to avoid
+			# re-locking a passing neutral is a future piracy refinement.)
 			if classification != "UNIDENTIFIED VESSEL" and classification != "INCOMING ORDNANCE":
 				continue
 			if contact.get("pos_timer", 0.0) > ACQUISITION_FRESHNESS:
@@ -203,7 +220,10 @@ func detonate() -> void:
 		if result and result.collider.has_method("take_damage") and result.collider != ship:
 			var hit_dir = (result.collider.position - ship.position).normalized()
 			# Missiles are laser-heads, so they deal laser damage (which applies extreme heat)
-			result.collider.take_damage(WARHEAD_DAMAGE, result.position, hit_dir, "laser")
+			# M48 -- attribute to the LAUNCHER, not the missile itself (the missile is
+			# about to be freed; the launcher is the one whose standing/wanted-name
+			# should be affected).
+			result.collider.take_damage(WARHEAD_DAMAGE, result.position, hit_dir, "laser", ship.launcher_instance_id)
 			
 	# Destroy missile. Before it's freed, clean up observers' tracks of it per the
 	# selected debug cleanup mode -- otherwise every ship that saw it keeps a

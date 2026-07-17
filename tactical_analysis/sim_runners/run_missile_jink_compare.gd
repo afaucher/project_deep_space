@@ -12,6 +12,10 @@ extends Node
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Missile = preload("res://scripts/ships/missile.gd")
 const MissileController = preload("res://scripts/missile_controller.gd")
+# M48 -- see run_missile_vs_pd.gd's identical comment: these missiles have no
+# launcher to inherit a HOSTILE contact snapshot from, and no comms to
+# receive a transponder flag, so mark_contact_hostile is the only lever.
+const Standing = preload("res://scripts/combat/standing.gd")
 
 var main_node
 var log_file: FileAccess
@@ -118,6 +122,7 @@ func _physics_process(_delta: float) -> void:
 		return
 
 	scenario_frames += 1
+	_mark_target_hostile_for_missiles()
 
 	if not is_instance_valid(f_ship) or f_ship.is_dead:
 		_finish_scenario()
@@ -139,6 +144,20 @@ func _physics_process(_delta: float) -> void:
 		if scenario_frames > max_scenario_frames:
 			timeouts = current_active_count
 		_finish_scenario()
+
+# M48 -- see the const Standing comment above.
+func _mark_target_hostile_for_missiles() -> void:
+	if not is_instance_valid(f_ship):
+		return
+	var tid: int = f_ship.get_instance_id()
+	for m in missiles:
+		if not is_instance_valid(m) or m.is_dead:
+			continue
+		for c_id in m.active_contacts:
+			var c: Dictionary = m.active_contacts[c_id]
+			if c.get("instance_id", -1) == tid and c.get("standing", "") != Standing.HOSTILE:
+				m.mark_contact_hostile(c_id, "test target")
+				break
 
 func _finish_scenario() -> void:
 	var config = configs[config_idx]

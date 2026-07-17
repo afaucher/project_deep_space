@@ -1,6 +1,8 @@
 extends Node
 class_name AIDroneController
 
+const Standing = preload("res://scripts/combat/standing.gd")
+
 # LEGACY baseline AI. Superseded in production by the M12 Beehave tree
 # (scripts/ai/ai_tree_factory.gd) -- _spawn_ship no longer attaches this. It is
 # retained ONLY as the baseline opponent for test_ai_vs_legacy.gd: the new AI must beat
@@ -27,8 +29,8 @@ func _physics_process(delta: float) -> void:
 	
 	for c_id in ship.active_contacts:
 		var contact = ship.active_contacts[c_id]
-		# Only target hostile vessels
-		if contact.get("classification", "") != "UNIDENTIFIED VESSEL":
+		# Only target hostile vessels (M48: earned Standing.HOSTILE, not raw classification)
+		if contact.get("standing", "") != Standing.HOSTILE:
 			continue
 			
 		var dist = ship.position.distance_to(contact["pos"])

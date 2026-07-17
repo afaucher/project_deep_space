@@ -292,6 +292,7 @@ func _ready() -> void:
 	contacts_panel = ContactsPanel.new()
 	contacts_panel.contact_pin_toggled.connect(_on_contact_pin_toggled)
 	contacts_panel.selection_changed.connect(_on_selection_changed)
+	contacts_panel.mark_hostile_requested.connect(_on_mark_hostile_requested)
 	contacts_container.add_child(contacts_panel)
 	content_hbox.add_child(contacts_container)
 	
@@ -668,6 +669,11 @@ func _on_fire_weapon_requested(weapon_id: String) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "fire_weapon", weapon_id, target_pos, target_id)
+
+func _on_mark_hostile_requested(c_id: String) -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "mark_contact_hostile", c_id, "flagged by operator")
 
 func _on_contact_pin_toggled(c_id: String, is_pinned: bool) -> void:
 	if is_pinned and not pinned_contacts.has(c_id):

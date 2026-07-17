@@ -37,6 +37,11 @@ extends Node
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Missile = preload("res://scripts/ships/missile.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
+# M48 -- mutual pirate flag makes both sides mutually HOSTILE via the
+# default known_enemy_flags=[FLAG_PIRATE] every ship already carries
+# (same lever as test_ai_duel.gd -- without it this sim measures a fight
+# that never starts, i.e. a fantasy tick time).
+const Standing = preload("res://scripts/combat/standing.gd")
 
 const SHIPS_PER_SIDE := 3
 const START_RANGE := 8000.0   # test_ai_duel's optimal broadside range -- forces immediate engagement
@@ -82,6 +87,7 @@ func setup(main) -> void:
 		a.position = Vector2(0, i * 300.0)
 		a.rotation = 0.0
 		main_node.add_child(a)
+		a.set_transponder_flag(Standing.FLAG_PIRATE)
 		a.add_child(AITreeFactory.build_default())
 
 		var b = Frigate.new()
@@ -91,6 +97,7 @@ func setup(main) -> void:
 		b.position = Vector2(START_RANGE, i * 300.0)
 		b.rotation = PI
 		main_node.add_child(b)
+		b.set_transponder_flag(Standing.FLAG_PIRATE)
 		b.add_child(AITreeFactory.build_default())
 
 	var ship_count := get_tree().get_nodes_in_group("ships").size()

@@ -24,8 +24,9 @@ func setup(main) -> void:
 	tree.process_thread = BeehaveTreeScript.ProcessThread.MANUAL
 	ship.add_child(tree)
 
-	# Hostile contact dead ahead (+X), 5 km.
-	ship.active_contacts["TGT"] = {"pos": Vector2(5000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL"}
+	# Hostile contact dead ahead (+X), 5 km. Fabricated contact never goes
+	# through fusion, so standing must be set directly (M48).
+	ship.active_contacts["TGT"] = {"pos": Vector2(5000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE"}
 
 	# 1) Healthy: should NOT disengage -> engages, nose toward the +X threat (heading ~0).
 	if ship.get_health_fraction() < 0.99:

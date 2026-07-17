@@ -29,6 +29,17 @@ var iff_tags: Array = []
 var kind: int = Kind.TRAFFIC
 var is_static: bool = false         # stations/beacons/wormhole never move -> skip dead-reckon
 
+# M48 -- Standings & flags (IFF v2). transponder_flag is the record's
+# declared allegiance (Standing.FLAG_DRIFT / FLAG_CIVILIAN / ...), applied
+# to the live hull via Ship.set_transponder_flag() at promote (an RPC that
+# walks ship_components, so it must run AFTER add_child -- see _promote()).
+# authority_flags is the plain per-ship field consumed later by M49's
+# DEMAND_SURRENDER rules (patrols get it; unread until then). Both are
+# authored data on the record, same as iff_tags, so they survive repeated
+# demote/promote cycles for free.
+var transponder_flag: String = ""
+var authority_flags: Array = []
+
 # M42 -- story overlay decorations, merged onto the record by ClusterLoader at
 # load time (see load_into()'s overlay/characters params) and applied to the
 # live node generically by ClusterManager._promote() (AFTER construction and

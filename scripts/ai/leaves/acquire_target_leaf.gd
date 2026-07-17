@@ -1,11 +1,13 @@
 extends "res://addons/beehave/nodes/leaves/action.gd"
 
+const Standing = preload("res://scripts/combat/standing.gd")
+
 # M12 acquire_target: pick the nearest hostile contact and publish it to the blackboard
-# for the steer/fire leaves downstream. "Hostile" today means classification
-# "UNIDENTIFIED VESSEL" -- the same rule the legacy controller used and the only
-# non-friendly bucket the binary classifier produces (INCOMING ORDNANCE is handled by
-# the ship's own point defense, not chased as a maneuver target). Returns FAILURE when
-# there is nothing to engage so the parent selector falls through to Idle.
+# for the steer/fire leaves downstream. M48: "hostile" is now the earned, per-observer
+# standing judgment (Standing.HOSTILE) rather than the raw classification bucket --
+# see implementation_plans/m48_standings_flags_design.md (INCOMING ORDNANCE is handled
+# by the ship's own point defense, not chased as a maneuver target). Returns FAILURE
+# when there is nothing to engage so the parent selector falls through to Idle.
 func tick(actor: Node, blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
@@ -20,7 +22,7 @@ func tick(actor: Node, blackboard) -> int:
 	var best_dist := INF
 	for c_id in actor.active_contacts:
 		var contact = actor.active_contacts[c_id]
-		if contact.get("classification", "") != "UNIDENTIFIED VESSEL":
+		if contact.get("standing", "") != Standing.HOSTILE:
 			continue
 		# Fire discipline (Ship.FIRE_STALENESS_MAX): a track nobody has
 		# actually seen in a while is a dead-reckoned guess about where a

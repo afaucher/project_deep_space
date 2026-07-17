@@ -73,6 +73,12 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 	proj.name = "Missile_" + str(ship.owner_id) + "_" + str(randi())
 	proj.owner_id = ship.owner_id
 	proj.iff_tags = ship.iff_tags.duplicate()
+	# M48 -- the missile inherits the launcher's own hostile-flag judgment (so
+	# a reacquiring seeker uses the SAME standing rules the launcher would)
+	# and carries the launcher's instance id so missile_controller.gd's
+	# detonate() attributes warhead damage to the launcher, not the missile.
+	proj.known_enemy_flags = ship.known_enemy_flags.duplicate()
+	proj.launcher_instance_id = ship.get_instance_id()
 	proj.linear_velocity = ship.linear_velocity + (Vector2.RIGHT.rotated(weapon_launch_angle) * LAUNCH_KICK)
 	proj.add_collision_exception_with(ship)
 	main_node.add_child(proj, true)

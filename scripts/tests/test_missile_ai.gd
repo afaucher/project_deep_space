@@ -2,6 +2,17 @@ extends Node
 
 const Ship = preload("res://scripts/ships/frigate.gd")
 const Missile = preload("res://scripts/ships/missile.gd")
+# M48 -- the missile's acquisition now needs standing==HOSTILE. A bare test
+# Missile (no comms component -- see missile.gd's ship_components) can never
+# RECEIVE a transponder flag (Ship._physics_process's datalink relay gates
+# the whole transponder-receive loop on self_comms_range > 0), and in normal
+# play a fired missile instead inherits an already-HOSTILE contact snapshot
+# from its launcher (missile_behavior.gd duplicates the launcher's contact
+# dict at launch). This test builds the missile directly (no launcher), so
+# the legitimate lever is mark_contact_hostile once the missile's own seeker
+# has a track -- same as any other comms-less hull (design doc: "a hull with
+# no comms can't declare a flag, so there's no other legal way to mark it").
+const Standing = preload("res://scripts/combat/standing.gd")
 
 var main_scene
 var current_scenario_idx = 0
@@ -73,7 +84,7 @@ func _start_scenario(idx: int) -> void:
 	e_ship.linear_velocity = sc["target_vel"]
 	e_ship.ship_components = e_ship.ship_components.filter(func(c): return c["type"] != "weapons")
 	main_scene.add_child(e_ship)
-	
+
 	# Add Friendly Missile
 	f_missile = Missile.new()
 	f_missile.name = "FriendlyMissile_" + str(idx)
@@ -91,9 +102,10 @@ func _start_scenario(idx: int) -> void:
 
 func _physics_process(delta: float) -> void:
 	if f_missile == null or e_ship == null: return
-	
+
 	scenario_frames += 1
-	
+	_mark_target_hostile_once_tracked()
+
 	if scenario_frames % 120 == 0 and is_instance_valid(f_missile):
 		print("  Frame ", scenario_frames, " - Missile Pos: ", f_missile.position, " Vel: ", f_missile.linear_velocity)
 		
@@ -130,6 +142,20 @@ func _physics_process(delta: float) -> void:
 			print("  >>> [SCENARIO PASSED] Missile reached target and detonated at end of window.")
 			_cleanup_current()
 			_start_scenario(current_scenario_idx + 1)
+
+# M48 -- the missile has no comms, so it can never receive a transponder
+# flag; find its own track on e_ship (once its seeker has correlated one)
+# and flag it hostile directly, same as any comms-less-hull test lever.
+# Cheap to call every frame -- a no-op once the contact is already HOSTILE.
+func _mark_target_hostile_once_tracked() -> void:
+	if not is_instance_valid(f_missile) or not is_instance_valid(e_ship):
+		return
+	var tid: int = e_ship.get_instance_id()
+	for c_id in f_missile.active_contacts:
+		var c: Dictionary = f_missile.active_contacts[c_id]
+		if c.get("instance_id", -1) == tid and c.get("standing", "") != Standing.HOSTILE:
+			f_missile.mark_contact_hostile(c_id, "test target")
+			return
 
 func _cleanup_current() -> void:
 	if is_instance_valid(f_missile):
