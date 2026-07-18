@@ -118,6 +118,21 @@ the lane, the staging point, the cover name; a trade director will pick
 routes and dwell times the same way. The job dict is the interface between
 directors and ships — a director never reaches into a tree.
 
+A director is **a ledger plus a policy tick**: a plain serializable object
+(not a Node, not a ship) living in `ClusterManager.directors`, ticked from
+`ClusterManager.tick()` — so tests drive it with the same deterministic
+manual tick as the cluster. Its config (name pools, caps, cadences, hull
+mixes) is a data table; story phases (M54) swap tables, never code.
+
+**Director honesty rule** (the director-side twin of the job-condition
+rule): a director may know only what its members report and what's public.
+The guild is an off-map organization; knowledge arrives by check-in. A
+member going silent goes OVERDUE, and only after a presumed-lost delay does
+the ledger act — no instant death notifications, no reading other ships'
+sensors. This is why killing a pirate buys quiet MINUTES, not a same-frame
+respawn, and it's the knowledge model every later director (trade, traffic,
+militia) inherits.
+
 ## The verb vocabulary
 
 | Verb | Semantics | Who reuses it |

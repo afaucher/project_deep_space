@@ -203,6 +203,19 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 
 ## M51 — Pirate guild director
 
+> **Revised before execution** — pinned design in
+> [m51_pirate_guild_design.md](m51_pirate_guild_design.md). Key additions
+> over the sketch below: the **director pattern** (ledger + policy tick as
+> a ClusterManager tenant; config as data) and the **director honesty
+> rule** (knowledge by member check-in — a silent member goes OVERDUE and
+> resolves LOST/CASHED_OUT only after a presumed-lost delay; cash-in is
+> the vanished-near-the-wormhole heuristic), both recorded in
+> [jobs_and_itineraries.md](../design_ideas/jobs_and_itineraries.md) §3.
+> Also surfaces and partially fixes a latent cluster bug: the cluster
+> layer has no concept of death (a hulk's record would re-promote as a
+> live ship); M51 removes LOST pirates' records, the general case is a
+> filed follow-up.
+
 - Guild ledger (plain serializable data): active, scheduled arrivals,
   losses, takes, streaks. Policy tick (~10s): floor of 1 pirate in the
   area — a loss schedules a wormhole arrival 2–5 min out; take-streak
