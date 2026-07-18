@@ -1,6 +1,13 @@
 extends Control
 
 const DialogueScratch = preload("res://scripts/dialogue_scratch.gd")
+const Standing = preload("res://scripts/combat/standing.gd")
+const Hail = preload("res://scripts/comms/hail.gd")
+
+# Mirrors Ship.FIRE_STALENESS_MAX (ship.gd) -- kept as a local const rather
+# than importing the Ship script here (this panel is client UI reading the
+# already-filtered packet, not sim-side); see ship.gd for the rationale.
+const SOS_FRESH_STALENESS := 3.0
 
 var current_state: Dictionary = {}
 
@@ -44,6 +51,18 @@ signal transponder_toggled(active: bool)
 signal transponder_share_name_toggled(share: bool)
 signal transponder_share_loc_toggled(share: bool)
 signal transponder_custom_name_changed(new_name: String)
+
+# M49 -- hail protocol (design_ideas/comms_verbs.md).
+signal comply_requested()
+signal sos_requested(nature: String)
+
+# HAILS section (last_hails newest-first) + honored-stop banner/COMPLY + SOS button.
+var hail_banner: PanelContainer
+var hail_banner_label: Label
+var btn_comply: Button
+var btn_sos: Button
+var hails_vbox: VBoxContainer
+var _last_hails_rendered: Array = []
 
 func _ready() -> void:
 	clip_contents = true
@@ -96,7 +115,56 @@ func _ready() -> void:
 	btn_share_loc.toggled.connect(func(pressed): emit_signal("transponder_share_loc_toggled", pressed))
 	hbox1.add_child(btn_share_loc)
 	my_vbox.add_child(hbox1)
-	
+
+	# M49 -- SOS: sends UNDER_ATTACK if a fresh HOSTILE contact exists, else
+	# DISABLED. The actual nature pick happens in _on_sos_pressed() against
+	# current_state, same "packet-polling, not pushed" pattern as every other
+	# reader of current_state in this panel.
+	btn_sos = Button.new()
+	btn_sos.text = "[ SOS ]"
+	btn_sos.add_theme_color_override("font_color", Color.ORANGE_RED)
+	btn_sos.pressed.connect(_on_sos_pressed)
+	my_vbox.add_child(btn_sos)
+
+	# M49 -- honored-stop banner: a red bar + COMPLY button, shown only while
+	# a pending STOP demand exists on the player ship (packet["pending_
+	# demand"]). This is the fear moment the design wants (design_ideas/
+	# comms_verbs.md) -- a STOP demand arriving from a dark, untrusted
+	# contact on YOUR panel.
+	hail_banner = PanelContainer.new()
+	var banner_style = StyleBoxFlat.new()
+	banner_style.bg_color = Color(0.4, 0.05, 0.05, 0.9)
+	hail_banner.add_theme_stylebox_override("panel", banner_style)
+	hail_banner.visible = false
+	top_pane.add_child(hail_banner)
+
+	var banner_hbox = HBoxContainer.new()
+	hail_banner.add_child(banner_hbox)
+
+	hail_banner_label = Label.new()
+	hail_banner_label.text = "DEMAND(STOP) RECEIVED"
+	hail_banner_label.add_theme_color_override("font_color", Color.WHITE)
+	hail_banner_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	banner_hbox.add_child(hail_banner_label)
+
+	btn_comply = Button.new()
+	btn_comply.text = "COMPLY"
+	btn_comply.pressed.connect(func(): emit_signal("comply_requested"))
+	banner_hbox.add_child(btn_comply)
+
+	top_pane.add_child(HSeparator.new())
+
+	# M49 -- HAILS: last_hails newest-first (sender name/flag, verb+rung,
+	# addressed-to-me highlight).
+	var hails_title = Label.new()
+	hails_title.text = "HAILS"
+	hails_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hails_title.add_theme_color_override("font_color", Color.ORANGE_RED)
+	top_pane.add_child(hails_title)
+
+	hails_vbox = VBoxContainer.new()
+	top_pane.add_child(hails_vbox)
+
 	top_pane.add_child(HSeparator.new())
 
 	# M41 -- Missions section: header + a small text readout, updated in
@@ -192,6 +260,73 @@ func update_data(packet: Dictionary) -> void:
 				
 	_update_contacts_list()
 	_update_missions_list()
+	_update_hail_banner()
+	_update_hails_list()
+
+# M49 -- honored-stop banner: visible whenever the player ship holds a
+# pending STOP demand (packet["pending_demand"], set by ship.gd's comms_inbox
+# processing). Cleared the moment we COMPLY (pending_demand is cleared
+# server-side) or a fresh demand replaces it.
+func _update_hail_banner() -> void:
+	if hail_banner == null:
+		return
+	var demand: Dictionary = current_state.get("pending_demand", {})
+	var is_stop_demand: bool = demand.get("rung", "") == Hail.RUNG_STOP
+	hail_banner.visible = is_stop_demand
+	if is_stop_demand:
+		var flag: String = demand.get("sender_flag", "")
+		var flag_text: String = flag if flag != "" else "UNKNOWN (dark)"
+		hail_banner_label.text = "DEMAND(STOP) from flag: %s" % flag_text
+
+# M49 -- last_hails newest-first: sender name/flag, verb+rung, addressed-to-me
+# highlight. Rebuilt only when the newest hail actually changed, keyed on its
+# seq -- NOT on array size: last_hails is a rolling ring buffer capped at 8,
+# so once full its size never changes again and a size check would freeze the
+# list on the first 8 hails forever. (seq + count together also cover the
+# buffer draining/reset case.)
+func _update_hails_list() -> void:
+	if hails_vbox == null:
+		return
+	var hails: Array = current_state.get("last_hails", [])
+	var newest_seq: int = hails.back().get("seq", -1) if not hails.is_empty() else -1
+	var rendered_seq: int = _last_hails_rendered.back().get("seq", -1) if not _last_hails_rendered.is_empty() else -1
+	if newest_seq == rendered_seq and hails.size() == _last_hails_rendered.size():
+		return
+	_last_hails_rendered = hails.duplicate()
+
+	for child in hails_vbox.get_children():
+		child.queue_free()
+
+	var my_ship = _get_my_ship()
+	var my_iid: int = my_ship.get_instance_id() if my_ship != null else -1
+
+	for i in range(hails.size() - 1, -1, -1):
+		var hail: Dictionary = hails[i]
+		var verb: String = hail.get("verb", "")
+		var rung: String = hail.get("rung", "")
+		var flag: String = hail.get("sender_flag", "")
+		var flag_text: String = flag if flag != "" else "dark"
+		var verb_text: String = verb + ("(" + rung + ")" if rung != "" else "")
+		var addressed_to_me: bool = hail.get("target_iid", -1) == my_iid
+
+		var lbl = Label.new()
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		lbl.text = "%s -- flag: %s%s" % [verb_text, flag_text, " [TO YOU]" if addressed_to_me else ""]
+		lbl.add_theme_color_override("font_color", Color.RED if addressed_to_me else Color(0.8, 0.8, 0.8))
+		hails_vbox.add_child(lbl)
+
+# M49 -- SOS nature pick: UNDER_ATTACK if we hold any fresh HOSTILE contact,
+# else DISABLED. Mirrors Ship._nearest_fresh_hostile_pos()'s freshness gate
+# (FIRE_STALENESS_MAX) against the same "contacts" the packet already carries.
+func _on_sos_pressed() -> void:
+	var contacts: Dictionary = current_state.get("contacts", {})
+	var nature := Hail.NATURE_DISABLED
+	for c_id in contacts:
+		var c: Dictionary = contacts[c_id]
+		if c.get("standing", "") == Standing.HOSTILE and c.get("last_seen_timer", 999.0) <= SOS_FRESH_STALENESS:
+			nature = Hail.NATURE_UNDER_ATTACK
+			break
+	emit_signal("sos_requested", nature)
 
 # M41 -- packet["missions"] is built by main.gd's _distribute_state() as
 # [{title, objective_text}, ...] straight off the player ship's MissionLog

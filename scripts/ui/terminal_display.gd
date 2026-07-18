@@ -292,6 +292,8 @@ func _ready() -> void:
 	contacts_panel.contact_pin_toggled.connect(_on_contact_pin_toggled)
 	contacts_panel.selection_changed.connect(_on_selection_changed)
 	contacts_panel.mark_hostile_requested.connect(_on_mark_hostile_requested)
+	contacts_panel.demand_requested.connect(_on_demand_requested)
+	contacts_panel.release_requested.connect(_on_release_requested)
 	contacts_container.add_child(contacts_panel)
 	content_hbox.add_child(contacts_container)
 	
@@ -362,6 +364,8 @@ func _ready() -> void:
 	comms_panel.transponder_toggled.connect(_on_transponder_toggled)
 	comms_panel.transponder_share_name_toggled.connect(_on_transponder_share_name_toggled)
 	comms_panel.transponder_share_loc_toggled.connect(_on_transponder_share_loc_toggled)
+	comms_panel.comply_requested.connect(_on_comply_requested)
+	comms_panel.sos_requested.connect(_on_sos_requested)
 	comms_container.add_child(comms_panel)
 	content_hbox.add_child(comms_container)
 	comms_container.visible = false
@@ -637,6 +641,44 @@ func _on_mark_hostile_requested(c_id: String) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
 		ship_node.rpc_id(1, "mark_contact_hostile", c_id, "flagged by operator")
+
+# M49 -- DEMAND/RELEASE need the target's INSTANCE id (send_demand/
+# send_release RPCs take target_iid, not a track string -- Hail.send needs
+# an actual node). c_id is a track id local to OUR OWN active_contacts;
+# resolve it via contacts_panel's own current_state["contacts"] (the packet
+# already carries "instance_id" per contact record, same field
+# contacts_panel.gd already reads to merge transponder data).
+func _resolve_contact_instance_id(c_id: String) -> int:
+	if not is_instance_valid(contacts_panel):
+		return -1
+	var contacts: Dictionary = contacts_panel.current_state.get("contacts", {})
+	return contacts.get(c_id, {}).get("instance_id", -1)
+
+func _on_demand_requested(c_id: String, rung: String) -> void:
+	var target_iid: int = _resolve_contact_instance_id(c_id)
+	if target_iid == -1:
+		return
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "send_demand", target_iid, rung)
+
+func _on_release_requested(c_id: String) -> void:
+	var target_iid: int = _resolve_contact_instance_id(c_id)
+	if target_iid == -1:
+		return
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "send_release", target_iid)
+
+func _on_comply_requested() -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "comply_with_stop")
+
+func _on_sos_requested(nature: String) -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "send_sos", nature)
 
 func _on_contact_pin_toggled(c_id: String, is_pinned: bool) -> void:
 	if is_pinned and not pinned_contacts.has(c_id):

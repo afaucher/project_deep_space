@@ -18,6 +18,7 @@ const RadarCrossSection = preload("res://scripts/components/radar_cross_section.
 const PortZone = preload("res://scripts/port/port_zone.gd")
 const PortControl = preload("res://scripts/port/port_control.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
+const Hail = preload("res://scripts/comms/hail.gd")
 
 # M31 -- port-zone membership hysteresis. A ship hovering right on a zone's
 # boundary would otherwise thrash zone_enter/zone_exit every tick (its position
@@ -104,6 +105,25 @@ const CONTACT_TIMEOUT := 20.0          # seconds with no fresh detection before 
 # Missiles in flight have their own (stricter) pos_timer-based lock rules in
 # missile_controller.gd; PD is safe via its live-instance checks.
 const FIRE_STALENESS_MAX := 3.0
+
+# M49 -- hail protocol constants (design_ideas/comms_verbs.md). HEARD_SOS_TTL:
+# how long a heard SOS lingers on the nav layer before being pruned (delta-
+# accumulated seconds, not wall-clock, same convention as Standing's
+# AGGRESSION_EVENT_TTL). COMPLIED_STOP_SPEED_LIMIT: compliance is behavioral,
+# not a one-time declaration -- a contact we're crediting with complied_stop
+# loses it the moment its OBSERVED speed shows it bolted. COMPELLED_STOP_
+# LOST_ISSUER_TIMEOUT: nobody waits forever on a dead/out-of-range issuer's
+# permission (see the auto-resume block in _physics_process).
+const HEARD_SOS_TTL := 90.0
+const COMPLIED_STOP_SPEED_LIMIT := 80.0
+# The behavioral check above only starts biting this many seconds after the
+# COMPLY was heard: the declaration arrives the instant compliance is DECIDED,
+# while the sender is usually still braking from cruise speed -- without the
+# grace, the flag was erased on the very next fusion tick (observed speed
+# still > limit) and never restored, since COMPLY is a one-shot event.
+const COMPLIED_STOP_GRACE := 15.0
+const COMPELLED_STOP_LOST_ISSUER_TIMEOUT := 10.0
+
 const CONTACT_CORRELATION_RANGE := 2000.0 # max distance (no instance_id match) to fuse a new blip into an existing contact instead of starting a new one
 const CONTACT_RESOLUTION_STALE_TIME := 0.3 # seconds since the last position update before a coarser-resolution bin is allowed to override position anyway
 const CONTACT_FUSION_SMOOTHING := 0.8  # lerp weight toward each new reading -- shared by pos/vel/cross_section/heat/em_noise so none of them drift out of sync with the others
@@ -429,14 +449,33 @@ var iff_tags: Array = []
 # economy_and_piracy.md's "flags are cheap talk except the pirate flag" --
 # everyone hates the black flag by default, day one). authority_flags: flags
 # this observer considers a legitimate interdiction authority (home
-# civilians trust the militia flag) -- fielded now, consumed by M49's
-# DEMAND_SURRENDER rules; unread in phase 1. launcher_instance_id: unused by
+# civilians trust the militia flag) -- consumed by M49's DEMAND(STOP)
+# police-stop exemption (both the addressed-to-me and overheard-witness
+# rules in the comms_inbox block below). launcher_instance_id: unused by
 # a normal Ship, set on a Missile instance at launch (missile_behavior.gd) so
 # missile_controller.gd's detonate() attributes warhead damage to the
 # launcher, not the missile itself.
 var known_enemy_flags: Array = [Standing.FLAG_PIRATE]
 var authority_flags: Array = []
 var launcher_instance_id: int = -1
+
+# M49 -- hail protocol runtime state (design_ideas/comms_verbs.md). comms_inbox:
+# hails delivered this tick by Hail.send/send_broadcast, processed and cleared
+# in _physics_process right after the M48 witness-consumption block.
+# heard_sos: sender_iid -> the latest SOS hail heard from them (plus "age"),
+# NAV-layer only -- never touches active_contacts/sensor fusion (the M41
+# rule, see scripts/story/contract_feed.gd's header). pending_demand: the
+# latest unresolved DEMAND addressed to me (rung STOP or IDENTIFY).
+# compelled_stop: {} = not held; else {issuer_iid, demand_seq,
+# lost_issuer_timer} -- the honored-stop hard state, enforced at the ship
+# level (throttle override + fire guard), not the AI level. last_hails:
+# rolling log of the last ~8 hails heard, for the comms panel's HAILS
+# section.
+var comms_inbox: Array = []
+var heard_sos: Dictionary = {}
+var pending_demand: Dictionary = {}
+var compelled_stop: Dictionary = {}
+var last_hails: Array = []
 
 var available_npcs: Array[Resource] = []
 var comms_ledger: Node
@@ -1738,6 +1777,27 @@ func mark_contact_hostile(c_id: String, reason: String = "flagged by operator") 
 	c["standing"] = Standing.HOSTILE
 	c["standing_reason"] = reason
 
+# M49 -- the honored-stop declaration (design_ideas/comms_verbs.md's
+# "Stopped-under-compulsion"). Requires a live STOP demand addressed to us
+# (pending_demand); forces the transponder on -- a stopped-but-dark ship has
+# NOT complied, STOP implies IDENTIFY -- broadcasts COMPLY {in_reply_to} so
+# the issuer (and any bystander who adopts complied_stop off our track, see
+# the comms_inbox block) honors the hold, and clears pending_demand
+# (answered). Same RPC shape as mark_contact_hostile above; the AI calls
+# this directly (threat_response_leaf.gd), same as fire_weapon.
+@rpc("any_peer", "call_local")
+func comply_with_stop() -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	if pending_demand.get("rung", "") != Hail.RUNG_STOP:
+		return
+	var demand_seq: int = pending_demand.get("seq", -1)
+	var issuer_iid: int = pending_demand.get("sender_iid", -1)
+	compelled_stop = {"issuer_iid": issuer_iid, "demand_seq": demand_seq, "lost_issuer_timer": 0.0}
+	set_transponder_active(true)
+	Hail.send_broadcast(self, {"verb": Hail.VERB_COMPLY, "in_reply_to": demand_seq})
+	pending_demand = {}
+
 # M32 -- player/AI-initiated undock. Only meaningful while actually captured
 # (docking_bay != null, i.e. CAPTURING or DOCKED) with manual_undock=true (see
 # DockingBay._physics_process -- manual_undock=false auto-releases on the old
@@ -1832,7 +1892,28 @@ func _physics_process(delta: float) -> void:
 	# -- skip the two O(n) scans instead of computing zeros.
 	var active_max_thrust = 0.0 if is_dead else get_ship_max_thrust()
 
-	if linear_mode == 0:
+	# M49 -- honored stop: while compelled, the ship-level override owns motion
+	# for the frame WITHOUT mutating the persistent control fields (linear_mode/
+	# target_thrust/target_heading -- a released ship must resume exactly where
+	# the player/AI left its controls). effective_target_heading is the frame-
+	# local heading the rotation controller below actually tracks; normally
+	# just target_heading, but a compelled ship still carrying real velocity
+	# noses onto its velocity vector first -- engine thrust only acts along
+	# the facing axis, so braking the forward component alone leaves any
+	# lateral drift coasting forever (observed in test_honored_stop: a ship
+	# facing 124 degrees off its drift held a perfect throttle=0 at 205 u/s).
+	var effective_target_heading = target_heading
+	if not compelled_stop.is_empty():
+		# Same math as the velocity-control branch below, just with
+		# target_velocity forced to 0.0 for the frame.
+		var v_error = 0.0 - current_forward_speed
+		var required_accel = v_error * VELOCITY_CONTROL_GAIN
+		var required_force = required_accel * mass
+		actual_throttle = (required_force / active_max_thrust) if active_max_thrust > 0.0 else 0.0
+		rcs_translation_cmd = Vector2.ZERO # zero any RCS translation command for the frame
+		if linear_velocity.length() > 5.0:
+			effective_target_heading = linear_velocity.angle()
+	elif linear_mode == 0:
 		# Direct Throttle Control
 		actual_throttle = target_thrust
 	else:
@@ -1844,7 +1925,7 @@ func _physics_process(delta: float) -> void:
 			actual_throttle = required_force / active_max_thrust
 		else:
 			actual_throttle = 0.0
-		
+
 	# Apply limits based on steering mode
 	if steering_mode == 0:
 		actual_throttle = clampf(actual_throttle, -SMOOTH_MODE_THRUST_RATIO, SMOOTH_MODE_THRUST_RATIO)
@@ -1868,7 +1949,9 @@ func _physics_process(delta: float) -> void:
 		linear_velocity = linear_velocity.normalized() * max_speed
 
 	# Time-Optimal Rotational Controller (Square-root curve braking)
-	var angle_diff = wrapf(target_heading - rotation, -PI, PI)
+	# (effective_target_heading == target_heading except under the M49
+	# compelled-stop override above.)
+	var angle_diff = wrapf(effective_target_heading - rotation, -PI, PI)
 
 	var ship_max_torque = 0.0 if is_dead else get_ship_max_torque()
 
@@ -2330,6 +2413,165 @@ func _physics_process(delta: float) -> void:
 				atk_c["standing"] = Standing.HOSTILE
 				atk_c["standing_reason"] = "sustained attack on " + victim_name
 	PerfProbe.end("aggression_witness")
+
+	# M49 -- hail inbox processing (design_ideas/comms_verbs.md). Event-driven
+	# (comms_inbox is usually empty -- one pass over whatever Hail.send/
+	# send_broadcast delivered THIS tick), so this is O(inbox), not a scan.
+	# Every branch mutates THIS ship's own state (pending_demand/
+	# compelled_stop/active_contacts/heard_sos) -- hail.gd only owns the wire
+	# format + delivery, all interpretation lives here.
+	PerfProbe.begin("comms_inbox")
+	var my_iid_hail := get_instance_id()
+	for hail in comms_inbox:
+		last_hails.append(hail)
+		if last_hails.size() > 8:
+			last_hails.pop_front()
+
+		var verb: String = hail.get("verb", "")
+		var sender_iid: int = hail.get("sender_iid", -1)
+		var target_iid: int = hail.get("target_iid", -1)
+		var addressed_to_me: bool = target_iid == my_iid_hail
+
+		match verb:
+			Hail.VERB_DEMAND:
+				var rung: String = hail.get("rung", "")
+				if addressed_to_me:
+					pending_demand = hail
+					transient_events.append({"type": "hail", "verb": verb, "rung": rung, "sender_iid": sender_iid})
+					# IDENTIFY never changes standing (asking is free); STOP
+					# marks the issuer HOSTILE unless their flag is one we
+					# hold as an authority (the police-stop exemption).
+					if rung == Hail.RUNG_STOP:
+						var sender_flag: String = hail.get("sender_flag", "")
+						var police_stop: bool = sender_flag != "" and authority_flags.has(sender_flag)
+						if not police_stop:
+							var issuer_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+							if active_contacts.has(issuer_trk):
+								active_contacts[issuer_trk]["standing"] = Standing.HOSTILE
+								active_contacts[issuer_trk]["standing_reason"] = "demanding we stop"
+				elif sender_iid != my_iid_hail:
+					# Overheard: only the STOP rung is witness-relevant --
+					# demanding INFORMATION is never coercion (comms_verbs.md).
+					# No aggro_hits dampening: a demand is deliberate, it
+					# cannot be a stray accident.
+					if rung == Hail.RUNG_STOP:
+						var issuer_trk2: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+						if active_contacts.has(issuer_trk2):
+							var issuer_c: Dictionary = active_contacts[issuer_trk2]
+							# (a) need a live fresh track on the sender -- can't
+							# mark what we can't see.
+							if issuer_c.get("last_seen_timer", 999.0) <= FIRE_STALENESS_MAX:
+								# (b) assistance exemption: if we hold a track
+								# on the demand's TARGET and it's already
+								# HOSTILE to us, this is lawful interdiction of
+								# a marked pirate -- ignore.
+								var demand_target_trk: String = "TRK-%03d" % (abs(target_iid) % 1000)
+								var assistance_exempt: bool = active_contacts.has(demand_target_trk) and active_contacts[demand_target_trk].get("standing", "") == Standing.HOSTILE
+								# (c) police-stop exemption, same rule as the
+								# addressed-to-me branch.
+								var sender_flag2: String = hail.get("sender_flag", "")
+								var police_stop2: bool = sender_flag2 != "" and authority_flags.has(sender_flag2)
+								if not assistance_exempt and not police_stop2:
+									var target_name := ""
+									if active_transponders.has(target_iid):
+										target_name = active_transponders[target_iid].get("name", "")
+									issuer_c["standing"] = Standing.HOSTILE
+									issuer_c["standing_reason"] = "demanding a stop of " + (target_name if target_name != "" else "target")
+			Hail.VERB_COMPLY:
+				# What the AI honor rule reads (acquire_target_leaf.gd) --
+				# no leaf targets a compliant stopped ship, regardless of
+				# whether the demand was ours to issue. The grace timer lets
+				# the behavioral speed check (below) wait out the sender's
+				# braking distance -- see COMPLIED_STOP_GRACE.
+				var sender_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+				if active_contacts.has(sender_trk):
+					active_contacts[sender_trk]["complied_stop"] = true
+					active_contacts[sender_trk]["complied_stop_grace"] = COMPLIED_STOP_GRACE
+			Hail.VERB_RELEASE:
+				if addressed_to_me:
+					if not compelled_stop.is_empty() and compelled_stop.get("issuer_iid", -1) == sender_iid:
+						compelled_stop = {}
+				else:
+					# Overheard / addressed to someone else: if we hold a
+					# track on the released ship carrying complied_stop, the
+					# hold is over -- they're free to move without becoming
+					# fair game the instant they thrust.
+					var released_trk: String = "TRK-%03d" % (abs(target_iid) % 1000)
+					if active_contacts.has(released_trk) and active_contacts[released_trk].get("complied_stop", false):
+						active_contacts[released_trk].erase("complied_stop")
+			Hail.VERB_SOS:
+				# NAV-layer only -- NEVER touches active_contacts/sensor
+				# fusion (the M41 rule, see scripts/story/contract_feed.gd's
+				# header).
+				var sos_copy: Dictionary = hail.duplicate(true)
+				sos_copy["age"] = 0.0
+				heard_sos[sender_iid] = sos_copy
+			Hail.VERB_MARK_HOSTILE:
+				# Broadcast form of the M48 datalink standing share -- only
+				# trusted from our own faction (crypto IFF-tag overlap,
+				# stamped at send as sender_iff_tags); otherwise it's enemy
+				# propaganda, ignored.
+				var sender_tags: Array = hail.get("sender_iff_tags", [])
+				if _iff_tags_overlap(iff_tags, sender_tags):
+					var report: Dictionary = hail.get("report", {})
+					var rep_trk: String = report.get("contact_trk", "")
+					var rep_standing: String = report.get("standing", "")
+					if rep_trk != "" and rep_standing != "" and active_contacts.has(rep_trk):
+						var rep_c: Dictionary = active_contacts[rep_trk]
+						if Standing.is_more_severe(rep_standing, rep_c.get("standing", "")):
+							rep_c["standing"] = rep_standing
+							rep_c["standing_reason"] = report.get("reason", "")
+	comms_inbox.clear()
+
+	# heard_sos decay -- delta-accumulated age, same convention as Standing's
+	# aggression-event TTL, so it stays deterministic under --fixed-fps.
+	var stale_sos: Array = []
+	for s_iid in heard_sos:
+		var sos: Dictionary = heard_sos[s_iid]
+		sos["age"] = sos.get("age", 0.0) + delta
+		if sos["age"] > HEARD_SOS_TTL:
+			stale_sos.append(s_iid)
+	for s_iid in stale_sos:
+		heard_sos.erase(s_iid)
+
+	# complied_stop clears when a held contact's OBSERVED speed shows it
+	# bolted -- compliance is behavioral, not a one-time declaration. The
+	# grace window (decremented here, set on COMPLY receipt) covers the
+	# braking distance between declaring compliance and actually being
+	# stopped; only after it expires does speed become disqualifying.
+	for c_id in active_contacts:
+		var c: Dictionary = active_contacts[c_id]
+		if not c.get("complied_stop", false):
+			continue
+		var grace: float = c.get("complied_stop_grace", 0.0)
+		if grace > 0.0:
+			c["complied_stop_grace"] = grace - delta
+		elif c.get("vel", Vector2.ZERO).length() > COMPLIED_STOP_SPEED_LIMIT:
+			c.erase("complied_stop")
+			c.erase("complied_stop_grace")
+
+	# Auto-resume: a held ship doesn't wait forever on a dead/out-of-range
+	# issuer's permission. Reset the timer whenever the issuer is present
+	# (alive AND in comms-link range); past the timeout, clear the hold.
+	if not compelled_stop.is_empty():
+		set_transponder_active(true) # re-assert -- STOP implies IDENTIFY, every tick of the hold
+		var issuer_iid: int = compelled_stop.get("issuer_iid", -1)
+		var issuer = instance_from_id(issuer_iid)
+		var issuer_present := false
+		if issuer != null and is_instance_valid(issuer) and not issuer.is_dead:
+			var issuer_range: float = issuer.get_comms_range() if issuer.has_method("get_comms_range") else 0.0
+			var self_range_hail: float = get_comms_range()
+			if self_range_hail > 0.0 and issuer_range > 0.0:
+				var link_range_hail: float = min(self_range_hail, issuer_range)
+				if position.distance_to(issuer.position) <= link_range_hail:
+					issuer_present = true
+		if issuer_present:
+			compelled_stop["lost_issuer_timer"] = 0.0
+		else:
+			compelled_stop["lost_issuer_timer"] = compelled_stop.get("lost_issuer_timer", 0.0) + delta
+			if compelled_stop["lost_issuer_timer"] > COMPELLED_STOP_LOST_ISSUER_TIMEOUT:
+				compelled_stop = {}
+	PerfProbe.end("comms_inbox")
 
 	# Datalink Relay: friendly ships in mutual comms range and line-of-sight
 	# share active_contacts via freshest-wins. This reruns from scratch every
@@ -2916,6 +3158,65 @@ func set_transponder_flag(flag: String) -> void:
 			c["transponder_flag"] = flag
 			break
 
+# M49 -- player/AI send APIs for the hail protocol (design_ideas/comms_verbs.md).
+# Same RPC shape as the sibling setters above; the AI calls these directly
+# (server-side), same pattern as fire_weapon/mark_contact_hostile.
+@rpc("any_peer", "call_local")
+func send_demand(target_iid: int, rung: String) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	var target = instance_from_id(target_iid)
+	if target == null or not is_instance_valid(target):
+		return
+	Hail.send(self, target, {"verb": Hail.VERB_DEMAND, "rung": rung})
+
+@rpc("any_peer", "call_local")
+func send_release(target_iid: int) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	var target = instance_from_id(target_iid)
+	if target == null or not is_instance_valid(target):
+		return
+	Hail.send(self, target, {"verb": Hail.VERB_RELEASE})
+
+# nature: Hail.NATURE_UNDER_ATTACK | Hail.NATURE_DISABLED. Stamps name/flag
+# from our own transponder data (a distress call identifies the caller --
+# SOS counts as reporting, per the spec) + our current position; UNDER_ATTACK
+# additionally carries the nearest fresh HOSTILE track's position as "threat"
+# when we hold one, so a responder knows where to intercept.
+@rpc("any_peer", "call_local")
+func send_sos(nature: String) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	var t_data: Dictionary = get_active_transponder_data()
+	var verb: Dictionary = {
+		"verb": Hail.VERB_SOS,
+		"nature": nature,
+		"pos": position,
+		"name": t_data.get("name", ship_name),
+		"flag": t_data.get("flag", ""),
+	}
+	if nature == Hail.NATURE_UNDER_ATTACK:
+		var threat_pos = _nearest_fresh_hostile_pos()
+		if threat_pos != null:
+			verb["threat"] = threat_pos
+	Hail.send_broadcast(self, verb)
+
+func _nearest_fresh_hostile_pos():
+	var best = null
+	var best_dist := INF
+	for c_id in active_contacts:
+		var c: Dictionary = active_contacts[c_id]
+		if c.get("standing", "") != Standing.HOSTILE:
+			continue
+		if c.get("last_seen_timer", 999.0) > FIRE_STALENESS_MAX:
+			continue
+		var d: float = position.distance_to(c.get("pos", Vector2.ZERO))
+		if d < best_dist:
+			best_dist = d
+			best = c.get("pos", Vector2.ZERO)
+	return best
+
 @rpc("any_peer", "call_local")
 func set_component_power(component_id: String, active: bool) -> void:
 	if not is_multiplayer_authority() or is_dead:
@@ -2932,7 +3233,14 @@ func set_component_power(component_id: String, active: bool) -> void:
 func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: String) -> void:
 	if not is_multiplayer_authority() or is_dead:
 		return # Only host executes this
-		
+
+	# M49 -- held under compulsion: weapons cold until RELEASE/auto-resume
+	# (design_ideas/comms_verbs.md's "Stopped-under-compulsion" honor rule).
+	# One state (compelled_stop), one gate -- belt to fire_opportunity_leaf's
+	# own suspender on the AI side.
+	if not compelled_stop.is_empty():
+		return
+
 	# Verify client owns this ship
 	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
 		if multiplayer.get_remote_sender_id() != 0:

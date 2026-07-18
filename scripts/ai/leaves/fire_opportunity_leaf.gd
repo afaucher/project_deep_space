@@ -14,6 +14,11 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # fires immediately; the holding behavior only bites once a multi-tube broadside is
 # brought to bear (M12c orientation).
 func tick(actor: Node, blackboard) -> int:
+	# M49 -- belt to fire_weapon's own suspender (ship.gd): a held ship stays
+	# weapons-cold while compelled_stop is non-empty (design_ideas/
+	# comms_verbs.md's honored stop).
+	if not actor.compelled_stop.is_empty():
+		return SUCCESS
 	if not blackboard.has_value("target_id"):
 		return SUCCESS
 

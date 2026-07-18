@@ -32,6 +32,8 @@ const IdleLeaf = preload("res://scripts/ai/leaves/idle_leaf.gd")
 const StationKeepingLeaf = preload("res://scripts/ai/leaves/station_keeping_leaf.gd")
 const FollowRouteLeaf = preload("res://scripts/ai/leaves/follow_route_leaf.gd")
 const CargoRunLeaf = preload("res://scripts/ai/leaves/cargo_run_leaf.gd")
+const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
+const ChallengeLeaf = preload("res://scripts/ai/leaves/challenge_leaf.gd")
 
 static func build_default() -> Node:
 	var tree = BeehaveTreeScript.new()
@@ -118,9 +120,17 @@ static func build_station() -> Node:
 # fallback follows the hull's patrol_route (looping) instead of idling. FollowRoute
 # fails when there is no route, so a route-less hull still falls through to Idle.
 #
+# M49 -- Challenge (design_ideas/comms_verbs.md's "Patrol" policy): sits AFTER
+# Engage, BEFORE FollowRoute. It always returns FAILURE (cheap side-effect
+# work -- DEMAND(IDENTIFY) any fresh UNREPORTED contact in controlled space),
+# so it never actually claims the tick; a hostile still preempts everything
+# via Engage above it, and with no challenge to send the tree falls straight
+# through to FollowRoute exactly as before M49.
+#
 #   Selector
 #   |-- Disengage (flee when crippled)
 #   |-- Engage (acquire -> steer -> fire; a hostile preempts the patrol)
+#   |-- Challenge (DEMAND(IDENTIFY) UNREPORTED contacts in controlled space; always FAILURE)
 #   |-- FollowRoute (cruise the waypoints; SUCCESS while patrolling)
 #   +-- Idle (no route -> hold heading)
 static func build_patrol() -> Node:
@@ -154,6 +164,10 @@ static func build_patrol() -> Node:
 	fire.name = "FireOpportunity"
 	engage.add_child(fire)
 
+	var challenge = ChallengeLeaf.new()
+	challenge.name = "Challenge"
+	root.add_child(challenge)
+
 	var patrol = FollowRouteLeaf.new()
 	patrol.name = "FollowRoute"
 	root.add_child(patrol)
@@ -167,8 +181,16 @@ static func build_patrol() -> Node:
 # M20 cargo tree: an unarmed hauler. Flees when attacked, otherwise runs its lane
 # (CargoRun docks at each station and moves on). No Engage -- civilians don't fight.
 #
+# M49 -- ThreatResponse (design_ideas/comms_verbs.md's "Cargo/civilian"
+# policy): sits between Disengage and CargoRun. Comply-or-run reaction to a
+# STOP demand (or holds still, doing nothing, while compelled_stop is
+# active -- the ship-level override owns motion). Returns FAILURE when
+# there's no incident to react to, so the tree falls through to CargoRun
+# exactly as before M49.
+#
 #   Selector
 #   |-- Disengage (flee when crippled/attacked)
+#   |-- ThreatResponse (comply-or-run on a STOP demand, always SOS; FAILURE when idle)
 #   |-- CargoRun (transit -> dock -> depart around the lane)
 #   +-- Idle (no lane -> hold heading)
 static func build_cargo() -> Node:
@@ -188,6 +210,10 @@ static func build_cargo() -> Node:
 	var flee = FleeLeaf.new()
 	flee.name = "Flee"
 	disengage.add_child(flee)
+
+	var threat_response = ThreatResponseLeaf.new()
+	threat_response.name = "ThreatResponse"
+	root.add_child(threat_response)
 
 	var cargo = CargoRunLeaf.new()
 	cargo.name = "CargoRun"

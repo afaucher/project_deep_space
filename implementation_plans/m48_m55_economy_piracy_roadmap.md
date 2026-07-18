@@ -104,6 +104,11 @@ The enabling refactor; nothing else lands without it.
 
 ## M49 — Hail protocol, the DEMAND verb, the honored stop
 
+> **SHIPPED.** `scripts/comms/hail.gd` (wire format + delivery),
+> receiver rules + honored stop in `ship.gd`, `threat_response_leaf.gd` /
+> `challenge_leaf.gd`, comms/contacts-panel verbs + nav-layer SOS markers.
+> Tests: `test_hail_protocol`, `test_honored_stop`, `test_patrol_challenge`.
+
 > **Revised before execution** — the original verb list (CHALLENGE,
 > DEMAND_SURRENDER, COMPLY, SOS) collapsed under a scenario differential:
 > CHALLENGE and DEMAND_SURRENDER differ ONLY in what's demanded, and

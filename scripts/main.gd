@@ -538,6 +538,15 @@ func _distribute_state() -> void:
 			# by indicators_visible -- that flag only mutes map/contacts-panel
 			# declutter, not "can I review what I accepted").
 			"missions": _missions_summary(ship.mission_log),
+			# M49 -- hail protocol (design_ideas/comms_verbs.md). "sos" rides
+			# the packet the same way "contracts" does -- NAV-layer data, never
+			# merged into "contacts" (the M41 rule: SOS never touches sensor
+			# fusion). "last_hails"/"pending_demand"/"compelled_stop" feed the
+			# comms panel's HAILS section + honored-stop banner.
+			"sos": ship.heard_sos.duplicate(true),
+			"last_hails": ship.last_hails.duplicate(true),
+			"pending_demand": ship.pending_demand.duplicate(true),
+			"compelled_stop": ship.compelled_stop.duplicate(true),
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal

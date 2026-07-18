@@ -6,10 +6,18 @@ extends Control
 # not-yet-hostile vessel directly (mark_contact_hostile -- the player-
 # judgment lever). Referenced via preload const, never bare class_name.
 const Standing = preload("res://scripts/combat/standing.gd")
+const Hail = preload("res://scripts/comms/hail.gd")
 
 signal contact_pin_toggled(c_id: String, is_pinned: bool)
 signal selection_changed(c_id: String)
 signal mark_hostile_requested(c_id: String)
+# M49 -- hail protocol (design_ideas/comms_verbs.md). rung is Hail.RUNG_IDENTIFY
+# or Hail.RUNG_STOP; c_id is the observer's OWN track id (same as
+# mark_hostile_requested above) -- terminal_display.gd resolves it to the
+# target's instance id via this panel's own current_state["contacts"] before
+# issuing the rpc (the packet's contact records already carry instance_id).
+signal demand_requested(c_id: String, rung: String)
+signal release_requested(c_id: String)
 
 # Local color map -- standing.gd is phase-1, not ours to touch, and
 # scripts/utils.gd's classification_color is shared with the nav/sensor
@@ -246,6 +254,9 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var p_style: StyleBoxFlat
 
 		var mark_hostile_btn: Button
+		var demand_id_btn: Button
+		var demand_stop_btn: Button
+		var release_btn: Button
 
 		if contact_panels.has(c_id):
 			var refs = contact_panels[c_id]
@@ -255,6 +266,9 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			pin_btn = refs["pin_btn"]
 			info = refs["info"]
 			mark_hostile_btn = refs["mark_hostile_btn"]
+			demand_id_btn = refs["demand_id_btn"]
+			demand_stop_btn = refs["demand_stop_btn"]
+			release_btn = refs["release_btn"]
 		else:
 			panel = PanelContainer.new()
 			p_style = StyleBoxFlat.new()
@@ -286,11 +300,32 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			mark_hostile_btn.pressed.connect(func(): emit_signal("mark_hostile_requested", c_id))
 			header_hbox.add_child(mark_hostile_btn)
 
+			# M49 -- DEMAND ID / DEMAND STOP / RELEASE, next to MARK HOSTILE.
+			# Same "only for the selected vessel contact" visibility rule --
+			# see the update below.
+			demand_id_btn = Button.new()
+			demand_id_btn.text = "DEMAND ID"
+			demand_id_btn.visible = false
+			demand_id_btn.pressed.connect(func(): emit_signal("demand_requested", c_id, Hail.RUNG_IDENTIFY))
+			header_hbox.add_child(demand_id_btn)
+
+			demand_stop_btn = Button.new()
+			demand_stop_btn.text = "DEMAND STOP"
+			demand_stop_btn.visible = false
+			demand_stop_btn.pressed.connect(func(): emit_signal("demand_requested", c_id, Hail.RUNG_STOP))
+			header_hbox.add_child(demand_stop_btn)
+
+			release_btn = Button.new()
+			release_btn.text = "RELEASE"
+			release_btn.visible = false
+			release_btn.pressed.connect(func(): emit_signal("release_requested", c_id))
+			header_hbox.add_child(release_btn)
+
 			info = Label.new()
 			info.add_theme_font_size_override("font_size", 12)
 			vbox.add_child(info)
 
-			contact_panels[c_id] = {"panel": panel, "style": p_style, "header": header, "pin_btn": pin_btn, "info": info, "mark_hostile_btn": mark_hostile_btn}
+			contact_panels[c_id] = {"panel": panel, "style": p_style, "header": header, "pin_btn": pin_btn, "info": info, "mark_hostile_btn": mark_hostile_btn, "demand_id_btn": demand_id_btn, "demand_stop_btn": demand_stop_btn, "release_btn": release_btn}
 
 		# Parent to the correct section
 		var classification = c.get("classification", "UNKNOWN")
@@ -370,6 +405,16 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
 		mark_hostile_btn.visible = (c_id == selected_contact_id and is_vessel
 			and standing != Standing.HOSTILE and standing != Standing.FRIENDLY)
+
+		# M49 -- DEMAND ID / DEMAND STOP: any selected vessel contact (asking
+		# is free, and even a hostile might be demanded a stop). RELEASE:
+		# only once we've actually held this contact under compulsion
+		# (contact carries complied_stop -- see ship.gd's comms_inbox COMPLY
+		# handling).
+		var is_selected_vessel: bool = c_id == selected_contact_id and is_vessel
+		demand_id_btn.visible = is_selected_vessel
+		demand_stop_btn.visible = is_selected_vessel
+		release_btn.visible = is_selected_vessel and c.get("complied_stop", false)
 
 # ---------------------------------------------------------------------------
 # M41 -- "Contracts" section: one row per contract_feed.gd entry (the current

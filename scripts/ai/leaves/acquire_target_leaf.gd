@@ -12,6 +12,12 @@ func tick(actor: Node, blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
 
+	# M49 -- a held ship doesn't hunt (design_ideas/comms_verbs.md's honored
+	# stop); the tree falls through to Idle, and the ship-level throttle
+	# override (ship.gd's _physics_process) owns motion regardless.
+	if not actor.compelled_stop.is_empty():
+		return FAILURE
+
 	var max_weapon_range = 0.0
 	for comp in actor.ship_components:
 		if comp.get("type") == "weapons" and comp.has("range"):
@@ -23,6 +29,11 @@ func tick(actor: Node, blackboard) -> int:
 	for c_id in actor.active_contacts:
 		var contact = actor.active_contacts[c_id]
 		if contact.get("standing", "") != Standing.HOSTILE:
+			continue
+		# M49 -- no leaf targets a compliant stopped ship (comms_verbs.md's
+		# honor rule): stopped for customs, arrest, or robbery, it's off the
+		# table regardless of standing.
+		if contact.get("complied_stop", false):
 			continue
 		# Fire discipline (Ship.FIRE_STALENESS_MAX): a track nobody has
 		# actually seen in a while is a dead-reckoned guess about where a
