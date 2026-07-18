@@ -155,6 +155,12 @@ The enabling refactor; nothing else lands without it.
 
 ## M50 — Pirate hulls + the piracy behavior tree
 
+> **SHIPPED.** `scripts/ai/jobs/` (two-slot runner + step library),
+> `build_pirate()`, pirate_ore_shuttle/armed_pinnace hulls. Tests:
+> `test_job_runner`, `test_visitor_itinerary` (the generality proof),
+> `test_pirate_ambush`, `test_pirate_abort`. As-built deviations recorded
+> in [m50_pirate_tree_design.md](m50_pirate_tree_design.md).
+
 > **Revised before execution** — the "long multi-phase FSM-in-a-tree" risk
 > below is resolved by a new composition model: **reactions stay trees,
 > missions become data.** A generic job runner executes an itinerary of
