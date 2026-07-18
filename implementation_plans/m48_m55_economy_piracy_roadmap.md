@@ -155,6 +155,21 @@ The enabling refactor; nothing else lands without it.
 
 ## M50 — Pirate hulls + the piracy behavior tree
 
+> **Revised before execution** — the "long multi-phase FSM-in-a-tree" risk
+> below is resolved by a new composition model: **reactions stay trees,
+> missions become data.** A generic job runner executes an itinerary of
+> step verbs (GO_TO / GO_DARK / RELIGHT / SELECT_VICTIM / INTERCEPT /
+> DEMAND_STOP / TAKE_ALONGSIDE / AWAIT / EXIT_AT ...) with declarative
+> abort edges; the pirate lifecycle below is ~10 lines of job data, and
+> traders/commuters (M53+) are the same runner with different data. Model:
+> [jobs_and_itineraries.md](../design_ideas/jobs_and_itineraries.md);
+> pinned build plan: [m50_pirate_tree_design.md](m50_pirate_tree_design.md)
+> (also resolves the launder-knowledge question honestly: the pirate can't
+> KNOW the datalink forgot it, so it waits out a fallible track-quiet
+> heuristic — relighting early near a patrol is gameplay, not a bug). The
+> hulls ship as M24 delta variants of ore_shuttle/pinnace. M50 also ships a
+> non-pirate "visitor" itinerary test as the generality proof.
+
 The loop itself, with an **abstract take** (no physical cargo yet).
 
 - 1–2 pirate hulls as repurposed civilian designs (mining-laser shuttle,
