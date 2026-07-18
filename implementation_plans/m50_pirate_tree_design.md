@@ -10,14 +10,20 @@ built on the generic job runner that traders/workers will reuse.
 
 ## New: the job runner (`scripts/ai/jobs/`)
 
-- `scripts/ai/jobs/job_runner_leaf.gd` — Beehave action leaf. Reads
-  `actor.current_job` (a ship field, so directors/spawners/tests can assign
-  without touching the tree). No job / job complete → FAILURE (tree falls
-  through). Otherwise: evaluate the current step's `abort_when` conditions,
-  then dispatch the step to the executor library; handle CONTINUE (return
-  SUCCESS), DONE (advance `current`), ABORT (jump to the step whose
-  `label` == this step's `on_abort`; no match → job complete). ~80 lines,
-  never grows.
+- `scripts/ai/jobs/job_runner_leaf.gd` — Beehave action leaf. Two-slot
+  model (jobs_and_itineraries.md — NOT a stack): reads `actor.assignment`
+  falling back to `actor.default_job` (ship fields; ship-facing API is
+  `assign_job(job)` / `set_default_job(job)` so directors/spawners/tests
+  never touch the tree). A completed/aborted-out assignment clears and the
+  standing duty resumes at step 0; a completed job with `repeat: true`
+  re-enters at step 0. Neither slot populated / both complete → FAILURE
+  (tree falls through). Otherwise: evaluate the current step's `abort_when`
+  conditions, then dispatch to the executor library; handle CONTINUE
+  (return SUCCESS), DONE (advance `current`), ABORT (jump to the step whose
+  `label` == this step's `on_abort`; no match → job over). ~90 lines,
+  never grows. The pirate's hunt is an ASSIGNMENT (guild-issued in M51,
+  test-issued in M50) over an empty standing duty — which also exercises
+  the fallback path M52's interdiction will rely on.
 - `scripts/ai/jobs/job_steps.gd` — static executor library (preload-const
   convention, like standing.gd/hail.gd). One `static func step_<verb>(actor,
   step: Dictionary) -> int` per verb returning CONTINUE/DONE/ABORT consts.
@@ -44,6 +50,9 @@ built on the generic job runner that traders/workers will reuse.
     been transponder-dark AND held no fresh contact within `clear_range`
     for `seconds` continuously (reset on any fresh contact). Conservative
     stand-in for "everyone lost my track"; deliberately fallible.
+  - `"undocked" {}` — we are not currently captured by a berth (the dock
+    dwell: DOCK_AT is done when BERTHED, AWAIT{undocked} rides out the
+    hold until the station releases us — the visitor test uses this).
 - `DOCK_AT {station_pos}` — find the station near pos ("ships" group +
   `get_port_zone`, cargo_run_leaf's `_find_station_at` pattern), request a
   grant at a controlled bay / raise `wants_dock` at an open one, DONE once
@@ -162,11 +171,14 @@ yes).
 
 - `test_job_runner` — unit, no combat: scripted micro-jobs assert step
   advancement, scratch reset on entry, abort-edge jump (including jump
-  BACKWARD to a label), job-complete → FAILURE, AWAIT duration/timeout.
+  BACKWARD to a label), job-complete → FAILURE, AWAIT duration/timeout,
+  `repeat` re-entry, and the two-slot fallback (assignment completes →
+  default_job resumes at step 0; assignment aborts out → same).
 - `test_visitor_itinerary` — the GENERALITY PROOF: a plain ship runs
-  `GO_TO -> DOCK_AT -> AWAIT{duration} -> EXIT_AT` through the runner
-  against a real station; asserts docked then departed then despawned.
-  This is the trader skeleton, shipped a milestone early on purpose.
+  `GO_TO -> DOCK_AT -> AWAIT{undocked} -> EXIT_AT` through the runner
+  against a real station; asserts docked then released then departed then
+  despawned. This is the trader skeleton, shipped a milestone early on
+  purpose.
 - `test_pirate_ambush` — e2e mini cluster: pirate (armed_pinnace) arrives
   under cover flag reading NEUTRAL to a watcher, goes dark, lurks; a cargo
   shuttle crosses the lane; assert demand → shuttle complies (M49) → take

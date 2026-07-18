@@ -31,12 +31,25 @@ Three classes in, we'd have three divergent copies of the same plumbing.
 
 ### 1. Reactive — trees (unchanged)
 
-Priority selectors of shared leaves: Disengage/Flee, ThreatResponse
-(comply-or-run), Engage, Challenge. Role differences up here are **policy
-parameters** (authority_flags, comply thresholds, whether an Engage branch
-exists at all), not new leaf code. The reactive layer ALWAYS outranks the
-job — a crippled pirate flees mid-heist because Disengage sits above the
-runner, not because the heist knows about damage.
+Priority selectors of shared leaves, holding two kinds of things that
+compose identically: **reactions** (Disengage/Flee, ThreatResponse, Engage)
+and **ambient duties** (Challenge — side-effect scans that never claim the
+tick; don't try to force these into jobs, they aren't missions). Role
+differences up here are **policy parameters** (authority_flags, comply
+thresholds, whether an Engage branch exists at all), not new leaf code. The
+reactive layer ALWAYS outranks the job — a crippled pirate flees mid-heist
+because Disengage sits above the runner, not because the heist knows about
+damage.
+
+One policy parameter is load-bearing enough to name here: **rules of
+engagement** on the Engage layer. Today acquire_target engages ANY fresh
+HOSTILE in weapons range — right for patrols, wrong for a battle fleet that
+should ignore civil matters (it would open fire on a marked pirate it
+happens to cruise past). ROE becomes a per-ship policy: `weapons_free`
+(today's behavior) / `self_defense` (engage only what attacked us or our
+faction) / `escort_only` (later). Witness rules are untouched — the fleet
+still MARKS the pirate and the standing rides the datalink; it reports the
+crime, it just doesn't chase it.
 
 Ship-level hard states stay below even that: compelled_stop (M49) overrides
 motion and weapons in `ship.gd` no matter what any tree wants.
@@ -50,12 +63,40 @@ data structure:
 job = {
   "steps": [ {"verb": ..., <params>, "on_abort": <label>, "label": <opt>} ],
   "current": 0,
+  "repeat": false,   # standing duties loop; assignments don't
 }
 ```
 
+A ship holds up to TWO jobs — **assignment falls back to standing duty**,
+no stack:
+
+- `default_job` — the standing duty (patrol shift, cargo lane, tug
+  standby), usually `repeat: true`; re-enters at step 0 whenever it comes
+  back into effect (a shift's progress is regenerable by design).
+- `assignment` — an overriding mission (a guild hunt, an M52 interdiction
+  pushed by an SOS trigger, a director's order). The runner runs the
+  assignment when present; on completion or abort it clears and the
+  standing duty resumes.
+
+Ship-facing API is deliberately tiny — `assign_job()` / `set_default_job()`
+— so the runner's internals stay swappable. A real LIFO stack is
+deliberately NOT built: it's justified only by NESTED preemption over
+NON-REGENERABLE progress (a mission interrupting a mission, where the
+interrupted one can't just be reissued), and nothing through M55 has that
+shape. When something does, prefer the director-mediated answer first (the
+director knows what it assigned and reissues the remainder) before adding
+stack frames to ships. A suspended job that resumes minutes later would
+need to re-validate every ship/wreck it references — complexity the
+fallback-to-duty model never pays.
+
 Each **step verb** has a small executor in a step library, reusing the same
-Steering/docking calls today's leaves make. Executors are stateless — any
-per-step scratch lives in the step dict itself — and return one of:
+Steering/docking calls today's leaves make. **Steps must be resumable from
+arbitrary position and elapsed time**: while a reactive layer owns the tick
+(cargo fleeing a pirate mid-haul), the runner simply isn't ticked, and later
+resumes mid-step from wherever the ship ended up — GO_TO steers from
+anywhere, DOCK_AT re-requests. A verb that can't recover from displacement
+is a broken verb. Executors are stateless — any per-step scratch lives in
+the step dict itself — and return one of:
 
 - **CONTINUE** — still working; runner returns SUCCESS this tick (it owns
   the tick).
@@ -97,6 +138,34 @@ Only three verbs are pirate-only. The rest is the shared vocabulary traders
 and workers speak with zero new code — a trader IS
 `GO_TO → DOCK_AT → AWAIT → GO_TO → DOCK_AT → ... → EXIT_AT` as data.
 
+AWAIT's condition set grows additively as classes need it: `duration`,
+`track_quiet` (M50), `undocked` (dock dwell), later `unloaded`,
+`until_time` (scheduled departures), `trade_complete`. Conditions obey the
+honesty rule below.
+
+## Validation: the classes this was tested against
+
+Re-expressing existing behaviors and five planned classes on paper (before
+committing the model) — each row is data + at most a couple of verbs:
+
+| Class | Itinerary | New machinery it forces |
+|---|---|---|
+| Cargo lane (exists) | `GO_TO → DOCK_AT → AWAIT{undocked} → ...` repeat | `repeat`, `AWAIT{undocked}` |
+| Patrol shift (exists) | `GO_TO wp1..wpN` repeat; Challenge stays an ambient tree leaf | patrols get SHIFTS for free (dock at base between them) |
+| M52 interdiction | assignment: `GO_TO sos → INTERCEPT → DEMAND_STOP` — same verbs as the robbery, judged by flag | the assignment/default_job fallback |
+| Fleet patrol | leader runs the sweep; wingmen `FORM_UP {leader, slot}` repeat | `FORM_UP`; the ROE parameter (above) |
+| Mining | `GO_TO field → MINE → GO_TO station → DOCK_AT → AWAIT{unloaded}` repeat | `MINE` |
+| Civilian transport | scheduled port calls | nothing — pure data |
+| Smuggler | legit arrival → `GO_DARK → DROP_CARGO → AWAIT{track_quiet} → RELIGHT → EXIT` | `DROP_CARGO`/`PICKUP`; reuses the pirate's whole stealth family |
+| Tug | duty: standby `AWAIT`; assignment on SOS(DISABLED): `INTERCEPT wreck → GRAPPLE → GO_TO station → RELEASE_TOW` | `GRAPPLE`/`RELEASE_TOW` (docking capture-spring, reused ship-to-ship) |
+
+No case needed branching jobs, parallel steps, or a stack — the flat shape
+held. Convergences worth trusting: the police stop and the stickup are one
+itinerary skeleton (the same collapse comms_verbs.md found on the wire);
+M49's SOS nature field is the dispatch signal for BOTH patrols
+(UNDER_ATTACK) and tugs (DISABLED); smugglers reuse the pirate's stealth
+verbs wholesale.
+
 ## Where role "personality" lives
 
 - **Reactive policy**: which reactive branches the tree has + their
@@ -127,8 +196,11 @@ not a bug; that's the gameplay.
 - Not a replacement for reactive trees — reactions stay trees; a job never
   handles being shot at.
 - Not a scripting language — no branching beyond the single on_abort edge,
-  no loops, no expressions. If a behavior needs more, it's either a new
-  verb (capability) or it belongs in the reactive layer (reaction).
+  no loops beyond the job-level `repeat` flag (itself a bridge: today's
+  loop-forever lanes/patrols are an artifact of having no directors — the
+  target state is directors assigning DISCRETE runs and shifts), no
+  expressions. If a behavior needs more, it's either a new verb
+  (capability) or it belongs in the reactive layer (reaction).
 - Not migrated wholesale in M50: CargoRun/FollowRoute keep their leaves for
   now (load-bearing in many tests); migrating them onto jobs is a
   mechanical follow-up once the runner has proven itself (M53-ish, with the
