@@ -69,6 +69,27 @@ const VARIANTS := [
 		"role_key": "cargo_shuttle",
 		"promotes_tactical_sweep": false,
 	},
+	# M50 -- pirate hulls (implementation_plans/m50_pirate_tree_design.md).
+	# Both add exactly one weapon component to an otherwise-unarmed civilian
+	# base -- a weapon-class-mix change is one of the design doc §7 promotion
+	# triggers (a variant that "adds an entire weapon class"), so unlike
+	# Pirate LAC/Ore Shuttle above, these DO promote: they're new tactical
+	# roles (armed civilian silhouettes), not skins of an already-swept one.
+	# No tactical sweep run this milestone (out of scope per the M50 plan --
+	# combat balance lands with a real tactical_analysis pass later); flagged
+	# here so the promotion bookkeeping is honest rather than silently false.
+	{
+		"name": "Pirate Ore Shuttle",
+		"script": preload("res://scripts/ships/pirate_ore_shuttle.gd"),
+		"role_key": "pirate_ore_shuttle",
+		"promotes_tactical_sweep": true,
+	},
+	{
+		"name": "Armed Pinnace",
+		"script": preload("res://scripts/ships/armed_pinnace.gd"),
+		"role_key": "armed_pinnace",
+		"promotes_tactical_sweep": true,
+	},
 ]
 
 enum Team { FRIENDLY, ENEMY, PIRATE }

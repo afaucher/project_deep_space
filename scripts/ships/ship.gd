@@ -477,6 +477,29 @@ var pending_demand: Dictionary = {}
 var compelled_stop: Dictionary = {}
 var last_hails: Array = []
 
+# M50 -- the job runner (design_ideas/jobs_and_itineraries.md, implementation_
+# plans/m50_pirate_tree_design.md). Two-slot model, NOT a stack: `assignment`
+# (an overriding mission -- a guild hunt, an M52 interdiction) falls back to
+# `default_job` (a standing duty -- patrol shift, cargo lane) whenever
+# `assignment` is empty. JobRunnerLeaf reads these two fields directly;
+# assign_job()/set_default_job() below are the ONLY ship-facing write API, so
+# directors/spawners/tests never touch the tree or the runner's internals.
+var assignment: Dictionary = {}
+var default_job: Dictionary = {}
+
+func assign_job(job: Dictionary) -> void:
+	assignment = job
+
+func set_default_job(job: Dictionary) -> void:
+	default_job = job
+
+# M50 -- piracy bookkeeping. loot_takes: how many times THIS ship (the
+# robber) has completed TAKE_ALONGSIDE's hold -- the M51 guild ledger reads
+# it. looted: server-side flag stamped on the VICTIM by the take, test-visible
+# (cargo stays abstract in M50 -- no physical goods change hands yet).
+var loot_takes: int = 0
+var looted: bool = false
+
 var available_npcs: Array[Resource] = []
 var comms_ledger: Node
 var mission_log: Node
@@ -3156,6 +3179,22 @@ func set_transponder_flag(flag: String) -> void:
 	for c in ship_components:
 		if c["type"] == "comms":
 			c["transponder_flag"] = flag
+			break
+
+# M50 -- the launder relight (RELIGHT verb, design_ideas/jobs_and_itineraries.md
+# / implementation_plans/m50_pirate_tree_design.md): a claimed name is a
+# liability once it's on the wanted-names registry, so the job steps a pirate
+# under a NEW one before showing colors again. Same RPC shape as the sibling
+# transponder_* setters above. get_active_transponder_data() already reads
+# "transponder_custom_name" off the comms component (falls back to ship_name
+# when unset) -- this is just the missing setter for that existing field.
+@rpc("any_peer", "call_local")
+func set_transponder_custom_name(custom_name: String) -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	for c in ship_components:
+		if c["type"] == "comms":
+			c["transponder_custom_name"] = custom_name
 			break
 
 # M49 -- player/AI send APIs for the hail protocol (design_ideas/comms_verbs.md).

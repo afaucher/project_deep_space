@@ -191,6 +191,30 @@ yes).
 - Full `build.ps1` gate green; watch perf_combat's band (the runner adds
   O(1) per ship per tick; SELECT_VICTIM's scoring is 30-tick-gated).
 
+## As-built notes (deviations, all deliberate)
+
+- **abort_when entries carry their own jump target** — `{"cond", "on_abort",
+  <params>}` — because one step legitimately aborts to DIFFERENT places per
+  condition (INTERCEPT: victim_lost → back to "hunt", third_party →
+  "exfil"); the step-level `on_abort` remains for verb-returned ABORTs
+  (DEMAND_STOP's patience, TAKE's bolted victim). Runner header documents
+  the split.
+- **Executors take `(actor, step, job)`** uniformly so the victim-sharing
+  verbs read/write `job["victim_iid"]` through one dispatch shape.
+- **`third_party_in_range` is NOT attached to SELECT_VICTIM** — before a
+  victim exists, victim_iid is -1 and the intended prey itself would read
+  as a false third party, aborting every hunt at birth. SELECT_VICTIM's own
+  ALONE check covers witness pressure during the lurk; the shared condition
+  applies from INTERCEPT onward.
+- **The hunt job needs a second GO_DARK after TAKE_ALONGSIDE** — show_colors
+  relit the transponder; AWAIT{track_quiet}'s dark precondition needs it
+  off again. The canonical-job table above is shorthand.
+- **Both new hulls are standalone `design()` compositions** (Variants.apply
+  has no ADD-component op); registered with `promotes_tactical_sweep: true`
+  honestly (they add a weapon class; no sweep run yet — balance pass later).
+- Steps hold station via velocity-mode zero-target (brakes), not
+  throttle-zero (coasts) — a coast orbit-overshoots and never settles.
+
 ## Out of scope (lands later)
 
 Guild director + wormhole arrivals/records (M51 — reads loot_takes,

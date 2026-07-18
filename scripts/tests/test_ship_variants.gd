@@ -400,7 +400,11 @@ func _assert_only_layout_warnings(result: Dictionary, item: String, label: Strin
 
 func _test_auto_enumeration() -> void:
 	_assert(not ShipCatalog.VARIANTS.is_empty(), "Item 9: ShipCatalog.VARIANTS should be non-empty")
-	_assert(ShipCatalog.VARIANTS.size() == 2, "Item 9: ShipCatalog.VARIANTS should have 2 entries (Pirate LAC, Ore Shuttle) for this milestone, got %d" % ShipCatalog.VARIANTS.size())
+	# M24 shipped 2 (Pirate LAC, Ore Shuttle); M50 added 2 more pirate hulls
+	# (Pirate Ore Shuttle, Armed Pinnace -- implementation_plans/
+	# m50_pirate_tree_design.md), same registration surface, same auto-
+	# enumeration proof below.
+	_assert(ShipCatalog.VARIANTS.size() == 4, "Item 9: ShipCatalog.VARIANTS should have 4 entries as of M50, got %d" % ShipCatalog.VARIANTS.size())
 
 	# Demonstrate test_ship_designs.gd actually iterates VARIANTS: every
 	# variant must appear in its EXPECTED_LAYOUT_WARNINGS registry (Case 6's

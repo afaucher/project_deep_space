@@ -34,6 +34,7 @@ const FollowRouteLeaf = preload("res://scripts/ai/leaves/follow_route_leaf.gd")
 const CargoRunLeaf = preload("res://scripts/ai/leaves/cargo_run_leaf.gd")
 const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
 const ChallengeLeaf = preload("res://scripts/ai/leaves/challenge_leaf.gd")
+const JobRunnerLeaf = preload("res://scripts/ai/jobs/job_runner_leaf.gd")
 
 static func build_default() -> Node:
 	var tree = BeehaveTreeScript.new()
@@ -75,6 +76,48 @@ static func build_default() -> Node:
 	var idle = IdleLeaf.new()
 	idle.name = "Idle"
 	root.add_child(idle)
+
+	return tree
+
+# M50 -- pirate tree (design_ideas/jobs_and_itineraries.md /
+# implementation_plans/m50_pirate_tree_design.md). Deliberately NO Engage
+# branch: a pirate is predatory, not reactive -- it attacks via the job
+# (DEMAND/TAKE), never via acquire_target's "shoot any fresh HOSTILE in
+# range." Standing gates REACTIVE violence only; the pirate's victims mark IT
+# hostile through ordinary witnessed-aggression attribution, not the other
+# way around. Disengage still outranks everything -- a crippled pirate flees
+# mid-heist because Disengage sits above the runner, not because the heist
+# knows about damage (jobs_and_itineraries.md's layering rule).
+#
+#   Selector
+#   |-- Disengage (flee when crippled -- damage outranks the heist)
+#   |-- JobRunner (the mission: hunt dark, demand, take, exfil, launder)
+#   +-- Idle (no job in either slot -- coast)
+static func build_pirate() -> Node:
+	var tree = BeehaveTreeScript.new()
+	tree.name = "AITree"
+
+	var root = SelectorScript.new()
+	root.name = "RootSelector"
+	tree.add_child(root)
+
+	var disengage = SequenceScript.new()
+	disengage.name = "Disengage"
+	root.add_child(disengage)
+	var should_disengage = ShouldDisengageLeaf.new()
+	should_disengage.name = "ShouldDisengage"
+	disengage.add_child(should_disengage)
+	var flee = FleeLeaf.new()
+	flee.name = "Flee"
+	disengage.add_child(flee)
+
+	var job_runner = JobRunnerLeaf.new()
+	job_runner.name = "JobRunner"
+	root.add_child(job_runner)
+
+	var idle2 = IdleLeaf.new()
+	idle2.name = "Idle"
+	root.add_child(idle2)
 
 	return tree
 

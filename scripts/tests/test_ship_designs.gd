@@ -390,6 +390,34 @@ const EXPECTED_LAYOUT_WARNINGS := {
 		{"component_id": "engine_main", "field": "hull_coverage"},
 		{"component_id": "engine_main", "field": "hull_coverage"},
 	],
+	# M50 -- pirate hulls (implementation_plans/m50_pirate_tree_design.md).
+	# Enumerated the same way as every other entry: run the validator against
+	# the actual authored geometry, then review before freezing.
+	#  - Pirate Ore Shuttle: identical to "Ore Shuttle"'s own engine_main
+	#    warnings (inherited layout, untouched by this delta) plus the new
+	#    mining_laser's two flank faces (+Y/-Y) -- it's bolted onto hull_fwd's
+	#    open +X face with nothing beside it, same "turret projecting past
+	#    the hull" idiom already accepted fleet-wide.
+	"Pirate Ore Shuttle": [
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "mining_laser", "field": "hull_coverage"},
+		{"component_id": "mining_laser", "field": "hull_coverage"},
+	],
+	#  - Armed Pinnace: identical to "Pinnace"'s own sensor_fwd/engine_main
+	#    warnings (inherited, untouched by this delta) plus the new
+	#    hp_dorsal_laser's -X face -- it sits flush against rcs_main's dorsal
+	#    edge (covered from that side) but open on its outboard -X flank with
+	#    nothing else nearby; its active face (+Y) reaches the hull's own
+	#    edge unmasked, so no active_surface warning.
+	"Armed Pinnace": [
+		{"component_id": "sensor_fwd", "field": "hull_coverage"},
+		{"component_id": "sensor_fwd", "field": "hull_coverage"},
+		{"component_id": "sensor_fwd", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "engine_main", "field": "hull_coverage"},
+		{"component_id": "hp_dorsal_laser", "field": "hull_coverage"},
+	],
 }
 
 # Multiset key: "component_id|field" repeated per occurrence (a component can
