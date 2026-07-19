@@ -291,9 +291,6 @@ func _ready() -> void:
 	contacts_panel = ContactsPanel.new()
 	contacts_panel.contact_pin_toggled.connect(_on_contact_pin_toggled)
 	contacts_panel.selection_changed.connect(_on_selection_changed)
-	contacts_panel.mark_hostile_requested.connect(_on_mark_hostile_requested)
-	contacts_panel.demand_requested.connect(_on_demand_requested)
-	contacts_panel.release_requested.connect(_on_release_requested)
 	contacts_container.add_child(contacts_panel)
 	content_hbox.add_child(contacts_container)
 	
@@ -366,6 +363,12 @@ func _ready() -> void:
 	comms_panel.transponder_share_loc_toggled.connect(_on_transponder_share_loc_toggled)
 	comms_panel.comply_requested.connect(_on_comply_requested)
 	comms_panel.sos_requested.connect(_on_sos_requested)
+	# Post-M51 playtest -- the selected-contact action row lives on the comms
+	# panel now (see comms_panel.gd); same handlers as before, new emitter.
+	comms_panel.mark_hostile_requested.connect(_on_mark_hostile_requested)
+	comms_panel.unmark_hostile_requested.connect(_on_unmark_hostile_requested)
+	comms_panel.demand_requested.connect(_on_demand_requested)
+	comms_panel.release_requested.connect(_on_release_requested)
 	comms_container.add_child(comms_panel)
 	content_hbox.add_child(comms_container)
 	comms_container.visible = false
@@ -637,6 +640,11 @@ func _on_fire_weapon_requested(weapon_id: String) -> void:
 	if ship_node:
 		ship_node.rpc_id(1, "fire_weapon", weapon_id, target_pos, target_id)
 
+func _on_unmark_hostile_requested(c_id: String) -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "clear_contact_hostile", c_id)
+
 func _on_mark_hostile_requested(c_id: String) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
@@ -691,6 +699,8 @@ func _on_selection_changed(c_id: String) -> void:
 		sensor_panel.set_selected_contact_id(c_id)
 	if contacts_panel and contacts_panel.has_method("set_selected_contact_id"):
 		contacts_panel.set_selected_contact_id(c_id)
+	if comms_panel and comms_panel.has_method("set_selected_contact_id"):
+		comms_panel.set_selected_contact_id(c_id)
 
 	var ship_node = _get_my_ship()
 	if ship_node:

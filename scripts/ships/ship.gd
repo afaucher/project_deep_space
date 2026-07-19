@@ -1397,13 +1397,14 @@ func _on_body_entered(other: Node) -> void:
 	var hit_pos: Vector2 = position + impact_dir * get_bounding_radius()
 
 	if COMBAT_DEBUG: print("[Collision] ", name, " hit ", other.name, " at v_impact=", v_impact, " dmg=", damage)
-	# M48 -- attribute a ramming collision to the other ship (a station getting
-	# rammed is as much a hostile act as being shot at). Not every collision
-	# is with a ship (asteroids, debris) -- has_method("take_damage") is the
-	# same "is this a damageable ship-like body" test laser_behavior.gd's
-	# hit-query already uses, so Asteroid (no take_damage) is excluded.
-	var attacker_id: int = other.get_instance_id() if other.has_method("take_damage") else -1
-	take_damage(damage, hit_pos, hit_dir, "kinetic", attacker_id)
+	# Collisions are NOT attributed (attacker_id -1): fault is ambiguous --
+	# BOTH bodies run this handler and would blame each other, so a player
+	# nudging a beacon marked the BEACON hostile for "attacking" them (the
+	# original M48 choice attributed ramming as aggression; playtesting
+	# showed the false-positive is far more common than the deliberate ram).
+	# A deliberate-ramming consequence, if we ever want one, should be a
+	# fault heuristic + a warning tier, not an instant HOSTILE mark.
+	take_damage(damage, hit_pos, hit_dir, "kinetic", -1)
 
 func hulk() -> void:
 	is_dead = true
@@ -1799,6 +1800,26 @@ func mark_contact_hostile(c_id: String, reason: String = "flagged by operator") 
 	var c: Dictionary = active_contacts[c_id]
 	c["standing"] = Standing.HOSTILE
 	c["standing_reason"] = reason
+
+# The inverse judgment lever -- "I was wrong about this one." Clears the
+# sticky HOSTILE (and the hidden stray-fire counter) from OUR OWN track so
+# the next fusion tick recomputes standing from rest (crypto/flag/
+# transponder). Per-observer only: it does not retract a marking already
+# shared onto the datalink -- a crypto-linked peer still carrying HOSTILE
+# will re-share it (severity-wins), so unmarking a faction-wide marking is
+# a future comms verb, not this. That limitation is acceptable today: the
+# common wrongful mark (e.g. the collision-attribution bug this shipped
+# alongside) is a purely local judgment that never had witnesses.
+@rpc("any_peer", "call_local")
+func clear_contact_hostile(c_id: String) -> void:
+	if not is_multiplayer_authority(): return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	if not active_contacts.has(c_id):
+		return
+	var c: Dictionary = active_contacts[c_id]
+	c.erase("standing")
+	c.erase("standing_reason")
+	c.erase("aggro_hits")
 
 # M49 -- the honored-stop declaration (design_ideas/comms_verbs.md's
 # "Stopped-under-compulsion"). Requires a live STOP demand addressed to us

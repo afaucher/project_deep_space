@@ -55,14 +55,31 @@ signal transponder_custom_name_changed(new_name: String)
 # M49 -- hail protocol (design_ideas/comms_verbs.md).
 signal comply_requested()
 signal sos_requested(nature: String)
+# Post-M51 playtest -- the contact action row moved HERE from the contacts
+# panel (contact rows are prime real estate; comms is where you talk to and
+# judge ships). All act on the currently SELECTED contact (selection is
+# shared across panels via terminal_display's set_selected_contact_id
+# fan-out). c_id is our own track id; terminal_display resolves instance ids.
+signal mark_hostile_requested(c_id: String)
+signal unmark_hostile_requested(c_id: String)
+signal demand_requested(c_id: String, rung: String)
+signal release_requested(c_id: String)
 
-# HAILS section (last_hails newest-first) + honored-stop banner/COMPLY + SOS button.
+# HAILS section (last_hails newest-first) + honored-stop banner/COMPLY + SOS
+# button + the selected-contact action row.
 var hail_banner: PanelContainer
 var hail_banner_label: Label
 var btn_comply: Button
 var btn_sos: Button
 var hails_vbox: VBoxContainer
 var _last_hails_rendered: Array = []
+var selected_contact_id: String = ""
+var action_target_lbl: Label
+var btn_mark_hostile: Button
+var btn_unmark: Button
+var btn_demand_id: Button
+var btn_demand_stop: Button
+var btn_release: Button
 
 func _ready() -> void:
 	clip_contents = true
@@ -161,6 +178,44 @@ func _ready() -> void:
 	hails_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hails_title.add_theme_color_override("font_color", Color.ORANGE_RED)
 	top_pane.add_child(hails_title)
+
+	# Selected-contact action row (moved here from the contacts panel --
+	# post-M51 playtest): who it acts on + the judgment/verb buttons.
+	# Visibility rules live in _update_action_row().
+	action_target_lbl = Label.new()
+	action_target_lbl.text = "No contact selected"
+	action_target_lbl.add_theme_font_size_override("font_size", 12)
+	action_target_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	top_pane.add_child(action_target_lbl)
+
+	var action_hbox = HBoxContainer.new()
+	top_pane.add_child(action_hbox)
+
+	btn_demand_id = Button.new()
+	btn_demand_id.text = "DEMAND ID"
+	btn_demand_id.pressed.connect(func(): emit_signal("demand_requested", selected_contact_id, Hail.RUNG_IDENTIFY))
+	action_hbox.add_child(btn_demand_id)
+
+	btn_demand_stop = Button.new()
+	btn_demand_stop.text = "DEMAND STOP"
+	btn_demand_stop.pressed.connect(func(): emit_signal("demand_requested", selected_contact_id, Hail.RUNG_STOP))
+	action_hbox.add_child(btn_demand_stop)
+
+	btn_release = Button.new()
+	btn_release.text = "RELEASE"
+	btn_release.pressed.connect(func(): emit_signal("release_requested", selected_contact_id))
+	action_hbox.add_child(btn_release)
+
+	btn_mark_hostile = Button.new()
+	btn_mark_hostile.text = "MARK HOSTILE"
+	btn_mark_hostile.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+	btn_mark_hostile.pressed.connect(func(): emit_signal("mark_hostile_requested", selected_contact_id))
+	action_hbox.add_child(btn_mark_hostile)
+
+	btn_unmark = Button.new()
+	btn_unmark.text = "UNMARK"
+	btn_unmark.pressed.connect(func(): emit_signal("unmark_hostile_requested", selected_contact_id))
+	action_hbox.add_child(btn_unmark)
 
 	hails_vbox = VBoxContainer.new()
 	top_pane.add_child(hails_vbox)
@@ -262,6 +317,44 @@ func update_data(packet: Dictionary) -> void:
 	_update_missions_list()
 	_update_hail_banner()
 	_update_hails_list()
+	_update_action_row()
+
+# Shared-selection sink (terminal_display's _on_selection_changed fan-out,
+# same duck-typed method the sensor/contacts panels expose).
+func set_selected_contact_id(c_id: String) -> void:
+	selected_contact_id = c_id
+	_update_action_row()
+
+# Visibility rules (carried over from the contacts-panel buttons this row
+# replaces): everything needs a selected VESSEL contact. DEMAND ID/STOP --
+# always (asking is free; even a hostile can be demanded a stop). RELEASE --
+# only a contact we're crediting with complied_stop. MARK HOSTILE -- not
+# already HOSTILE/FRIENDLY (nothing left to declare). UNMARK -- the inverse:
+# only a HOSTILE track (clear_contact_hostile recomputes it from rest).
+func _update_action_row() -> void:
+	if action_target_lbl == null:
+		return
+	var contacts: Dictionary = current_state.get("contacts", {})
+	var c: Dictionary = contacts.get(selected_contact_id, {})
+	var classification: String = c.get("classification", "")
+	var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
+	var standing: String = c.get("standing", "")
+
+	if c.is_empty() or not is_vessel:
+		action_target_lbl.text = "No vessel selected (select one in CONTACTS)"
+		for b in [btn_demand_id, btn_demand_stop, btn_release, btn_mark_hostile, btn_unmark]:
+			b.visible = false
+		return
+
+	var t_name: String = c.get("transponder_name", "")
+	action_target_lbl.text = "Selected: %s%s%s" % [selected_contact_id,
+		(" '" + t_name + "'") if t_name != "" else "",
+		(" [" + standing + "]") if standing != "" else ""]
+	btn_demand_id.visible = true
+	btn_demand_stop.visible = true
+	btn_release.visible = c.get("complied_stop", false)
+	btn_mark_hostile.visible = standing != "HOSTILE" and standing != "FRIENDLY"
+	btn_unmark.visible = standing == "HOSTILE"
 
 # M49 -- honored-stop banner: visible whenever the player ship holds a
 # pending STOP demand (packet["pending_demand"], set by ship.gd's comms_inbox
