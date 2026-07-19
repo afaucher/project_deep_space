@@ -236,6 +236,14 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 
 ## M52 — Patrol interdiction + SOS response
 
+> **Playtest notes to fold into this milestone's design pass** (details in
+> economy_and_piracy.md "Open notes from playtesting"): a retraction verb
+> (who may un-mark, before patrols act on shared markings); player-facing
+> feedback when dispositions flip on you (overheard MARK_HOSTILE reports
+> about you on the comms panel) + AI behavioral coherence with its own
+> standing; and the escalation ladder — marked → challenged → fire only on
+> refusal — which sharpens the intercept-before-weapons bullet below.
+
 - Patrol tree grows, and this is where the patrol's SUSPICION ASSESSMENT
   lives (the former SUSPICIOUS-standing criteria — loiter off-lane, ignored
   challenge, wanted-name — as blackboard scoring, not a contact-record tier):

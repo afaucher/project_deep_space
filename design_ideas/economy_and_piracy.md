@@ -332,6 +332,42 @@ rule in CLAUDE.md).
    world needs off-bubble ambushes later, the liveness ROUTE_TICK tier is
    the designed hook for abstract resolution.
 
+## Open notes from playtesting (park for ~M52, not designed yet)
+
+Three gaps surfaced by the first standing playtests (collision-mark
+incident). All three land naturally with M52's patrol interdiction; noted
+here so they're designed together, not patched piecemeal.
+
+1. **No retraction.** UNMARK (`clear_contact_hostile`) is per-observer; a
+   marking that already rode the datalink re-imports from any peer still
+   carrying it (severity-wins), and the wanted-name entry outlives the
+   track. Un-ringing the bell needs an explicit retraction comms verb —
+   with a real design question inside it: WHO may retract (the original
+   marker? any authority flag? does an innocent get to appeal?). Matters
+   the moment patrols act on shared markings.
+
+2. **State flips on you are invisible.** Standing is per-observer and
+   private — when another ship marks you HOSTILE, nothing tells you, and
+   in the playtest "friendly" ships carried a HOSTILE mark on the player
+   while behaving warmly. Two halves to fix: (a) FEEDBACK — the player
+   needs a surfaced signal when dispositions toward them change. The
+   fiction-honest channels already exist: radio is a broadcast medium, so
+   an overheard MARK_HOSTILE report ABOUT YOU is exactly "hearing them
+   talk about you on the radio" (comms panel: "Patrol Alpha has flagged
+   you"), challenges/demands addressed to you are already surfaced, and
+   the rest is behavior read off sensors. No mind-reading required.
+   (b) COHERENCE — an AI whose standing on you is HOSTILE must not act
+   like a friend; whatever it does (challenge, shadow, interdict, refuse
+   dock grants), its behavior IS the tell.
+
+3. **An escalation ladder between "marked" and "weapons-free."** The
+   incident → instant-open-fire jump is too steep for authorities. The
+   intended shape (sharpening what M52 already sketches): incident →
+   marked + CHALLENGED/demanded; open fire is one step ABOVE — the
+   response to refusing the challenge, not to the mark itself. The mark
+   is the warrant; the demand is the arrest; fire answers resistance.
+   Deliberately not designed yet.
+
 ## Known hazards
 
 - **Damage attribution plumbing** touches every weapon path — do it early
