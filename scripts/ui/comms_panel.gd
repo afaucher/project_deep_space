@@ -74,7 +74,8 @@ var btn_sos: Button
 var hails_vbox: VBoxContainer
 var _last_hails_rendered: Array = []
 var selected_contact_id: String = ""
-var docking_slot: VBoxContainer
+var action_hbox: HBoxContainer
+var _hosted_docking: Control = null
 var action_target_lbl: Label
 var btn_mark_hostile: Button
 var btn_unmark: Button
@@ -144,16 +145,6 @@ func _ready() -> void:
 	btn_sos.pressed.connect(_on_sos_pressed)
 	my_vbox.add_child(btn_sos)
 
-	# Post-M51 playtest -- the top-bar "Request Docking"/"Undock" control
-	# relocates here (the top bar isn't gameplay space; talking to port
-	# control IS comms). terminal_display still owns creating/wiring the
-	# DockingControl; this panel just hosts it via host_docking_control().
-	docking_slot = VBoxContainer.new()
-	my_vbox.add_child(docking_slot)
-	if _pending_docking_control != null:
-		docking_slot.add_child(_pending_docking_control)
-		_pending_docking_control = null
-
 	# M49 -- honored-stop banner: a red bar + COMPLY button, shown only while
 	# a pending STOP demand exists on the player ship (packet["pending_
 	# demand"]). This is the fear moment the design wants (design_ideas/
@@ -199,7 +190,7 @@ func _ready() -> void:
 	action_target_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	top_pane.add_child(action_target_lbl)
 
-	var action_hbox = HBoxContainer.new()
+	action_hbox = HBoxContainer.new()
 	top_pane.add_child(action_hbox)
 
 	btn_demand_id = Button.new()
@@ -211,6 +202,15 @@ func _ready() -> void:
 	btn_demand_stop.text = "DEMAND STOP"
 	btn_demand_stop.pressed.connect(func(): emit_signal("demand_requested", selected_contact_id, Hail.RUNG_STOP))
 	action_hbox.add_child(btn_demand_stop)
+
+	# Request Docking / Undock sits HERE, right beside the demands -- it is
+	# a peer per-track action (it already targets the SELECTED station via
+	# terminal_display's _update_docking_control). Adopted now if it was
+	# hosted before this panel entered the tree.
+	if _pending_docking_control != null:
+		action_hbox.add_child(_pending_docking_control)
+		_hosted_docking = _pending_docking_control
+		_pending_docking_control = null
 
 	btn_release = Button.new()
 	btn_release.text = "RELEASE"
@@ -331,16 +331,18 @@ func update_data(packet: Dictionary) -> void:
 	_update_action_row()
 
 # Hosts the terminal's DockingControl button (created + wired by
-# terminal_display; see docking_slot's comment in _ready). Callable BEFORE
-# this panel enters the tree (terminal_display wires panels prior to
-# add_child, so _ready -- which builds docking_slot -- hasn't run yet):
-# the control parks in _pending_docking_control and _ready adopts it.
+# terminal_display) in the action row beside DEMAND ID/STOP. Callable
+# BEFORE this panel enters the tree (terminal_display wires panels prior
+# to add_child, so _ready -- which builds the row -- hasn't run yet): the
+# control parks in _pending_docking_control and _ready adopts it.
 var _pending_docking_control: Control = null
 
 func host_docking_control(ctrl: Control) -> void:
 	ctrl.focus_mode = Control.FOCUS_NONE # don't steal the spacebar hotkey
-	if docking_slot != null:
-		docking_slot.add_child(ctrl)
+	if action_hbox != null:
+		action_hbox.add_child(ctrl)
+		action_hbox.move_child(ctrl, 2) # after DEMAND ID / DEMAND STOP
+		_hosted_docking = ctrl
 	else:
 		_pending_docking_control = ctrl
 
@@ -365,10 +367,19 @@ func _update_action_row() -> void:
 	var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
 	var standing: String = c.get("standing", "")
 
+	# Request Docking/Undock rides the row but with its own rule: visible for
+	# a selected vessel (it targets the selected station) OR while actually
+	# docked -- the Undock face must never vanish just because the selection
+	# cleared. Its own refresh() handles enabled/disabled and the label flip.
+	var my_ship = _get_my_ship()
+	var is_docked: bool = my_ship != null and my_ship.get("docking_bay") != null
+
 	if c.is_empty() or not is_vessel:
 		action_target_lbl.text = "No vessel selected (select one in CONTACTS)"
 		for b in [btn_demand_id, btn_demand_stop, btn_release, btn_mark_hostile, btn_unmark]:
 			b.visible = false
+		if _hosted_docking != null:
+			_hosted_docking.visible = is_docked
 		return
 
 	var t_name: String = c.get("transponder_name", "")
@@ -380,6 +391,8 @@ func _update_action_row() -> void:
 	btn_release.visible = c.get("complied_stop", false)
 	btn_mark_hostile.visible = standing != "HOSTILE" and standing != "FRIENDLY"
 	btn_unmark.visible = standing == "HOSTILE"
+	if _hosted_docking != null:
+		_hosted_docking.visible = true
 
 # M49 -- honored-stop banner: visible whenever the player ship holds a
 # pending STOP demand (packet["pending_demand"], set by ship.gd's comms_inbox
