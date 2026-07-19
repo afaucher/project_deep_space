@@ -314,6 +314,11 @@ func _ready() -> void:
 	
 	weapons_panel = WeaponsPanel.new()
 	weapons_panel.fire_weapon_requested.connect(_on_fire_weapon_requested)
+	# Post-playtest -- MARK HOSTILE/UNMARK moved here from the comms panel
+	# (a targeting-computer judgment call, not a comms action); same RPC
+	# handlers as before, new emitter.
+	weapons_panel.mark_hostile_requested.connect(_on_mark_hostile_requested)
+	weapons_panel.unmark_hostile_requested.connect(_on_unmark_hostile_requested)
 	weapons_container.add_child(weapons_panel)
 	right_vbox.add_child(weapons_container)
 	
@@ -352,8 +357,7 @@ func _ready() -> void:
 	comms_panel.sos_requested.connect(_on_sos_requested)
 	# Post-M51 playtest -- the selected-contact action row lives on the comms
 	# panel now (see comms_panel.gd); same handlers as before, new emitter.
-	comms_panel.mark_hostile_requested.connect(_on_mark_hostile_requested)
-	comms_panel.unmark_hostile_requested.connect(_on_unmark_hostile_requested)
+	# (MARK HOSTILE/UNMARK moved to weapons_panel -- wired above.)
 	comms_panel.demand_requested.connect(_on_demand_requested)
 	comms_panel.release_requested.connect(_on_release_requested)
 	# M33 "Request Docking"/"Undock" context-flip control -- relocated from

@@ -135,7 +135,6 @@ func _register_tests() -> void:
 		"check": func():
 			var weapon = ship.get_component("hp_fwd_laser")
 			weapon["cooldown"] = 0.0
-			weapon["ammo"] = 999
 			WeaponBehaviorRegistry.get_behavior("laser").execute_fire(ship, weapon, target_missile.position, "TRK-TEST")
 			return _assert(_missile_took_damage(target_missile), "A fresh (zero-staleness) contact should still hit normally.")
 	})

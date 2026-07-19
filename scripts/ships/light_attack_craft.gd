@@ -31,7 +31,7 @@ static func design() -> Array:
 			"sensor_type": "active", "active": true, "range": 25000.0, "arc_width": PI / 1.5, "num_bins": 60, "refresh_interval": 0.5, "timer": 0.0, "heading": 0.0},
 
 		{"id": "hp_fwd_laser", "type": "weapons", "rect": Rect2(10, -7.5, 5, 5), "health": 55.0, "max_health": 55.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
-			"weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 0.8, "range": 3000.0, "damage": 250.0, "heading": 0.0, "arc_width": PI / 3.0},
+			"weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 0.8, "range": 3000.0, "damage": 250.0, "heading": 0.0, "arc_width": PI / 3.0},
 		{"id": "hp_fwd_missile", "type": "weapons", "rect": Rect2(10, 2.5, 5, 5), "health": 55.0, "max_health": 55.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
 			"weapon_type": "missile", "ammo": 4, "cooldown": 0.0, "cooldown_max": 15.0, "range": 12000.0, "heading": 0.0, "arc_width": PI / 3.0},
 	]

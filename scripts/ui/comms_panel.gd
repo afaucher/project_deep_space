@@ -60,8 +60,10 @@ signal sos_requested(nature: String)
 # judge ships). All act on the currently SELECTED contact (selection is
 # shared across panels via terminal_display's set_selected_contact_id
 # fan-out). c_id is our own track id; terminal_display resolves instance ids.
-signal mark_hostile_requested(c_id: String)
-signal unmark_hostile_requested(c_id: String)
+# (mark_hostile_requested/unmark_hostile_requested moved to weapons_panel.gd
+# alongside the standing readout -- MARK/UNMARK is a targeting-computer
+# judgment call, not a comms action; this panel keeps only genuine comms
+# verbs: identify/stop demands, docking, release.)
 signal demand_requested(c_id: String, rung: String)
 signal release_requested(c_id: String)
 
@@ -77,8 +79,6 @@ var selected_contact_id: String = ""
 var action_hbox: HBoxContainer
 var _hosted_docking: Control = null
 var action_target_lbl: Label
-var btn_mark_hostile: Button
-var btn_unmark: Button
 var btn_demand_id: Button
 var btn_demand_stop: Button
 var btn_release: Button
@@ -217,17 +217,6 @@ func _ready() -> void:
 	btn_release.pressed.connect(func(): emit_signal("release_requested", selected_contact_id))
 	action_hbox.add_child(btn_release)
 
-	btn_mark_hostile = Button.new()
-	btn_mark_hostile.text = "MARK HOSTILE"
-	btn_mark_hostile.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
-	btn_mark_hostile.pressed.connect(func(): emit_signal("mark_hostile_requested", selected_contact_id))
-	action_hbox.add_child(btn_mark_hostile)
-
-	btn_unmark = Button.new()
-	btn_unmark.text = "UNMARK"
-	btn_unmark.pressed.connect(func(): emit_signal("unmark_hostile_requested", selected_contact_id))
-	action_hbox.add_child(btn_unmark)
-
 	hails_vbox = VBoxContainer.new()
 	top_pane.add_child(hails_vbox)
 
@@ -355,9 +344,8 @@ func set_selected_contact_id(c_id: String) -> void:
 # Visibility rules (carried over from the contacts-panel buttons this row
 # replaces): everything needs a selected VESSEL contact. DEMAND ID/STOP --
 # always (asking is free; even a hostile can be demanded a stop). RELEASE --
-# only a contact we're crediting with complied_stop. MARK HOSTILE -- not
-# already HOSTILE/FRIENDLY (nothing left to declare). UNMARK -- the inverse:
-# only a HOSTILE track (clear_contact_hostile recomputes it from rest).
+# only a contact we're crediting with complied_stop. (MARK HOSTILE/UNMARK
+# moved to weapons_panel.gd -- see that panel's own visibility rule.)
 func _update_action_row() -> void:
 	if action_target_lbl == null:
 		return
@@ -376,7 +364,7 @@ func _update_action_row() -> void:
 
 	if c.is_empty() or not is_vessel:
 		action_target_lbl.text = "No vessel selected (select one in CONTACTS)"
-		for b in [btn_demand_id, btn_demand_stop, btn_release, btn_mark_hostile, btn_unmark]:
+		for b in [btn_demand_id, btn_demand_stop, btn_release]:
 			b.visible = false
 		if _hosted_docking != null:
 			_hosted_docking.visible = is_docked
@@ -389,8 +377,6 @@ func _update_action_row() -> void:
 	btn_demand_id.visible = true
 	btn_demand_stop.visible = true
 	btn_release.visible = c.get("complied_stop", false)
-	btn_mark_hostile.visible = standing != "HOSTILE" and standing != "FRIENDLY"
-	btn_unmark.visible = standing == "HOSTILE"
 	if _hosted_docking != null:
 		_hosted_docking.visible = true
 

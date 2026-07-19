@@ -1,13 +1,12 @@
 extends Control
 
 # M48 -- Standings & flags (IFF v2): row color prefers standing over raw
-# classification for vessels, the selected row's detail line shows
-# standing (reason), and a MARK HOSTILE button lets the operator flag a
-# not-yet-hostile vessel directly (mark_contact_hostile -- the player-
-# judgment lever). Referenced via preload const, never bare class_name.
-# (Standing/Hail preloads removed with the action buttons -- row colors key
-# on the literal standing strings in _STANDING_COLORS below; the action row
-# lives in comms_panel.gd now.)
+# classification for vessels. Referenced via preload const, never bare
+# class_name. (Standing/Hail preloads removed with the action buttons --
+# row colors key on the literal standing strings in _STANDING_COLORS below.
+# The standing text readout + MARK HOSTILE/UNMARK buttons moved to the
+# weapons panel's targeting-computer section; the DEMAND ID/STOP/RELEASE
+# action row lives in comms_panel.gd.)
 
 signal contact_pin_toggled(c_id: String, is_pinned: bool)
 signal selection_changed(c_id: String)
@@ -346,10 +345,10 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0),
 			my_em_emit, Utils.format_dist(detect_dist)
 		]
-		# M48 -- the selected contact's detail line shows standing (reason).
-		if c_id == selected_contact_id and standing != "":
-			var reason: String = c.get("standing_reason", "")
-			info.text += "\nStanding: %s (%s)" % [standing, reason]
+		# (Standing metadata -- the "Standing: X (reason)" detail line -- moved
+		# to the weapons panel's targeting-computer section alongside MARK/
+		# UNMARK; see weapons_panel.gd. Row color above still keys off
+		# standing when present, just no text readout here anymore.)
 
 		# Update state without emitting signal
 		pin_btn.set_pressed_no_signal(c_id in pinned_list)

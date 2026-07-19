@@ -3,6 +3,7 @@ extends Control
 signal component_power_toggled(component_id: String, is_active: bool)
 
 const PortRules = preload("res://scripts/port/port_rules.gd")
+const ShipSilhouette = preload("res://scripts/components/ship_silhouette.gd")
 
 const HIGHLIGHT_SENSOR_PEAK_EM_BONUS := 40.0 # flat display-only bump to "Peak EM" when the highlighted sensor is active
 const POWER_TOGGLE_DEBOUNCE_MSEC := 500 # how long a local power-button click is trusted over a conflicting server update
@@ -108,9 +109,30 @@ class EMPolarChart extends Control:
 class ComponentSpatialView extends Control:
 	var eng_state: Dictionary = {}
 	var font: Font
-	
+
+	# M-- hull silhouette underlay (playtest feedback: the component-rect grid
+	# alone doesn't read as a ship). ShipSilhouette.compute() runs Geometry2D
+	# polygon booleans -- too heavy to redo every _draw() call (this redraws
+	# on every packet, ~server tick rate) when the underlying rects are the
+	# same design every time (only health/power change per packet, never
+	# component geometry) -- cached and only recomputed when the rect set
+	# actually changes.
+	var _silhouette_loops: Array = []
+	var _silhouette_rects_sig: Array = []
+	const HULL_OUTLINE_COLOR := Color(0.18, 0.18, 0.24, 0.9) # slightly lighter than the diagram bg (0.05, 0.05, 0.08)
+
 	func _ready() -> void:
 		font = ThemeDB.fallback_font
+
+	func _silhouette_loops_for(components: Array) -> Array:
+		var sig: Array = []
+		for c in components:
+			sig.append(c.get("rect", Rect2()))
+		if sig == _silhouette_rects_sig:
+			return _silhouette_loops
+		_silhouette_rects_sig = sig
+		_silhouette_loops = ShipSilhouette.compute(components)
+		return _silhouette_loops
 	
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.05, 0.08), true)
@@ -142,7 +164,26 @@ class ComponentSpatialView extends Control:
 				var scale_w = size.x / (ship_w * 1.2)
 				var scale_h = size.y / (ship_h * 1.2)
 				scale_factor = min(scale_w, scale_h)
-		
+
+		# Hull silhouette -- drawn UNDER the component rects (before them in
+		# the paint order) so it reads as the ship's outline behind its
+		# internal module grid, not on top of it. Same local-to-UI point
+		# transform as the rect corners below (r.position maps the same way).
+		if eng_state.has("ship_components"):
+			var loops: Array = _silhouette_loops_for(eng_state["ship_components"])
+			for loop in loops:
+				var pts: PackedVector2Array = loop.get("points", PackedVector2Array())
+				if pts.size() < 2:
+					continue
+				var ui_pts := PackedVector2Array()
+				for p in pts:
+					ui_pts.append(Vector2(
+						center.x + (p.y - offset_x) * scale_factor,
+						center.y - (p.x - offset_y) * scale_factor
+					))
+				ui_pts.append(ui_pts[0]) # close the loop
+				draw_polyline(ui_pts, HULL_OUTLINE_COLOR, 1.0)
+
 		if eng_state.has("ship_components"):
 			for c in eng_state["ship_components"]:
 				var r: Rect2 = c.get("rect", Rect2())

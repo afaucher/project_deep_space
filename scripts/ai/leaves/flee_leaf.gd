@@ -28,6 +28,10 @@ func _nearest_hostile_pos(actor: Node):
 		var c = actor.active_contacts[c_id]
 		if c.get("standing", "") != Standing.HOSTILE:
 			continue
+		# Same wreck gate as acquire_target_leaf: a dead ship's sticky HOSTILE
+		# standing never clears, but there is nothing to flee from a hulk.
+		if c.get("classification", "") == "WRECKAGE":
+			continue
 		var d = actor.position.distance_to(c["pos"])
 		if d < best_dist:
 			best_dist = d

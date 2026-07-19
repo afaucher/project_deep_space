@@ -1,7 +1,15 @@
 extends PanelContainer
 class_name WeaponsPanel
 
+const Standing = preload("res://scripts/combat/standing.gd")
+
 signal fire_weapon_requested(weapon_id: String)
+# Post-playtest -- moved here from comms_panel.gd: MARK HOSTILE/UNMARK are a
+# targeting-computer judgment call on the LOCKED target, not a comms action.
+# c_id is our own track id, same convention comms_panel used; terminal_display
+# resolves it to the RPC (mark_contact_hostile/clear_contact_hostile).
+signal mark_hostile_requested(c_id: String)
+signal unmark_hostile_requested(c_id: String)
 
 const FIRING_FLASH_WINDOW := 0.2 # seconds before cooldown ends where the button reads "* FIRING *" instead of "COOLDOWN"
 
@@ -16,6 +24,9 @@ var current_state: Dictionary = {}
 var selected_contact_id: String = ""
 var weapon_buttons: Dictionary = {}
 var target_info_label: Label
+var standing_label: Label
+var btn_mark_hostile: Button
+var btn_unmark: Button
 var weapon_grid: GridContainer
 var history_graph: Control
 var _closing_vel_samples: Array = [] # [{"t": float, "v": float}, ...]
@@ -70,7 +81,32 @@ func _ready() -> void:
 	target_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	target_info_label.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(target_info_label)
-	
+
+	# Standing metadata + MARK HOSTILE/UNMARK -- moved here from the comms/
+	# contacts panels (post-playtest): this is the targeting-computer's own
+	# judgment call on whatever it has locked, so it belongs beside the rest
+	# of the target readout rather than split across two other panels.
+	standing_label = Label.new()
+	standing_label.text = ""
+	standing_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	standing_label.add_theme_font_size_override("font_size", 12)
+	vbox.add_child(standing_label)
+
+	var standing_hbox = HBoxContainer.new()
+	standing_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(standing_hbox)
+
+	btn_mark_hostile = Button.new()
+	btn_mark_hostile.text = "MARK HOSTILE"
+	btn_mark_hostile.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+	btn_mark_hostile.pressed.connect(func(): emit_signal("mark_hostile_requested", selected_contact_id))
+	standing_hbox.add_child(btn_mark_hostile)
+
+	btn_unmark = Button.new()
+	btn_unmark.text = "UNMARK"
+	btn_unmark.pressed.connect(func(): emit_signal("unmark_hostile_requested", selected_contact_id))
+	standing_hbox.add_child(btn_unmark)
+
 	var charts_hbox = HBoxContainer.new()
 	charts_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vbox.add_child(charts_hbox)
@@ -166,11 +202,14 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 		for w_info in weapons:
 			var w_id = w_info.get("id", "")
 			if weapon_buttons.has(w_id):
+				var is_laser = w_info.get("weapon_type", "") == "laser"
 				var ammo = w_info.get("ammo", 0)
 				var cd = w_info.get("cooldown", 0.0)
 
 				var lbl = weapon_buttons[w_id]["ammo_label"]
-				lbl.text = "Ammo: %d | CD: %.1f" % [ammo, cd]
+				# Lasers are reactor-powered, not ammo-fed -- no ammo field, no
+				# ammo counter (see ship.gd's normalization / weapon_behavior.gd).
+				lbl.text = ("CD: %.1f" % cd) if is_laser else ("Ammo: %d | CD: %.1f" % [ammo, cd])
 
 				var btn = weapon_buttons[w_id]["btn"]
 
@@ -207,7 +246,6 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 
 					is_in_arc = (abs(rel_angle) <= arc_w / 2.0)
 
-				var is_laser = w_info.get("weapon_type", "") == "laser"
 				var range_ok = is_in_range or not is_laser # range only gates lasers -- missiles fly to target regardless of launch distance
 
 				# Single ordered priority list so can_fire and the status text
@@ -217,7 +255,7 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 					[not is_alive, "DESTROYED"],
 					[not is_powered, "OFFLINE"],
 					[not has_target, "NO LOCK"],
-					[ammo <= 0, "EMPTY"],
+					[not is_laser and ammo <= 0, "EMPTY"], # lasers are never ammo-blocked
 					[cd > w_info.get("cooldown_max", 1.0) - FIRING_FLASH_WINDOW, "* FIRING *"],
 					[cd > 0.0, "COOLDOWN"],
 					[not is_in_arc, "OUT OF ARC"],
@@ -237,9 +275,11 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 	if selected_contact_id == "":
 		target_info_label.text = "NO TARGET LOCKED"
 		if is_instance_valid(history_graph): history_graph.hide()
+		_update_standing_row({})
 	else:
 		if current_state.has("contacts") and current_state["contacts"].has(selected_contact_id):
 			var c = current_state["contacts"][selected_contact_id]
+			_update_standing_row(c)
 			# c["signature"] is OUR OWN sensors' fused, lerp-smoothed track data
 			# (Ship._run_sensor_sweep + the correlation lerp in _physics_process),
 			# not the target's actual current_heat/em_signature -- the history
@@ -270,4 +310,29 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 		else:
 			target_info_label.text = "TARGET LOST"
 			if is_instance_valid(history_graph): history_graph.hide()
+			_update_standing_row({})
+
+# Standing metadata + MARK HOSTILE/UNMARK enablement (moved here from comms_
+# panel.gd -- see that file's now-removed _update_action_row() for the rules
+# this mirrors). Standing only ever applies to a VESSEL contact (ordnance/
+# wreckage/asteroid never carry one, per Standing.compute_standing) --
+# no target, or a non-vessel target, disables both buttons; MARK HOSTILE
+# disables once already HOSTILE or FRIENDLY (nothing left to declare);
+# UNMARK is only meaningful on an already-HOSTILE track.
+func _update_standing_row(c: Dictionary) -> void:
+	if standing_label == null:
+		return
+	var classification: String = c.get("classification", "")
+	var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
+	var standing: String = c.get("standing", "") if is_vessel else ""
+
+	standing_label.text = "Standing: %s" % standing if standing != "" else ""
+
+	if c.is_empty() or not is_vessel:
+		btn_mark_hostile.disabled = true
+		btn_unmark.disabled = true
+		return
+
+	btn_mark_hostile.disabled = (standing == Standing.HOSTILE or standing == Standing.FRIENDLY)
+	btn_unmark.disabled = (standing != Standing.HOSTILE)
 

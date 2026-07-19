@@ -50,8 +50,10 @@ func _hull(id: String, rect: Rect2) -> Dictionary:
 	return {"id": id, "type": "hull", "rect": rect, "health": 100.0, "max_health": 100.0, "density": 20.0}
 
 func _weapon(id: String, rect: Rect2, heading: float, arc_width: float = PI / 3.0) -> Dictionary:
+	# Lasers are reactor-powered, not ammo-fed -- no "ammo" field authored (see
+	# ship.gd's normalization / weapon_behavior.gd).
 	return {"id": id, "type": "weapons", "rect": rect, "health": 100.0, "max_health": 100.0, "density": 20.0,
-		"weapon_type": "laser", "ammo": 999, "cooldown_max": 1.0, "range": 4000.0, "damage": 250.0,
+		"weapon_type": "laser", "cooldown_max": 1.0, "range": 4000.0, "damage": 250.0,
 		"heading": heading, "arc_width": arc_width}
 
 func _sensor(id: String, rect: Rect2, heading: float, arc_width: float) -> Dictionary:

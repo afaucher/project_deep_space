@@ -4,7 +4,11 @@ class_name WeaponBehavior
 # arc) — Ship.fire_weapon()/_process_point_defense() never check these themselves,
 # they delegate entirely to whichever behavior handles this component's weapon_type.
 func can_fire(ship: Ship, comp: Dictionary, target_contact_id: String) -> bool:
-	if comp["ammo"] <= 0 or comp["cooldown"] > 0.0:
+	# Lasers are reactor-powered, not ammo-fed -- they never author an "ammo"
+	# field at all (see Ship._ready()'s normalization). .get() with a
+	# default of 1 (i.e. "has ammo") makes that a no-op for lasers while
+	# missile tubes, which DO author finite ammo, are gated exactly as before.
+	if comp.get("ammo", 1) <= 0 or comp["cooldown"] > 0.0:
 		return false
 	# `comp` is the weapon's dict itself -- use the dict-direct power check
 	# (Ship._component_powered, the single source of truth is_component_powered
@@ -31,5 +35,9 @@ func tick(ship: Ship, comp: Dictionary, delta: float) -> void:
 	comp["em_emission"] = comp.get("base_em_emission", 0.0)
 
 func _consume_default(comp: Dictionary) -> void:
-	comp["ammo"] -= 1
+	# Only decrement ammo when the weapon actually carries it (missile tubes).
+	# A laser has no "ammo" field to begin with -- reactor power is the only
+	# resource it spends, tracked via heat/EM, not this counter.
+	if comp.has("ammo"):
+		comp["ammo"] -= 1
 	comp["cooldown"] = comp["cooldown_max"]

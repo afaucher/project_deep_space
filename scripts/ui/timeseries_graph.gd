@@ -40,7 +40,10 @@ func _draw() -> void:
 	var margin_left = 28.0
 	var margin_bottom = 14.0
 	var margin_top = 10.0
-	var margin_right = 34.0 # room for the HEAT/EM legend, moved out here (was inside the plot's top-left)
+	# Room for the HEAT/EM legend, moved out here (was inside the plot's
+	# top-left). Widened from 34 -> 56 so a live 4-digit value ("HEAT 1234")
+	# still fits without clipping.
+	var margin_right = 56.0
 	var plot_w = size.x - margin_left - margin_right
 	var plot_h = size.y - margin_top - margin_bottom
 	var origin_y = size.y - margin_bottom
@@ -53,10 +56,18 @@ func _draw() -> void:
 	# Legend -- right side of the chart (always shown, even with no data yet).
 	# This is now the ONLY heat/EM readout in the weapons panel (the numeric
 	# "Heat: X | EM: Y" text and the spider chart were both removed as
-	# duplicates of what this graph already shows).
+	# duplicates of what this graph already shows). Live: shows the most
+	# recent sample's value ("HEAT 37") once there's data, just the bare word
+	# until then.
 	var legend_x = margin_left + plot_w + 4.0
-	draw_string(default_font, Vector2(legend_x, margin_top + font_size), "HEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, HEAT_COLOR)
-	draw_string(default_font, Vector2(legend_x, margin_top + font_size * 2.5), "EM", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, EM_COLOR)
+	var heat_legend = "HEAT"
+	var em_legend = "EM"
+	if not _samples.is_empty():
+		var last = _samples[_samples.size() - 1]
+		heat_legend = "HEAT %.0f" % last["heat"]
+		em_legend = "EM %.0f" % last["em"]
+	draw_string(default_font, Vector2(legend_x, margin_top + font_size), heat_legend, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, HEAT_COLOR)
+	draw_string(default_font, Vector2(legend_x, margin_top + font_size * 2.5), em_legend, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, EM_COLOR)
 
 	if _samples.is_empty():
 		draw_string(default_font, Vector2(margin_left + 4, origin_y - plot_h / 2.0), "NO DATA", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.GRAY)
@@ -80,7 +91,12 @@ func _draw() -> void:
 		var y = margin_top + plot_h * (float(i) / 4.0)
 		draw_line(Vector2(margin_left, y), Vector2(margin_left + plot_w, y), Color(0.3, 0.3, 0.3, 0.3), 1.0)
 
+	# Top-of-scale for BOTH axes, color-keyed to their line -- they're two
+	# independent auto-scales sharing the same vertical extent, so both
+	# numbers are needed to read either line's height correctly. Heat on top
+	# (orange), EM right below it (blue).
 	draw_string(default_font, Vector2(0, margin_top + 4), "%.0f" % max_heat, HORIZONTAL_ALIGNMENT_LEFT, margin_left - 2, font_size, HEAT_COLOR)
+	draw_string(default_font, Vector2(0, margin_top + 4 + font_size + 2), "%.0f" % max_em, HORIZONTAL_ALIGNMENT_LEFT, margin_left - 2, font_size, EM_COLOR)
 	draw_string(default_font, Vector2(0, origin_y), "0", HORIZONTAL_ALIGNMENT_LEFT, margin_left - 2, font_size, Color.GRAY)
 	draw_string(default_font, Vector2(margin_left, size.y - 2), "-%ds" % int(HISTORY_DURATION), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.GRAY)
 	draw_string(default_font, Vector2(size.x - margin_right - 22, size.y - 2), "now", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.GRAY)

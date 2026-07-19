@@ -1609,17 +1609,20 @@ func _ready() -> void:
 			if not c.has("transponder_flag"): c["transponder_flag"] = ""
 
 		# Weapon runtime scratch fields. cooldown is pure state (always starts
-		# ready); ammo is required by the fire path. Authoring these per-weapon is
-		# boilerplate that stations forgot, which silently aborted their whole
-		# _physics_process at the cooldown read every frame (no heat/EM sim, no PD,
-		# permanently reading as cold wreckage). Default them here so a missing
-		# field can never take a ship's physics down again. Lasers are energy
-		# weapons -> effectively unlimited ammo (matches the authored 999); missile
-		# tubes must author finite ammo, so default them to empty.
+		# ready). Authoring these per-weapon is boilerplate that stations
+		# forgot, which silently aborted their whole _physics_process at the
+		# cooldown read every frame (no heat/EM sim, no PD, permanently
+		# reading as cold wreckage). Default them here so a missing field can
+		# never take a ship's physics down again.
+		# Lasers are reactor-powered, not ammo-fed -- they never get an
+		# "ammo" field at all (weapon_behavior.gd's can_fire/_consume_default
+		# treat a missing key as "always fed"). Missile tubes DO consume
+		# finite ammo, so they still default to empty (0) if a design forgot
+		# to author it -- fail closed, not an accidental infinite magazine.
 		if c.get("type") == "weapons":
 			if not c.has("cooldown"): c["cooldown"] = 0.0
-			if not c.has("ammo"):
-				c["ammo"] = 999 if c.get("weapon_type", "") == "laser" else 0
+			if c.get("weapon_type", "") != "laser" and not c.has("ammo"):
+				c["ammo"] = 0
 			# Laser EM scratch: laser_behavior.tick() bracket-reads these every
 			# frame (em_emission = base_em_emission + em_pulse). Station PD lasers
 			# never authored them, so the read aborted the station's weapon tick.
@@ -3411,7 +3414,7 @@ func is_group_volley_ready(group_id: String, weapon_type: String) -> bool:
 			continue
 		if w["health"] <= 0.0:                 # damaged -- never wait on it
 			continue
-		if w["ammo"] <= 0:                      # out of ammo -- never wait on it
+		if w.get("ammo", 1) <= 0:               # out of ammo -- never wait on it (lasers have no "ammo" key -- always fed)
 			continue
 		if not _component_powered(w):   # disabled / unpowered -- never wait on it
 			continue
@@ -3440,7 +3443,7 @@ func _process_point_defense() -> void:
 	var ready_weapon_data: Dictionary = {}
 	var max_ready_range = 0.0
 	for w in get_components_by_type("weapons"):
-		if w["weapon_type"] == "laser" and w["ammo"] > 0 and w["cooldown"] <= 0.0:
+		if w["weapon_type"] == "laser" and w["cooldown"] <= 0.0: # lasers have no "ammo" key -- always fed
 			if _component_powered(w):
 				ready_lasers.append(w["id"])
 				ready_weapon_data[w["id"]] = w

@@ -227,14 +227,17 @@ func _build_tests() -> void:
 			_set_component("hp_fwd_laser", 150.0, false) # full health, OFF
 			# Give it a fake contact to shoot at
 			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
-			var ammo_before = ship.get_component("hp_fwd_laser")["ammo"]
-			ship.set_meta("ammo_before", ammo_before)
+			# Lasers are reactor-powered, not ammo-fed (no "ammo" field at all --
+			# see ship.gd's normalization), so "did it fire" is read off cooldown
+			# instead: an untouched weapon's cooldown stays at 0.
+			var cooldown_before = ship.get_component("hp_fwd_laser")["cooldown"]
+			ship.set_meta("cooldown_before", cooldown_before)
 			ship.fire_weapon("hp_fwd_laser", Vector2(500, 0), "FAKE_TGT"),
 		"check": func():
-			var ammo_after = ship.get_component("hp_fwd_laser")["ammo"]
-			var ammo_before = ship.get_meta("ammo_before", 999)
-			return _assert(ammo_after == ammo_before,
-				"Weapon should not fire when powered off. ammo_before=" + str(ammo_before) + " ammo_after=" + str(ammo_after)),
+			var cooldown_after = ship.get_component("hp_fwd_laser")["cooldown"]
+			var cooldown_before = ship.get_meta("cooldown_before", 0.0)
+			return _assert(cooldown_after == cooldown_before,
+				"Weapon should not fire when powered off. cooldown_before=" + str(cooldown_before) + " cooldown_after=" + str(cooldown_after)),
 		"duration": 5
 	})
 
@@ -245,14 +248,14 @@ func _build_tests() -> void:
 			_reset_ship()
 			_set_component("hp_fwd_laser", 0.0, true) # destroyed, powered on
 			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
-			var ammo_before = ship.get_component("hp_fwd_laser")["ammo"]
-			ship.set_meta("ammo_before", ammo_before)
+			var cooldown_before = ship.get_component("hp_fwd_laser")["cooldown"]
+			ship.set_meta("cooldown_before", cooldown_before)
 			ship.fire_weapon("hp_fwd_laser", Vector2(500, 0), "FAKE_TGT"),
 		"check": func():
-			var ammo_after = ship.get_component("hp_fwd_laser")["ammo"]
-			var ammo_before = ship.get_meta("ammo_before", 999)
-			return _assert(ammo_after == ammo_before,
-				"Weapon should not fire when destroyed. ammo_before=" + str(ammo_before) + " ammo_after=" + str(ammo_after)),
+			var cooldown_after = ship.get_component("hp_fwd_laser")["cooldown"]
+			var cooldown_before = ship.get_meta("cooldown_before", 0.0)
+			return _assert(cooldown_after == cooldown_before,
+				"Weapon should not fire when destroyed. cooldown_before=" + str(cooldown_before) + " cooldown_after=" + str(cooldown_after)),
 		"duration": 5
 	})
 

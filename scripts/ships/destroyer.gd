@@ -13,7 +13,7 @@ func _init() -> void:
 	ship_components = [
 		# --- AFT SECTION (-60 to -50) ---
 		{"id": "engine_main", "type": "engines", "rect": Rect2(-60, -10, 10, 20), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "power_rating": 100.0, "thrust_rating": 15000.0, "torque_rating": 25000.0},
-		{"id": "hp_aft_pd", "type": "weapons", "rect": Rect2(-60, -15, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 0.5, "range": 5000.0, "damage": 1000.0, "heading": PI, "arc_width": PI / 2.0},
+		{"id": "hp_aft_pd", "type": "weapons", "rect": Rect2(-60, -15, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 0.5, "range": 5000.0, "damage": 1000.0, "heading": PI, "arc_width": PI / 2.0},
 		{"id": "hull_aft_port_1", "type": "hull", "rect": Rect2(-55, -25, 5, 10), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hull_aft_port_2", "type": "hull", "rect": Rect2(-55, -15, 5, 5), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hull_aft_stbd", "type": "hull", "rect": Rect2(-55, 10, 5, 15), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
@@ -41,13 +41,13 @@ func _init() -> void:
 		{"id": "hull_stbd_z3", "type": "hull", "rect": Rect2(-20, 10, 5, 15), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 
 		# Z4 (-15 to -10)
-		{"id": "hp_port_laser_1", "type": "weapons", "rect": Rect2(-15, -25, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": -PI / 2.0, "arc_width": PI / 2.0},
+		{"id": "hp_port_laser_1", "type": "weapons", "rect": Rect2(-15, -25, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": -PI / 2.0, "arc_width": PI / 2.0},
 		{"id": "hull_port_inner_z4", "type": "hull", "rect": Rect2(-15, -20, 5, 10), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hp_stbd_tube_2", "type": "weapons", "rect": Rect2(-15, 10, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "missile", "ammo": 5, "cooldown": 0.0, "cooldown_max": 15.0, "range": 30000.0, "heading": PI / 2.0, "arc_width": PI / 2.0},
 
 		# Z5 (-10 to -5)
 		{"id": "hp_port_tube_3", "type": "weapons", "rect": Rect2(-10, -25, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "missile", "ammo": 5, "cooldown": 0.0, "cooldown_max": 15.0, "range": 30000.0, "heading": -PI / 2.0, "arc_width": PI / 2.0},
-		{"id": "hp_stbd_laser_1", "type": "weapons", "rect": Rect2(-10, 20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": PI / 2.0, "arc_width": PI / 2.0},
+		{"id": "hp_stbd_laser_1", "type": "weapons", "rect": Rect2(-10, 20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": PI / 2.0, "arc_width": PI / 2.0},
 		{"id": "hull_stbd_inner_z5", "type": "hull", "rect": Rect2(-10, 10, 5, 10), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 
 		# Z6 (-5 to 0)
@@ -59,13 +59,13 @@ func _init() -> void:
 		{"id": "hull_stbd_z7", "type": "hull", "rect": Rect2(0, 10, 5, 15), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 
 		# Z8 (5 to 10)
-		{"id": "hp_port_laser_2", "type": "weapons", "rect": Rect2(5, -25, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": -PI / 2.0, "arc_width": PI / 2.0},
+		{"id": "hp_port_laser_2", "type": "weapons", "rect": Rect2(5, -25, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": -PI / 2.0, "arc_width": PI / 2.0},
 		{"id": "hull_port_inner_z8", "type": "hull", "rect": Rect2(5, -20, 5, 10), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hp_stbd_tube_4", "type": "weapons", "rect": Rect2(5, 10, 5, 15), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "missile", "ammo": 5, "cooldown": 0.0, "cooldown_max": 15.0, "range": 30000.0, "heading": PI / 2.0, "arc_width": PI / 2.0},
 
 		# Z9 (10 to 15)
 		{"id": "hull_port_z9", "type": "hull", "rect": Rect2(10, -25, 5, 15), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
-		{"id": "hp_stbd_laser_2", "type": "weapons", "rect": Rect2(10, 20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": PI / 2.0, "arc_width": PI / 2.0},
+		{"id": "hp_stbd_laser_2", "type": "weapons", "rect": Rect2(10, 20, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 1.0, "range": 4000.0, "damage": 1000.0, "heading": PI / 2.0, "arc_width": PI / 2.0},
 		{"id": "hull_stbd_inner_z9", "type": "hull", "rect": Rect2(10, 10, 5, 10), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 
 		# Z10 (15 to 20)
@@ -99,7 +99,7 @@ func _init() -> void:
 		{"id": "hull_bow_main", "type": "hull", "rect": Rect2(30, -25, 15, 50), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hp_fwd_tube_1", "type": "weapons", "rect": Rect2(45, -12.5, 15, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "missile", "ammo": 5, "cooldown": 0.0, "cooldown_max": 15.0, "range": 30000.0, "heading": 0.0, "arc_width": PI / 3.0},
 		{"id": "hp_fwd_tube_2", "type": "weapons", "rect": Rect2(45, 7.5, 15, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "missile", "ammo": 5, "cooldown": 0.0, "cooldown_max": 15.0, "range": 30000.0, "heading": 0.0, "arc_width": PI / 3.0},
-		{"id": "hp_fwd_laser", "type": "weapons", "rect": Rect2(55, -2.5, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 5000.0, "damage": 1000.0, "heading": 0.0, "arc_width": PI / 3.0},
+		{"id": "hp_fwd_laser", "type": "weapons", "rect": Rect2(55, -2.5, 5, 5), "health": 150.0, "max_health": 150.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true, "weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 1.0, "range": 5000.0, "damage": 1000.0, "heading": 0.0, "arc_width": PI / 3.0},
 		{"id": "hull_bow_port", "type": "hull", "rect": Rect2(45, -25, 10, 12.5), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hull_bow_mid1", "type": "hull", "rect": Rect2(45, -7.5, 15, 5), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},
 		{"id": "hull_bow_laser_back", "type": "hull", "rect": Rect2(45, -2.5, 10, 5), "health": 1500.0, "max_health": 1500.0, "density": 20.0, "heat": 0.0, "em_emission": 0.0, "switchable": false},

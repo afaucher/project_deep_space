@@ -56,6 +56,7 @@ func setup(main) -> void:
 
 	_test_fire_guard()
 	_test_acquire_skip()
+	_test_wreck_gate()
 	await _test_comply_flow()
 	await _test_fast_ship_runs()
 	await _test_release()
@@ -130,6 +131,54 @@ func _test_acquire_skip() -> void:
 	_assert(r_c == fire_leaf.SUCCESS, "fire_opportunity_leaf returns SUCCESS (not RUNNING/FAILURE) while suspended")
 	_assert(actor_c.get_component(laser_id2).get("cooldown", 0.0) == cooldown_before2,
 		"fire_opportunity_leaf: held actor's own suspender holds fire")
+
+# --- Wreck gate: a sticky-HOSTILE contact classified WRECKAGE is never an
+# acquirable target -- playtest regression (stations/defense pods kept firing
+# on wrecks because Standing.HOSTILE never clears on death; classification
+# does flip to WRECKAGE, see Ship.classify_contact) --------------------------
+func _test_wreck_gate() -> void:
+	print("\n--- Wreck gate: HOSTILE + WRECKAGE classification is never acquired ---")
+	var acquire = AcquireTargetLeaf.new()
+
+	# These actors are ticked synchronously and never needed again -- spawn
+	# them FAR from the origin (where _test_comply_flow's live shuttle runs)
+	# and free them at the end, so three extra frigate bodies don't stack on
+	# the later live-ship scenarios' spawn point and perturb their physics.
+	var wg_base := Vector2(200000, 200000)
+	var actor_wreck = _make_ship(Frigate, "WreckHunter", 504, wg_base)
+	actor_wreck.active_contacts["TGT4"] = {"pos": wg_base + Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "WRECKAGE", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	var r_wreck = acquire.tick(actor_wreck, BlackboardScript.new())
+	_assert(r_wreck == acquire.FAILURE, "AcquireTarget skips a HOSTILE contact classified WRECKAGE")
+
+	var actor_live = _make_ship(Frigate, "LiveHunter", 505, wg_base + Vector2(0, 20000))
+	actor_live.active_contacts["TGT5"] = {"pos": actor_live.position + Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	var r_live = acquire.tick(actor_live, BlackboardScript.new())
+	_assert(r_live == acquire.SUCCESS, "AcquireTarget still acquires the same HOSTILE contact when classified UNIDENTIFIED VESSEL")
+
+	# fire_opportunity_leaf's belt-and-suspenders: never fire on a target that
+	# has since classified WRECKAGE, even if it's still the published blackboard target.
+	var fire_leaf = FireOpportunityLeaf.new()
+	var actor_wreck2 = _make_ship(Frigate, "WreckShooter", 506, wg_base + Vector2(0, 40000))
+	var laser_id3 := ""
+	for w in actor_wreck2.get_components_by_type("weapons"):
+		if w.get("weapon_type", "") == "laser":
+			laser_id3 = w["id"]
+			break
+	var bb4 = BlackboardScript.new()
+	bb4.set_value("target_id", "TGT6")
+	bb4.set_value("target_pos", actor_wreck2.position + Vector2(1000, 0))
+	actor_wreck2.active_contacts["TGT6"] = {"pos": actor_wreck2.position + Vector2(1000, 0), "vel": Vector2.ZERO, "classification": "WRECKAGE", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	var cooldown_before3: float = actor_wreck2.get_component(laser_id3).get("cooldown", 0.0)
+	var r_wreck2 = fire_leaf.tick(actor_wreck2, bb4)
+	_assert(r_wreck2 == fire_leaf.SUCCESS, "fire_opportunity_leaf returns SUCCESS (not firing) on a WRECKAGE-classified target")
+	_assert(actor_wreck2.get_component(laser_id3).get("cooldown", 0.0) == cooldown_before3,
+		"fire_opportunity_leaf: never spends a laser's cooldown on a WRECKAGE-classified target")
+
+	# Done with all three -- remove them so they can't sensor-link into or
+	# collide with the later live-ship scenarios.
+	for a in [actor_wreck, actor_live, actor_wreck2]:
+		spawned.erase(a)
+		a.queue_free()
 
 # --- Cargo comply-or-run: SLOW threat -> shuttle complies -------------------
 func _test_comply_flow() -> void:

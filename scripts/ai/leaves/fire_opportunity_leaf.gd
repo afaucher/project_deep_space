@@ -33,6 +33,11 @@ func tick(actor: Node, blackboard) -> int:
 	var contact: Dictionary = actor.active_contacts.get(target_id, {})
 	if contact.is_empty() or contact.get("last_seen_timer", 0.0) > actor.FIRE_STALENESS_MAX:
 		return SUCCESS
+	# Belt-and-suspenders to acquire_target_leaf's own wreck gate: never fire on
+	# a target that has since classified as WRECKAGE (a dead ship whose sticky
+	# HOSTILE standing didn't clear), even if it was acquired before it died.
+	if contact.get("classification", "") == "WRECKAGE":
+		return SUCCESS
 
 	var groups = actor.get_weapon_groups()
 	for gid in groups:

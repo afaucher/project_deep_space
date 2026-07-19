@@ -68,7 +68,7 @@ func _fixture_array() -> Array:
 		_hull("hull_a", Rect2(0, -5, 10, 10)),
 		_hull("hull_b", Rect2(10, -5, 10, 10)),
 		{"id": "hp_laser", "type": "weapons", "rect": Rect2(20, -2.5, 5, 5), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
-			"weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 3000.0, "damage": 250.0, "heading": 0.0, "arc_width": PI / 3.0},
+			"weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 1.0, "range": 3000.0, "damage": 250.0, "heading": 0.0, "arc_width": PI / 3.0},
 	]
 
 func _fixture_array_wide_laser() -> Array:
@@ -81,7 +81,7 @@ func _fixture_array_wide_laser() -> Array:
 		_hull("hull_a", Rect2(0, -5, 10, 10)),
 		_hull("hull_b", Rect2(10, -5, 10, 10)),
 		{"id": "hp_laser", "type": "weapons", "rect": Rect2(20, -4, 5, 8), "health": 50.0, "max_health": 50.0, "density": 20.0, "heat": 0.0, "base_em_emission": 0.0, "em_emission": 0.0, "switchable": true, "powered_on": true,
-			"weapon_type": "laser", "ammo": 999, "cooldown": 0.0, "cooldown_max": 1.0, "range": 3000.0, "damage": 50.0, "heading": 0.0, "arc_width": PI / 3.0},
+			"weapon_type": "laser", "cooldown": 0.0, "cooldown_max": 1.0, "range": 3000.0, "damage": 50.0, "heading": 0.0, "arc_width": PI / 3.0},
 	]
 
 # ---------------------------------------------------------------------------

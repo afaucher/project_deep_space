@@ -37,9 +37,14 @@ func setup(main) -> void:
 	ship.active_contacts["TGT_PORT"] = {"pos": port_pos, "vel": Vector2.ZERO}
 
 	var port_ids = groups["port"]
+	# Lasers are reactor-powered, not ammo-fed (no "ammo" field at all -- see
+	# ship.gd's normalization / weapon_behavior.gd) -- "did it fire" for those
+	# is read off cooldown (0 -> cooldown_max the instant it fires) instead of
+	# an ammo decrement, same distinction test_fire_staleness_gate.gd draws.
 	var before := {}
 	for wid in port_ids:
-		before[wid] = ship.get_component(wid)["ammo"]
+		var w = ship.get_component(wid)
+		before[wid] = {"ammo": w.get("ammo", -1), "cooldown": w.get("cooldown", 0.0)}
 
 	var status = ship.get_group_status("port", "TGT_PORT")
 	if status["ready"] != 5 or status["total"] != 5:
@@ -50,9 +55,14 @@ func setup(main) -> void:
 		failures.append("fire_group(port) fired %d, expected 5 (full broadside in one tick)" % fired)
 
 	for wid in port_ids:
-		var after = ship.get_component(wid)["ammo"]
-		if after != before[wid] - 1:
-			failures.append("port weapon %s ammo %d, expected %d (did not fire in volley)" % [wid, after, before[wid] - 1])
+		var w = ship.get_component(wid)
+		if w.get("weapon_type", "") == "laser":
+			if w.get("cooldown", 0.0) <= before[wid]["cooldown"]:
+				failures.append("port laser %s cooldown %.2f did not advance (did not fire in volley)" % [wid, w.get("cooldown", 0.0)])
+		else:
+			var after = w.get("ammo", -1)
+			if after != before[wid]["ammo"] - 1:
+				failures.append("port weapon %s ammo %d, expected %d (did not fire in volley)" % [wid, after, before[wid]["ammo"] - 1])
 
 	# --- 3. A group that does not bear fires nothing ---
 	var fired_stbd = ship.fire_group("stbd", port_pos, "TGT_PORT")

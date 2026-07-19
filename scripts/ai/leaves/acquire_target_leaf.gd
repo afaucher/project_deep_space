@@ -30,6 +30,12 @@ func tick(actor: Node, blackboard) -> int:
 		var contact = actor.active_contacts[c_id]
 		if contact.get("standing", "") != Standing.HOSTILE:
 			continue
+		# A dead ship's classification flips to WRECKAGE (Ship.classify_contact
+		# -- EM-dark hulk) but Standing.HOSTILE is sticky and never clears on
+		# death, so without this a hulk stays an acquirable target forever.
+		# Wreckage is never worth engaging -- skip it.
+		if contact.get("classification", "") == "WRECKAGE":
+			continue
 		# M49 -- no leaf targets a compliant stopped ship (comms_verbs.md's
 		# honor rule): stopped for customs, arrest, or robbery, it's off the
 		# table regardless of standing.

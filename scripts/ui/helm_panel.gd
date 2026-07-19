@@ -417,6 +417,14 @@ func _ready() -> void:
 	for lbl in [speed_stat_lbl, heading_stat_lbl, course_stat_lbl, bearing_stat_lbl]:
 		lbl.add_theme_font_size_override("font_size", 15)
 		stats_vbox.add_child(lbl)
+	# Match the dial's own needle colors so the stat readouts are
+	# self-explanatory: Heading is the cyan actual-heading needle; Course and
+	# Speed both describe the velocity vector the yellow prograde marker shows.
+	# Bearing's color is data-driven (target's classification color) and is
+	# set/cleared in update_data() instead -- left alone here.
+	heading_stat_lbl.add_theme_color_override("font_color", Color.CYAN)
+	course_stat_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 0.0))
+	speed_stat_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 0.0))
 	stats_center.add_child(stats_vbox)
 	dial_row.add_child(stats_center)
 
@@ -695,7 +703,7 @@ func update_data(packet: Dictionary) -> void:
 
 	var speed_text := Utils.format_speed(forward_speed)
 	if velocity_slider.show_drift_cue:
-		speed_text += "  lat %s" % Utils.format_speed(lateral_speed)
+		speed_text += "\nlat %s" % Utils.format_speed(lateral_speed)
 	speed_readout_lbl.text = speed_text
 	var speed_color := Color(0.8, 0.8, 0.8)
 	match velocity_slider.zone_speed_state:
