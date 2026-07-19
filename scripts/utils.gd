@@ -30,6 +30,13 @@ static func format_dist(meters: float) -> String:
 	else:
 		return "%.1f km" % (meters / 1000.0)
 
+# Speed variant of format_dist -- same m/km auto-scaling (reused directly,
+# not reimplemented), "/s" appended, sign handled separately since format_dist
+# itself is magnitude-only (distances are never negative; speeds can be).
+static func format_speed(mps: float) -> String:
+	var sign := "-" if mps < 0.0 else ""
+	return sign + format_dist(absf(mps)) + "/s"
+
 # Single source of truth for contact classification -> color, used by
 # navigation_panel (blips, off-screen indicators) and sensor_panel (contact
 # list border/font color) so the two views can't disagree about what a
