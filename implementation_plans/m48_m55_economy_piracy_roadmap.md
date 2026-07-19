@@ -236,8 +236,27 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 
 ## M52 — Patrol interdiction + SOS response
 
-> **Playtest notes to fold into this milestone's design pass** (details in
-> economy_and_piracy.md "Open notes from playtesting"): a retraction verb
+> **SPLIT (campaign playtest, July 2026): two sub-milestones now precede
+> this milestone's original scope.**
+>
+> - **M52a — Pirate viability** (implementation_plans/m52a_pirate_viability.md):
+>   the campaign guild ledger read takes_total=0 — pirates loop on failed
+>   demands until killed. Instrument (abort causes, witness identity,
+>   comply-or-run decisions, death attribution, viability sim + CSV), then
+>   fix from data: comply-or-run speed comparison, beacon-witness rule,
+>   failed-victim memory, withdraw-alive (RETURNED_EMPTY), guild
+>   profitability backoff, calibrated presumed-lost.
+> - **M52b — Warrants** (design_ideas/warrants.md): rescopes the M48
+>   sticky-HOSTILE standing + MARK HOSTILE into observed, typed, expiring,
+>   revocable warrant records with response levels, origin flags,
+>   authority-scoped enforcement, and comms propagation with dedup. This
+>   SUPERSEDES the parked playtest notes below (retraction verb, visible
+>   flips, escalation ladder — all three fall out of the model), and the
+>   patrol behaviors in this milestone's original bullets should be built
+>   ON warrants, not on raw standing. Campaign framing decision leaning:
+>   player starts in a small militia with no warrant feed (see the doc).
+>
+> Original design-pass notes (now folded into M52b): a retraction verb
 > (who may un-mark, before patrols act on shared markings); player-facing
 > feedback when dispositions flip on you (overheard MARK_HOSTILE reports
 > about you on the comms panel) + AI behavioral coherence with its own

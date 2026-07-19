@@ -135,21 +135,24 @@ const OPTIONS := {
 		],
 		"default": PerfSubsystem.ON,
 	},
+	# Both pirate logs default ON (M52a): the console is omniscient by
+	# declaration -- developer visibility, not guild knowledge -- and the
+	# zero-takes campaign loop was invisible until these were flipped on.
 	"pirate_guild_log": {
 		"label": "Pirate guild director log",
 		"choices": [
-			"Off (default)",
-			"On (one line per policy pass)",
+			"Off",
+			"On (default -- one line per policy pass)",
 		],
-		"default": PirateGuildLog.OFF,
+		"default": PirateGuildLog.ON,
 	},
 	"job_log": {
 		"label": "AI job step log",
 		"choices": [
-			"Off (default)",
-			"On (one line per job step transition)",
+			"Off",
+			"On (default -- one line per job step transition)",
 		],
-		"default": JobLog.OFF,
+		"default": JobLog.ON,
 	},
 }
 
