@@ -40,7 +40,7 @@ func _draw() -> void:
 	var margin_left = 28.0
 	var margin_bottom = 14.0
 	var margin_top = 10.0
-	var margin_right = 4.0
+	var margin_right = 34.0 # room for the HEAT/EM legend, moved out here (was inside the plot's top-left)
 	var plot_w = size.x - margin_left - margin_right
 	var plot_h = size.y - margin_top - margin_bottom
 	var origin_y = size.y - margin_bottom
@@ -50,9 +50,13 @@ func _draw() -> void:
 
 	draw_rect(Rect2(margin_left, margin_top, plot_w, plot_h), Color(0.05, 0.05, 0.05, 0.5))
 
-	# Legend (always shown, even with no data yet)
-	draw_string(default_font, Vector2(margin_left + 2, margin_top - 1), "HEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, HEAT_COLOR)
-	draw_string(default_font, Vector2(margin_left + 38, margin_top - 1), "EM", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, EM_COLOR)
+	# Legend -- right side of the chart (always shown, even with no data yet).
+	# This is now the ONLY heat/EM readout in the weapons panel (the numeric
+	# "Heat: X | EM: Y" text and the spider chart were both removed as
+	# duplicates of what this graph already shows).
+	var legend_x = margin_left + plot_w + 4.0
+	draw_string(default_font, Vector2(legend_x, margin_top + font_size), "HEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, HEAT_COLOR)
+	draw_string(default_font, Vector2(legend_x, margin_top + font_size * 2.5), "EM", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, EM_COLOR)
 
 	if _samples.is_empty():
 		draw_string(default_font, Vector2(margin_left + 4, origin_y - plot_h / 2.0), "NO DATA", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.GRAY)

@@ -17,7 +17,6 @@ var selected_contact_id: String = ""
 var weapon_buttons: Dictionary = {}
 var target_info_label: Label
 var weapon_grid: GridContainer
-var spider_chart: Control
 var history_graph: Control
 var _closing_vel_samples: Array = [] # [{"t": float, "v": float}, ...]
 
@@ -76,13 +75,13 @@ func _ready() -> void:
 	charts_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vbox.add_child(charts_hbox)
 
-	spider_chart = load("res://scripts/ui/spider_chart.gd").new()
-	spider_chart.custom_minimum_size = Vector2(160, 160)
-	charts_hbox.add_child(spider_chart)
-	spider_chart.hide()
-
+	# The spider chart (heat/EM/cross-section/density radar) duplicated what
+	# this history graph and the text readout below already show -- removed;
+	# the graph now takes the freed width. Its HEAT/EM legend (orange/blue,
+	# top-left of the plot) is the only heat/EM readout left -- see
+	# target_info_label below, which no longer prints those as numbers.
 	history_graph = load("res://scripts/ui/timeseries_graph.gd").new()
-	history_graph.custom_minimum_size = Vector2(220, 160)
+	history_graph.custom_minimum_size = Vector2(380, 160)
 	charts_hbox.add_child(history_graph)
 	history_graph.hide()
 
@@ -237,16 +236,14 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 					
 	if selected_contact_id == "":
 		target_info_label.text = "NO TARGET LOCKED"
-		if is_instance_valid(spider_chart): spider_chart.hide()
 		if is_instance_valid(history_graph): history_graph.hide()
 	else:
 		if current_state.has("contacts") and current_state["contacts"].has(selected_contact_id):
 			var c = current_state["contacts"][selected_contact_id]
 			# c["signature"] is OUR OWN sensors' fused, lerp-smoothed track data
 			# (Ship._run_sensor_sweep + the correlation lerp in _physics_process),
-			# not the target's actual current_heat/em_signature -- the spider
-			# chart and history graph below are both observed readings, same as
-			# this label.
+			# not the target's actual current_heat/em_signature -- the history
+			# graph below is an observed reading too, same as this label.
 			var sig = c.get("signature", {"heat": 0.0, "em_noise": 0.0, "cross_section": 1.0, "density": 0.0})
 			var speed = c.get("vel", Vector2.ZERO).length()
 			var s_pos = current_state.get("pos", Vector2.ZERO)
@@ -262,17 +259,15 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 				closing_vel = -rel_pos.normalized().dot(rel_vel)
 			var closing_accel = _track_closing_accel(closing_vel)
 
-			target_info_label.text = "Target: %s\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nDist: %s | Spd: %.1f m/s\nClosing: %.1f m/s | Accel: %.1f m/s^2" % [
-				selected_contact_id, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0), Utils.format_dist(dist), speed, closing_vel, closing_accel
+			# Heat/EM dropped from here -- the history graph's own HEAT
+			# (orange) / EM (blue) legend is now their only readout.
+			target_info_label.text = "Target: %s\nCS: %.1f | Den: %.1f\nDist: %s | Spd: %.1f m/s\nClosing: %.1f m/s | Accel: %.1f m/s^2" % [
+				selected_contact_id, sig.get("cross_section", 1.0), sig.get("density", 0.0), Utils.format_dist(dist), speed, closing_vel, closing_accel
 			]
-			if is_instance_valid(spider_chart):
-				spider_chart.set_values(sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0))
-				spider_chart.show()
 			if is_instance_valid(history_graph):
 				history_graph.push_sample(sig.get("heat", 0.0), sig.get("em_noise", 0.0))
 				history_graph.show()
 		else:
 			target_info_label.text = "TARGET LOST"
-			if is_instance_valid(spider_chart): spider_chart.hide()
 			if is_instance_valid(history_graph): history_graph.hide()
 

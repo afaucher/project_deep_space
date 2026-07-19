@@ -17,6 +17,21 @@ var thrust_slider: VSlider
 var vel_gauge: ProgressBar
 var mode_button: CheckButton
 
+# Dial-side stat readouts (to the right of the heading dial -- the dial's
+# needles are dense/unlabeled by design, so these make them self-discoverable
+# without cluttering the ring itself). Terms, since "direction" is ambiguous
+# with Newtonian flight (nose orientation != travel direction):
+#   Speed   -- |velocity|, unsigned, regardless of facing.
+#   Heading -- which way the ship's NOSE points (the cyan needle).
+#   Course  -- which way the ship is ACTUALLY moving (the yellow prograde
+#              marker) -- can differ from Heading under drift/momentum.
+#   Bearing -- compass direction to the selected target, if any (the
+#              colored compass-bug on the ring).
+var speed_stat_lbl: Label
+var heading_stat_lbl: Label
+var course_stat_lbl: Label
+var bearing_stat_lbl: Label
+
 @onready var main_node = get_node_or_null("/root/Main")
 
 class HeadingDial extends Control:
@@ -300,12 +315,18 @@ var throttle_slider: EngineSlider
 var velocity_slider: EngineSlider
 var max_speed: float = 1000.0
 
-# Numeric readouts flanking the gauges: throttle setting LEFT of the throttle
-# gauge and current speed RIGHT of the velocity gauge. The speed number used
-# to draw inside the velocity gauge (EngineSlider.show_speed_number); it now
-# lives out here to the side. (The controlled-zone LIMIT line lives on the
-# engineering screen -- see engineering_panel.gd's zone_status_lbl.)
+# Numeric readouts flanking the gauges: ACTUAL on the outside of each pair,
+# SETPOINT on the inside -- so for either gauge, actual is one side and
+# setpoint (whatever the gauge's own dot is currently showing -- target_val
+# while that control is active, else implied_val) is the other:
+#   [actual throttle] [THROTTLE] [setpoint throttle]   [setpoint velocity] [VELOCITY] [actual speed]
+# The speed number used to draw inside the velocity gauge (EngineSlider.
+# show_speed_number); it now lives out here to the side. (The controlled-
+# zone LIMIT line lives on the engineering screen -- see engineering_panel.
+# gd's zone_status_lbl.)
 var throttle_readout_lbl: Label
+var throttle_setpoint_lbl: Label
+var velocity_setpoint_lbl: Label
 var speed_readout_lbl: Label
 
 func _input(event: InputEvent) -> void:
@@ -370,13 +391,35 @@ func _ready() -> void:
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	add_child(vbox)
 	
-	# Dial
+	# Dial + stat readouts, side by side -- the dial's needles are dense and
+	# unlabeled, so these make Speed/Heading/Course/Bearing self-discoverable.
+	var dial_row = HBoxContainer.new()
+	dial_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	dial_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dial_row.add_theme_constant_override("separation", 20)
+
 	var dial_container = CenterContainer.new()
 	dial_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	heading_dial = HeadingDial.new()
 	heading_dial.target_angle_changed.connect(_on_heading_changed)
 	dial_container.add_child(heading_dial)
-	vbox.add_child(dial_container)
+	dial_row.add_child(dial_container)
+
+	var stats_center = CenterContainer.new()
+	stats_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var stats_vbox = VBoxContainer.new()
+	stats_vbox.add_theme_constant_override("separation", 10)
+	speed_stat_lbl = Label.new()
+	heading_stat_lbl = Label.new()
+	course_stat_lbl = Label.new()
+	bearing_stat_lbl = Label.new()
+	for lbl in [speed_stat_lbl, heading_stat_lbl, course_stat_lbl, bearing_stat_lbl]:
+		lbl.add_theme_font_size_override("font_size", 15)
+		stats_vbox.add_child(lbl)
+	stats_center.add_child(stats_vbox)
+	dial_row.add_child(stats_center)
+
+	vbox.add_child(dial_row)
 	
 	# Mode Toggle
 	var mode_container = CenterContainer.new()
@@ -390,7 +433,7 @@ func _ready() -> void:
 	var engine_hbox = HBoxContainer.new()
 	engine_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	engine_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	engine_hbox.add_theme_constant_override("separation", 16)
+	engine_hbox.add_theme_constant_override("separation", 24)
 
 	# Throttle setting readout -- LEFT of the throttle gauge, vertically centered
 	# against the tall slider.
@@ -427,7 +470,31 @@ func _ready() -> void:
 	)
 	throttle_vbox.add_child(throttle_slider)
 	engine_hbox.add_child(throttle_vbox)
-	
+
+	# Throttle setpoint readout -- RIGHT of the throttle gauge (inner side),
+	# the counterpart to throttle_readout_lbl's actual value on its outer side.
+	throttle_setpoint_lbl = Label.new()
+	throttle_setpoint_lbl.text = "SP +0%"
+	throttle_setpoint_lbl.custom_minimum_size = Vector2(56, 0)
+	throttle_setpoint_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	throttle_setpoint_lbl.add_theme_font_size_override("font_size", 13)
+	engine_hbox.add_child(throttle_setpoint_lbl)
+
+	# Fixed gap so the two inner setpoint readouts don't visually run together.
+	var setpoint_gap = Control.new()
+	setpoint_gap.custom_minimum_size = Vector2(16, 0)
+	engine_hbox.add_child(setpoint_gap)
+
+	# Velocity setpoint readout -- LEFT of the velocity gauge (inner side),
+	# the counterpart to speed_readout_lbl's actual value on its outer side.
+	velocity_setpoint_lbl = Label.new()
+	velocity_setpoint_lbl.text = "SP 0"
+	velocity_setpoint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	velocity_setpoint_lbl.custom_minimum_size = Vector2(70, 0)
+	velocity_setpoint_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	velocity_setpoint_lbl.add_theme_font_size_override("font_size", 13)
+	engine_hbox.add_child(velocity_setpoint_lbl)
+
 	# Velocity Slider
 	var vel_vbox = VBoxContainer.new()
 	var vel_lbl = Label.new()
@@ -544,6 +611,23 @@ func update_data(packet: Dictionary) -> void:
 
 	heading_dial.queue_redraw()
 
+	# Dial-side stat readouts (see field comments up top for Heading vs Course).
+	# Course only means anything once actually moving -- same threshold the
+	# dial itself uses to draw/hide the prograde marker, so the number and the
+	# needle never disagree about whether the ship is "moving".
+	speed_stat_lbl.text = "Speed    %d" % int(round(heading_dial.actual_vel.length()))
+	heading_stat_lbl.text = "Heading  %03d" % Utils.compass_bearing_deg(rot)
+	if heading_dial.actual_vel.length_squared() > 1.0:
+		course_stat_lbl.text = "Course   %03d" % Utils.compass_bearing_deg(heading_dial.actual_vel.angle())
+	else:
+		course_stat_lbl.text = "Course   --"
+	if heading_dial.has_target:
+		bearing_stat_lbl.text = "Bearing  %03d" % Utils.compass_bearing_deg(heading_dial.target_bearing)
+		bearing_stat_lbl.add_theme_color_override("font_color", heading_dial.target_color)
+	else:
+		bearing_stat_lbl.text = "Bearing  --"
+		bearing_stat_lbl.remove_theme_color_override("font_color")
+
 	# Update Engine Controls
 	var actual_vel = current_state.get("vel", Vector2.ZERO)
 	var forward = Vector2.RIGHT.rotated(rot)
@@ -612,6 +696,20 @@ func update_data(packet: Dictionary) -> void:
 		PortRules.SpeedState.OVER:
 			speed_color = Color(1.0, 0.25, 0.15)
 	speed_readout_lbl.add_theme_color_override("font_color", speed_color)
+
+	# Setpoint readouts -- INNER side of each gauge, mirroring whatever that
+	# gauge's own dot is currently showing (target_val while that control is
+	# active, else implied_val -- the same selection EngineSlider._draw() uses
+	# for the dot, so the number and the dot never disagree). Red while that
+	# control is the one actively being commanded, grey while it's just
+	# following the other control's implied value.
+	var throttle_setpoint: float = throttle_slider.target_val if throttle_slider.is_active_control else throttle_slider.implied_val
+	throttle_setpoint_lbl.text = "SP %+d%%" % int(round(throttle_setpoint * 100.0))
+	throttle_setpoint_lbl.add_theme_color_override("font_color", Color.RED if throttle_slider.is_active_control else Color(0.7, 0.7, 0.7))
+
+	var velocity_setpoint: float = velocity_slider.target_val if velocity_slider.is_active_control else velocity_slider.implied_val
+	velocity_setpoint_lbl.text = "SP %d" % int(round(velocity_setpoint))
+	velocity_setpoint_lbl.add_theme_color_override("font_color", Color.RED if velocity_slider.is_active_control else Color(0.7, 0.7, 0.7))
 
 	throttle_slider.queue_redraw()
 	velocity_slider.queue_redraw()

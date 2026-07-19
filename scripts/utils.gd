@@ -72,6 +72,16 @@ static func compass_label_text(degrees: int) -> String:
 		270: return "W"
 		_: return str(degrees)
 
+# World-frame math angle (radians, 0 = +X/east, CCW-in-screen-space) -> the
+# compass bearing (degrees, 0 = N, 90 = E) that matches this file's ring
+# conventions above: tick i is drawn at deg_to_rad(i - 90), so a needle at
+# angle `a` lines up with tick i when i = rad_to_deg(a) + 90. Always ship-
+# frame-independent (map_rotation is a DISPLAY offset, not part of the
+# bearing itself) -- callers add it back in only when drawing on a
+# ship-oriented ring.
+static func compass_bearing_deg(angle_rad: float) -> int:
+	return int(round(wrapf(rad_to_deg(angle_rad) + 90.0, 0.0, 360.0))) % 360
+
 static func is_directional_emitter(comp: Dictionary) -> bool:
 	return comp.get("type", "") == "sensors" or comp.get("type", "") == "weapons"
 
