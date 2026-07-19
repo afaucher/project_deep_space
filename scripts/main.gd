@@ -22,6 +22,7 @@ const ContractFeed = preload("res://scripts/story/contract_feed.gd")
 const NavComputer = preload("res://scripts/nav/nav_computer.gd")
 const NavAutopilot = preload("res://scripts/nav/nav_autopilot.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
+const PirateGuild = preload("res://scripts/directors/pirate_guild.gd")
 
 enum GameMode { SANDBOX, CAMPAIGN }
 
@@ -276,6 +277,11 @@ func _bootstrap_campaign() -> void:
 	# ClusterLoader stays story-agnostic in mechanism; this is the one call
 	# site that actually knows Stephanie exists.
 	ClusterLoader.load_into(def, manager, HomeClusterOverlay, StoryCharacters)
+
+	# M51 -- the pirate guild, a default-config director. Campaign only (NOT
+	# the sandbox): the guild is an invisible hand behind the home cluster's
+	# wormhole traffic, not a sandbox test fixture.
+	manager.directors.append(PirateGuild.new())
 
 	var pid = multiplayer.get_unique_id()
 	_spawn_player_ship(pid, def.player_start)

@@ -54,6 +54,12 @@ enum SensorDotOutlines { OFF, ON }
 # harness explicitly flips one OFF for isolation.
 enum PerfSubsystem { ON, OFF }
 
+# M51 -- the pirate guild director's whole player-facing footprint (design
+# doc: "an invisible hand"). Default OFF; ON prints one line per policy pass
+# (counts by state, cap, streaks, pending etas) -- see scripts/directors/
+# pirate_guild.gd's _log().
+enum PirateGuildLog { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -121,6 +127,14 @@ const OPTIONS := {
 			"Off (skip _check_eng_log_crossings -- perf isolation only)",
 		],
 		"default": PerfSubsystem.ON,
+	},
+	"pirate_guild_log": {
+		"label": "Pirate guild director log",
+		"choices": [
+			"Off (default)",
+			"On (one line per policy pass)",
+		],
+		"default": PirateGuildLog.OFF,
 	},
 }
 

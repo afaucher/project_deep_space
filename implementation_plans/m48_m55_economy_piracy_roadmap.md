@@ -203,6 +203,13 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 
 ## M51 — Pirate guild director
 
+> **SHIPPED.** `scripts/directors/pirate_guild.gd` (ledger + five-stage
+> policy tick), `ClusterManager.directors` + the `_attach_ai` pirate
+> branch + external-despawn record retirement (the cash-out resurrection
+> fix), campaign-bootstrap wiring, `pirate_guild_log` debug toggle. Test:
+> `test_pirate_guild` (five scenarios, real queue_free despawn path).
+> As-built deviations in [m51_pirate_guild_design.md](m51_pirate_guild_design.md).
+
 > **Revised before execution** — pinned design in
 > [m51_pirate_guild_design.md](m51_pirate_guild_design.md). Key additions
 > over the sketch below: the **director pattern** (ledger + policy tick as

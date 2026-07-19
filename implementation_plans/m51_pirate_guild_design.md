@@ -166,6 +166,28 @@ streaks, pending etas. That's the whole player-facing footprint of M51.
 - Full build.ps1 gate green; perf_combat band unaffected (the guild is one
   O(members) pass every 10s).
 
+## As-built notes
+
+- **The cash-out path required a second cluster fix the spec missed**: the
+  production despawn (EXIT_AT's queue_free) leaves the record in
+  `cluster.records` with a dangling live_node — `_reconcile()` would
+  re-promote a fresh, alive pirate the next pass, and the member would
+  never resolve CASHED_OUT (the check-in finds it alive again). Fixed in
+  `_reconcile()`: records whose live node was freed EXTERNALLY are retired
+  (removed). Discriminator: `_demote()` nulls live_node, so external death
+  is a dangling reference — and since **a freed instance compares EQUAL to
+  null in GDScript**, the check must be `typeof(live_node) == TYPE_OBJECT
+  and not is_instance_valid(live_node)`, never `!= null`. test_pirate_guild
+  scenario (c) drives this real path (queue_free + tick), not a synthetic
+  record splice.
+- SCHEDULED exists in the MemberState enum for the doc's state list but is
+  never stored in `members` — a scheduled arrival has no record id yet, so
+  it lives only in `arrivals`; name-avoidance treats both alike.
+- Member entries carry an `observed_dead` flag (needed to distinguish
+  "observed dead" from "vanished" at overdue resolution).
+- Spawned record ids start at 9000 — clear of every authored home_cluster
+  id.
+
 ## Out of scope (lands later)
 
 Patrol/SOS interdiction (M52). Trade/traffic directors + CargoRun

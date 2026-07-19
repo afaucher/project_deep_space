@@ -26,6 +26,12 @@ var live_parent: Node = null     # where live bodies are added (defaults to self
 var viewpoint_node: Node = null  # if set, the live game drives viewpoint from it each frame
 var cluster_def = null           # the authored ClusterDef (for the nav computer's beacon graph)
 
+# M51 -- directors (a ledger + policy tick, jobs_and_itineraries.md §3), e.g.
+# the pirate guild. Ticked at the end of tick(dt), AFTER dead-reckon/reconcile
+# so a director sees this frame's settled records. Campaign bootstrap appends
+# a configured PirateGuild; the sandbox gets none.
+var directors: Array = []
+
 func _init() -> void:
 	policy = LivenessPolicy.new()
 	# policy.configure_bubble(45000.0, 60000.0)
@@ -52,8 +58,28 @@ func tick(dt: float) -> void:
 		if not rec.is_live() and not rec.is_static:
 			rec.pos += rec.vel * dt
 	_reconcile()
+	for d in directors:
+		d.tick(dt, self)
 
 func _reconcile() -> void:
+	# M51 -- retire records whose live node was despawned EXTERNALLY (a
+	# pirate's EXIT_AT queue_free, or any other outside free). _demote() nulls
+	# live_node when the CLUSTER reclaims a body, so a dangling freed
+	# reference is the unambiguous "someone else freed it" signal. Without
+	# this, the promote branch below would rebuild a fresh, alive hull from
+	# the stale record on the very next pass -- a wormhole-exiting pirate
+	# would resurrect at its spawn point and its guild member would never
+	# resolve as CASHED_OUT (the check-in would find it alive again).
+	# GOTCHA: a freed instance compares EQUAL to null in GDScript, so
+	# `live_node != null` can't tell freed from demoted -- typeof() still
+	# reports TYPE_OBJECT for a dangling reference (TYPE_NIL only for a real
+	# null), which is the discriminator used here.
+	var i: int = records.size() - 1
+	while i >= 0:
+		var rec_r = records[i]
+		if typeof(rec_r.live_node) == TYPE_OBJECT and not is_instance_valid(rec_r.live_node):
+			records.remove_at(i)
+		i -= 1
 	for rec in records:
 		var tier: int = policy.classify(rec, viewpoint)
 		var want_live: bool = (tier == LivenessPolicy.Tier.LIVE)
@@ -199,6 +225,15 @@ func _attach_ai(rec, node) -> void:
 		return
 	if node.ship_tier == ComponentSpec.Tier.STRUCTURE:
 		node.add_child(AITreeFactory.build_station())
+		return
+	# M51 -- guild-issued pirate: the whole tree + job come from the record's
+	# behavior, ahead of the route/cargo checks below. duplicate(true) matters:
+	# a demote/promote cycle must hand the fresh node a CLEAN copy of the job,
+	# not the half-run job dict the previous body was mutating in place (job
+	# progress does not survive demotion in v1 -- see the M51 design doc).
+	if typeof(rec.behavior) == TYPE_DICTIONARY and rec.behavior.get("pirate", false):
+		node.add_child(AITreeFactory.build_pirate())
+		node.assign_job(rec.behavior.get("job", {}).duplicate(true))
 		return
 	# Mobile hull: patrol if it was handed a route (via behavior), else combat AI.
 	var route = _route_from(rec.behavior)
