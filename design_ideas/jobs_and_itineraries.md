@@ -172,10 +172,20 @@ committing the model) — each row is data + at most a couple of verbs:
 | Mining | `GO_TO field → MINE → GO_TO station → DOCK_AT → AWAIT{unloaded}` repeat | `MINE` |
 | Civilian transport | scheduled port calls | nothing — pure data |
 | Smuggler | legit arrival → `GO_DARK → DROP_CARGO → AWAIT{track_quiet} → RELIGHT → EXIT` | `DROP_CARGO`/`PICKUP`; reuses the pirate's whole stealth family |
-| Tug | duty: standby `AWAIT`; assignment on SOS(DISABLED): `INTERCEPT wreck → GRAPPLE → GO_TO station → RELEASE_TOW` | `GRAPPLE`/`RELEASE_TOW` (docking capture-spring, reused ship-to-ship) |
+| Tug (rescue) | duty: standby `AWAIT`; assignment on SOS(DISABLED): `INTERCEPT wreck → GRAPPLE → GO_TO station → RELEASE_TOW` | `GRAPPLE`/`RELEASE_TOW` (docking capture-spring, reused ship-to-ship) |
+| Tug (road maintenance) | duty: inspect circuit over the beacon road (`GO_TO` each beacon, repeat); on finding one displaced past tolerance → `GRAPPLE → TOW to its authored position → RELEASE_TOW`; damaged → repair in place (`REPAIR`, the M40 system shipboard) or tow to a repair station | `REPAIR` verb; authored beacon positions as director-known infrastructure data |
 
 No case needed branching jobs, parallel steps, or a stack — the flat shape
-held. Convergences worth trusting: the police stop and the stickup are one
+held.
+
+The road-maintenance tug earns a note: it's the world's first
+INFRASTRUCTURE keeper, and it closes a real loop — collisions displace live
+beacons and the displacement PERSISTS (position syncs back to the cluster
+record on demote), so today a shoved beacon bends the road forever. The
+maintenance duty makes the world self-healing, gives tugs a standing duty
+better than pure standby (an inspect circuit you can watch fly by), and its
+"authored position" target is honest director knowledge: where the beacon
+is SUPPOSED to be is public infrastructure data, not sensor omniscience. Convergences worth trusting: the police stop and the stickup are one
 itinerary skeleton (the same collapse comms_verbs.md found on the wire);
 M49's SOS nature field is the dispatch signal for BOTH patrols
 (UNDER_ATTACK) and tugs (DISABLED); smugglers reuse the pirate's stealth
