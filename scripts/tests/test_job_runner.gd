@@ -46,8 +46,48 @@ func setup(main) -> void:
 	await _test_two_slot_assignment_aborts()
 	await _test_abort_when_generic_dispatch()
 	_test_no_job_and_empty_job()
+	_test_relight_identity_kit()
 
 	_finish()
+
+# M51+ -- RELIGHT {from_kit}: identities are pre-provisioned papers
+# (ship.identity_documents), consumed one per relight; an exhausted kit
+# ABORTs (routed by on_abort -- the canonical hunt runs for the exit DARK).
+# A paper can't be fabricated on the spot, so the runner path is: draw ->
+# mark used -> apply name; empty -> ABORT jump.
+func _test_relight_identity_kit() -> void:
+	print("\n--- RELIGHT from_kit: draw, consume, exhaust -> abort route ---")
+	var actor = _make_actor("KitRelighter")
+	actor.identity_documents = [
+		{"name": "Cover Name", "flag": "", "used": true},   # the flying cover
+		{"name": "Fresh Paper", "flag": "", "used": false}, # one unspent
+	]
+	# A bare test actor carries no design -- set_transponder_custom_name()
+	# only touches an existing "comms" component, so give it one to observe.
+	actor.ship_components = [{"id": "comms", "type": "comms", "transponder_active": false, "transponder_custom_name": "", "transponder_flag": ""}]
+	var runner = JobRunnerLeaf.new()
+	var bb = BlackboardScript.new()
+
+	# One unspent paper: first RELIGHT draws it...
+	actor.assign_job({"steps": [
+		{"verb": "RELIGHT", "from_kit": true, "flag": "", "on_abort": "dark_exit"},
+		{"verb": "AWAIT", "condition": "duration", "seconds": 0.0},
+		{"verb": "RELIGHT", "from_kit": true, "flag": "", "on_abort": "dark_exit"},
+		{"verb": "AWAIT", "condition": "duration", "seconds": 999.0, "label": "dark_exit"},
+	], "current": 0})
+
+	runner.tick(actor, bb) # RELIGHT #1 -> draws "Fresh Paper"
+	_assert(actor.identity_documents[1].get("used", false), "from_kit relight consumed the unspent paper")
+	var flying := ""
+	for c in actor.ship_components:
+		if c.get("type", "") == "comms":
+			flying = c.get("transponder_custom_name", "")
+			break
+	_assert(flying == "Fresh Paper", "transponder now flies the drawn paper's name (got '%s')" % flying)
+
+	runner.tick(actor, bb) # AWAIT 0s -> DONE
+	runner.tick(actor, bb) # RELIGHT #2 -> kit exhausted -> ABORT -> jump to dark_exit
+	_assert(actor.assignment.get("current", -1) == 3, "exhausted kit ABORTs to the on_abort label (the dark run), current=%d" % actor.assignment.get("current", -1))
 
 func _finish() -> void:
 	if failures.is_empty():

@@ -500,6 +500,16 @@ func set_default_job(job: Dictionary) -> void:
 var loot_takes: int = 0
 var looted: bool = false
 
+# M51+ -- the identity papers physically aboard: [{name, flag, used}].
+# Convincing false identities take illegal back channels to procure, so a
+# pirate carries a finite pre-provisioned kit (set at promote from its guild
+# record) and RELIGHT {from_kit} consumes them one by one -- exhaust the kit
+# and there is no fresh identity to fly, only a dark run. The documents stay
+# aboard (used or not): a future ship-search mechanic reads THIS array and
+# cross-references the wanted-names registry -- a hold full of papers, some
+# of them confirmed pirate names, IS the evidence.
+var identity_documents: Array = []
+
 var available_npcs: Array[Resource] = []
 var comms_ledger: Node
 var mission_log: Node

@@ -20,6 +20,7 @@ const Wormhole = preload("res://scripts/wormhole.gd")
 const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const PirateOreShuttle = preload("res://scripts/ships/pirate_ore_shuttle.gd")
 const ArmedPinnace = preload("res://scripts/ships/armed_pinnace.gd")
+const MediumStation = preload("res://scripts/ships/medium_station.gd")
 
 # Fast config per CLAUDE.md/the design doc -- config is data, so tuning it for
 # test speed is legitimate, not a test backdoor.
@@ -33,11 +34,20 @@ const FAST_CONFIG := {
 	"losses_per_cap_cut": 2,
 	"cashin_radius": 8000.0,
 	"hull_mix": [PirateOreShuttle, ArmedPinnace],
-	"name_pool": ["Alpha Trader", "Bravo Light", "Charlie Return", "Delta Odds", "Echo Wind", "Foxtrot Change"],
+	"identity_kit_size": 3,
+	"name_parts_first": ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"],
+	"name_parts_second": ["Trader", "Light", "Return", "Odds", "Wind", "Change"],
 }
 
 const WORMHOLE_POS := Vector2.ZERO
+# The lane's far end sits AT a station -- mirrors the authored cargo lanes
+# (Ironhold<->Drift Market etc, home_cluster.gd), where the endpoints ARE
+# stations. This is the exact geometry that produced the playtest bug (a
+# pirate going dark right next to a station): the naive lane-point/staging/
+# exfil rolls had no station keep-away at all.
 const LANE_ROUTE := [Vector2(10000, 0), Vector2(50000, 20000)]
+const STATION_POS := Vector2(50000, 20000)
+const R_STATION_AVOID := 25000.0 # mirrors pirate_guild.gd's _R_STATION_AVOID
 
 var main_node: Node = null
 var failures: Array = []
@@ -78,6 +88,15 @@ func _make_cluster() -> Node:
 	lane.pos = LANE_ROUTE[0]
 	lane.behavior = {"route": LANE_ROUTE, "cargo": true, "loop": true}
 	cluster.add_record(lane)
+
+	var station := ClusterEntity.new()
+	station.id = 600
+	station.name = "Test Station"
+	station.hull_script = MediumStation
+	station.kind = ClusterEntity.Kind.STATION
+	station.is_static = true
+	station.pos = STATION_POS
+	cluster.add_record(station)
 
 	spawned_clusters.append(cluster)
 	return cluster
@@ -207,7 +226,49 @@ func _test_bootstrap_floor() -> void:
 		for st in steps:
 			verbs.append(st.get("verb", ""))
 		_assert(verbs.has("SELECT_VICTIM"), "(a) the assigned job is a hunt (has SELECT_VICTIM)")
+		# Tradecraft: the hunt waits for CLEAR (nobody in own-sensor range)
+		# before its first GO_DARK -- a transponder vanishing in front of a
+		# watcher is a suspicion gift (playtest feedback).
+		var clear_idx: int = -1
+		var dark_idx: int = -1
+		for i in range(steps.size()):
+			if clear_idx == -1 and steps[i].get("verb", "") == "AWAIT" and steps[i].get("condition", "") == "clear":
+				clear_idx = i
+			if dark_idx == -1 and steps[i].get("verb", "") == "GO_DARK":
+				dark_idx = i
+		_assert(clear_idx != -1 and dark_idx != -1 and clear_idx < dark_idx,
+			"(a) the hunt waits for AWAIT{clear} before its first GO_DARK (clear@%d, dark@%d)" % [clear_idx, dark_idx])
 		_assert(node.position.distance_to(WORMHOLE_POS) < 2000.0, "(a) pirate spawned near the wormhole")
+		# Station-avoidance (playtest bug): the staging GO_TO (steps[0]) and the
+		# exfil GO_TO (labeled "exfil") must both clear R_STATION_AVOID of the
+		# test station sitting at the lane's far end -- otherwise the pirate
+		# goes dark right next to it, which is exactly what was reported.
+		if steps.size() > 0:
+			var staging_pos: Vector2 = steps[0].get("pos", Vector2.ZERO)
+			_assert(steps[0].get("verb", "") == "GO_TO" and staging_pos.distance_to(STATION_POS) >= R_STATION_AVOID,
+				"(a) staging point clears the station keep-away (dist=%.0f)" % staging_pos.distance_to(STATION_POS))
+		var exfil_idx: int = -1
+		for i in range(steps.size()):
+			if steps[i].get("label", "") == "exfil":
+				exfil_idx = i
+				break
+		if exfil_idx != -1:
+			var exfil_pos: Vector2 = steps[exfil_idx].get("pos", Vector2.ZERO)
+			_assert(exfil_pos.distance_to(STATION_POS) >= R_STATION_AVOID,
+				"(a) exfil point clears the station keep-away (dist=%.0f)" % exfil_pos.distance_to(STATION_POS))
+		else:
+			_assert(false, "(a) exfil GO_TO step found (labeled 'exfil')")
+		# Identity papers (the back-channels rule): the whole pre-provisioned
+		# kit is physically aboard; the cover (kit[0], == the record name) is
+		# in use; the rest are unspent relight papers. The guild never
+		# re-issues any of them (issued_names).
+		var docs: Array = node.identity_documents
+		_assert(docs.size() == FAST_CONFIG["identity_kit_size"], "(a) full identity kit aboard (%d papers)" % docs.size())
+		if docs.size() >= 2:
+			_assert(docs[0].get("used", false) and docs[0].get("name", "") == rec.name, "(a) kit[0] is the flying cover identity (used)")
+			_assert(not docs[1].get("used", true), "(a) remaining papers unspent")
+		for d in docs:
+			_assert(guild.issued_names.has(d.get("name", "")), "(a) every carried paper is on the guild's issued-names ledger")
 	_assert(_count_alive_pirate_nodes(cluster) == 1, "(a) exactly one live pirate hull exists")
 
 # ---------------------------------------------------------------------------

@@ -234,6 +234,15 @@ func _attach_ai(rec, node) -> void:
 	if typeof(rec.behavior) == TYPE_DICTIONARY and rec.behavior.get("pirate", false):
 		node.add_child(AITreeFactory.build_pirate())
 		node.assign_job(rec.behavior.get("job", {}).duplicate(true))
+		# The identity papers aboard (M51+ back-channels rule): kit[0] is the
+		# cover identity currently flying (rec.name) -- marked used; the rest
+		# are the unspent relight papers RELIGHT {from_kit} consumes.
+		var kit: Array = rec.behavior.get("identity_kit", [])
+		if not kit.is_empty():
+			var docs: Array = []
+			for i in range(kit.size()):
+				docs.append({"name": kit[i], "flag": rec.transponder_flag, "used": i == 0})
+			node.identity_documents = docs
 		return
 	# Mobile hull: patrol if it was handed a route (via behavior), else combat AI.
 	var route = _route_from(rec.behavior)

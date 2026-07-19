@@ -174,6 +174,20 @@ judgment call. The fix is a **two-layer split**:
      coming in from a far berth.
   The wormhole exit stays the trivially clean cash-in: the ship is simply
   gone, and the guild's next arrival carries a fresh cover identity anyway.
+- **Identities are PAPERS, and papers take back channels.** A convincing
+  false identity cannot be fabricated on the spot — it's procured ahead of
+  time through the guild's illegal channels, so a pirate carries a finite
+  pre-provisioned **identity kit** (`ship.identity_documents`; names are
+  generated and NEVER re-issued — the guild's `issued_names` ledger).
+  RELIGHT consumes one paper per use. **Burn the whole kit and there is no
+  fresh identity left**: the ship must run for the exit dark, drawing
+  patrol challenges in controlled space, hoping nobody stops it — supply
+  pressure is the natural brake on serial laundering. The payoff mechanic
+  (later, with boarding/inspection — the TAKE_ALONGSIDE reuse): **searching
+  a suspected ship finds ALL the papers aboard**, spent and unspent, and
+  cross-referencing them against the wanted-names list turns "suspicious
+  hauler" into "confirmed pirate carrying three burned identities" — the
+  hard evidence hunt missions want.
 - **Standing is shareable.** Datalink already merges tracks; HOSTILE markings
   ride along with attribution ("Patrol Alpha flagged: fired on Mule"), and a
   patrol may also relay explicit REPORTS ("dark contact loitering off lane 2")

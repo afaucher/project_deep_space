@@ -47,10 +47,21 @@ const DEFAULT_CONFIG := {
 	"losses_per_cap_cut": 2,
 	"cashin_radius": 8000.0,
 	"hull_mix": [PirateOreShuttle, ArmedPinnace],
-	"name_pool": [
-		"Fair Trader", "Slow Light", "Quiet Return", "Long Odds", "Second Wind",
-		"Loose Change", "Dead Reckoning", "Last Call", "Open Book", "Clean Slate",
-		"Distant Signal", "Idle Hands",
+	# Identity generation (the back channels). Names are GENERATED (first x
+	# second part), not drawn from a fixed pool, and a name once issued is
+	# never issued again (issued_names below) -- a convincing false identity
+	# takes illegal back channels to procure, so each member arrives with a
+	# pre-provisioned KIT of identity_kit_size papers and can never fabricate
+	# another on the spot. Burn the whole kit and you run dark and hope.
+	"identity_kit_size": 3,
+	"name_parts_first": [
+		"Fair", "Slow", "Quiet", "Long", "Second", "Loose", "Dead", "Last",
+		"Open", "Clean", "Distant", "Idle", "Pale", "Steady", "Broken", "Late",
+	],
+	"name_parts_second": [
+		"Trader", "Light", "Return", "Odds", "Wind", "Change", "Reckoning",
+		"Call", "Book", "Slate", "Signal", "Hands", "Harbor", "Crossing",
+		"Promise", "Ledger",
 	],
 }
 
@@ -67,6 +78,12 @@ var members: Dictionary = {}
 # [{eta_remaining, cover_name, relight_name, hull_idx}] -- scheduled arrivals
 # with no record yet (the record is minted when they actually spawn).
 var arrivals: Array = []
+
+# Every identity ever issued through the back channels, forever -- a burned
+# name is never re-issued (it may be on wanted lists; re-flying it would be
+# suicide, and the future ship-search mechanic cross-references exactly this
+# kind of paper trail). Serializable set: name -> true.
+var issued_names: Dictionary = {}
 
 var takes_total: int = 0
 var losses: int = 0
@@ -211,16 +228,15 @@ func _schedule_floor() -> void:
 		return
 	while _roster_pressure() < cap:
 		var eta: float = randf_range(window[0], window[1])
-		var names: Array = _draw_two_names()
+		var kit: Array = _provision_kit()
 		var hull_idx: int = _hull_cursor % hull_mix.size()
 		_hull_cursor += 1
 		arrivals.append({
 			"eta_remaining": eta,
-			"cover_name": names[0],
-			"relight_name": names[1],
+			"kit": kit,
 			"hull_idx": hull_idx,
 		})
-		_event("arrival scheduled: '%s' in %.0fs" % [names[0], eta])
+		_event("arrival scheduled: '%s' in %.0fs (papers: %d)" % [kit[0], eta, kit.size()])
 
 # active + overdue (still-carried members) + already-pending arrivals --
 # what the floor check compares against cap.
@@ -256,11 +272,12 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 
 		var hull_idx: int = arrival.get("hull_idx", 0) % max(1, hull_mix.size())
 		var hull_script: Script = hull_mix[hull_idx]
-		var relight_name: String = arrival.get("relight_name", "")
+		var kit: Array = arrival.get("kit", [])
+		var cover_name: String = kit[0] if not kit.is_empty() else ""
 
 		var rec := ClusterEntity.new()
 		rec.id = record_id
-		rec.name = arrival.get("cover_name", "")
+		rec.name = cover_name
 		rec.hull_script = hull_script
 		rec.kind = ClusterEntity.Kind.TRAFFIC
 		rec.is_static = false
@@ -269,21 +286,22 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 		rec.transponder_flag = Standing.FLAG_CIVILIAN
 		rec.behavior = {
 			"pirate": true,
-			"job": _build_hunt_job(cluster, wormhole_pos, relight_name),
+			"identity_kit": kit.duplicate(),
+			"job": _build_hunt_job(cluster, wormhole_pos),
 		}
 		cluster.records.append(rec)
 
 		members[record_id] = {
 			"state": MemberState.ACTIVE,
-			"cover_name": arrival.get("cover_name", ""),
-			"relight_name": relight_name,
+			"cover_name": cover_name,
+			"kit": kit.duplicate(),
 			"last_seen_pos": spawn_pos,
 			"last_loot_takes": 0,
 			"overdue_since": 0.0,
 			"observed_dead": false,
 		}
 		_event("'%s' arrived through the wormhole (%s, record %d)" %
-			[arrival.get("cover_name", ""), hull_script.resource_path.get_file(), record_id])
+			[cover_name, hull_script.resource_path.get_file(), record_id])
 
 	arrivals = still_pending
 
@@ -296,17 +314,30 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 # (show_colors re-lit the transponder; AWAIT{track_quiet} needs it off again).
 # ---------------------------------------------------------------------------
 
-const _R_THIRD_PARTY := 3000.0
+const _R_THIRD_PARTY := 6000.0
+# Tradecraft keep-away from stations (playtest: a pirate lurked, robbed, and
+# went dark ON Drift Market's doorstep -- lane endpoints ARE stations, and
+# nothing kept the rolled points away from them). Station positions are
+# PUBLIC geometry (the same records the lanes come from), so avoiding them
+# is honest guild knowledge, not omniscience.
+const _R_STATION_AVOID := 25000.0
 
-func _build_hunt_job(cluster, wormhole_pos: Vector2, relight_name: String) -> Dictionary:
-	var lane_pos: Vector2 = _pick_lane_point(cluster, wormhole_pos)
-	var staging_pos: Vector2 = _staging_point(wormhole_pos, lane_pos)
-	var exfil_pos: Vector2 = _exfil_point(wormhole_pos, lane_pos)
+func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
+	var stations: Array = _station_positions(cluster)
+	var lane_pos: Vector2 = _pick_lane_point(cluster, wormhole_pos, stations)
+	var staging_pos: Vector2 = _away_from_stations(stations, func(): return _staging_point(wormhole_pos, lane_pos))
+	var exfil_pos: Vector2 = _away_from_stations(stations, func(): return _exfil_point(wormhole_pos, lane_pos))
 
 	return {
 		"steps": [
 			{"verb": "GO_TO", "pos": staging_pos},
-			{"verb": "GO_DARK"},
+			# Don't kill the transponder in front of witnesses -- a NEUTRAL
+			# trader vanishing off the board while watched is a suspicion
+			# gift. Wait until nobody's in plausible sensor range (own-sensor
+			# heuristic); patience runs out -> go dark anyway (on_abort jumps
+			# to the GO_DARK label -- an impatient pirate, not a broken job).
+			{"verb": "AWAIT", "condition": "clear", "clear_range": 8000.0, "timeout": 45.0, "on_abort": "go_dark"},
+			{"verb": "GO_DARK", "label": "go_dark"},
 			# See header: third_party_in_range deliberately NOT attached here.
 			{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY},
 			{"verb": "INTERCEPT", "on_abort": "hunt",
@@ -318,18 +349,57 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2, relight_name: String) -> Di
 			{"verb": "GO_DARK"}, # re-achieve dark after DEMAND_STOP's show_colors relit us
 			{"verb": "GO_TO", "label": "exfil", "pos": exfil_pos},
 			{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 60.0},
-			{"verb": "RELIGHT", "name": relight_name, "flag": Standing.FLAG_CIVILIAN},
-			{"verb": "EXIT_AT", "pos": wormhole_pos},
+			# The launder relight draws the next unused paper from the ship's
+			# pre-provisioned identity kit (job_steps.gd RELIGHT from_kit) --
+			# a convincing identity can't be fabricated on the spot. Kit
+			# exhausted -> ABORT to "exit": run for the wormhole DARK and
+			# hope nobody stops you (drawing patrol challenges in controlled
+			# space is exactly the squeeze the design wants).
+			{"verb": "RELIGHT", "from_kit": true, "flag": Standing.FLAG_CIVILIAN, "on_abort": "exit"},
+			{"verb": "EXIT_AT", "label": "exit", "pos": wormhole_pos},
 		],
 		"current": 0,
 	}
 
+func _station_positions(cluster) -> Array:
+	var out: Array = []
+	for rec in cluster.records:
+		if rec.kind == ClusterEntity.Kind.STATION:
+			out.append(rec.pos)
+	return out
+
+# Roll candidates until one clears _R_STATION_AVOID of every station
+# (bounded); otherwise keep the candidate that got FARTHEST from its nearest
+# station (a cramped cluster degrades to "least bad", never to a crash or an
+# infinite loop). Deterministic: pure seeded rolls, fixed retry count.
+func _away_from_stations(stations: Array, roll: Callable) -> Vector2:
+	var best: Vector2 = roll.call()
+	var best_d: float = _nearest_station_dist(stations, best)
+	for _i in range(7):
+		if best_d >= _R_STATION_AVOID:
+			return best
+		var candidate: Vector2 = roll.call()
+		var d: float = _nearest_station_dist(stations, candidate)
+		if d > best_d:
+			best = candidate
+			best_d = d
+	return best
+
+func _nearest_station_dist(stations: Array, p: Vector2) -> float:
+	var nearest: float = INF
+	for s_pos in stations:
+		nearest = minf(nearest, p.distance_to(s_pos))
+	return nearest
+
 # A seeded point along a randomly-chosen cargo lane's route segment. Cargo
 # lanes are public knowledge (a guild watching the lanes plausibly has it) --
 # TRAFFIC records whose behavior carries {"route": [...], "cargo": true}
-# (home_cluster.gd). Falls back to the wormhole itself if the cluster somehow
-# carries no cargo lane (keeps the job assemblable rather than crashing).
-func _pick_lane_point(cluster, wormhole_pos: Vector2) -> Vector2:
+# (home_cluster.gd). The lerp fraction stays INSIDE [0.15, 0.85] and the
+# point must clear the station keep-away -- lane ENDPOINTS are station
+# doorsteps (the playtest bug), and no sane pirate lurks under a hub's guns.
+# Falls back to the wormhole itself if the cluster somehow carries no cargo
+# lane (keeps the job assemblable rather than crashing).
+func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array) -> Vector2:
 	var lanes: Array = []
 	for rec in cluster.records:
 		if rec.kind != ClusterEntity.Kind.TRAFFIC:
@@ -347,7 +417,7 @@ func _pick_lane_point(cluster, wormhole_pos: Vector2) -> Vector2:
 	var seg: int = randi() % (route.size() - 1)
 	var a: Vector2 = route[seg]
 	var b: Vector2 = route[seg + 1]
-	return a.lerp(b, randf())
+	return _away_from_stations(stations, func(): return a.lerp(b, randf_range(0.15, 0.85)))
 
 # A seeded point off the beacon road: offset perpendicular from the
 # wormhole->lane direction, well outside comms range of stations.
@@ -389,42 +459,34 @@ func _wormhole_pos(cluster) -> Vector2:
 			return rec.pos
 	return Vector2.ZERO
 
-# Names in use by ACTIVE/OVERDUE members and already-pending arrivals --
-# resolved (LOST/CASHED_OUT) members free their names back to the pool.
-func _names_in_use() -> Dictionary:
-	var in_use: Dictionary = {}
-	for record_id in members.keys():
-		var m: Dictionary = members[record_id]
-		var st = m.get("state", -1)
-		if st == MemberState.ACTIVE or st == MemberState.OVERDUE:
-			in_use[m.get("cover_name", "")] = true
-			in_use[m.get("relight_name", "")] = true
-	for arrival in arrivals:
-		in_use[arrival.get("cover_name", "")] = true
-		in_use[arrival.get("relight_name", "")] = true
-	return in_use
+# Generate one never-before-issued identity (seeded rolls -- deterministic
+# under the test seed). The part-combination space is large (16x16 default);
+# if a roll collides with an issued name, re-roll a bounded number of times,
+# then fall back to a numbered variant (degenerate-but-unique, never crashes
+# even with tiny test part lists).
+func _generate_name() -> String:
+	var firsts: Array = config.get("name_parts_first", ["Nameless"])
+	var seconds: Array = config.get("name_parts_second", ["Hull"])
+	for _attempt in range(24):
+		var candidate: String = "%s %s" % [firsts[randi() % firsts.size()], seconds[randi() % seconds.size()]]
+		if not issued_names.has(candidate):
+			issued_names[candidate] = true
+			return candidate
+	var n: int = 2
+	var base: String = "%s %s" % [firsts[randi() % firsts.size()], seconds[randi() % seconds.size()]]
+	while issued_names.has("%s %d" % [base, n]):
+		n += 1
+	var fallback: String = "%s %d" % [base, n]
+	issued_names[fallback] = true
+	return fallback
 
-func _draw_two_names() -> Array:
-	var pool: Array = config.get("name_pool", [])
-	var in_use: Dictionary = _names_in_use()
-	var available: Array = []
-	for n in pool:
-		if not in_use.has(n):
-			available.append(n)
-	if available.size() < 2:
-		available = pool.duplicate() # pool exhausted -- reuse rather than crash
-
-	var idx1: int = randi() % available.size()
-	var cover: String = available[idx1]
-	available.remove_at(idx1)
-	if available.is_empty():
-		available = pool.duplicate()
-		available.erase(cover)
-		if available.is_empty():
-			available = [cover] # single-name pool -- degenerate but non-crashing
-	var idx2: int = randi() % available.size()
-	var relight: String = available[idx2]
-	return [cover, relight]
+# The back channels at work: provision a member's whole identity kit ahead
+# of time. kit[0] is the arrival cover; the rest are the relight papers.
+func _provision_kit() -> Array:
+	var kit: Array = []
+	for _i in range(maxi(1, config.get("identity_kit_size", 3))):
+		kit.append(_generate_name())
+	return kit
 
 # Event line -- fires at ledger MILESTONES (arrival scheduled/spawned,
 # OVERDUE, LOST, CASHED_OUT, cap moves), same toggle as the per-pass summary

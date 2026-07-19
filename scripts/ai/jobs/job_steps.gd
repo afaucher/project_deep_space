@@ -120,6 +120,17 @@ static func _contact_for_instance(actor, iid: int) -> Dictionary:
 static func _is_fresh(actor, c: Dictionary) -> bool:
 	return not c.is_empty() and c.get("last_seen_timer", 999.0) <= actor.FIRE_STALENESS_MAX
 
+static func _fresh_vessel_within(actor, r: float) -> bool:
+	for c_id in actor.active_contacts:
+		var c: Dictionary = actor.active_contacts[c_id]
+		if not _is_fresh(actor, c):
+			continue
+		if not _VESSEL_CLASSIFICATIONS.has(c.get("classification", "")):
+			continue
+		if actor.position.distance_to(c.get("pos", actor.position)) <= r:
+			return true
+	return false
+
 # Comms-hail range to a specific victim, honesty-compatible: resolves the
 # live node purely to read ITS radio's range (the same "resolve the node to
 # read its comms_range" idiom challenge_leaf.gd's _resolve_track_node already
@@ -164,10 +175,30 @@ static func step_go_dark(actor, _step: Dictionary, _job: Dictionary) -> int:
 	return DONE
 
 # ---------------------------------------------------------------------------
-# RELIGHT {name, flag}
+# RELIGHT {name, flag} -- or {from_kit: true, flag}: draw the next UNUSED
+# identity paper from actor.identity_documents (the pre-provisioned kit --
+# convincing papers take illegal back channels, they can't be fabricated on
+# the spot). Kit exhausted -> ABORT (the job's on_abort decides what a
+# paperless ship does -- the canonical hunt routes to a DARK run for the
+# exit, hoping nobody stops it).
 # ---------------------------------------------------------------------------
 
 static func step_relight(actor, step: Dictionary, _job: Dictionary) -> int:
+	if step.get("from_kit", false):
+		var doc = null
+		for d in actor.identity_documents:
+			if not d.get("used", false):
+				doc = d
+				break
+		if doc == null:
+			return ABORT # papers exhausted -- no identity left to fly
+		doc["used"] = true
+		if doc.get("name", "") != "":
+			actor.set_transponder_custom_name(doc["name"])
+		actor.set_transponder_flag(step.get("flag", doc.get("flag", "")))
+		actor.set_transponder_active(true)
+		return DONE
+
 	var custom_name: String = step.get("name", "")
 	if custom_name != "":
 		actor.set_transponder_custom_name(custom_name)
@@ -204,6 +235,13 @@ static func step_await(actor, step: Dictionary, _job: Dictionary) -> int:
 	var scratch: Dictionary = step.get("scratch", {})
 	var elapsed: float = _elapsed_seconds(scratch, "start_frame")
 
+	# A wait means WAIT: brake and hold, don't keep sailing on whatever the
+	# previous step's last cruise command was (a clear-wait that drifts at
+	# cruise speed isn't waiting anywhere). Skipped while berthed -- the
+	# capture spring owns motion there (AWAIT{undocked}).
+	if actor.get("docking_bay") == null:
+		_hold_station(actor)
+
 	var condition: String = step.get("condition", "duration")
 	var holds := false
 	match condition:
@@ -213,6 +251,14 @@ static func step_await(actor, step: Dictionary, _job: Dictionary) -> int:
 			holds = _track_quiet_holds(actor, step, scratch)
 		"undocked":
 			holds = actor.get("docking_bay") == null
+		"clear":
+			# No fresh VESSEL contact within clear_range -- "am I alone right
+			# now?", read off the ship's own sensors (if I can't see them,
+			# they likely can't see me -- the same honest heuristic as
+			# track_quiet, minus its dark-transponder requirement). The hunt
+			# job waits on this BEFORE going dark: a transponder that
+			# vanishes in front of a watcher is a suspicion gift.
+			holds = not _fresh_vessel_within(actor, step.get("clear_range", 8000.0))
 		_:
 			holds = false
 
