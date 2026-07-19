@@ -126,6 +126,7 @@ func _check_ins(cluster) -> void:
 				m["state"] = MemberState.OVERDUE
 				m["overdue_since"] = 0.0
 				m["observed_dead"] = true
+				_event("'%s' missed check-in (observed dead) -> OVERDUE" % m.get("cover_name", "?"))
 			else:
 				m["last_seen_pos"] = node.position
 				m["last_loot_takes"] = node.loot_takes
@@ -133,6 +134,7 @@ func _check_ins(cluster) -> void:
 			m["state"] = MemberState.OVERDUE
 			m["overdue_since"] = 0.0
 			m["observed_dead"] = false
+			_event("'%s' missed check-in (vanished) -> OVERDUE" % m.get("cover_name", "?"))
 
 # ---------------------------------------------------------------------------
 # 2. Resolve overdue past presumed_lost_delay. Vanished (not observed dead)
@@ -165,12 +167,16 @@ func _resolve_overdue(cluster, period: float) -> void:
 			takes_total += m.get("last_loot_takes", 0)
 			take_streak += 1
 			loss_streak = 0
+			_event("'%s' CASHED OUT (takes +%d -> total %d, streak %d)" %
+				[m.get("cover_name", "?"), m.get("last_loot_takes", 0), takes_total, take_streak])
 		else:
 			m["state"] = MemberState.LOST
 			losses += 1
 			loss_streak += 1
 			take_streak = 0
 			_erase_record(cluster, record_id)
+			_event("'%s' presumed LOST (%s; losses %d, streak %d)" %
+				[m.get("cover_name", "?"), "observed dead" if m.get("observed_dead", false) else "vanished off-wormhole", losses, loss_streak])
 
 # ---------------------------------------------------------------------------
 # 3. Cap adjust -- streak-driven, clamped [base_cap, max_cap] both ways.
@@ -180,10 +186,16 @@ func _adjust_cap() -> void:
 	var base_cap: int = config.get("base_cap", 1)
 	var max_cap: int = config.get("max_cap", 3)
 	if take_streak >= config.get("takes_per_cap_raise", 2):
-		cap = clampi(cap + 1, base_cap, max_cap)
+		var raised: int = clampi(cap + 1, base_cap, max_cap)
+		if raised != cap:
+			_event("success attracts recruits -- cap %d -> %d" % [cap, raised])
+		cap = raised
 		take_streak = 0
 	if loss_streak >= config.get("losses_per_cap_cut", 2):
-		cap = clampi(cap - 1, base_cap, max_cap)
+		var cut: int = clampi(cap - 1, base_cap, max_cap)
+		if cut != cap:
+			_event("losses thin the ranks -- cap %d -> %d" % [cap, cut])
+		cap = cut
 		loss_streak = 0
 
 # ---------------------------------------------------------------------------
@@ -208,6 +220,7 @@ func _schedule_floor() -> void:
 			"relight_name": names[1],
 			"hull_idx": hull_idx,
 		})
+		_event("arrival scheduled: '%s' in %.0fs" % [names[0], eta])
 
 # active + overdue (still-carried members) + already-pending arrivals --
 # what the floor check compares against cap.
@@ -269,6 +282,8 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 			"overdue_since": 0.0,
 			"observed_dead": false,
 		}
+		_event("'%s' arrived through the wormhole (%s, record %d)" %
+			[arrival.get("cover_name", ""), hull_script.resource_path.get_file(), record_id])
 
 	arrivals = still_pending
 
@@ -410,6 +425,14 @@ func _draw_two_names() -> Array:
 	var idx2: int = randi() % available.size()
 	var relight: String = available[idx2]
 	return [cover, relight]
+
+# Event line -- fires at ledger MILESTONES (arrival scheduled/spawned,
+# OVERDUE, LOST, CASHED_OUT, cap moves), same toggle as the per-pass summary
+# below. The pirate's whole career is deliberately invisible in-world (dark,
+# off-lane); these lines are how a playtester watches it happen.
+func _event(msg: String) -> void:
+	if DebugSettings and DebugSettings.get_choice("pirate_guild_log") == DebugSettings.PirateGuildLog.ON:
+		print("[PirateGuild] ", msg)
 
 func _log(cluster) -> void:
 	if not (DebugSettings and DebugSettings.get_choice("pirate_guild_log") == DebugSettings.PirateGuildLog.ON):

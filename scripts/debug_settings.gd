@@ -60,6 +60,13 @@ enum PerfSubsystem { ON, OFF }
 # pirate_guild.gd's _log().
 enum PirateGuildLog { OFF, ON }
 
+# M51 follow-up -- job-runner step transitions (scripts/ai/jobs/
+# job_runner_leaf.gd). ON prints one line per DONE/ABORT/complete for every
+# ship running a job -- the console view of an otherwise-invisible pirate
+# hunt (GO_DARK, victim selected, demand, take, exfil, relight...). Pairs
+# with pirate_guild_log for the full career: guild events + job milestones.
+enum JobLog { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -135,6 +142,14 @@ const OPTIONS := {
 			"On (one line per policy pass)",
 		],
 		"default": PirateGuildLog.OFF,
+	},
+	"job_log": {
+		"label": "AI job step log",
+		"choices": [
+			"Off (default)",
+			"On (one line per job step transition)",
+		],
+		"default": JobLog.OFF,
 	},
 }
 

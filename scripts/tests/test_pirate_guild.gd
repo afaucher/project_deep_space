@@ -152,6 +152,10 @@ func _roster_count(guild) -> int:
 # ---------------------------------------------------------------------------
 
 func setup(main) -> void:
+	# Narrate guild milestones in this test's log (also covers the _event
+	# logging paths -- arrival scheduled/spawned, OVERDUE, LOST, CASHED_OUT,
+	# cap moves -- so a logging crash would fail the suite, not a playtest).
+	DebugSettings.set_choice("pirate_guild_log", DebugSettings.PirateGuildLog.ON)
 	main_node = main
 	print("Starting Pirate Guild (M51) Tests")
 

@@ -101,6 +101,11 @@ func setup(main) -> void:
 	main_node = main
 	print("Starting Pirate Ambush (M50) Tests")
 
+	# Narrate the otherwise-invisible hunt in this test's log (the job_log
+	# lines double as living documentation of the ambush arc -- and as
+	# coverage that the logging paths themselves don't crash).
+	DebugSettings.set_choice("job_log", DebugSettings.JobLog.ON)
+
 	var staging_pos := Vector2(5000, 0)
 	var lane_pos := staging_pos
 	var exfil_pos := Vector2(5000, -12000)

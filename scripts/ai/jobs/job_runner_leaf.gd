@@ -78,6 +78,7 @@ func tick(actor: Node, _blackboard) -> int:
 
 	for cond in step.get("abort_when", []):
 		if JobSteps.check_abort(actor, job, cond):
+			_job_log(actor, "%s ABORT (%s) -> '%s'" % [step.get("verb", "?"), cond.get("cond", "?"), cond.get("on_abort", "")])
 			_abort_to(job, cond.get("on_abort", ""))
 			return SUCCESS
 
@@ -85,16 +86,37 @@ func tick(actor: Node, _blackboard) -> int:
 
 	match result:
 		JobSteps.DONE:
+			_job_log(actor, "%s done%s" % [step.get("verb", "?"), _done_detail(step, job)])
 			job["current"] = current + 1
 		JobSteps.ABORT:
+			_job_log(actor, "%s ABORT -> '%s'" % [step.get("verb", "?"), step.get("on_abort", "")])
 			_abort_to(job, step.get("on_abort", ""))
 		_: # CONTINUE -- still working, runner owns the tick.
 			pass
 
 	if job.get("current", 0) >= steps.size():
+		if not job.get("repeat", false):
+			_job_log(actor, "job complete (%s slot cleared)" % slot)
 		_complete_job(actor, slot, job)
 
 	return SUCCESS
+
+# One line per step transition when the DebugSettings "job_log" toggle is ON
+# -- the console view of an otherwise-invisible job (a pirate's whole hunt
+# happens dark and off-lane; these lines are how a playtester watches it).
+func _job_log(actor: Node, msg: String) -> void:
+	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
+		print("[Job] %s: %s" % [actor.name, msg])
+
+# Verb-aware detail for the DONE line -- the milestones worth a number.
+func _done_detail(step: Dictionary, job: Dictionary) -> String:
+	match step.get("verb", ""):
+		"SELECT_VICTIM", "INTERCEPT", "DEMAND_STOP", "TAKE_ALONGSIDE":
+			return " (victim_iid=%d)" % job.get("victim_iid", -1)
+		"RELIGHT":
+			return " (as '%s' / %s)" % [step.get("name", ""), step.get("flag", "no flag")]
+		_:
+			return ""
 
 # Jump to the step whose "label" matches `label`; no match (including an
 # empty label) means the job is over -- push current past the end so the
