@@ -119,6 +119,14 @@ global truth.
   pay up" — nobody pays for killing speeding-ticket guy).
 - Prove-resolved presentation flow (the data shape supports it already).
 - Port control sharing warrant lists on request.
+- **The beacon road as a controlled corridor.** The road may become a
+  port-zone-like jurisdiction with mandatory IDs — transiting dark, or
+  just LOITERING there, becomes an offense in its own right (you can get
+  arrested for hanging around). This slots straight into the taxonomy
+  (LOITERING / NO_ID_IN_CORRIDOR, minor class, expiring) and compounds
+  M52a's road tradecraft: the road already has beacon witnesses, traffic,
+  and patrols; mandatory IDs would make it formally hostile ground for
+  anyone with something to hide, not just observably risky.
 
 ## Campaign framing: the militia
 
