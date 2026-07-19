@@ -229,19 +229,6 @@ func _ready() -> void:
 	
 	top_bar.add_child(_build_debug_menu())
 
-	# M33 -- top-level "Request Docking"/"Undock" context-flip control. One
-	# press runs the whole hail->request->grant->clearance handshake via the
-	# SAME issuance path the port-control dialogue uses (PortControl.
-	# request_docking(), see scripts/port/port_control.gd); flips to "Undock"
-	# (Ship.request_undock(), M32) once actually captured by a bay.
-	docking_control = DockingControl.new()
-	top_bar.add_child(docking_control)
-	# Fast-path outcome feedback: the button previously gave NO response on a
-	# denial (the dialogue path speaks its outcome, the button path was mute
-	# -- a denied player saw nothing happen at all). Reuse the zone-crossing
-	# banner slot: same position/fade, transient, one line.
-	docking_control.docking_requested.connect(_on_docking_outcome)
-
 	ship_oriented_toggle = CheckButton.new()
 	ship_oriented_toggle.text = "Ship Oriented"
 	ship_oriented_toggle.button_pressed = false
@@ -369,6 +356,14 @@ func _ready() -> void:
 	comms_panel.unmark_hostile_requested.connect(_on_unmark_hostile_requested)
 	comms_panel.demand_requested.connect(_on_demand_requested)
 	comms_panel.release_requested.connect(_on_release_requested)
+	# M33 "Request Docking"/"Undock" context-flip control -- relocated from
+	# the top bar to the comms panel (post-M51 playtest: the top bar isn't
+	# gameplay space, and talking to port control IS comms). Same handshake
+	# path (PortControl.request_docking()), same outcome banner; only the
+	# host changed. Wiring stays here; comms_panel just parents the button.
+	docking_control = DockingControl.new()
+	comms_panel.host_docking_control(docking_control)
+	docking_control.docking_requested.connect(_on_docking_outcome)
 	comms_container.add_child(comms_panel)
 	content_hbox.add_child(comms_container)
 	comms_container.visible = false

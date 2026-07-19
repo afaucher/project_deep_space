@@ -74,6 +74,7 @@ var btn_sos: Button
 var hails_vbox: VBoxContainer
 var _last_hails_rendered: Array = []
 var selected_contact_id: String = ""
+var docking_slot: VBoxContainer
 var action_target_lbl: Label
 var btn_mark_hostile: Button
 var btn_unmark: Button
@@ -142,6 +143,16 @@ func _ready() -> void:
 	btn_sos.add_theme_color_override("font_color", Color.ORANGE_RED)
 	btn_sos.pressed.connect(_on_sos_pressed)
 	my_vbox.add_child(btn_sos)
+
+	# Post-M51 playtest -- the top-bar "Request Docking"/"Undock" control
+	# relocates here (the top bar isn't gameplay space; talking to port
+	# control IS comms). terminal_display still owns creating/wiring the
+	# DockingControl; this panel just hosts it via host_docking_control().
+	docking_slot = VBoxContainer.new()
+	my_vbox.add_child(docking_slot)
+	if _pending_docking_control != null:
+		docking_slot.add_child(_pending_docking_control)
+		_pending_docking_control = null
 
 	# M49 -- honored-stop banner: a red bar + COMPLY button, shown only while
 	# a pending STOP demand exists on the player ship (packet["pending_
@@ -318,6 +329,20 @@ func update_data(packet: Dictionary) -> void:
 	_update_hail_banner()
 	_update_hails_list()
 	_update_action_row()
+
+# Hosts the terminal's DockingControl button (created + wired by
+# terminal_display; see docking_slot's comment in _ready). Callable BEFORE
+# this panel enters the tree (terminal_display wires panels prior to
+# add_child, so _ready -- which builds docking_slot -- hasn't run yet):
+# the control parks in _pending_docking_control and _ready adopts it.
+var _pending_docking_control: Control = null
+
+func host_docking_control(ctrl: Control) -> void:
+	ctrl.focus_mode = Control.FOCUS_NONE # don't steal the spacebar hotkey
+	if docking_slot != null:
+		docking_slot.add_child(ctrl)
+	else:
+		_pending_docking_control = ctrl
 
 # Shared-selection sink (terminal_display's _on_selection_changed fan-out,
 # same duck-typed method the sensor/contacts panels expose).
