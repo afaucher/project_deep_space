@@ -7,8 +7,8 @@ Prell: ...Yes?
 	- He lives in this field.
 		Prell: People live all over. We done?
 		=> END
-	- Sorry to bother you.
+	- Sorry to bother you. (Disconnect)
 		=> END
-- Sorry, wrong channel.
+- Sorry, wrong channel. (Disconnect)
 	Prell: Mm.
 	=> END

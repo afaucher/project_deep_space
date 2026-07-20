@@ -1,0 +1,11 @@
+~ start
+Aunt Stephanie: Well, there's my favorite trouble. What do you need, Hun?
+=> hub
+
+~ hub
+- Option 1
+	Aunt Stephanie: You picked Option 1.
+	=> hub
+- Option 2
+	Aunt Stephanie: You picked Option 2.
+	=> hub

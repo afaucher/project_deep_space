@@ -39,6 +39,21 @@ const PHYSICS_HZ := 60.0
 
 const SELECT_VICTIM_SCAN_INTERVAL := 30 # ticks -- per the design doc's "~30-tick-gated scoring"
 
+# M52a: how long (frames) a failed-on victim is skipped by SELECT_VICTIM. A
+# ship we demanded and couldn't take is alerted and running -- 90s of rest
+# lets the hunt move to fresh prey instead of re-locking the same target.
+const VICTIM_BLACKLIST_FRAMES := int(90.0 * PHYSICS_HZ)
+
+# Stamp a victim onto the job's failure memory (SELECT_VICTIM reads it). Called
+# from the demand/take aborts -- the victim refused or bolted, so give it a
+# cooldown. Keyed by instance id; a no-op for an unknown id.
+static func _blacklist_victim(job: Dictionary, iid: int) -> void:
+	if iid == -1:
+		return
+	var bl: Dictionary = job.get("failed_victims", {})
+	bl[iid] = Engine.get_physics_frames() + VICTIM_BLACKLIST_FRAMES
+	job["failed_victims"] = bl
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -183,7 +198,7 @@ static func step_go_dark(actor, _step: Dictionary, _job: Dictionary) -> int:
 # exit, hoping nobody stops it).
 # ---------------------------------------------------------------------------
 
-static func step_relight(actor, step: Dictionary, _job: Dictionary) -> int:
+static func step_relight(actor, step: Dictionary, job: Dictionary) -> int:
 	if step.get("from_kit", false):
 		var doc = null
 		for d in actor.identity_documents:
@@ -191,6 +206,7 @@ static func step_relight(actor, step: Dictionary, _job: Dictionary) -> int:
 				doc = d
 				break
 		if doc == null:
+			job["_abort_reason"] = "identity kit exhausted -- running dark"
 			return ABORT # papers exhausted -- no identity left to fly
 		doc["used"] = true
 		if doc.get("name", "") != "":
@@ -399,6 +415,31 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 	var witness_range: float = step.get("witness_range", 5000.0)
 	var scratch: Dictionary = step.get("scratch", {})
 
+	# M52a withdraw budget -- two ceilings, whichever trips first:
+	#   * attempts: each ENTRY to the hunt (scratch is cleared on entry, so a
+	#     fresh scratch is a new victim-engagement cycle re-entered from a
+	#     failed INTERCEPT/DEMAND/TAKE) counts one. Bounds a pirate that keeps
+	#     FINDING prey but can't land a take (the campaign thrash).
+	#   * time: a wall (frame) deadline set on the FIRST hunt entry. Bounds a
+	#     pirate that finds NO prey at all and would otherwise lurk forever
+	#     (never re-entering, so the attempt counter never advances) -- the
+	#     lone-pirate-on-a-long-lane case the viability sim exposed.
+	# Either exhausted -> abort to "exit": withdraw alive (-> RETURNED_EMPTY).
+	var max_hunt_seconds: float = step.get("max_hunt_seconds", 0.0)
+	if max_hunt_seconds > 0.0:
+		if not job.has("hunt_deadline_frame"):
+			job["hunt_deadline_frame"] = Engine.get_physics_frames() + int(max_hunt_seconds * PHYSICS_HZ)
+		if Engine.get_physics_frames() > job["hunt_deadline_frame"]:
+			job["_abort_reason"] = "hunt time budget (%.0fs) spent, no take -- withdrawing" % max_hunt_seconds
+			return ABORT
+	if not scratch.get("counted", false):
+		scratch["counted"] = true
+		job["hunt_attempts"] = job.get("hunt_attempts", 0) + 1
+		var max_attempts: int = step.get("max_attempts", 0)
+		if max_attempts > 0 and job["hunt_attempts"] > max_attempts:
+			job["_abort_reason"] = "hunt budget spent (%d attempts, nothing taken) -- withdrawing" % (job["hunt_attempts"] - 1)
+			return ABORT
+
 	var to_lane: Vector2 = lane_pos - actor.position
 	if to_lane.length() > lurk_radius:
 		_cruise_toward(actor, lane_pos, null, 300.0)
@@ -425,12 +466,20 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 	# Viable prey: NEUTRAL or UNREPORTED (never FRIENDLY-crypto, never
 	# HOSTILE), and not currently complied (already someone else's mark --
 	# the one ship-knowable proxy for "already being robbed/inspected").
+	# M52a failure memory: skip a victim we recently failed on (job[
+	# "failed_victims"][iid] holds a cooldown expiry frame) -- a ship we
+	# already demanded is alerted and running, so re-picking it is the thrash
+	# the campaign showed. Give it a rest and look for fresh prey.
+	var blacklist: Dictionary = job.get("failed_victims", {})
+	var now_frame := Engine.get_physics_frames()
 	var candidates: Array = []
 	for c in all_fresh_vessels:
 		var standing: String = c.get("standing", "")
 		if standing != Standing.NEUTRAL and standing != Standing.UNREPORTED:
 			continue
 		if c.get("complied_stop", false):
+			continue
+		if blacklist.get(c.get("instance_id", -1), 0) > now_frame:
 			continue
 		candidates.append(c)
 
@@ -471,6 +520,7 @@ static func step_intercept(actor, step: Dictionary, job: Dictionary) -> int:
 	var victim_iid: int = job.get("victim_iid", -1)
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if not _is_fresh(actor, c):
+		job["_abort_reason"] = "victim track lost"
 		return ABORT
 
 	var hail_range: float = _hail_range_to(actor, victim_iid)
@@ -500,6 +550,7 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty():
+		job["_abort_reason"] = "victim track lost"
 		return ABORT
 
 	if c.get("complied_stop", false):
@@ -514,11 +565,15 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 
 	var patience: float = step.get("patience", 25.0)
 	if _elapsed_seconds(scratch, "start_frame") > patience:
+		job["_abort_reason"] = "patience %.0fs expired un-complied" % patience
+		_blacklist_victim(job, victim_iid)
 		return ABORT
 
 	var hail_range: float = _hail_range_to(actor, victim_iid)
 	var dist: float = actor.position.distance_to(c.get("pos", actor.position))
 	if hail_range > 0.0 and dist > hail_range * 1.2:
+		job["_abort_reason"] = "victim outpaced us beyond hail range (%.0f > %.0f)" % [dist, hail_range]
+		_blacklist_victim(job, victim_iid)
 		return ABORT # outpacing us beyond hail range -- let it go
 
 	return CONTINUE
@@ -538,6 +593,8 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty() or not c.get("complied_stop", false):
+		job["_abort_reason"] = "victim bolted (complied_stop cleared)"
+		_blacklist_victim(job, victim_iid)
 		return ABORT
 
 	var victim_pos_take: Vector2 = c.get("pos", actor.position)
@@ -581,7 +638,12 @@ static func _third_party_in_range(actor, job: Dictionary, r: float) -> bool:
 			continue
 		if c.get("instance_id", -1) == victim_iid:
 			continue
-		if actor.position.distance_to(c.get("pos", actor.position)) <= r:
+		var d: float = actor.position.distance_to(c.get("pos", actor.position))
+		if d <= r:
+			# M52a: stamp WHO tripped the witness check so the abort log can
+			# name it -- track id + range (the campaign log showed a bare
+			# "third_party_in_range" with no way to tell a beacon from a patrol).
+			job["_abort_reason"] = "witness %s at %.0f" % [c_id, d]
 			return true
 	return false
 

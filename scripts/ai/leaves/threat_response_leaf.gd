@@ -30,6 +30,17 @@ func tick(actor: Node, blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
 
+	# M52a (H1): keep a per-contact PEAK observed speed while we hold a track.
+	# The comply-or-run decision below used the threat's INSTANTANEOUS speed at
+	# demand time -- but a pirate decelerates to hail range before demanding,
+	# so it reads as nearly stationary and every hull "outran" it, so everyone
+	# ran and no robbery ever completed (the campaign's takes_total=0). Peak
+	# speed over the encounter is the honest capability read a victim actually
+	# has (it watched the thing chase it down); accumulate it every tick,
+	# including during the pre-demand approach when this leaf otherwise just
+	# returns FAILURE and hands back to CargoRun.
+	_update_contact_peaks(actor, blackboard)
+
 	if not actor.compelled_stop.is_empty():
 		return SUCCESS # held -- ship-level throttle override owns motion, do nothing
 
@@ -68,8 +79,18 @@ func tick(actor: Node, blackboard) -> int:
 		threat_speed = issuer_c.get("vel", Vector2.ZERO).length()
 		threat_pos = issuer_c.get("pos", threat_pos)
 
+	# H1: compare against the threat's demonstrated CAPABILITY -- the higher of
+	# its instantaneous speed and the peak we clocked while it chased us down --
+	# not the near-zero speed it coasts at once alongside to demand.
+	var peaks: Dictionary = blackboard.get_value("contact_peaks", {})
+	var threat_capability: float = maxf(threat_speed, peaks.get(issuer_iid, 0.0))
+
 	var ratio: float = RUN_SPEED_RATIO_PIRATE_FLAG if demand.get("sender_flag", "") == Standing.FLAG_PIRATE else RUN_SPEED_RATIO
-	var will_run: bool = actor.max_speed > threat_speed * ratio
+	var will_run: bool = actor.max_speed > threat_capability * ratio
+
+	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
+		print("[Cargo] %s: %s (my max %.0f vs threat cap %.0f x%.1f = %.0f)" %
+			[actor.name, "RUN" if will_run else "COMPLY", actor.max_speed, threat_capability, ratio, threat_capability * ratio])
 
 	# Always broadcast SOS once per incident, regardless of the comply-or-run call.
 	if actor.has_method("send_sos"):
@@ -81,6 +102,28 @@ func tick(actor: Node, blackboard) -> int:
 	elif actor.has_method("comply_with_stop"):
 		actor.comply_with_stop()
 	return SUCCESS
+
+# Per-contact peak observed speed, keyed by true instance id, held only while
+# the track is continuously fresh (pruned the moment a contact drops out of
+# sensor range) -- so it reflects "fastest I've seen this thing move during
+# THIS encounter", forgotten cleanly when the encounter ends. No decay: the
+# encounter is short and the prune-on-loss is the reset.
+func _update_contact_peaks(actor: Node, blackboard) -> void:
+	var peaks: Dictionary = blackboard.get_value("contact_peaks", {})
+	var seen := {}
+	for c_id in actor.active_contacts:
+		var c: Dictionary = actor.active_contacts[c_id]
+		if c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
+			continue
+		var iid: int = c.get("instance_id", -1)
+		if iid == -1:
+			continue
+		peaks[iid] = maxf(peaks.get(iid, 0.0), c.get("vel", Vector2.ZERO).length())
+		seen[iid] = true
+	for iid in peaks.keys():
+		if not seen.has(iid):
+			peaks.erase(iid)
+	blackboard.set_value("contact_peaks", peaks)
 
 func _run_from(actor: Node, threat_pos: Vector2) -> void:
 	var away_dir: Vector2 = (actor.position - threat_pos).normalized()

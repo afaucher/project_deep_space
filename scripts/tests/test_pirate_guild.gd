@@ -21,6 +21,7 @@ const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const PirateOreShuttle = preload("res://scripts/ships/pirate_ore_shuttle.gd")
 const ArmedPinnace = preload("res://scripts/ships/armed_pinnace.gd")
 const MediumStation = preload("res://scripts/ships/medium_station.gd")
+const Buoy = preload("res://scripts/ships/buoy.gd")
 
 # Fast config per CLAUDE.md/the design doc -- config is data, so tuning it for
 # test speed is legitimate, not a test backdoor.
@@ -48,6 +49,12 @@ const WORMHOLE_POS := Vector2.ZERO
 const LANE_ROUTE := [Vector2(10000, 0), Vector2(50000, 20000)]
 const STATION_POS := Vector2(50000, 20000)
 const R_STATION_AVOID := 25000.0 # mirrors pirate_guild.gd's _R_STATION_AVOID
+# M52a (H2): a charted beacon mid-lane -- the guild must roll its hunt lane
+# point clear of it (beacons see/report; the road is the worst place to hunt).
+const BEACON_POS := Vector2(30000, 10000)
+const R_BEACON_AVOID := 15000.0 # mirrors pirate_guild.gd's _R_BEACON_AVOID
+# The unbeaconed alternative lane, far from the beacon (>60k) and the station.
+const LANE2_ROUTE := [Vector2(0, -70000), Vector2(60000, -70000)]
 
 var main_node: Node = null
 var failures: Array = []
@@ -89,6 +96,20 @@ func _make_cluster() -> Node:
 	lane.behavior = {"route": LANE_ROUTE, "cargo": true, "loop": true}
 	cluster.add_record(lane)
 
+	# A SECOND, beacon-free cargo lane out in open space (mirrors the real
+	# cluster's unbeaconed Coldreach lane alongside the beaconed hub road).
+	# H2's whole point: given a choice, the guild routes the hunt to the lane
+	# that ISN'T under a beacon's eye. Far from both the beacon and the station.
+	var lane2 := ClusterEntity.new()
+	lane2.id = 702
+	lane2.name = "Quiet Lane"
+	lane2.hull_script = CargoShuttle
+	lane2.kind = ClusterEntity.Kind.TRAFFIC
+	lane2.is_static = false
+	lane2.pos = LANE2_ROUTE[0]
+	lane2.behavior = {"route": LANE2_ROUTE, "cargo": true, "loop": true}
+	cluster.add_record(lane2)
+
 	var station := ClusterEntity.new()
 	station.id = 600
 	station.name = "Test Station"
@@ -97,6 +118,15 @@ func _make_cluster() -> Node:
 	station.is_static = true
 	station.pos = STATION_POS
 	cluster.add_record(station)
+
+	var beacon := ClusterEntity.new()
+	beacon.id = 610
+	beacon.name = "Test Beacon"
+	beacon.hull_script = Buoy
+	beacon.kind = ClusterEntity.Kind.BEACON
+	beacon.is_static = true
+	beacon.pos = BEACON_POS
+	cluster.add_record(beacon)
 
 	spawned_clusters.append(cluster)
 	return cluster
@@ -258,6 +288,21 @@ func _test_bootstrap_floor() -> void:
 				"(a) exfil point clears the station keep-away (dist=%.0f)" % exfil_pos.distance_to(STATION_POS))
 		else:
 			_assert(false, "(a) exfil GO_TO step found (labeled 'exfil')")
+		# H2: the hunt LANE point (SELECT_VICTIM's lurk anchor) must clear the
+		# charted beacon keep-away -- the guild routes pirates off the beacon
+		# road, where beacons see and report. (Beacons still count as witnesses
+		# in the job's own sensor checks; only the guild's GEOMETRY avoids them.)
+		var hunt_idx: int = -1
+		for i in range(steps.size()):
+			if steps[i].get("verb", "") == "SELECT_VICTIM":
+				hunt_idx = i
+				break
+		if hunt_idx != -1:
+			var lane_pos: Vector2 = steps[hunt_idx].get("lane_pos", Vector2.ZERO)
+			_assert(lane_pos.distance_to(BEACON_POS) >= R_BEACON_AVOID,
+				"(a) hunt lane point clears the beacon keep-away (dist=%.0f)" % lane_pos.distance_to(BEACON_POS))
+		else:
+			_assert(false, "(a) SELECT_VICTIM hunt step found")
 		# Identity papers (the back-channels rule): the whole pre-provisioned
 		# kit is physically aboard; the cover (kit[0], == the record name) is
 		# in use; the rest are unspent relight papers. The guild never
@@ -412,8 +457,15 @@ func _test_streaks_bounded() -> void:
 	_assert(guild.cap == max_cap, "(d) enough successes climb cap to max_cap (got %d)" % guild.cap)
 
 	# --- Fall: repeated losses lower the cap, clamped at base_cap. ---
+	# M52a: a loss streak now also drives the profitability BACKOFF (arrival
+	# delay x2 per profitless resolution, capped x8), so the next arrival can
+	# take up to 8 x arrival_window seconds -- the wait budget has to cover
+	# that or the streak starves before the cap has finished falling. (Backoff
+	# is orthogonal to the cap mechanic this scenario checks; it just spaces
+	# the arrivals the scenario is still driving.)
+	var loss_wait: int = ceili(8.0 * FAST_CONFIG["arrival_window"][1] / period) + 20
 	for s in range(8):
-		var rid: int = _wait_for_any_active(cluster, guild, 60, period)
+		var rid: int = _wait_for_any_active(cluster, guild, loss_wait, period)
 		_assert(rid != -1, "(d) an ACTIVE member exists to lose (#%d)" % s)
 		if rid == -1:
 			break

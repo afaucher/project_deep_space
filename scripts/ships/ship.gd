@@ -500,6 +500,14 @@ func set_default_job(job: Dictionary) -> void:
 var loot_takes: int = 0
 var looted: bool = false
 
+# M52a -- last attributed attacker (for death-cause instrumentation only). The
+# pirate guild reads this off a member's node at the OVERDUE-on-death check-in
+# so a LOST log can name the killer ("killed by 'Patrol Bravo'"). Console-side
+# developer visibility; the guild's LEDGER stays honest (it only reads its own
+# member nodes). Stays -1/"" until a known (non-collision) hit lands.
+var last_damage_attacker_iid: int = -1
+var last_damage_attacker_name: String = ""
+
 # M51+ -- the identity papers physically aboard: [{name, flag, used}].
 # Convincing false identities take illegal back channels to procure, so a
 # pirate carries a finite pre-provisioned kit (set at promote from its guild
@@ -1236,6 +1244,15 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 	#     their own fusion tick, independent of whether we hold a track.
 	if attacker_id != -1:
 		var attacker_trk: String = "TRK-%03d" % (abs(attacker_id) % 1000)
+		# M52a death-cause instrumentation: remember who last hit us. Prefer the
+		# attacker's claimed transponder name, fall back to the live node name.
+		last_damage_attacker_iid = attacker_id
+		var atk_claimed: String = active_transponders.get(attacker_id, {}).get("name", "")
+		if atk_claimed != "":
+			last_damage_attacker_name = atk_claimed
+		else:
+			var atk_node = instance_from_id(attacker_id)
+			last_damage_attacker_name = atk_node.name if is_instance_valid(atk_node) else ""
 		if active_contacts.has(attacker_trk):
 			var atk_c: Dictionary = active_contacts[attacker_trk]
 			atk_c["standing"] = Standing.HOSTILE

@@ -21,6 +21,8 @@ const Hail = preload("res://scripts/comms/hail.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 const AcquireTargetLeaf = preload("res://scripts/ai/leaves/acquire_target_leaf.gd")
 const FireOpportunityLeaf = preload("res://scripts/ai/leaves/fire_opportunity_leaf.gd")
+const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
+const Standing = preload("res://scripts/combat/standing.gd")
 const BlackboardScript = preload("res://addons/beehave/blackboard.gd")
 
 var main_node: Node = null
@@ -59,10 +61,55 @@ func setup(main) -> void:
 	_test_wreck_gate()
 	await _test_comply_flow()
 	await _test_fast_ship_runs()
+	_test_peak_speed_comply()
 	await _test_release()
 	await _test_auto_resume()
 
 	_finish()
+
+# --- M52a (H1): comply-or-run compares against the threat's PEAK observed
+# speed, not the near-zero speed it coasts at once alongside to demand. This
+# is the campaign's zero-takes bug: a pirate decelerates to hail range, so at
+# demand time it looks stationary and EVERY victim "outran" it and ran, so no
+# robbery ever completed. Deterministic (hand-injected contacts, no physics
+# frames between ticks -- the leaf is called directly, same style as
+# _test_fire_guard). -----------------------------------------------------------
+func _test_peak_speed_comply() -> void:
+	print("\n--- H1 comply-or-run: peak speed, not demand-time speed ---")
+	var shuttle = _make_ship(CargoShuttle, "PeakShuttle", 530, Vector2(400000, 0), ["TEAM_CARGO3"])
+	var leaf = ThreatResponseLeaf.new()
+
+	# Case A: a pirate that CHASED fast (peak ~900) then slowed to demand.
+	var bb = BlackboardScript.new()
+	var iid := 424242
+	var trk := "TRK-%03d" % (abs(iid) % 1000)
+	shuttle.active_contacts = {trk: {"instance_id": iid, "vel": Vector2(900, 0),
+		"pos": Vector2(401000, 0), "last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+	shuttle.pending_demand = {}
+	leaf.tick(shuttle, bb)  # no demand -> records peak 900 for this track
+	shuttle.active_contacts[trk]["vel"] = Vector2(15, 0)  # decelerated to hail range
+	shuttle.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 7, "sender_iid": iid,
+		"sender_pos": Vector2(401000, 0), "sender_flag": Standing.FLAG_PIRATE, "target_iid": shuttle.get_instance_id()}
+	leaf.tick(shuttle, bb)
+	# RUN sets threat_issuer_iid on the blackboard; COMPLY does not.
+	_assert(not bb.has_value("threat_issuer_iid"),
+		"peak capability (900) makes a slow-at-demand pirate a COMPLY (old code saw ~0 and RAN)")
+
+	# Case B: a genuinely slow threat (peak ~50) a cargo really can outrun -> RUN.
+	# Clear the compulsion Case A's COMPLY set, or the leaf early-returns "held".
+	shuttle.compelled_stop = {}
+	var bb2 = BlackboardScript.new()
+	var iid2 := 434343
+	var trk2 := "TRK-%03d" % (abs(iid2) % 1000)
+	shuttle.active_contacts = {trk2: {"instance_id": iid2, "vel": Vector2(50, 0),
+		"pos": Vector2(402000, 0), "last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+	shuttle.pending_demand = {}
+	leaf.tick(shuttle, bb2)  # records peak 50
+	shuttle.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 8, "sender_iid": iid2,
+		"sender_pos": Vector2(402000, 0), "sender_flag": Standing.FLAG_PIRATE, "target_iid": shuttle.get_instance_id()}
+	leaf.tick(shuttle, bb2)
+	_assert(bb2.has_value("threat_issuer_iid"),
+		"a genuinely slow threat (peak 50) is still a RUN -- the fix doesn't make everyone comply")
 
 func _finish() -> void:
 	if failures.is_empty():

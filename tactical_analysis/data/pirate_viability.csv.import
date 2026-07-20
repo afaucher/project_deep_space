@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cusmp8oy1up7e"
+
+[deps]
+
+files=["res://tactical_analysis/data/pirate_viability.active.translation", "res://tactical_analysis/data/pirate_viability.overdue.translation", "res://tactical_analysis/data/pirate_viability.pending.translation", "res://tactical_analysis/data/pirate_viability.cap.translation", "res://tactical_analysis/data/pirate_viability.takes.translation", "res://tactical_analysis/data/pirate_viability.losses.translation", "res://tactical_analysis/data/pirate_viability.returned.translation", "res://tactical_analysis/data/pirate_viability.backoff.translation"]
+
+source_file="res://tactical_analysis/data/pirate_viability.csv"
+dest_files=["res://tactical_analysis/data/pirate_viability.active.translation", "res://tactical_analysis/data/pirate_viability.overdue.translation", "res://tactical_analysis/data/pirate_viability.pending.translation", "res://tactical_analysis/data/pirate_viability.cap.translation", "res://tactical_analysis/data/pirate_viability.takes.translation", "res://tactical_analysis/data/pirate_viability.losses.translation", "res://tactical_analysis/data/pirate_viability.returned.translation", "res://tactical_analysis/data/pirate_viability.backoff.translation"]
+
+[params]
+
+compress=true
+delimiter=0

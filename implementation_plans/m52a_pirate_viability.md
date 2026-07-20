@@ -162,3 +162,96 @@ actually runs in*. To add:
 4. Patience/blacklist/withdraw/backoff behaviors with their tests.
 5. Calibrate presumed-lost + arrival window from the CSV; re-run the sim;
    record before/after rates here.
+
+## 7. FINDINGS (as-built — measured with `--run-tactical-sim pirate_viability`)
+
+**Headline: from takes=0-with-everyone-running to a 100% comply rate and
+robberies that land.** Final instrumented sim (12 sim-min, 3 concurrent
+pirates, isolated open-space traders): **COMPLY 4 / RUN 0**, one robbery
+landed (`TAKE_ALONGSIDE` completed, loot aboard), two pirates lost to the
+hostile environment. Every fix below was confirmed against the log, not
+assumed.
+
+**H1 — the real bug, confirmed.** Comply-or-run compared the victim's
+max_speed against the pirate's INSTANTANEOUS speed, read at demand time —
+when the pirate has already decelerated to hail range and looks stationary.
+So `will_run = my_max > ~0 * ratio` was always true and *every* victim ran;
+no robbery could complete. Fix: `threat_response_leaf` now tracks each
+contact's PEAK observed speed while the track is held (honest — it's what
+the victim actually watched chase it down) and compares against that. Live
+proof from the sim: `[Cargo] Trader: COMPLY (my max 1000 vs threat cap 734
+x1.6 = 1174)`. Pinned deterministically by `test_honored_stop`'s
+`_test_peak_speed_comply` (high-peak/slow-at-demand → COMPLY; genuinely slow
+→ still RUN).
+
+**Hulls were already fine — do NOT retune.** Armed Pinnace max_speed 2000
+(the chaser, 2x cargo), Pirate Ore Shuttle 1000 (the boarder, tied with
+cargo). With the H1 fix a cargo (1000) never clears the 1.6x margin over
+either hull's peak, so it complies against both — no hull-speed change was
+needed or made. Cargo *capacity* is derived from cargo-component area
+(ship_design_validator's `total_cargo_area`), not a hand-authored field; the
+ore shuttle inherits the cargo hull's holds (it's the hauler), the pinnace
+carries little (it's the interceptor). Coherent division of labour; left as
+is. (User's "pirates must be fast enough + hold their bounty" — satisfied by
+the existing hulls; noted here rather than changed.)
+
+**H2 — beacons SEE; the guild avoids the road (user's call).** No witness
+exemption anywhere — beacons stay honest witnesses in the job's sensor
+checks (pinned by `test_job_runner._test_beacon_still_witnesses`). Instead
+the guild treats charted beacon positions as public geometry (same class as
+the station positions it already read) and rolls its lurk/staging/exfil
+points clear of a 15km beacon keep-away, rerolling ACROSS lanes so a lane
+that runs down the beacon road loses on clearance to the unbeaconed one.
+Pinned by `test_pirate_guild` scenario (a): given a beaconed + an unbeaconed
+lane, the hunt point lands 82km from the beacon.
+
+**A second real bug the sim exposed: staging was anchored at the wormhole,
+not the hunting ground.** `_staging_point` offset from the *wormhole*, so a
+pirate went dark by the wormhole and then had to cruise the whole way to a
+possibly-215km-distant lane under its hunt budget — a slow hull never
+arrived and withdrew empty every time (0 SELECT_VICTIM completions until
+this was fixed). Now staging anchors just off the LANE: the pirate transits
+lit (ordinary-looking) to its hunting area, goes dark once clear, and hunts
+there. This was almost certainly a real contributor to the campaign's
+zero-takes, not just a sim artifact.
+
+**A third: pirates fought each other.** Each guild member had a UNIQUE
+`PIRATE_GUILD_N` tag, so pirates classified fellow pirates as prey AND as
+witnesses — with cap>1 they clustered, targeted each other, and tripped each
+other's third-party aborts. Fixed with a shared `PIRATE_GUILD` recognition
+tag (mutual FRIENDLY-crypto; outsiders still read them as UNIDENTIFIED). In
+the cap=1 campaign this never surfaced; it would have the moment a take
+streak raised the cap.
+
+**Behaviors, all confirmed working in the sim logs:**
+- *Withdraw-alive* — two ceilings on the hunt (4 attempts OR 150s), whichever
+  trips first. The time cap was essential: a pirate that finds NO prey never
+  re-enters SELECT_VICTIM, so an attempts-only budget let it lurk forever
+  (early sim runs hung one pirate in the hunt indefinitely). Exhausted →
+  withdraw to the wormhole → **RETURNED_EMPTY** (alive, not a take, not a
+  loss). Observed: `SELECT_VICTIM ABORT; hunt time budget (150s) spent … ->
+  'exit'` → clean EXIT_AT → RETURNED_EMPTY.
+- *Failure memory* — a demanded-but-not-taken victim is blacklisted 90s;
+  SELECT_VICTIM skips it so the pirate stops re-locking the same alerted,
+  running ship (the campaign thrash).
+- *Profitability backoff* — LOST or RETURNED_EMPTY stretch the next arrival
+  x2 per profitless step (cap x8); a real take resets it. The guild commits
+  fewer ships to a lane that isn't paying and recovers on its own clock.
+
+**Presumed-lost calibration — deferred, deliberately.** The CSV this run
+produces is dominated by the SIM's artificial cadence (accelerated arrival
+window, isolated victim lanes), so calibrating `presumed_lost_delay` from it
+would fit the instrument, not the game. Left at 45s; recommend re-deriving it
+from a REAL campaign session's per-attempt durations once the M52 patrol
+work lands and the environment is closer to shipping shape. Flagged so it
+isn't mistaken for done.
+
+**Sim caveats (honest instrument limits).** The viability sim swaps the two
+sparse hub cargo lanes for several isolated open-space traders and raises
+the cap to 3 purely to make pirate-meets-lone-victim frequent enough to
+measure in minutes — it measures "does the take LAND once they meet", not
+real campaign encounter *frequency*. It is a `--run-tactical-sim` (not part
+of build.ps1's test gate), so its floor check gates nothing automatically;
+it's a rerunnable diagnostic. Two pirates still died per run to the real
+patrols/long dark exfil — pirates SHOULD carry risk; the point is takes are
+no longer systemically zero.

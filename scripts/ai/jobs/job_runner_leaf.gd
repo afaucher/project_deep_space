@@ -78,7 +78,7 @@ func tick(actor: Node, _blackboard) -> int:
 
 	for cond in step.get("abort_when", []):
 		if JobSteps.check_abort(actor, job, cond):
-			_job_log(actor, "%s ABORT (%s) -> '%s'" % [step.get("verb", "?"), cond.get("cond", "?"), cond.get("on_abort", "")])
+			_job_log(actor, "%s ABORT (%s%s) -> '%s'" % [step.get("verb", "?"), cond.get("cond", "?"), _abort_reason(job), cond.get("on_abort", "")])
 			_abort_to(job, cond.get("on_abort", ""))
 			return SUCCESS
 
@@ -89,7 +89,7 @@ func tick(actor: Node, _blackboard) -> int:
 			_job_log(actor, "%s done%s" % [step.get("verb", "?"), _done_detail(actor, step, job)])
 			job["current"] = current + 1
 		JobSteps.ABORT:
-			_job_log(actor, "%s ABORT -> '%s'" % [step.get("verb", "?"), step.get("on_abort", "")])
+			_job_log(actor, "%s ABORT%s -> '%s'" % [step.get("verb", "?"), _abort_reason(job), step.get("on_abort", "")])
 			_abort_to(job, step.get("on_abort", ""))
 		_: # CONTINUE -- still working, runner owns the tick.
 			pass
@@ -100,6 +100,16 @@ func tick(actor: Node, _blackboard) -> int:
 		_complete_job(actor, slot, job)
 
 	return SUCCESS
+
+# M52a -- consume the verb/condition-stamped abort cause (job["_abort_reason"],
+# set by the executor or condition helper right before it signalled ABORT) so
+# every ABORT line carries WHY, not just the jump target. Reads once and clears
+# it so a later cause-less abort can't inherit a stale reason. Returns a
+# "; <reason>" fragment (or "") for splicing into the log line.
+func _abort_reason(job: Dictionary) -> String:
+	var reason: String = job.get("_abort_reason", "")
+	job.erase("_abort_reason")
+	return "; %s" % reason if reason != "" else ""
 
 # One line per step transition when the DebugSettings "job_log" toggle is ON
 # -- the console view of an otherwise-invisible job (a pirate's whole hunt

@@ -29,5 +29,5 @@ else
 	do player.request_undock()
 	Port Control: Copy, releasing you. Watch your separation.
 	=> END
-- Never mind.
+- Never mind. (Disconnect)
 	=> END

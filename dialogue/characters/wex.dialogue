@@ -1,11 +1,14 @@
 ~ start
 
 Wex: You hear it too, right? The hum. Everybody says it's the reclaimer, but the reclaimer's UNPLUGGED.
+=> hub
+
+~ hub
 - Ask about Todd. [if story.has_flag("todd_mission_accepted") /]
 	Wex: Todd! Todd LISTENS. Used to ping me every Tuesday -- tick tick tick -- then nothing. The rocks took his voice, friend. Snapped it clean off in the last gravel storm. Saw his lights still blinking out on the spinward edge after. Blink, blink. Lights but no voice. No voice at all.
-	=> start
+	=> hub
 - Just passing through.
 	Wex: That's what the hum wants you to think.
-	=> start
-- Goodbye.
+	=> hub
+- Clear screens. (Disconnect)
 	=> END

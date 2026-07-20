@@ -33,16 +33,16 @@ Todd: She mentioned once she'd like one of these -- said they're impossible to f
 ~ handoff
 if story.has_flag("todd_present_given")
 	Todd: Present's handled -- it's on you now. And tell her I'm calling the second the antenna's up. Swear.
-	- Goodbye.
+	- Clear screens. (Disconnect)
 		=> END
 elif player.is_docked_at(station)
 	do story.set_flag("todd_present_given")
 	do story.grant_item("stephanies_present")
 	Todd: There. Sealed and padded. Don't shake it, don't scan it -- she opens it first. That's the whole point.
 	Todd: And... thanks for coming out. Tell her I'm calling the second the antenna's up. Swear.
-	- Goodbye.
+	- Clear screens. (Disconnect)
 		=> END
 else
 	Todd: Clamp's open whenever you are -- dock and I'll hand it over.
-	- Goodbye.
+	- Clear screens. (Disconnect)
 		=> END

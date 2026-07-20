@@ -157,6 +157,12 @@ func _run() -> void:
 	var repairs_resp = _find_response_exact(line, "Ask about repairs.")
 	_assert(repairs_resp != null, "stephanie: 'Ask about repairs.' response is offered")
 
+	var disconnect_resp = _find_response_exact(line, "Clear screens. (Disconnect)")
+	_assert(disconnect_resp != null, "stephanie: 'Clear screens. (Disconnect)' response is offered")
+	if disconnect_resp != null:
+		var end_line = await dm.get_next_dialogue_line(resource, disconnect_resp.next_id, states)
+		_assert(end_line == null, "stephanie: choosing disconnect leads immediately to null (END)")
+
 	# --- Phase 2: repairs refused while undocked ---
 	if repairs_resp != null:
 		var repair_line = await dm.get_next_dialogue_line(resource, repairs_resp.next_id, states)

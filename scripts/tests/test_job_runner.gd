@@ -14,6 +14,7 @@ extends Node
 
 const Ship = preload("res://scripts/ships/ship.gd")
 const JobRunnerLeaf = preload("res://scripts/ai/jobs/job_runner_leaf.gd")
+const JobSteps = preload("res://scripts/ai/jobs/job_steps.gd")
 const BlackboardScript = preload("res://addons/beehave/blackboard.gd")
 
 var main_node: Node = null
@@ -47,8 +48,27 @@ func setup(main) -> void:
 	await _test_abort_when_generic_dispatch()
 	_test_no_job_and_empty_job()
 	_test_relight_identity_kit()
+	_test_beacon_still_witnesses()
 
 	_finish()
+
+# M52a (H2 pin): beacons see. The witness check (_third_party_in_range, via
+# check_abort) counts any fresh UNIDENTIFIED VESSEL near the pirate REGARDLESS
+# of where it sits -- there is NO beacon exemption anywhere (H2 moved the road-
+# avoidance into the guild's hunt GEOMETRY, not the job's sensor checks). This
+# pins that: an EM-loud stationary contact parked at a charted beacon position
+# still trips the witness abort. Guards against anyone re-adding an exemption.
+func _test_beacon_still_witnesses() -> void:
+	print("\n--- H2: a contact at a beacon position still counts as a witness ---")
+	var actor = _make_actor("WitnessProbe")
+	var beacon_pos := Vector2(30000, 10000)
+	actor.position = beacon_pos + Vector2(3000, 0)  # 3km from the beacon spot
+	actor.active_contacts = {"TRK-042": {
+		"instance_id": 42, "pos": beacon_pos, "vel": Vector2.ZERO,  # stationary, ON the beacon
+		"last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+	var job := {"victim_iid": 999}  # some other ship is the victim; the beacon contact is a THIRD party
+	var tripped: bool = JobSteps.check_abort(actor, job, {"cond": "third_party_in_range", "r": 6000.0})
+	_assert(tripped, "a stationary EM-loud contact at a charted beacon position STILL trips the witness check (no exemption)")
 
 # M51+ -- RELIGHT {from_kit}: identities are pre-provisioned papers
 # (ship.identity_documents), consumed one per relight; an exhausted kit

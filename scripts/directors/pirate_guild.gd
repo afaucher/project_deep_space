@@ -29,7 +29,11 @@ const ArmedPinnace = preload("res://scripts/ships/armed_pinnace.gd")
 # id yet (nothing to key `members` on), so it lives in `arrivals` instead;
 # `members` entries only ever hold ACTIVE/OVERDUE/LOST/CASHED_OUT. Name-pool
 # avoidance treats both the same way ("in use by ACTIVE/SCHEDULED members").
-enum MemberState { SCHEDULED, ACTIVE, OVERDUE, LOST, CASHED_OUT }
+# RETURNED_EMPTY (M52a): a member that withdrew ALIVE with nothing taken --
+# not a take (didn't rob anyone), not a loss (didn't lose a hull). "We'd be
+# more profitable elsewhere"; it feeds the profitability backoff below and
+# lets a scared-off pirate pop back up later on the normal schedule.
+enum MemberState { SCHEDULED, ACTIVE, OVERDUE, LOST, CASHED_OUT, RETURNED_EMPTY }
 
 # Base id for spawned pirate records -- clear of every authored home_cluster
 # id (stations 1-12, homes 200-204, beacons 100-106, wormhole 500, patrols
@@ -87,8 +91,16 @@ var issued_names: Dictionary = {}
 
 var takes_total: int = 0
 var losses: int = 0
+var returned_empty: int = 0
 var take_streak: int = 0
 var loss_streak: int = 0
+# Profitability governor (M52a): consecutive PROFITLESS resolutions (LOST or
+# RETURNED_EMPTY) stretch the next arrival delay (backoff_factor); any real
+# take resets it. Distinct from cap (how MANY at once) -- backoff is how OFTEN.
+# A lane that isn't paying gets fewer ships committed, and the guild recovers
+# on its own clock (a scared-off predator population that ebbs and returns).
+var profitless_streak: int = 0
+var backoff_factor: float = 1.0
 var cap: int = 1
 
 var _elapsed: float = 0.0
@@ -143,7 +155,13 @@ func _check_ins(cluster) -> void:
 				m["state"] = MemberState.OVERDUE
 				m["overdue_since"] = 0.0
 				m["observed_dead"] = true
-				_event("'%s' missed check-in (observed dead) -> OVERDUE" % m.get("cover_name", "?"))
+				# M52a: capture the killer (developer instrumentation -- the node
+				# stamped its last attributed attacker in take_damage) so the LOST
+				# line can name it. Empty when the hull died to collision/anon.
+				m["killed_by"] = node.last_damage_attacker_name
+				var by: String = node.last_damage_attacker_name
+				_event("'%s' missed check-in (observed dead%s) -> OVERDUE" %
+					[m.get("cover_name", "?"), " -- killed by '%s'" % by if by != "" else ""])
 			else:
 				m["last_seen_pos"] = node.position
 				m["last_loot_takes"] = node.loot_takes
@@ -178,22 +196,37 @@ func _resolve_overdue(cluster, period: float) -> void:
 
 		var vanished_near_wormhole: bool = (not m.get("observed_dead", false)) \
 			and m.get("last_seen_pos", wormhole_pos).distance_to(wormhole_pos) <= cashin_radius
+		var loot: int = m.get("last_loot_takes", 0)
 
-		if vanished_near_wormhole:
+		if vanished_near_wormhole and loot > 0:
 			m["state"] = MemberState.CASHED_OUT
-			takes_total += m.get("last_loot_takes", 0)
+			takes_total += loot
 			take_streak += 1
 			loss_streak = 0
+			profitless_streak = 0
+			_recompute_backoff()
 			_event("'%s' CASHED OUT (takes +%d -> total %d, streak %d)" %
-				[m.get("cover_name", "?"), m.get("last_loot_takes", 0), takes_total, take_streak])
+				[m.get("cover_name", "?"), loot, takes_total, take_streak])
+		elif vanished_near_wormhole:
+			# Left alive with an empty hold -- withdrew, not lost. Feeds backoff
+			# but never counts as a loss (no hull thinned) or a take.
+			m["state"] = MemberState.RETURNED_EMPTY
+			returned_empty += 1
+			take_streak = 0
+			profitless_streak += 1
+			_recompute_backoff()
+			_event("'%s' RETURNED EMPTY (no take, alive; profitless streak %d, backoff x%.1f)" %
+				[m.get("cover_name", "?"), profitless_streak, backoff_factor])
 		else:
 			m["state"] = MemberState.LOST
 			losses += 1
 			loss_streak += 1
 			take_streak = 0
+			profitless_streak += 1
+			_recompute_backoff()
 			_erase_record(cluster, record_id)
-			_event("'%s' presumed LOST (%s; losses %d, streak %d)" %
-				[m.get("cover_name", "?"), "observed dead" if m.get("observed_dead", false) else "vanished off-wormhole", losses, loss_streak])
+			_event("'%s' presumed LOST (%s; losses %d, streak %d, backoff x%.1f)" %
+				[m.get("cover_name", "?"), "observed dead" if m.get("observed_dead", false) else "vanished off-wormhole", losses, loss_streak, backoff_factor])
 
 # ---------------------------------------------------------------------------
 # 3. Cap adjust -- streak-driven, clamped [base_cap, max_cap] both ways.
@@ -227,7 +260,9 @@ func _schedule_floor() -> void:
 	if hull_mix.is_empty():
 		return
 	while _roster_pressure() < cap:
-		var eta: float = randf_range(window[0], window[1])
+		# Profitability backoff: a lane that keeps costing the guild ships or
+		# sending them home empty gets fewer arrivals, spaced further apart.
+		var eta: float = randf_range(window[0], window[1]) * backoff_factor
 		var kit: Array = _provision_kit()
 		var hull_idx: int = _hull_cursor % hull_mix.size()
 		_hull_cursor += 1
@@ -282,7 +317,14 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 		rec.kind = ClusterEntity.Kind.TRAFFIC
 		rec.is_static = false
 		rec.pos = spawn_pos
-		rec.iff_tags = ["PIRATE_GUILD_%d" % record_id]
+		# Shared guild tag FIRST (mutual FRIENDLY-crypto recognition: guild
+		# members never rob or get spooked by their own -- the viability sim
+		# showed pirates targeting each other as prey and tripping each other's
+		# witness checks when the cap climbed above 1). The unique per-member
+		# tag rides alongside for future per-member identity; nothing keys on it
+		# today. Outsiders share neither, so a pirate still reads UNIDENTIFIED to
+		# a patrol/the player.
+		rec.iff_tags = ["PIRATE_GUILD", "PIRATE_GUILD_%d" % record_id]
 		rec.transponder_flag = Standing.FLAG_CIVILIAN
 		rec.behavior = {
 			"pirate": true,
@@ -321,12 +363,24 @@ const _R_THIRD_PARTY := 6000.0
 # PUBLIC geometry (the same records the lanes come from), so avoiding them
 # is honest guild knowledge, not omniscience.
 const _R_STATION_AVOID := 25000.0
+# M52a (H2): the beacon road is the WORST place to hunt -- beacons are EM-loud
+# sensor+comms relays that see and report, the road carries the most traffic
+# (more witnesses), and patrols work it. Beacons stay honest witnesses in the
+# job's own sensor checks (no exemption anywhere); the intelligence is here in
+# the guild's hunt GEOMETRY instead. Charted beacon positions are public
+# knowledge (same records class as the stations the guild already reads), so
+# rolling lurk/staging/exfil points away from them is honest guild tradecraft,
+# not omniscience. The keep-away sits comfortably above the 6km witness range
+# so the whole 25k-spaced road fails clearance and the guild self-selects the
+# unbeaconed Coldreach lane / off-road stretches.
+const _R_BEACON_AVOID := 15000.0
 
 func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 	var stations: Array = _station_positions(cluster)
-	var lane_pos: Vector2 = _pick_lane_point(cluster, wormhole_pos, stations)
-	var staging_pos: Vector2 = _away_from_stations(stations, func(): return _staging_point(wormhole_pos, lane_pos))
-	var exfil_pos: Vector2 = _away_from_stations(stations, func(): return _exfil_point(wormhole_pos, lane_pos))
+	var beacons: Array = _beacon_positions(cluster)
+	var lane_pos: Vector2 = _pick_lane_point(cluster, wormhole_pos, stations, beacons)
+	var staging_pos: Vector2 = _away_from_hazards(func(): return _staging_point(wormhole_pos, lane_pos), stations, beacons)
+	var exfil_pos: Vector2 = _away_from_hazards(func(): return _exfil_point(wormhole_pos, lane_pos), stations, beacons)
 
 	return {
 		"steps": [
@@ -339,7 +393,11 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 			{"verb": "AWAIT", "condition": "clear", "clear_range": 8000.0, "timeout": 45.0, "on_abort": "go_dark"},
 			{"verb": "GO_DARK", "label": "go_dark"},
 			# See header: third_party_in_range deliberately NOT attached here.
-			{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY},
+			# max_attempts (M52a): a bounded hunt budget -- after this many
+			# victim-engagement cycles with nothing taken, SELECT_VICTIM aborts
+			# to "exit" (withdraw alive via the wormhole -> RETURNED_EMPTY),
+			# rather than thrashing the same lane until a patrol kills it.
+			{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY, "max_attempts": 4, "max_hunt_seconds": 150.0, "on_abort": "exit"},
 			{"verb": "INTERCEPT", "on_abort": "hunt",
 				"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"}, {"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
 			{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0, "on_abort": "hunt",
@@ -368,28 +426,41 @@ func _station_positions(cluster) -> Array:
 			out.append(rec.pos)
 	return out
 
-# Roll candidates until one clears _R_STATION_AVOID of every station
-# (bounded); otherwise keep the candidate that got FARTHEST from its nearest
-# station (a cramped cluster degrades to "least bad", never to a crash or an
-# infinite loop). Deterministic: pure seeded rolls, fixed retry count.
-func _away_from_stations(stations: Array, roll: Callable) -> Vector2:
+func _beacon_positions(cluster) -> Array:
+	var out: Array = []
+	for rec in cluster.records:
+		if rec.kind == ClusterEntity.Kind.BEACON:
+			out.append(rec.pos)
+	return out
+
+# Roll candidates until one clears BOTH keep-aways (stations at _R_STATION_
+# AVOID, charted beacons at _R_BEACON_AVOID); otherwise keep the candidate
+# with the greatest clearance (a cramped/all-hazard cluster degrades to
+# "least bad", never to a crash or an infinite loop). Deterministic: pure
+# seeded rolls, fixed retry count.
+func _away_from_hazards(roll: Callable, stations: Array, beacons: Array) -> Vector2:
 	var best: Vector2 = roll.call()
-	var best_d: float = _nearest_station_dist(stations, best)
+	var best_c: float = _hazard_clearance(best, stations, beacons)
 	for _i in range(7):
-		if best_d >= _R_STATION_AVOID:
+		if best_c >= 0.0:
 			return best
 		var candidate: Vector2 = roll.call()
-		var d: float = _nearest_station_dist(stations, candidate)
-		if d > best_d:
+		var c: float = _hazard_clearance(candidate, stations, beacons)
+		if c > best_c:
 			best = candidate
-			best_d = d
+			best_c = c
 	return best
 
-func _nearest_station_dist(stations: Array, p: Vector2) -> float:
-	var nearest: float = INF
+# Signed clearance: how far INSIDE (negative) or OUTSIDE (positive) all
+# keep-aways the point is. >= 0 means it clears every station and beacon.
+# Empty hazard lists contribute INF (no constraint).
+func _hazard_clearance(p: Vector2, stations: Array, beacons: Array) -> float:
+	var c: float = INF
 	for s_pos in stations:
-		nearest = minf(nearest, p.distance_to(s_pos))
-	return nearest
+		c = minf(c, p.distance_to(s_pos) - _R_STATION_AVOID)
+	for b_pos in beacons:
+		c = minf(c, p.distance_to(b_pos) - _R_BEACON_AVOID)
+	return c
 
 # A seeded point along a randomly-chosen cargo lane's route segment. Cargo
 # lanes are public knowledge (a guild watching the lanes plausibly has it) --
@@ -399,7 +470,7 @@ func _nearest_station_dist(stations: Array, p: Vector2) -> float:
 # doorsteps (the playtest bug), and no sane pirate lurks under a hub's guns.
 # Falls back to the wormhole itself if the cluster somehow carries no cargo
 # lane (keeps the job assemblable rather than crashing).
-func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array) -> Vector2:
+func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array, beacons: Array) -> Vector2:
 	var lanes: Array = []
 	for rec in cluster.records:
 		if rec.kind != ClusterEntity.Kind.TRAFFIC:
@@ -413,20 +484,32 @@ func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array) -> Vector
 	if lanes.is_empty():
 		return wormhole_pos
 
-	var route: Array = lanes[randi() % lanes.size()]
-	var seg: int = randi() % (route.size() - 1)
-	var a: Vector2 = route[seg]
-	var b: Vector2 = route[seg + 1]
-	return _away_from_stations(stations, func(): return a.lerp(b, randf_range(0.15, 0.85)))
+	# Reroll across the WHOLE lane set (lane + segment + fraction) each attempt,
+	# not just the fraction on one fixed lane -- so a lane that runs down the
+	# beacon road (the "Mule" lane, every point within a beacon keep-away) loses
+	# to the unbeaconed lane on clearance, and the guild self-selects the quiet
+	# route instead of degrading to the least-bad point on the road.
+	return _away_from_hazards(func():
+		var route: Array = lanes[randi() % lanes.size()]
+		var seg: int = randi() % (route.size() - 1)
+		return route[seg].lerp(route[seg + 1], randf_range(0.15, 0.85))
+	, stations, beacons)
 
-# A seeded point off the beacon road: offset perpendicular from the
-# wormhole->lane direction, well outside comms range of stations.
+# A dark staging spot near the HUNTING GROUND (the lane), not back at the
+# entry wormhole. M52a: anchoring staging at the wormhole meant a pirate went
+# dark by the wormhole and then had to cruise the whole way to a distant lane
+# under its hunt-time budget -- a slow hull never arrived and withdrew empty
+# every time (the viability sim's dead giveaway). Staging just short of and
+# off to one side of lane_pos lets the pirate transit LIT to its hunting area
+# (ordinary-looking traffic), go dark once AWAIT{clear} says nobody's near,
+# and hunt right there. Off-lane + hazard keep-away (the _away_from_hazards
+# wrapper) keep it out of witness/patrol sight.
 func _staging_point(wormhole_pos: Vector2, lane_pos: Vector2) -> Vector2:
 	var dir: Vector2 = (lane_pos - wormhole_pos)
 	dir = dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
 	var perp: Vector2 = dir.rotated(PI / 2.0)
 	var side: float = 1.0 if randf() < 0.5 else -1.0
-	return wormhole_pos + dir * randf_range(5000.0, 15000.0) + perp * side * randf_range(8000.0, 20000.0)
+	return lane_pos - dir * randf_range(3000.0, 8000.0) + perp * side * randf_range(6000.0, 14000.0)
 
 # Another off-road dark point, offset from the lane back toward/around the
 # wormhole side -- distinct from staging_point's roll.
@@ -452,6 +535,11 @@ func _erase_record(cluster, record_id: int) -> void:
 		if cluster.records[i].id == record_id:
 			cluster.records.remove_at(i)
 			return
+
+# Profitability backoff factor from the profitless streak: 1x, 2x, 4x, capped
+# at 8x. Any real take resets profitless_streak to 0 -> back to 1x.
+func _recompute_backoff() -> void:
+	backoff_factor = minf(pow(2.0, float(profitless_streak)), 8.0)
 
 func _wormhole_pos(cluster) -> Vector2:
 	for rec in cluster.records:
@@ -510,5 +598,5 @@ func _log(cluster) -> void:
 	var etas: Array = []
 	for arrival in arrivals:
 		etas.append(snappedf(arrival.get("eta_remaining", 0.0), 0.1))
-	print("[PirateGuild] active=%d overdue=%d pending=%d cap=%d take_streak=%d loss_streak=%d takes_total=%d losses=%d etas=%s" %
-		[active, overdue, arrivals.size(), cap, take_streak, loss_streak, takes_total, losses, str(etas)])
+	print("[PirateGuild] active=%d overdue=%d pending=%d cap=%d take_streak=%d loss_streak=%d takes_total=%d losses=%d returned_empty=%d backoff=x%.1f etas=%s" %
+		[active, overdue, arrivals.size(), cap, take_streak, loss_streak, takes_total, losses, returned_empty, backoff_factor, str(etas)])

@@ -578,9 +578,15 @@ func _get_my_ship() -> Node:
 	return get_node_or_null("/root/Main/" + ship_node_name)
 
 func _process_dialogue(node_id: String) -> void:
+	var f = FileAccess.open("user://debug_comms.txt", FileAccess.READ_WRITE)
+	if not f: f = FileAccess.open("user://debug_comms.txt", FileAccess.WRITE)
+	if f: f.seek_end()
+	
+	if f: f.store_line("--- _process_dialogue called with " + str(node_id) + " ---")
 	_clear_responses()
 
 	if not Engine.has_singleton("DialogueManager"):
+		if f: f.store_line("Error: No DialogueManager")
 		chat_log.text += "\n[color=red]Error: Comms system failure.[/color]\n"
 		return
 
@@ -588,32 +594,46 @@ func _process_dialogue(node_id: String) -> void:
 	var line = await dm.get_next_dialogue_line(active_dialogue_resource, node_id, _dialogue_game_states())
 	
 	if line != null:
+		if f: f.store_line("Line received: " + line.text)
+		if f: f.store_line("Next ID: " + str(line.next_id))
 		chat_log.text += "\n[color=cyan][b]" + line.character + ":[/b][/color] " + line.text + "\n"
+		var has_choices = false
+		if f: f.store_line("Responses count: " + str(line.responses.size()))
 		for resp in line.responses:
-			# M42 -- DialogueManager's get_next_dialogue_line() does NOT filter
-			# line.responses by a `- Response [if cond /]` gate itself: every
-			# response line.responses ID compiles into the array regardless,
-			# each carrying an `is_allowed` bool set from evaluating its own
-			# condition (see dialogue_manager.gd's _get_responses()/
-			# _check_condition() -- filtering is left to the caller, normally
-			# DialogueResponsesMenu's `hide_failed_responses`). This panel
-			# builds its own buttons directly, so it must do that filtering
-			# itself, or a gated response (e.g. aunt_stephanie.dialogue's
-			# mission-offer/status-check pair) would show unconditionally.
+			if f: f.store_line("  Resp text: " + str(resp.text) + " is_allowed: " + str(resp.is_allowed))
 			if not resp.is_allowed:
 				continue
 			var btn = Button.new()
-			btn.text = resp.text
+			btn.text = resp.text if resp.text != "" else "[ CONTINUE ]"
 			btn.pressed.connect(func(): _on_response_clicked(resp))
 			responses_vbox.add_child(btn)
+			has_choices = true
+			
+		if f: f.store_line("has_choices is " + str(has_choices))
+		if not has_choices:
+			if f: f.store_line("Auto-advancing to " + str(line.next_id))
+			_process_dialogue(line.next_id)
 	else:
+		if f: f.store_line("Line is null (ended)")
 		chat_log.text += "\n[color=gray]-- LINK TERMINATED BY REMOTE USER --[/color]\n"
 		var btn_end = Button.new()
-		btn_end.text = "[ END TRANSMISSION ]"
+		btn_end.text = "[ CLOSE CHANNEL ]"
 		btn_end.pressed.connect(_disconnect_chat)
 		responses_vbox.add_child(btn_end)
+		
+	if f: f.close()
 
 func _on_response_clicked(resp) -> void:
+	if resp.text.ends_with("(Disconnect)"):
+		chat_log.text += "\n[color=gray]> " + resp.text.replace(" (Disconnect)", "") + "[/color]\n"
+		chat_log.text += "\n[color=gray]-- LINK TERMINATED BY LOCAL USER --[/color]\n"
+		_clear_responses()
+		var btn_end = Button.new()
+		btn_end.text = "[ CLOSE CHANNEL ]"
+		btn_end.pressed.connect(_disconnect_chat)
+		responses_vbox.add_child(btn_end)
+		return
+
 	chat_log.text += "\n[color=gray]> " + resp.text + "[/color]\n"
 	_process_dialogue(resp.next_id)
 
