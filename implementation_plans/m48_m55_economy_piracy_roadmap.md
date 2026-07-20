@@ -287,6 +287,17 @@ The loop itself, with an **abstract take** (no physical cargo yet).
   player fires on a station → patrol demands surrender immediately, holds
   fire while the player complies.
 
+> **Confirmed by playtest (2026-07-20), post-M52b.** Spawned a pirate,
+> fired on it, and the home station attacked the player directly with no
+> demand and no way to surrender. Expected under the CURRENT state of the
+> world: M52b built the warrant DATA layer (an ASSAULT warrant posts
+> correctly, INTERCEPT-class per the taxonomy) but no station/patrol
+> behavior tree exists yet to READ that response class and execute the
+> challenge-before-engage sequence above — this milestone's actual scope,
+> not yet started. Real evidence the surrender contract (bullet above,
+> "Complying player is held, not executed") needs to land here, not be
+> assumed to fall out of the warrant plumbing alone.
+
 ## M53 — Traffic guild + demand-driven cargo
 
 - Traffic ledger: per-station demand scores fed by activity (docking

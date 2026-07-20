@@ -497,13 +497,50 @@ data/perf_baseline*` files show as modified in `git status` — that's
 unrelated to warrants. Left unstaged along with everything else per this
 task's instructions.
 
+### Step 8 follow-up (calling session, post-playtest): targeting computer now shows the reason
+
+User feedback after a playtest pass: the standing UI lives on the
+targeting computer, not the contacts panel (task #22, already landed
+pre-M52b) — `WeaponsPanel` (`scripts/ui/weapons_panel.gd`) IS that panel,
+and it already carries a `standing_label` (`"Standing: %s"`) plus the
+MARK/UNMARK buttons for the locked target. Extended that existing label
+rather than building a new panel: `_update_standing_row` now appends
+`contact["standing_reason"]` when present (`"Standing: HOSTILE -- sustained
+attack on Trader"`) — data every warrant post already cache-stamps onto
+the contact (standing.gd/ship.gd), which simply had zero UI consumers
+until now. No new state-threading: the wreck gate (non-vessel contacts
+never show a standing) and the no-target-locked case both fall out of
+the existing `is_vessel`/`c.is_empty()` guards unchanged.
+
+Deliberately the MINIMAL version, not the full offense/issuer/response-
+class/expiry breakdown — chosen because this environment can't visually
+verify Godot Control layout, so the lowest-risk change (extend an
+existing, working label with already-computed data) was preferred over
+new layout work. Verified at the data level with a new
+`test_weapons_panel_standing.gd` (drives the actual `WeaponsPanel` node
+headlessly, same pattern as `test_controls_menu_ui.gd`): HOSTILE-with-
+reason appends correctly, a reason-less standing shows plain (no
+dangling separator), a non-vessel contact and no-target-locked both stay
+blank. The fuller warrant breakdown (offense/issuer/response
+class/expiry) remains a follow-up if the reason string proves
+insufficient in play.
+
 ### Open items for the calling session
 
 1. **Militia-framing IFF gap** (step 9, above) — needs an explicit decision,
    not a code fix from this pass.
-2. **Step 8 UI** — station-pull trigger is live; the visual panels
-   (targeting-computer warrant detail, station WANTED list) are not built.
-3. `clear_contact_hostile` (UNMARK) no longer clears the private
+2. **Station WANTED list UI** — still not built (targeting-computer warrant
+   display now covers the locked-target case above; a station's own list
+   view is separate, lower-priority UI work).
+3. **Surrender-flow gap, confirmed by playtest** (2026-07-20): firing on a
+   pirate got the player attacked by the home station directly, no demand,
+   no way to surrender. Expected given the current state of the world — the
+   M52 patrol/station behavior tree that would read the warrant's response
+   class and run challenge-before-engage doesn't exist yet (M52a/M52b only
+   built pirate viability + the warrant data layer). Logged as confirmed
+   motivating evidence in implementation_plans/m48_m55_economy_piracy_
+   roadmap.md's M52 section — not this milestone's scope to fix.
+4. `clear_contact_hostile` (UNMARK) no longer clears the private
    `aggro_hits` stray-fire counter the way the old code did — deliberate,
    per the design doc's "confidence gates issuance, not the record"
    (aggro_hits feeds a different offense, `SUSTAINED_ASSAULT`, orthogonal to

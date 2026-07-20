@@ -326,7 +326,18 @@ func _update_standing_row(c: Dictionary) -> void:
 	var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
 	var standing: String = c.get("standing", "") if is_vessel else ""
 
-	standing_label.text = "Standing: %s" % standing if standing != "" else ""
+	# M52b -- surface the warrant reason behind an escalated standing (e.g.
+	# "sustained attack on X", "took cargo", "demanding we stop", or the
+	# player's own MARK reason): compute_standing's warrant-index lookup
+	# already cache-stamps contact["standing_reason"] with this text
+	# (standing.gd/ship.gd), it just had zero UI consumers until now.
+	var reason: String = c.get("standing_reason", "") if is_vessel else ""
+	if standing == "":
+		standing_label.text = ""
+	elif reason != "":
+		standing_label.text = "Standing: %s -- %s" % [standing, reason]
+	else:
+		standing_label.text = "Standing: %s" % standing
 
 	if c.is_empty() or not is_vessel:
 		btn_mark_hostile.disabled = true
