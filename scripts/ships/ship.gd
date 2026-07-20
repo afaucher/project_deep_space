@@ -19,6 +19,7 @@ const PortZone = preload("res://scripts/port/port_zone.gd")
 const PortControl = preload("res://scripts/port/port_control.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
+const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
 
 # M31 -- port-zone membership hysteresis. A ship hovering right on a zone's
 # boundary would otherwise thrash zone_enter/zone_exit every tick (its position
@@ -1888,6 +1889,10 @@ func request_undock() -> void:
 		docking_bay.release_with_push()
 
 func _physics_process(delta: float) -> void:
+	# Foam boundaries and current drag
+	if is_multiplayer_authority():
+		FoamPhysics.apply_forces(self)
+		
 	# Whole-callback attribution envelope: the inner tags below only cover the
 	# named blocks, so "total tick minus tagged sum" couldn't distinguish
 	# untagged SHIP script (steering/forces/etc.) from the engine's own physics

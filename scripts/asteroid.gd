@@ -1,6 +1,8 @@
 extends RigidBody2D
 class_name Asteroid
 
+const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
+
 # Sensor Signature Profile
 var cross_section: float = 600.0 # diameter; rescaled per-rock in _ready
 var base_heat: float = 0.0       # Cold rock
@@ -62,3 +64,7 @@ func _ready() -> void:
 	shape.radius = collision_radius
 	collision.shape = shape
 	add_child(collision)
+
+func _physics_process(delta: float) -> void:
+	if is_multiplayer_authority():
+		FoamPhysics.apply_forces(self)

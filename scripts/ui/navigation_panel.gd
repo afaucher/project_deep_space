@@ -5,6 +5,8 @@ signal contact_selected(c_id: String)
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
 
 const WORLD_HALF_EXTENT := 260000.0 # map clamps the camera/grid to +/- this on each axis -- matches the home cluster's +/-250k bounds with margin
+const FOAM_BOUNDARY := 250000.0
+const FOAM_FADE_DIST := 10000.0
 
 # v1.1 outline revision (design_ideas/ship_outline_rendering.md "first-
 # playtest revision"): the fade window is SIZE-PROPORTIONAL -- an angular-
@@ -576,11 +578,21 @@ func _draw() -> void:
 		
 		for x in range(start_x, max_x + grid_step, grid_step):
 			if x >= -grid_size and x <= grid_size:
-				draw_line(Vector2(x, min_y), Vector2(x, max_y), Color(0.1, 0.2, 0.1), 1.0 / map_zoom)
+				var alpha = 1.0
+				if abs(x) > FOAM_BOUNDARY:
+					alpha = max(0.0, 1.0 - (abs(x) - FOAM_BOUNDARY) / FOAM_FADE_DIST)
+				draw_line(Vector2(x, min_y), Vector2(x, max_y), Color(0.1, 0.2, 0.1, alpha), 1.0 / map_zoom)
 				
 		for y in range(start_y, max_y + grid_step, grid_step):
 			if y >= -grid_size and y <= grid_size:
-				draw_line(Vector2(min_x, y), Vector2(max_x, y), Color(0.1, 0.2, 0.1), 1.0 / map_zoom)
+				var alpha = 1.0
+				if abs(y) > FOAM_BOUNDARY:
+					alpha = max(0.0, 1.0 - (abs(y) - FOAM_BOUNDARY) / FOAM_FADE_DIST)
+				# Only draw horizontal lines up to the current X boundary, minus the fade dist to match the vertical fade
+				var line_min_x = max(min_x, -(FOAM_BOUNDARY + FOAM_FADE_DIST))
+				var line_max_x = min(max_x, FOAM_BOUNDARY + FOAM_FADE_DIST)
+				if line_min_x <= line_max_x:
+					draw_line(Vector2(line_min_x, y), Vector2(line_max_x, y), Color(0.1, 0.2, 0.1, alpha), 1.0 / map_zoom)
 		
 	# Draw origin reference
 	draw_circle(Vector2.ZERO, 10.0, Color(0.2, 0.2, 0.5))
