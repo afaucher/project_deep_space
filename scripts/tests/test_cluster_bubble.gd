@@ -28,7 +28,7 @@ var rec_d = null
 
 const COAST_FRAMES := 12
 const MOMENTUM_VEL := Vector2(50.0, 0.0)
-const SMOKE_ORIGIN := Vector2(500000.0, 0.0)
+const SMOKE_ORIGIN := Vector2(240000.0, 0.0)
 const SMOKE_VEL := Vector2(30.0, 0.0)
 
 func _assert(condition: bool, msg: String) -> void:
@@ -153,8 +153,8 @@ func _setup_async_phases() -> void:
 		var v: Vector2 = rec_a.live_node.linear_velocity
 		_assert(v.distance_to(MOMENTUM_VEL) < 1.0, "A: promoted body should carry the record's velocity")
 
-	# D: a frigate parked at +/-500k, kept live (full sim) to prove stable physics
-	# out at the edge of the world budget.
+	# D: a frigate parked at +/-240k, kept live (full sim) to prove stable physics
+	# out at the edge of the playable boundary (Foam boundary is 250k).
 	man_d = ClusterManager.new()
 	var pol_d = LivenessPolicy.new()
 	pol_d.configure_full_sim()
@@ -163,10 +163,10 @@ func _setup_async_phases() -> void:
 	rec_d = _mk(2, SMOKE_ORIGIN, Frigate, ClusterEntity.Kind.PLAYER, false, SMOKE_VEL)
 	man_d.add_record(rec_d)
 	man_d.tick(0.0)
-	_assert(rec_d.is_live(), "D: +/-500k body should be live under full-sim")
+	_assert(rec_d.is_live(), "D: +/-240k body should be live under full-sim")
 	if rec_d.is_live():
 		var p: Vector2 = rec_d.live_node.position
-		_assert(is_finite(p.x) and is_finite(p.y), "D: +/-500k body position must be finite on promote")
+		_assert(is_finite(p.x) and is_finite(p.y), "D: +/-240k body position must be finite on promote")
 
 func _physics_process(_delta: float) -> void:
 	if finished or main_node == null:
@@ -185,13 +185,13 @@ func _physics_process(_delta: float) -> void:
 	_assert(rec_a.pos.x > 1.0, "A: body should have advanced under physics while live (got x=%.3f)" % rec_a.pos.x)
 	_assert(is_finite(rec_a.pos.x) and is_finite(rec_a.pos.y), "A: round-tripped position must be finite")
 
-	# D: after coasting at +/-500k, physics must still be sane (finite, moved +x).
+	# D: after coasting at +/-240k, physics must still be sane (finite, moved +x).
 	if rec_d.is_live():
 		var dp: Vector2 = rec_d.live_node.position
 		var dv: Vector2 = rec_d.live_node.linear_velocity
-		_assert(is_finite(dp.x) and is_finite(dp.y), "D: +/-500k position must stay finite after coasting")
-		_assert(dp.x > SMOKE_ORIGIN.x, "D: +/-500k body should have moved +x under physics")
-		_assert(is_finite(dv.x) and is_finite(dv.y), "D: +/-500k velocity must stay finite")
+		_assert(is_finite(dp.x) and is_finite(dp.y), "D: +/-240k position must stay finite after coasting")
+		_assert(dp.x > SMOKE_ORIGIN.x, "D: +/-240k body should have moved +x under physics")
+		_assert(is_finite(dv.x) and is_finite(dv.y), "D: +/-240k velocity must stay finite")
 
 	_finalize()
 
