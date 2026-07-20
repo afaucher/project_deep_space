@@ -40,6 +40,14 @@ var is_static: bool = false         # stations/beacons/wormhole never move -> sk
 var transponder_flag: String = ""
 var authority_flags: Array = []
 
+# M52b -- the flag(s) this entity is personally deputized to issue/enforce
+# ENFORCEABLE warrants for (design_ideas/warrants.md's "Issuing authority").
+# Authored the same way as authority_flags above (stations/patrols get it in
+# home_cluster.gd; everyone else stays empty by the Ship-side field default,
+# including the player -- the campaign's militia framing's empty-list start
+# state). Applied to the live hull at promote(), same as authority_flags.
+var warrant_authority: Array = []
+
 # M42 -- story overlay decorations, merged onto the record by ClusterLoader at
 # load time (see load_into()'s overlay/characters params) and applied to the
 # live node generically by ClusterManager._promote() (AFTER construction and

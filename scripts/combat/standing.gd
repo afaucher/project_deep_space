@@ -88,12 +88,22 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	if _iff_tags_overlap(sig.get("iff_tags", []), observer.iff_tags):
 		return {"standing": FRIENDLY, "reason": "IFF tag overlap"}
 
-	# 2. sticky: existing HOSTILE on the track stays -- never recomputed away.
-	if contact.get("standing", "") == HOSTILE:
-		return {"standing": HOSTILE, "reason": contact.get("standing_reason", "")}
-
 	var has_transponder: bool = not transponder.is_empty()
 	var t_flag: String = transponder.get("flag", "") if has_transponder else ""
+	var t_name: String = transponder.get("name", "") if has_transponder else ""
+
+	# 2. M52b -- warrant-index lookup replaces the old sticky-HOSTILE rule.
+	# An OPEN, unexpired, ENFORCEABLE-BY-US warrant naming this subject ->
+	# HOSTILE. observer.warrant_index is rebuilt once per fusion tick (ship.gd)
+	# from observer.warrants via Standing.build_warrant_index -- already
+	# filtered to warrants this observer can enforce, so this is a plain O(1)
+	# lookup, not a rule evaluation (design doc's settled Q3: "cheap per-
+	# contact color lookup survives unchanged," only its input changed).
+	var skey: String = subject_key(t_name, sig)
+	var w: Dictionary = observer.warrant_index.get(skey, {})
+	if not w.is_empty():
+		var w_reason: String = w.get("reason", "")
+		return {"standing": HOSTILE, "reason": w_reason if w_reason != "" else ("warrant: " + w.get("offense", ""))}
 
 	# 3. flying a known-enemy flag -> HOSTILE, full stop (the one flag whose
 	# meaning is never ambiguous).
@@ -182,3 +192,202 @@ static func reset() -> void:
 	aggression_events = []
 	_aggression_seq = 0
 	_last_prune_frame = -1
+
+# --- Warrants (M52b) ---------------------------------------------------------
+# Replaces sticky HOSTILE with observed, typed, revocable records. THE spec is
+# design_ideas/warrants.md; the migration against this codebase is
+# implementation_plans/m52b_warrants.md. Everything below is pure data +
+# pure functions -- the STORE is per-ship (Ship.warrants/warrant_index/
+# warrant_authority, ship.gd), never a Standing static (see the design doc's
+# "not on the network -> you can't see it" visibility rule, and the plan's
+# architecture note: a global static here would make that rule meaningless).
+#
+# Record shape (design doc's "Core model"):
+#   offense, subject ({claimed_name, signature}), issuer ({iid, name}),
+#   origin_flag, timestamp, expires, status, resolved_at, event_key, reason.
+# `reason` is a small extension beyond the doc's literal schema -- free-text,
+# human-readable (feeds contact["standing_reason"] the same way the old
+# sticky-bit rule did), additive and harmless to the merge/dedup rules below.
+#
+# Time is the project's existing deterministic sim clock (Engine.get_physics_
+# frames(), the same convention job_steps.gd's patience/blacklist timers use
+# -- CLAUDE.md: --fixed-fps is deterministic, wall-clock is not). timestamp/
+# expires/resolved_at are frame counts, not seconds; PHYSICS_HZ converts an
+# offense's expiry duration (seconds, human-authored) to a frame count once,
+# at post time.
+
+const PHYSICS_HZ := 60.0
+
+# --- Offense taxonomy v1 (design doc's table) --------------------------------
+const OFF_ASSAULT := "ASSAULT"
+const OFF_SUSTAINED_ASSAULT := "SUSTAINED_ASSAULT"
+const OFF_ARMED_THREAT := "ARMED_THREAT"
+const OFF_ARMED_ROBBERY := "ARMED_ROBBERY"
+const OFF_NO_ID := "NO_ID"
+const OFF_SPEED_VIOLATION := "SPEED_VIOLATION"
+const OFF_OPERATOR_FLAGGED := "OPERATOR_FLAGGED"
+
+const WARRANT_OPEN := "OPEN"
+const WARRANT_RESOLVED := "RESOLVED"
+
+# Response classes: both run the same challenge/demand/stand-down-or-fire
+# shape, differing only in how much patience is extended (design doc's
+# "Response levels"). MAX > INTERCEPT for the index's "worst matching
+# warrant" tie-break.
+const RESPONSE_INTERCEPT := "INTERCEPT"
+const RESPONSE_MAX := "MAX"
+const _RESPONSE_SEVERITY := {RESPONSE_INTERCEPT: 1, RESPONSE_MAX: 2}
+
+# offense -> {response, expires_after_seconds (<0 = never)}. Values from the
+# design doc's taxonomy table; NO_ID is self-resolving (not clock-based, see
+# the doc) so it carries no clock expiry here either -- -1 means "never
+# expires on its own clock", not "never resolved" (NO_ID still resolves via
+# compute_standing's existing UNREPORTED-clearing rule, unrelated to this
+# table).
+const _OFFENSE_TABLE := {
+	OFF_ASSAULT: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0},
+	OFF_SUSTAINED_ASSAULT: {"response": RESPONSE_MAX, "expires_after": -1.0},
+	OFF_ARMED_THREAT: {"response": RESPONSE_INTERCEPT, "expires_after": 1800.0},
+	OFF_ARMED_ROBBERY: {"response": RESPONSE_MAX, "expires_after": -1.0},
+	OFF_NO_ID: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0},
+	OFF_SPEED_VIOLATION: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0},
+	OFF_OPERATOR_FLAGGED: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0},
+}
+
+static func response_class(offense: String) -> String:
+	return _OFFENSE_TABLE.get(offense, {}).get("response", RESPONSE_INTERCEPT)
+
+static func response_severity(offense: String) -> int:
+	return _RESPONSE_SEVERITY.get(response_class(offense), 0)
+
+static func default_expiry_seconds(offense: String) -> float:
+	return _OFFENSE_TABLE.get(offense, {}).get("expires_after", -1.0)
+
+static func _now_frame() -> int:
+	return Engine.get_physics_frames()
+
+# v1 dedup rule (design doc): key on claimed transponder name when present,
+# else on track-signature match -- "accept occasional duplicates over false
+# merges." Same key shape Standing.wanted_names already uses (claimed name),
+# extended with a signature fallback for dark/unclaimed subjects.
+static func subject_key(claimed_name: String, signature: Dictionary) -> String:
+	if claimed_name != "":
+		return "name:" + claimed_name
+	var tags: Array = signature.get("iff_tags", []).duplicate()
+	tags.sort()
+	return "sig:" + ",".join(tags) + "|" + str(signature.get("cross_section", 0.0))
+
+static func warrant_subject_key(warrant: Dictionary) -> String:
+	var subject: Dictionary = warrant.get("subject", {})
+	return subject_key(subject.get("claimed_name", ""), subject.get("signature", {}))
+
+# Issuing-authority origin-scoping (design doc's "Issuing authority" section):
+# a ship's warrant only carries its own flag as origin_flag if that flag is
+# one it's personally deputized to issue under (warrant_authority). Otherwise
+# the warrant still posts, just scoped personal (origin_flag ""). ONE gate,
+# routed through by every posting call site -- see warrant_enforceable_by
+# below for the mirrored ENFORCEMENT half of the same rule.
+static func scoped_origin(issuer_flag: String, issuer_authority: Array) -> String:
+	if issuer_flag != "" and issuer_authority.has(issuer_flag):
+		return issuer_flag
+	return ""
+
+static func make_warrant(offense: String, subject: Dictionary, issuer: Dictionary, origin_flag: String, event_key: String, reason: String = "") -> Dictionary:
+	var now := _now_frame()
+	var expires_after: float = default_expiry_seconds(offense)
+	var expires: int = -1
+	if expires_after > 0.0:
+		expires = now + int(expires_after * PHYSICS_HZ)
+	return {
+		"offense": offense,
+		"subject": subject.duplicate(true),
+		"issuer": issuer.duplicate(true),
+		"origin_flag": origin_flag,
+		"timestamp": now,
+		"expires": expires,
+		"status": WARRANT_OPEN,
+		"resolved_at": -1,
+		"event_key": event_key,
+		"reason": reason,
+	}
+
+# Revocation: a STATUS UPDATE to the SAME record, fresh timestamp (design
+# doc's "Time limits and revocation") -- not an erase, so latest-timestamp-
+# wins lets the resolution propagate over and override stale OPEN copies as
+# it spreads. Returns a NEW dict (pure) -- callers assign it back.
+static func resolve_warrant(warrant: Dictionary) -> Dictionary:
+	var now := _now_frame()
+	var out: Dictionary = warrant.duplicate(true)
+	out["status"] = WARRANT_RESOLVED
+	out["resolved_at"] = now
+	out["timestamp"] = now
+	return out
+
+static func is_expired(warrant: Dictionary, now_frame: int = -1) -> bool:
+	var expires: int = warrant.get("expires", -1)
+	if expires < 0:
+		return false
+	var now: int = now_frame if now_frame >= 0 else _now_frame()
+	return now >= expires
+
+# Merge rule for both the datalink relay pass and the station pull (design
+# doc: "latest-timestamp-wins is the merge rule"; plan: "latest-timestamp/
+# highest-status-wins"). Returns whichever of a/b should be KEPT.
+static func merge_warrant(a: Dictionary, b: Dictionary) -> Dictionary:
+	var ta: int = a.get("timestamp", 0)
+	var tb: int = b.get("timestamp", 0)
+	if ta != tb:
+		return a if ta > tb else b
+	var a_resolved: bool = a.get("status", "") == WARRANT_RESOLVED
+	var b_resolved: bool = b.get("status", "") == WARRANT_RESOLVED
+	if a_resolved and not b_resolved:
+		return a
+	if b_resolved and not a_resolved:
+		return b
+	return a
+
+# Authority chain (design doc): "enforcement and issuing share one gate."
+# A personal-origin warrant (origin_flag == "") is, by construction, only
+# ever found in its own issuer's OWN warrants store (the relay filter and the
+# station-pull filter below both refuse to propagate an empty origin_flag) --
+# so it is always enforceable by that same ship, the same private judgment
+# today's per-observer sticky bit already amounted to. A flagged warrant
+# (origin_flag != "") is enforceable by any ship holding that flag in its OWN
+# warrant_authority -- the identical check scoped_origin used to decide
+# whether to stamp the flag in the first place.
+static func warrant_enforceable_by(warrant: Dictionary, observer_authority: Array, observer_iid: int) -> bool:
+	var origin_flag: String = warrant.get("origin_flag", "")
+	if origin_flag == "":
+		return warrant.get("issuer", {}).get("iid", -1) == observer_iid
+	return observer_authority.has(origin_flag)
+
+# Per-observer subject-key -> worst enforceable OPEN warrant index (plan's
+# architecture note: "rebuilt cheaply alongside" the warrant store, same key
+# shape event_key's subject component uses). compute_standing does ONE dict
+# lookup against this instead of reading a sticky bit -- only warrants THIS
+# observer can actually enforce make it in, so a merely-visible (cross-flag
+# or undeputized-witness) warrant never escalates standing to HOSTILE; it
+# stays readable off the raw `warrants` store for informational/UI use
+# (design doc: "still information, not noise... you just can't fire on the
+# strength of it alone").
+static func build_warrant_index(warrants: Dictionary, observer_authority: Array, observer_iid: int) -> Dictionary:
+	var now := _now_frame()
+	var index: Dictionary = {}
+	for key in warrants:
+		var w: Dictionary = warrants[key]
+		if w.get("status", "") != WARRANT_OPEN:
+			continue
+		if is_expired(w, now):
+			continue
+		if not warrant_enforceable_by(w, observer_authority, observer_iid):
+			continue
+		var skey: String = warrant_subject_key(w)
+		var existing: Dictionary = index.get(skey, {})
+		if existing.is_empty():
+			index[skey] = w
+			continue
+		var w_sev: int = response_severity(w.get("offense", ""))
+		var e_sev: int = response_severity(existing.get("offense", ""))
+		if w_sev > e_sev or (w_sev == e_sev and w.get("timestamp", 0) > existing.get("timestamp", 0)):
+			index[skey] = w
+	return index

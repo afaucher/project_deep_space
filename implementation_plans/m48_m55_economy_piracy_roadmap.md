@@ -246,7 +246,8 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 >   fix from data: comply-or-run speed comparison, beacon-witness rule,
 >   failed-victim memory, withdraw-alive (RETURNED_EMPTY), guild
 >   profitability backoff, calibrated presumed-lost.
-> - **M52b — Warrants** (design_ideas/warrants.md): rescopes the M48
+> - **M52b — Warrants** (design_ideas/warrants.md, build order in
+>   implementation_plans/m52b_warrants.md): rescopes the M48
 >   sticky-HOSTILE standing + MARK HOSTILE into observed, typed, expiring,
 >   revocable warrant records with response levels, origin flags,
 >   authority-scoped enforcement, and comms propagation with dedup. This

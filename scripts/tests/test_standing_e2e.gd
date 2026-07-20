@@ -17,7 +17,7 @@ var spawned: Array[Node] = []
 var ships: Dictionary = {} # role name (String) -> Ship
 
 var scenario_idx: int = -1
-const NUM_SCENARIOS = 6
+const NUM_SCENARIOS = 9
 const SCENARIO_TIMEOUT := 8.0 # seconds of sim time before a scenario is declared hung
 var scenario_timer: float = 0.0
 
@@ -120,6 +120,22 @@ func _start_scenario(idx: int) -> void:
 			print("\n--- Scenario F: mark_contact_hostile works ---")
 			_spawn("observer", ["TEAM_F"], Vector2.ZERO)
 			_spawn("target", ["TEAM_G"], Vector2(2500, 0))
+		6:
+			print("\n--- Scenario G: M52b -- a flagged warrant relays to a linked peer ---")
+			var p1 := _spawn("patrol1", ["TEAM_R1"], Vector2.ZERO)
+			_spawn("patrol2", ["TEAM_R1"], Vector2(2000, 0))
+			p1.warrant_authority = ["FLAG_R"]
+			p1.set_transponder_flag("FLAG_R")
+		7:
+			print("\n--- Scenario H: M52b -- revocation propagates over the relay (latest-timestamp-wins) ---")
+			var q1 := _spawn("patrol1", ["TEAM_R2"], Vector2.ZERO)
+			_spawn("patrol2", ["TEAM_R2"], Vector2(2000, 0))
+			q1.warrant_authority = ["FLAG_R2"]
+			q1.set_transponder_flag("FLAG_R2")
+		8:
+			print("\n--- Scenario I: M52b -- personal-origin warrants never relay; flagged ones do (same ship, same tick) ---")
+			_spawn("shipA", ["TEAM_P1"], Vector2.ZERO)
+			_spawn("shipB", ["TEAM_P1"], Vector2(2000, 0))
 		_:
 			print("\nAll standing e2e scenarios passed!")
 			print(">>> [TEST PASSED] test_standing_e2e <<<")
@@ -138,6 +154,9 @@ func _physics_process(delta: float) -> void:
 		3: result = _tick_scenario_d()
 		4: result = _tick_scenario_e()
 		5: result = _tick_scenario_f()
+		6: result = _tick_scenario_g()
+		7: result = _tick_scenario_h()
+		8: result = _tick_scenario_i()
 
 	if result == 1:
 		_start_scenario(scenario_idx + 1)
@@ -323,5 +342,107 @@ func _tick_scenario_f() -> int:
 				printerr("  ASSERT FAILED: mark_contact_hostile should set HOSTILE with the given reason, got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
 				return 0
 			print("  [PASS] mark_contact_hostile: standing=HOSTILE reason='", c.get("standing_reason", ""), "'")
+			return 1
+	return -1
+
+# --- Scenario G: M52b -- flagged warrant relays to a linked peer ------------
+func _tick_scenario_g() -> int:
+	var patrol1: Ship = ships["patrol1"]
+	var patrol2: Ship = ships["patrol2"]
+	var event_key: String = Standing.OFF_ARMED_THREAT + "|" + Standing.subject_key("Suspect", {})
+
+	match phase:
+		0:
+			step_frame += 1
+			if step_frame < 3:
+				return -1 # let _ready()'s scratch normalization settle
+			patrol1.post_warrant(Standing.OFF_ARMED_THREAT, "Suspect", {}, "test relay")
+			if not patrol1.warrants.has(event_key):
+				printerr("  ASSERT FAILED: patrol1 should hold the warrant it just posted, warrants=", patrol1.warrants)
+				return 0
+			phase = 1
+			step_frame = 0
+			return -1
+		1:
+			if not patrol2.warrants.has(event_key):
+				return -1 # relay hasn't propagated it yet -- keep waiting
+			var relayed: Dictionary = patrol2.warrants[event_key]
+			if relayed.get("origin_flag", "") != "FLAG_R" or relayed.get("status", "") != Standing.WARRANT_OPEN:
+				printerr("  ASSERT FAILED: relayed warrant should keep the issuer's origin_flag and OPEN status, got ", relayed)
+				return 0
+			print("  [PASS] flagged warrant relayed to the linked peer (origin_flag='", relayed.get("origin_flag", ""), "')")
+			return 1
+	return -1
+
+# --- Scenario H: M52b -- revocation propagates (latest-timestamp-wins) ------
+func _tick_scenario_h() -> int:
+	var patrol1: Ship = ships["patrol1"]
+	var patrol2: Ship = ships["patrol2"]
+	var event_key: String = Standing.OFF_ARMED_THREAT + "|" + Standing.subject_key("Suspect2", {})
+
+	match phase:
+		0:
+			step_frame += 1
+			if step_frame < 3:
+				return -1
+			patrol1.post_warrant(Standing.OFF_ARMED_THREAT, "Suspect2", {}, "test revocation")
+			phase = 1
+			step_frame = 0
+			return -1
+		1:
+			# Wait for the peer to hold the stale OPEN copy before revoking --
+			# proves the override happens AFTER propagation, not before.
+			if not patrol2.warrants.has(event_key) or patrol2.warrants[event_key].get("status", "") != Standing.WARRANT_OPEN:
+				return -1
+			patrol1.resolve_warrant_for(Standing.OFF_ARMED_THREAT, "Suspect2", {})
+			if patrol1.warrants.get(event_key, {}).get("status", "") != Standing.WARRANT_RESOLVED:
+				printerr("  ASSERT FAILED: patrol1's own copy should read RESOLVED immediately after resolving, got ", patrol1.warrants.get(event_key, {}))
+				return 0
+			phase = 2
+			step_frame = 0
+			return -1
+		2:
+			var peer_copy: Dictionary = patrol2.warrants.get(event_key, {})
+			if peer_copy.get("status", "") != Standing.WARRANT_RESOLVED:
+				return -1 # resolution hasn't propagated yet -- keep waiting
+			print("  [PASS] revocation propagated over the relay: peer's stale OPEN copy overridden to RESOLVED")
+			return 1
+	return -1
+
+# --- Scenario I: M52b -- personal-origin never relays; flagged does (same ship) --
+func _tick_scenario_i() -> int:
+	var shipA: Ship = ships["shipA"]
+	var shipB: Ship = ships["shipB"]
+	var personal_key: String = Standing.OFF_OPERATOR_FLAGGED + "|" + Standing.subject_key("Personal Target", {})
+	var flagged_key: String = Standing.OFF_ARMED_THREAT + "|" + Standing.subject_key("Flagged Target", {})
+
+	match phase:
+		0:
+			step_frame += 1
+			if step_frame < 3:
+				return -1
+			# Personal-origin post: shipA holds no warrant_authority yet, so
+			# Standing.scoped_origin scopes this one to "" (personal).
+			shipA.post_warrant(Standing.OFF_OPERATOR_FLAGGED, "Personal Target", {}, "personal test")
+			# Deputize shipA under FLAG_P, THEN post a second, flagged warrant
+			# -- same ship, same tick, proving the filter is per-warrant, not
+			# per-link (the design doc's own framing of this test).
+			shipA.warrant_authority = ["FLAG_P"]
+			shipA.set_transponder_flag("FLAG_P")
+			shipA.post_warrant(Standing.OFF_ARMED_THREAT, "Flagged Target", {}, "flagged test")
+			phase = 1
+			step_frame = 0
+			return -1
+		1:
+			step_frame += 1
+			if not shipB.warrants.has(flagged_key):
+				if step_frame > 300: # generous relay-settle window before declaring it stuck
+					printerr("  ASSERT FAILED: flagged warrant never relayed to the linked peer within the window")
+					return 0
+				return -1 # keep waiting for the flagged one to land
+			if shipB.warrants.has(personal_key):
+				printerr("  ASSERT FAILED: personal-origin warrant leaked onto a linked peer, shipB.warrants=", shipB.warrants)
+				return 0
+			print("  [PASS] personal-origin warrant stayed on the issuer; flagged warrant (same ship, same tick) relayed to the linked peer")
 			return 1
 	return -1

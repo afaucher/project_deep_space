@@ -460,6 +460,23 @@ var known_enemy_flags: Array = [Standing.FLAG_PIRATE]
 var authority_flags: Array = []
 var launcher_instance_id: int = -1
 
+# M52b -- Warrants (design_ideas/warrants.md, implementation_plans/
+# m52b_warrants.md). Replaces the old sticky HOSTILE bit: `warrants` is THIS
+# ship's own store (event_key -> warrant record), populated by whatever this
+# ship personally posts plus whatever a linked peer relays in or a station
+# pull answers -- a per-ship store, NOT a Standing static, so "not on the
+# network -> you can't see it" is actually true (see standing.gd's warrant
+# section header). `warrant_authority`: the flag(s) THIS ship is personally
+# deputized to issue/enforce ENFORCEABLE warrants for -- empty by default
+# (traders, civilians, the player/militia at campaign start); stations and
+# patrol/military archetypes default it to their own flag (home_cluster.gd).
+# `warrant_index`: subject_key -> worst enforceable OPEN warrant, rebuilt
+# once per fusion tick from `warrants` (see _rebuild_warrant_index below) --
+# what compute_standing's rule 2 does its O(1) lookup against.
+var warrants: Dictionary = {}
+var warrant_authority: Array = []
+var warrant_index: Dictionary = {}
+
 # M49 -- hail protocol runtime state (design_ideas/comms_verbs.md). comms_inbox:
 # hails delivered this tick by Hail.send/send_broadcast, processed and cleared
 # in _physics_process right after the M48 witness-consumption block.
@@ -1256,9 +1273,24 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 			last_damage_attacker_name = atk_node.name if is_instance_valid(atk_node) else ""
 		if active_contacts.has(attacker_trk):
 			var atk_c: Dictionary = active_contacts[attacker_trk]
+			var claimed_name: String = active_transponders.get(attacker_id, {}).get("name", "")
+			# M52b -- ASSAULT warrant, posted into OUR OWN store (replaces the
+			# old direct sticky-HOSTILE write). Single hit, instant, no
+			# aggro_hits dampening -- "the apparent target of fire flips
+			# immediately" (design doc's ASSAULT: "single hit -- own-faction
+			# instant witness").
+			post_warrant(Standing.OFF_ASSAULT, claimed_name, atk_c.get("signature", {}), "fired on us")
+			# Eager same-tick cache stamp: compute_standing only re-runs when a
+			# sensor bin updates this track (its own refresh cadence, NOT every
+			# physics tick -- see the correlate-update/new-contact call sites
+			# above), so without this the flip wouldn't be visible until the
+			# next sweep. Safe: the warrant (not this stamp) is the source of
+			# truth -- the next recompute re-derives from warrant_index and
+			# will correctly clear it if the warrant later expires/resolves,
+			# same "cache primed now, corrected on next recompute" contract
+			# contact["standing"] already had before M52b.
 			atk_c["standing"] = Standing.HOSTILE
 			atk_c["standing_reason"] = "fired on us"
-			var claimed_name: String = active_transponders.get(attacker_id, {}).get("name", "")
 			if claimed_name != "":
 				Standing.add_wanted(iff_tags, claimed_name)
 		Standing.post_aggression(attacker_id, get_instance_id(), global_pos, iff_tags, ship_name)
@@ -1816,12 +1848,54 @@ func set_sensor_target(target_id: String) -> void:
 		if multiplayer.get_remote_sender_id() != 0: pass
 	manual_sensor_target = target_id
 
-# M48 -- the player-judgment mechanic (design_ideas/economy_and_piracy.md's
-# "MARK HOSTILE is how the player writes this tier"), not a test-only
-# backdoor: it's also the legitimate lever for tests that need immediate
-# engagement without transponder plumbing (a comms-less hull can't declare a
-# flag, so there's no other legal way to mark it). Same RPC shape as the
-# other player-triggered setters above.
+# M52b -- posts a warrant into THIS ship's OWN store (event_key -> record),
+# origin-scoped by warrant_authority (Standing.scoped_origin -- only a flag
+# this ship is personally deputized under rides the network; everyone else
+# still gets a real record, just scoped personal, design doc's Issuing
+# authority section). Every posting call site (MARK, aggression witness,
+# hail STOP, pirate-job robbery) routes through this ONE function so the
+# scoping rule lives in exactly one place. Not an RPC -- callers that need
+# player-triggered posting (mark_contact_hostile below) wrap it in one;
+# server-authoritative call sites (take_damage, the aggression-witness loop,
+# the job runner) call it directly, same as today's direct dict writes did.
+func post_warrant(offense: String, claimed_name: String, signature: Dictionary, reason: String = "") -> String:
+	var own_flag: String = get_active_transponder_data().get("flag", "")
+	var origin_flag: String = Standing.scoped_origin(own_flag, warrant_authority)
+	var subject: Dictionary = {"claimed_name": claimed_name, "signature": (signature.duplicate(true) if not signature.is_empty() else {})}
+	var issuer: Dictionary = {"iid": get_instance_id(), "name": ship_name}
+	var event_key: String = offense + "|" + Standing.subject_key(claimed_name, signature)
+	warrants[event_key] = Standing.make_warrant(offense, subject, issuer, origin_flag, event_key, reason)
+	return event_key
+
+# The inverse -- resolve (not erase) the warrant THIS ship itself posted for
+# (offense, subject): design doc's revocation mechanism, status=RESOLVED with
+# a fresh timestamp on the SAME record, so latest-timestamp-wins lets the
+# resolution propagate over/override a stale OPEN copy once relayed. No-op
+# if we never posted a matching warrant (e.g. UNMARK on a contact never
+# MARKed).
+func resolve_warrant_for(offense: String, claimed_name: String, signature: Dictionary) -> void:
+	var event_key: String = offense + "|" + Standing.subject_key(claimed_name, signature)
+	if warrants.has(event_key):
+		warrants[event_key] = Standing.resolve_warrant(warrants[event_key])
+
+# Rebuilt once per fusion tick (top of _physics_process, before contact
+# correlation) from `warrants` -- compute_standing's rule 2 does a plain O(1)
+# dict lookup against this instead of a rule evaluation. See standing.gd's
+# build_warrant_index doc comment for why only ENFORCEABLE warrants make it
+# into the index (a visible-but-unenforceable one stays informational, read
+# off `warrants` directly, not this index).
+func _rebuild_warrant_index() -> void:
+	warrant_index = Standing.build_warrant_index(warrants, warrant_authority, get_instance_id())
+
+# M48/M52b -- the player-judgment mechanic (design_ideas/economy_and_piracy.md's
+# "MARK HOSTILE is how the player writes this tier"; design_ideas/warrants.md's
+# "MARK HOSTILE becomes local"), not a test-only backdoor: it's also the
+# legitimate lever for tests that need immediate engagement without
+# transponder plumbing (a comms-less hull can't declare a flag, so there's no
+# other legal way to mark it). Posts an OPERATOR_FLAGGED warrant into OUR OWN
+# store -- the player starts with no warrant_authority, so origin_flag comes
+# back "" (personal-origin, never relayed) via the general scoping rule, not
+# a special case. Same RPC shape as the other player-triggered setters above.
 @rpc("any_peer", "call_local")
 func mark_contact_hostile(c_id: String, reason: String = "flagged by operator") -> void:
 	if not is_multiplayer_authority(): return
@@ -1829,18 +1903,25 @@ func mark_contact_hostile(c_id: String, reason: String = "flagged by operator") 
 	if not active_contacts.has(c_id):
 		return
 	var c: Dictionary = active_contacts[c_id]
+	var claimed_name: String = active_transponders.get(c.get("instance_id", -1), {}).get("name", "")
+	post_warrant(Standing.OFF_OPERATOR_FLAGGED, claimed_name, c.get("signature", {}), reason)
+	# Eager same-tick cache stamp -- see take_damage's own instant-flip
+	# comment for why (compute_standing only re-runs on this track's next
+	# sensor-bin update, not every physics tick); the warrant is the source
+	# of truth, this is cache priming so MARK reads back immediately.
 	c["standing"] = Standing.HOSTILE
 	c["standing_reason"] = reason
 
-# The inverse judgment lever -- "I was wrong about this one." Clears the
-# sticky HOSTILE (and the hidden stray-fire counter) from OUR OWN track so
-# the next fusion tick recomputes standing from rest (crypto/flag/
-# transponder). Per-observer only: it does not retract a marking already
-# shared onto the datalink -- a crypto-linked peer still carrying HOSTILE
-# will re-share it (severity-wins), so unmarking a faction-wide marking is
-# a future comms verb, not this. That limitation is acceptable today: the
-# common wrongful mark (e.g. the collision-attribution bug this shipped
-# alongside) is a purely local judgment that never had witnesses.
+# The inverse judgment lever -- "I was wrong about this one." Resolves the
+# OPERATOR_FLAGGED warrant this ship itself posted (design doc's revocation
+# mechanism: status=RESOLVED, fresh timestamp, same record -- not an erase).
+# Per-observer only, same limitation as before: it does not retract a
+# marking already shared onto the datalink -- but an OPERATOR_FLAGGED
+# warrant's origin_flag is always "" (the player has no warrant_authority),
+# so per the relay filter (only origin_flag != "" propagates) it was never
+# shared onto the datalink in the first place. aggro_hits stays untouched --
+# it's private per-observer confidence scratch, unrelated to this warrant
+# (design doc's settled "confidence gates issuance, not the record").
 @rpc("any_peer", "call_local")
 func clear_contact_hostile(c_id: String) -> void:
 	if not is_multiplayer_authority(): return
@@ -1848,9 +1929,14 @@ func clear_contact_hostile(c_id: String) -> void:
 	if not active_contacts.has(c_id):
 		return
 	var c: Dictionary = active_contacts[c_id]
+	var claimed_name: String = active_transponders.get(c.get("instance_id", -1), {}).get("name", "")
+	resolve_warrant_for(Standing.OFF_OPERATOR_FLAGGED, claimed_name, c.get("signature", {}))
+	# Eager same-tick cache clear -- mirrors the old erase() so UNMARK reads
+	# back immediately; the next recompute re-derives from rest anyway
+	# (crypto/warrant-index/flag/transponder/unreported), so this is purely
+	# a same-tick cache correction, not a new source of truth.
 	c.erase("standing")
 	c.erase("standing_reason")
-	c.erase("aggro_hits")
 
 # M49 -- the honored-stop declaration (design_ideas/comms_verbs.md's
 # "Stopped-under-compulsion"). Requires a live STOP demand addressed to us
@@ -2319,7 +2405,13 @@ func _physics_process(delta: float) -> void:
 	# same target on the exact same frame, processing the most accurate one first
 	# prevents lower-resolution sweeps from dragging the position backwards.
 	bins_this_frame.sort_custom(func(a, b): return a.get("bin_angle", TAU) < b.get("bin_angle", TAU))
-	
+
+	# M52b -- rebuild the warrant index once per fusion tick, before any
+	# compute_standing calls this tick read it (see standing.gd's warrant
+	# section + _rebuild_warrant_index's own doc comment). Cheap: one pass
+	# over this ship's own `warrants` (event_key -> record), usually small.
+	_rebuild_warrant_index()
+
 	# Correlate tracks
 	PerfProbe.begin("contact_correlate")
 	for bin in bins_this_frame:
@@ -2472,23 +2564,39 @@ func _physics_process(delta: float) -> void:
 			continue
 
 		var victim_name: String = ev.get("victim_name", "target")
+		var attacker_claimed: String = active_transponders.get(attacker_iid, {}).get("name", "")
 		if _iff_tags_overlap(iff_tags, ev.get("victim_iff_tags", [])):
-			# My own faction hit -> HOSTILE immediately, no dampening.
+			# My own faction hit -> ASSAULT warrant, instant, no dampening
+			# (M52b: replaces the old direct sticky-HOSTILE write).
+			post_warrant(Standing.OFF_ASSAULT, attacker_claimed, atk_c.get("signature", {}), "attacked " + victim_name)
+			# Eager same-tick cache stamp -- see take_damage's own instant-flip
+			# for why (compute_standing only re-runs on this track's next
+			# sensor-bin update, not every physics tick); the warrant is the
+			# source of truth, this is just cache priming.
 			atk_c["standing"] = Standing.HOSTILE
 			atk_c["standing_reason"] = "attacked " + victim_name
 		elif atk_c.get("standing", "") != Standing.HOSTILE:
 			# Attribution confidence gate: a stray hit on a THIRD party (not
 			# my faction) needs repetition before it flips the shooter HOSTILE
-			# -- one splash accident shouldn't permanently mark a ship (HOSTILE
-			# never decays). aggro_hits is a HIDDEN counter, NOT a standing:
-			# below the threshold the shooter's standing is left untouched (a
-			# "suspicious" tier would have no shared meaning -- that judgment,
-			# if any, is the observer's own assessment). At/over the threshold
-			# it flips HOSTILE. (Sticky HOSTILE covers the already-escalated
-			# case; the elif guard avoids re-touching a HOSTILE track's reason.)
+			# -- one splash accident shouldn't permanently mark a ship (a
+			# warrant's response class, once escalated, never auto-downgrades
+			# within this milestone). aggro_hits is a HIDDEN counter, NOT a
+			# standing/warrant: below the threshold the shooter's standing is
+			# left untouched (a "suspicious" tier would have no shared meaning
+			# -- that judgment, if any, is the observer's own assessment). At/
+			# over the threshold it posts a SUSTAINED_ASSAULT warrant (M52b:
+			# design doc's settled "confidence gates issuance, not the
+			# record" -- aggro_hits itself is unchanged, still private
+			# per-observer scratch; crossing the gate is what POSTS now,
+			# instead of what FLIPPED a sticky bit). The elif guard (reading
+			# the derived, one-tick-lagged standing) avoids reposting once
+			# already escalated.
 			var hits: int = atk_c.get("aggro_hits", 0) + 1
 			atk_c["aggro_hits"] = hits
 			if hits >= Standing.STRAY_HITS_TO_HOSTILE:
+				post_warrant(Standing.OFF_SUSTAINED_ASSAULT, attacker_claimed, atk_c.get("signature", {}), "sustained attack on " + victim_name)
+				# Eager same-tick cache stamp -- see take_damage's own
+				# instant-flip comment for why.
 				atk_c["standing"] = Standing.HOSTILE
 				atk_c["standing_reason"] = "sustained attack on " + victim_name
 	PerfProbe.end("aggression_witness")
@@ -2526,6 +2634,13 @@ func _physics_process(delta: float) -> void:
 						if not police_stop:
 							var issuer_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
 							if active_contacts.has(issuer_trk):
+								# M52b -- ARMED_THREAT warrant (replaces the old
+								# direct sticky-HOSTILE write): a non-authority
+								# STOP demand issued at us.
+								var issuer_claimed: String = active_transponders.get(sender_iid, {}).get("name", "")
+								post_warrant(Standing.OFF_ARMED_THREAT, issuer_claimed, active_contacts[issuer_trk].get("signature", {}), "demanding we stop")
+								# Eager same-tick cache stamp -- see take_damage's
+								# own instant-flip comment for why.
 								active_contacts[issuer_trk]["standing"] = Standing.HOSTILE
 								active_contacts[issuer_trk]["standing_reason"] = "demanding we stop"
 				elif sender_iid != my_iid_hail:
@@ -2554,8 +2669,15 @@ func _physics_process(delta: float) -> void:
 									var target_name := ""
 									if active_transponders.has(target_iid):
 										target_name = active_transponders[target_iid].get("name", "")
+									# M52b -- ARMED_THREAT warrant, overheard witness
+									# (replaces the old direct sticky-HOSTILE write).
+									var issuer_claimed2: String = active_transponders.get(sender_iid, {}).get("name", "")
+									var stop_reason: String = "demanding a stop of " + (target_name if target_name != "" else "target")
+									post_warrant(Standing.OFF_ARMED_THREAT, issuer_claimed2, issuer_c.get("signature", {}), stop_reason)
+									# Eager same-tick cache stamp -- see
+									# take_damage's own instant-flip comment for why.
 									issuer_c["standing"] = Standing.HOSTILE
-									issuer_c["standing_reason"] = "demanding a stop of " + (target_name if target_name != "" else "target")
+									issuer_c["standing_reason"] = stop_reason
 			Hail.VERB_COMPLY:
 				# What the AI honor rule reads (acquire_target_leaf.gd) --
 				# no leaf targets a compliant stopped ship, regardless of
@@ -2661,6 +2783,14 @@ func _physics_process(delta: float) -> void:
 	PerfProbe.begin("datalink_relay")
 	active_transponders.clear()
 	var self_comms_range = get_comms_range()
+	# M52b -- shared with the warrant merge folded into this loop below: both
+	# ride the exact same peer/range/LOS/IFF link this loop establishes, so
+	# warrants merge inside this SAME iteration rather than a second O(n)
+	# node-group scan + raycast pass -- this loop already pays that cost
+	# once per tick; a duplicate pass would double it for nothing (CLAUDE.md
+	# has a documented history of physics-perf regressions in this exact
+	# area, see the M45 investigation).
+	var warrant_index_dirty := false
 	if self_comms_range > 0.0:
 		var space_state = get_world_2d().direct_space_state
 		for s in get_tree().get_nodes_in_group("ships"):
@@ -2692,6 +2822,26 @@ func _physics_process(delta: float) -> void:
 			var ray_res = space_state.intersect_ray(ray_query)
 			if ray_res and ray_res.collider != s:
 				continue # Line of sight blocked
+
+			# M52b -- warrant relay: same link as the contact merge below, own
+			# merge rule (latest-timestamp/highest-status wins on event_key --
+			# Standing.merge_warrant, not the severity compare-and-copy
+			# contacts use just below). Only origin_flag-bearing warrants are
+			# eligible: personal-origin ones (MARK, an unauthorized witness)
+			# stay on their issuing ship regardless of link state (design
+			# doc's settled propagation answer).
+			for wkey in s.warrants:
+				var incoming: Dictionary = s.warrants[wkey]
+				if incoming.get("origin_flag", "") == "":
+					continue # personal-origin -- never relays
+				if warrants.has(wkey):
+					var kept: Dictionary = Standing.merge_warrant(warrants[wkey], incoming)
+					if kept != warrants[wkey]:
+						warrants[wkey] = kept
+						warrant_index_dirty = true
+				else:
+					warrants[wkey] = incoming.duplicate(true)
+					warrant_index_dirty = true
 
 			# A ship never appears in its own active_contacts (you don't sense
 			# yourself), so without this, two linked friendlies would only
@@ -2797,6 +2947,10 @@ func _physics_process(delta: float) -> void:
 							var peer_name: String = active_transponders.get(c.get("instance_id", -1), {}).get("name", "")
 							if peer_name != "":
 								Standing.add_wanted(iff_tags, peer_name)
+	# Rebuild the warrant subject-key index only if the merge above actually
+	# changed something -- most ticks are a no-op (same records re-seen).
+	if warrant_index_dirty:
+		_rebuild_warrant_index()
 	PerfProbe.end("datalink_relay")
 
 	if is_multiplayer_authority():

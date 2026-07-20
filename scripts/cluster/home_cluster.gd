@@ -102,6 +102,11 @@ static func _station(def, id: int, name: String, hull: Script, pos: Vector2, rol
 		"kind": ClusterEntity.Kind.STATION, "pos": pos, "role": role,
 		"iff_tags": HOME_IFF, "is_static": true,
 		"transponder_flag": Standing.FLAG_DRIFT,
+		# M52b -- stations ARE the authority: default warrant_authority to
+		# their own flag (design doc's "Stations and patrol/military ships
+		# default warrant_authority to their own flag" -- everyone else,
+		# including the player, stays empty).
+		"warrant_authority": [Standing.FLAG_DRIFT],
 	})
 
 static func _beacon(def, id: int, name: String, pos: Vector2) -> void:
@@ -128,6 +133,9 @@ static func _patrol(def, id: int, name: String, hull: Script, center: Vector2, r
 		# M49 -- consumed by the not-yet-built DEMAND_SURRENDER rules; fielded
 		# now so patrols don't need reshaping later.
 		"authority_flags": [Standing.FLAG_DRIFT],
+		# M52b -- patrols are the other archetype the design doc calls out by
+		# name; same default-to-own-flag rule as stations above.
+		"warrant_authority": [Standing.FLAG_DRIFT],
 	})
 
 # A cargo hauler shuttling between two stations (a fixed lane, looping). Starts at

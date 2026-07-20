@@ -106,6 +106,7 @@ func _promote(rec) -> void:
 		node.iff_tags = rec.iff_tags.duplicate(true)
 		node.ship_name = rec.name
 		node.authority_flags = rec.authority_flags.duplicate(true)
+		node.warrant_authority = rec.warrant_authority.duplicate(true)
 	# Transform before add_child (body not yet in the physics world -> no teleport
 	# warning); velocities after, once it is registered.
 	node.position = rec.pos

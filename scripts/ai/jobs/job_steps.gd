@@ -617,6 +617,25 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	var victim = instance_from_id(victim_iid)
 	if victim != null and is_instance_valid(victim):
 		victim.looted = true
+		# M52b -- ARMED_ROBBERY warrant, posted into the VICTIM's OWN store
+		# (nothing posted this offense before this milestone -- design doc's
+		# taxonomy: "pirate job takes loot"). Same "whoever experienced it
+		# posts it" shape as take_damage's own-hit ASSAULT post above; the
+		# victim names the pirate off whatever it can actually see (its own
+		# live track + transponder read on the pirate), the "honesty rule"
+		# the design doc's subject field is built around.
+		var pirate_trk: String = "TRK-%03d" % (abs(actor.get_instance_id()) % 1000)
+		var pirate_c: Dictionary = victim.active_contacts.get(pirate_trk, {})
+		var pirate_claimed: String = victim.active_transponders.get(actor.get_instance_id(), {}).get("name", "")
+		victim.post_warrant(Standing.OFF_ARMED_ROBBERY, pirate_claimed, pirate_c.get("signature", {}), "took cargo")
+		# Eager same-tick cache stamp (ship.gd's take_damage carries the full
+		# rationale): compute_standing only re-runs on this track's next
+		# sensor-bin update, not every physics tick, so without this the
+		# victim's own read on the pirate wouldn't flip until that next
+		# sweep. No-op if the victim holds no live track on the pirate.
+		if not pirate_c.is_empty():
+			pirate_c["standing"] = Standing.HOSTILE
+			pirate_c["standing_reason"] = "took cargo"
 	actor.send_release(victim_iid)
 	return DONE
 

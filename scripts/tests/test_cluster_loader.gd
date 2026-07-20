@@ -15,6 +15,7 @@ const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 const HomeCluster = preload("res://scripts/cluster/home_cluster.gd")
 const MediumStation = preload("res://scripts/ships/medium_station.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
+const Standing = preload("res://scripts/combat/standing.gd")
 
 var main_node: Node = null
 var failures: Array = []
@@ -31,6 +32,7 @@ func setup(main) -> void:
 	_test_broken_fixture_trips_rules()
 	_test_loader_populates()
 	_test_bootstrap_promotes_neighbour()
+	_test_warrant_authority_defaults()
 
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_cluster_loader <<<")
@@ -134,6 +136,34 @@ func _test_bootstrap_promotes_neighbour() -> void:
 
 	m.viewpoint = Vector2(1e9, 0)   # demote everything before teardown
 	m.tick(0.0)
+	m.queue_free()
+
+# ---------------------------------------------------------------------------
+# M52b -- warrant_authority defaults thread through the same authored-data
+# pipeline authority_flags already uses (design doc: "Stations and patrol/
+# military ships default warrant_authority to their own flag; everyone
+# else... stays empty").
+# ---------------------------------------------------------------------------
+func _test_warrant_authority_defaults() -> void:
+	var def = HomeCluster.build()
+	var m = ClusterManager.new()
+	main_node.add_child(m)
+	ClusterLoader.load_into(def, m)
+
+	var ironhold = _rec(m, 1)        # medium station hub
+	var patrol_alpha = _rec(m, 600)  # light-attack-craft patrol
+	var hermits_rest = _rec(m, 200)  # mobile home (civilian, not an authority)
+	var mule = _rec(m, 700)          # cargo shuttle (civilian, not an authority)
+
+	_assert(ironhold != null and ironhold.warrant_authority == [Standing.FLAG_DRIFT],
+		"warrant_authority: a hub station should default to its own flag, got " + str(ironhold.warrant_authority if ironhold != null else "<missing>"))
+	_assert(patrol_alpha != null and patrol_alpha.warrant_authority == [Standing.FLAG_DRIFT],
+		"warrant_authority: a patrol should default to its own flag, got " + str(patrol_alpha.warrant_authority if patrol_alpha != null else "<missing>"))
+	_assert(hermits_rest != null and hermits_rest.warrant_authority.is_empty(),
+		"warrant_authority: a mobile home (civilian) must stay empty, got " + str(hermits_rest.warrant_authority if hermits_rest != null else "<missing>"))
+	_assert(mule != null and mule.warrant_authority.is_empty(),
+		"warrant_authority: a cargo shuttle (civilian) must stay empty, got " + str(mule.warrant_authority if mule != null else "<missing>"))
+
 	m.queue_free()
 
 # --- helpers ---

@@ -45,6 +45,8 @@ static func load_into(def, manager, overlay = null, characters = null) -> void:
 		rec.transponder_flag = e.get("transponder_flag", "")
 		var auth_flags: Array = e.get("authority_flags", [])
 		rec.authority_flags = auth_flags.duplicate(true)
+		var warr_authority: Array = e.get("warrant_authority", [])
+		rec.warrant_authority = warr_authority.duplicate(true)
 		_merge_overlay(rec, overlay, characters)
 		manager.add_record(rec)
 

@@ -1,6 +1,8 @@
 extends RefCounted
 class_name PortControl
 
+const Standing = preload("res://scripts/combat/standing.gd")
+
 # M33 -- Port Control comms. Pure-logic helpers shared by BOTH the dialogue
 # mutation (comms_panel -> DialogueManager -> a .dialogue "do" line) and the
 # top-level "Request Docking"/"Undock" fast-path button, so there is exactly
@@ -132,6 +134,14 @@ static func request_docking(station, ship) -> Dictionary:
 	# the wants_dock precondition, not a positioning/geometry issue.
 	ship.dockable = true
 	ship.wants_dock = true
+	# M52b -- station-pull trigger (design doc's "Docking... lets you ASK for
+	# the station's warrant list"): fires automatically on a successful grant,
+	# through the SAME single issuance path the dialogue mutation and the
+	# fast-path button both already share, so neither route has to remember
+	# to wire it separately. Best-effort: a warrant-store read failure must
+	# never block docking itself, so its result isn't threaded into this
+	# outcome dict.
+	request_warrant_list(station, ship)
 	return {"outcome": "granted", "grant": grant}
 
 # Top-level context-flip control logic (fast path). is_docked = the ship is
@@ -149,3 +159,41 @@ static func button_text(is_docked: bool) -> String:
 static func undock(ship) -> void:
 	if ship.has_method("request_undock"):
 		ship.request_undock()
+
+# M52b -- on-request station pull (design_ideas/warrants.md's "On-request
+# pull, for when you're not on the network"): the player doesn't share IFF
+# with home stations by default, so the live datalink relay (ship.gd's
+# warrant_relay pass) never fires just by flying near or docking at one --
+# visiting a station needs its own explicit query. Docking (or hailing port
+# control) lets a ship ASK for the station's warrant list; this copies
+# matching records into the ASKING ship's OWN `warrants` store, same
+# latest-timestamp/event_key merge rule the live relay uses (Standing.
+# merge_warrant), and preserves the STATION's origin_flag rather than
+# rewriting it to the ship's own -- the station is the origin, this is just
+# a copy landing elsewhere. ONE-SHOT: nothing here subscribes the ship to
+# future updates -- walk away and you stop getting them until you ask again.
+# Same shared-entry-point shape as request_docking() above (station, ship) ->
+# Dictionary, so the dialogue path and any fast-path UI button call through
+# ONE function and can't diverge on outcome.
+static func request_warrant_list(station, ship) -> Dictionary:
+	if station == null or not is_instance_valid(station):
+		return {"outcome": "no_station", "count": 0}
+	var station_warrants: Dictionary = station.get("warrants") if "warrants" in station else {}
+	var changed_keys: Array = []
+	for key in station_warrants:
+		var incoming: Dictionary = station_warrants[key]
+		# Personal-origin never propagates, not even on an explicit ask --
+		# same rule the live relay enforces (design doc's settled answer).
+		if incoming.get("origin_flag", "") == "":
+			continue
+		if ship.warrants.has(key):
+			var kept: Dictionary = Standing.merge_warrant(ship.warrants[key], incoming)
+			if kept != ship.warrants[key]:
+				ship.warrants[key] = kept
+				changed_keys.append(key)
+		else:
+			ship.warrants[key] = incoming.duplicate(true)
+			changed_keys.append(key)
+	if not changed_keys.is_empty() and ship.has_method("_rebuild_warrant_index"):
+		ship._rebuild_warrant_index()
+	return {"outcome": "granted", "count": changed_keys.size()}
