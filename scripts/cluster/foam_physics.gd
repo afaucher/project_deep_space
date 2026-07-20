@@ -1,4 +1,4 @@
-﻿extends RefCounted
+extends RefCounted
 class_name FoamPhysics
 
 const BOUNDARY := 250000.0
@@ -21,15 +21,10 @@ static func calculate_forces(pos: Vector2, mass: float) -> Dictionary:
 		"force": Vector2.ZERO
 	}
 	
-	var dx = 0.0
-	if abs(pos.x) > BOUNDARY:
-		dx = abs(pos.x) - BOUNDARY
-	
-	var dy = 0.0
-	if abs(pos.y) > BOUNDARY:
-		dy = abs(pos.y) - BOUNDARY
-		
-	var depth = max(dx, dy)
+	var dist = pos.length()
+	var depth = 0.0
+	if dist > BOUNDARY:
+		depth = dist - BOUNDARY
 	
 	if depth > 0.0:
 		if depth > TELEPORT_DEPTH:

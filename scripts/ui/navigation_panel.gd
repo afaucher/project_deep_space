@@ -578,21 +578,27 @@ func _draw() -> void:
 		
 		for x in range(start_x, max_x + grid_step, grid_step):
 			if x >= -grid_size and x <= grid_size:
-				var alpha = 1.0
-				if abs(x) > FOAM_BOUNDARY:
-					alpha = max(0.0, 1.0 - (abs(x) - FOAM_BOUNDARY) / FOAM_FADE_DIST)
-				draw_line(Vector2(x, min_y), Vector2(x, max_y), Color(0.1, 0.2, 0.1, alpha), 1.0 / map_zoom)
+				for y in range(start_y, max_y, grid_step):
+					var p1 = Vector2(x, y)
+					var p2 = Vector2(x, min(y + grid_step, max_y))
+					var mid_len = ((p1 + p2) / 2.0).length()
+					var alpha = 1.0
+					if mid_len > FOAM_BOUNDARY:
+						alpha = max(0.0, 1.0 - (mid_len - FOAM_BOUNDARY) / FOAM_FADE_DIST)
+					if alpha > 0.0:
+						draw_line(p1, p2, Color(0.1, 0.2, 0.1, alpha), 1.0 / map_zoom)
 				
 		for y in range(start_y, max_y + grid_step, grid_step):
 			if y >= -grid_size and y <= grid_size:
-				var alpha = 1.0
-				if abs(y) > FOAM_BOUNDARY:
-					alpha = max(0.0, 1.0 - (abs(y) - FOAM_BOUNDARY) / FOAM_FADE_DIST)
-				# Only draw horizontal lines up to the current X boundary, minus the fade dist to match the vertical fade
-				var line_min_x = max(min_x, -(FOAM_BOUNDARY + FOAM_FADE_DIST))
-				var line_max_x = min(max_x, FOAM_BOUNDARY + FOAM_FADE_DIST)
-				if line_min_x <= line_max_x:
-					draw_line(Vector2(line_min_x, y), Vector2(line_max_x, y), Color(0.1, 0.2, 0.1, alpha), 1.0 / map_zoom)
+				for x in range(start_x, max_x, grid_step):
+					var p1 = Vector2(x, y)
+					var p2 = Vector2(min(x + grid_step, max_x), y)
+					var mid_len = ((p1 + p2) / 2.0).length()
+					var alpha = 1.0
+					if mid_len > FOAM_BOUNDARY:
+						alpha = max(0.0, 1.0 - (mid_len - FOAM_BOUNDARY) / FOAM_FADE_DIST)
+					if alpha > 0.0:
+						draw_line(p1, p2, Color(0.1, 0.2, 0.1, alpha), 1.0 / map_zoom)
 		
 	# Draw origin reference
 	draw_circle(Vector2.ZERO, 10.0, Color(0.2, 0.2, 0.5))
