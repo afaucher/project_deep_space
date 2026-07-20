@@ -1,11 +1,12 @@
-﻿extends SceneTree
+﻿extends Node
 
 const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
 
-func _init() -> void:
+func setup(main) -> void:
+	print("Starting automated test: test_foam_currents")
 	test_foam_forces()
-	print("Foam physics tests passed.")
-	quit()
+	print(">>> [TEST PASSED] test_foam_currents <<<")
+	get_tree().quit(0)
 
 func test_foam_forces() -> void:
 	var mass = 100.0
