@@ -527,19 +527,9 @@ func _draw() -> void:
 	var grid_size = WORLD_HALF_EXTENT
 	var camera_pos = pos
 	
-	if not is_ship_oriented:
-		# Clamp camera so map boundaries don't pan past the center of screen
-		var visible_half = (size / 2.0) / map_zoom
-		
-		if visible_half.x < grid_size:
-			camera_pos.x = clampf(camera_pos.x, -grid_size + visible_half.x, grid_size - visible_half.x)
-		else:
-			camera_pos.x = 0.0
-			
-		if visible_half.y < grid_size:
-			camera_pos.y = clampf(camera_pos.y, -grid_size + visible_half.y, grid_size - visible_half.y)
-		else:
-			camera_pos.y = 0.0
+	# Removed old camera clamping: The Foam boundary acts as a physical barrier now,
+	# and the grid visually fades into the void, so we want the camera to always
+	# perfectly follow the ship into the dark edge without artificially stopping.
 
 	var t = Transform2D()
 	t = t.translated(-camera_pos) # 1. Move camera target to origin
