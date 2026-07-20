@@ -62,6 +62,7 @@ func setup(main) -> void:
 	await _test_comply_flow()
 	await _test_fast_ship_runs()
 	_test_peak_speed_comply()
+	_test_overtaken_mid_flight()
 	await _test_release()
 	await _test_auto_resume()
 
@@ -110,6 +111,45 @@ func _test_peak_speed_comply() -> void:
 	leaf.tick(shuttle, bb2)
 	_assert(bb2.has_value("threat_issuer_iid"),
 		"a genuinely slow threat (peak 50) is still a RUN -- the fix doesn't make everyone comply")
+
+# --- M52a: overtaken mid-flight -- a RUN decision used to be made once and
+# never revisited; the chaser's LIVE peak now keeps re-checking the same
+# threshold every tick, and once it demonstrably closes to catching speed the
+# victim gives up and complies instead of continuing a race it's now losing.
+# Deterministic (hand-injected contacts/ticks, same style as
+# _test_peak_speed_comply above). -------------------------------------------
+func _test_overtaken_mid_flight() -> void:
+	print("\n--- M52a: victim reconsiders once overtaken mid-flight ---")
+	var shuttle = _make_ship(CargoShuttle, "OvertakenShuttle", 531, Vector2(400000, 40000), ["TEAM_CARGO4"])
+	var leaf = ThreatResponseLeaf.new()
+	var bb = BlackboardScript.new()
+	var iid := 454545
+	var trk := "TRK-%03d" % (abs(iid) % 1000)
+
+	# A threat that looks slow at demand time (peak ~50, well under the
+	# shuttle's 1000 max_speed / 1.6 pirate-flag ratio breakeven of ~625) ->
+	# the shuttle RUNs, exactly like Case B above.
+	shuttle.active_contacts = {trk: {"instance_id": iid, "vel": Vector2(50, 0),
+		"pos": Vector2(401000, 40000), "last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+	shuttle.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 9, "sender_iid": iid,
+		"sender_pos": Vector2(401000, 40000), "sender_flag": Standing.FLAG_PIRATE, "target_iid": shuttle.get_instance_id()}
+	leaf.tick(shuttle, bb)
+	_assert(bb.has_value("threat_issuer_iid") and shuttle.compelled_stop.is_empty(),
+		"setup sanity: a peak-50 threat starts a RUN, not a COMPLY")
+
+	# Same pending_demand (never cleared while running -- comply_with_stop()
+	# still reads it later); the SAME track now shows the chaser genuinely
+	# closing at 700, clearing the 625 breakeven with real margin. No new
+	# DEMAND arrives -- this has to be caught by the live re-check, not a
+	# fresh decision.
+	shuttle.active_contacts[trk]["vel"] = Vector2(-700, 0)
+	leaf.tick(shuttle, bb)
+	_assert(not bb.has_value("threat_issuer_iid"),
+		"overtaken (peak now 700 x1.6=1120 >= my 1000): the RUN incident clears")
+	_assert(not shuttle.compelled_stop.is_empty(),
+		"overtaken: the shuttle gives up and COMPLIES mid-flight (compelled_stop=%s)" % str(shuttle.compelled_stop))
+	_assert(shuttle.compelled_stop.get("issuer_iid", -1) == iid,
+		"the compliance is attributed to the actual chaser (issuer_iid=%d)" % shuttle.compelled_stop.get("issuer_iid", -1))
 
 func _finish() -> void:
 	if failures.is_empty():

@@ -14,10 +14,23 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # body or other leaves need to read):
 #   - "threat_issuer_iid": set while actively RUNNING from a demand; cleared
 #     (and this leaf returns FAILURE, handing back to CargoRun) once the
-#     issuer's track goes stale.
+#     issuer's track goes stale, OR (M52a) once the threat is OVERTAKEN --
+#     see below.
+#   - "threat_ratio": the RUN_SPEED_RATIO(_PIRATE_FLAG) that applied when this
+#     RUN started, carried alongside threat_issuer_iid so the overtaken-check
+#     below re-uses the same threshold rather than a fresh flag lookup.
 #   - "last_decided_seq": the seq of the last pending_demand this leaf already
 #     acted on, so a still-pending demand dict doesn't re-trigger the
 #     comply-or-run decision (and a fresh SOS) every single tick.
+#
+# M52a -- overtaken mid-flight: the comply-or-run call used to be made ONCE
+# per incident and never revisited while running, even as _update_contact_
+# peaks() (below) kept recording the chaser's speed in the background -- a
+# victim that watched its pursuer visibly closing the gap had no way to
+# reconsider short of a brand-new DEMAND. Now the active-RUN branch re-checks
+# the SAME threshold every tick against the live peak; once the threat has
+# actually demonstrated it can catch us, running is no longer rational and we
+# comply instead of burning fuel on a race already lost.
 const Steering = preload("res://scripts/ai/steering.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
@@ -53,7 +66,27 @@ func tick(actor: Node, blackboard) -> int:
 		var c: Dictionary = actor.active_contacts.get(issuer_trk, {})
 		if c.is_empty() or c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
 			blackboard.erase_value("threat_issuer_iid")
+			blackboard.erase_value("threat_ratio")
 			return FAILURE
+
+		# M52a: re-check the SAME threshold every tick against the live peak
+		# (_update_contact_peaks already refreshed it above) -- if the chaser
+		# has now demonstrably closed to catching-up speed, running is no
+		# longer the winning move. Give up and comply instead of continuing
+		# to burn fuel on a race we're now losing.
+		var run_ratio: float = blackboard.get_value("threat_ratio", RUN_SPEED_RATIO)
+		var live_peaks: Dictionary = blackboard.get_value("contact_peaks", {})
+		var live_threat_capability: float = live_peaks.get(issuer_iid, 0.0)
+		if actor.max_speed <= live_threat_capability * run_ratio:
+			if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
+				print("[Cargo] %s: overtaken mid-flight (threat now %.0f x%.1f >= my %.0f) -- giving up, COMPLY" %
+					[actor.name, live_threat_capability, run_ratio, actor.max_speed])
+			blackboard.erase_value("threat_issuer_iid")
+			blackboard.erase_value("threat_ratio")
+			if actor.has_method("comply_with_stop"):
+				actor.comply_with_stop()
+			return SUCCESS
+
 		_run_from(actor, c.get("pos", actor.position))
 		return SUCCESS
 
@@ -98,6 +131,7 @@ func tick(actor: Node, blackboard) -> int:
 
 	if will_run:
 		blackboard.set_value("threat_issuer_iid", issuer_iid)
+		blackboard.set_value("threat_ratio", ratio)
 		_run_from(actor, threat_pos)
 	elif actor.has_method("comply_with_stop"):
 		actor.comply_with_stop()
