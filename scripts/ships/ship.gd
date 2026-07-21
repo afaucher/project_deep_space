@@ -1049,7 +1049,8 @@ func get_component(comp_id: String) -> Dictionary:
 	return {}
 
 func get_component_origin(comp: Dictionary) -> Vector2:
-	return comp["rect"].position
+	var r: Rect2 = comp.get("rect", Rect2())
+	return r.position + r.size / 2.0
 
 func get_active_transponder_data() -> Dictionary:
 	for c in get_components_by_type("comms"):

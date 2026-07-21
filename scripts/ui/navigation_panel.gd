@@ -660,7 +660,8 @@ func _draw() -> void:
 				var r = w["range"]
 				var arc_w = w["arc_width"]
 				var w_heading = w["heading"]
-				var mount_pos = w.get("rect", Rect2()).position
+				var mount_rect = w.get("rect", Rect2())
+				var mount_pos = mount_rect.position + mount_rect.size / 2.0
 				var global_mount = pos + mount_pos.rotated(rot)
 				
 				var start_angle = rot + w_heading - arc_w / 2.0

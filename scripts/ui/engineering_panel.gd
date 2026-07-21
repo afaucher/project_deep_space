@@ -126,12 +126,25 @@ class ComponentSpatialView extends Control:
 
 	func _silhouette_loops_for(components: Array) -> Array:
 		var sig: Array = []
+		var all_pts: PackedVector2Array = PackedVector2Array()
 		for c in components:
-			sig.append(c.get("rect", Rect2()))
+			var r: Rect2 = c.get("rect", Rect2())
+			sig.append(r)
+			all_pts.append(r.position)
+			all_pts.append(r.position + Vector2(r.size.x, 0))
+			all_pts.append(r.position + Vector2(0, r.size.y))
+			all_pts.append(r.position + r.size)
+			
 		if sig == _silhouette_rects_sig:
 			return _silhouette_loops
 		_silhouette_rects_sig = sig
-		_silhouette_loops = ShipSilhouette.compute(components)
+		
+		var hull_points = Geometry2D.convex_hull(all_pts)
+		if not hull_points.is_empty():
+			_silhouette_loops = [{"points": hull_points, "is_hole": false}]
+		else:
+			_silhouette_loops = []
+			
 		return _silhouette_loops
 	
 	func _draw() -> void:
@@ -182,7 +195,7 @@ class ComponentSpatialView extends Control:
 						center.y - (p.x - offset_y) * scale_factor
 					))
 				ui_pts.append(ui_pts[0]) # close the loop
-				draw_polyline(ui_pts, HULL_OUTLINE_COLOR, 1.0)
+				draw_polyline(ui_pts, HULL_OUTLINE_COLOR, 8.0)
 
 		if eng_state.has("ship_components"):
 			for c in eng_state["ship_components"]:
