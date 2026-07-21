@@ -723,7 +723,12 @@ func _draw() -> void:
 
 	var debug_ships: Array = current_state.get("debug_ships", [])
 	for d_pos in debug_ships:
-		draw_circle(d_pos, 4.0 / map_zoom, Color.MAGENTA)
+		# Draw a huge, highly-visible magenta circle with a thick white border.
+		# Note: We must divide by map_zoom because draw_circle operates in world space,
+		# and the camera transform scales everything down when zoomed out.
+		var r = 15.0 / map_zoom
+		draw_circle(d_pos, r, Color.MAGENTA)
+		draw_arc(d_pos, r, 0, TAU, 16, Color.WHITE, 2.0 / map_zoom)
 
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
