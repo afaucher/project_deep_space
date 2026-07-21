@@ -28,6 +28,7 @@ enum GameMode { SANDBOX, CAMPAIGN }
 
 var is_host: bool = false
 var game_mode: int = GameMode.SANDBOX
+var debug_show_all_ships: bool = false
 var players = {}
 var asteroids = []
 var _next_sandbox_id: int = 900
@@ -348,6 +349,10 @@ func _on_peer_disconnected(id: int) -> void:
 		players.erase(id)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F9 and not event.echo:
+		debug_show_all_ships = not debug_show_all_ships
+		print("Debug map ships mode: ", debug_show_all_ships)
+
 	if event.is_action_pressed("system_exit"):
 		get_tree().quit()
 		
@@ -553,6 +558,7 @@ func _distribute_state() -> void:
 			"last_hails": ship.last_hails.duplicate(true),
 			"pending_demand": ship.pending_demand.duplicate(true),
 			"compelled_stop": ship.compelled_stop.duplicate(true),
+			"debug_ships": _get_debug_ships() if debug_show_all_ships else []
 		}
 		if client_id == multiplayer.get_unique_id():
 			# Update host's local terminal
@@ -562,6 +568,17 @@ func _distribute_state() -> void:
 			rpc_id(client_id, "receive_perceived_state", packet)
 			
 		ship.transient_events.clear()
+
+func _get_debug_ships() -> Array:
+	var arr = []
+	if cluster_manager != null:
+		for rec in cluster_manager.records:
+			if rec.kind == 5 or rec.kind == 3: # PLAYER or TRAFFIC (AI/Pirates)
+				if rec.live_node != null and is_instance_valid(rec.live_node) and rec.live_node is Node2D:
+					arr.append(rec.live_node.global_position)
+				else:
+					arr.append(rec.pos)
+	return arr
 
 # M41 -- plain-data summary of a MissionLog's active missions for the comms
 # panel's "Missions" section: [{title, objective_text}, ...], one entry per

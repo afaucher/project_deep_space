@@ -721,6 +721,10 @@ func _draw() -> void:
 	var contracts: Array = current_state.get("contracts", [])
 	_draw_contract_rings(contracts)
 
+	var debug_ships: Array = current_state.get("debug_ships", [])
+	for d_pos in debug_ships:
+		draw_circle(d_pos, 4.0 / map_zoom, Color.MAGENTA)
+
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
 	for c_id in contacts.keys():
