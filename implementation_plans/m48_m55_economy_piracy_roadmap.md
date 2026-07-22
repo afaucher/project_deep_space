@@ -236,8 +236,9 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 
 ## M52 — Patrol interdiction + SOS response
 
-> **SPLIT (campaign playtest, July 2026): two sub-milestones now precede
-> this milestone's original scope.**
+> **SPLIT (campaign playtest, July 2026): sub-milestones now precede
+> this milestone's original scope.** (a/b landed; c/d added by the
+> 2026-07-20 playtest — design_ideas/2026-07-20-pirate_playtest.md.)
 >
 > - **M52a — Pirate viability** (implementation_plans/m52a_pirate_viability.md):
 >   the campaign guild ledger read takes_total=0 — pirates loop on failed
@@ -256,6 +257,19 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 >   patrol behaviors in this milestone's original bullets should be built
 >   ON warrants, not on raw standing. Campaign framing decision leaning:
 >   player starts in a small militia with no warrant feed (see the doc).
+> - **M52c — Robbery mechanics** (implementation_plans/
+>   m52c_robbery_mechanics.md): the stop itself — standoff intercept with
+>   relative-velocity DONE (playtest: one pirate rammed the player and
+>   died, another "intercepted" without stopping), speed-match pacing
+>   during the demand, tightened 10s+ alongside robbery (soft-dock
+>   formation lock; hard ship-to-ship docking deferred), and player-side
+>   DEAD STOP autopilot.
+> - **M52d — Hail lifecycle + comms UX** (implementation_plans/
+>   m52d_hail_ux.md): pending_demand expiry on issuer-gone + RELEASE on
+>   job abort (playtest: a dead pirate's demand persisted forever),
+>   incoming-hail alert, COMPLY affordance (one press = declare + dead
+>   stop), and the hails panel restructured per-VESSEL (header = track/
+>   name/flag, consistent action buttons, no [TO YOU]).
 >
 > Original design-pass notes (now folded into M52b): a retraction verb
 > (who may un-mark, before patrols act on shared markings); player-facing
@@ -299,6 +313,17 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 > assumed to fall out of the warrant plumbing alone.
 
 ## M53 — Traffic guild + demand-driven cargo
+
+> **M53a — Economic expansion** (implementation_plans/
+> m53a_economic_expansion.md, from the 2026-07-20 playtest: "we don't have
+> enough traffic for pirates to have a good target selection") pulls the
+> world-building forward ahead of the demand ledger: 2x cluster radius,
+> wormhole moved near the center station, two mining colonies under a PEER
+> STATE's flag with routes back to center (jurisdiction seams via M52b's
+> warrant_authority for free), transient wormhole freighters running the
+> beacon road, and pirate circulation across the enlarged route set
+> (varied entry points; a false-flag "cruise lit as a freighter" hunting
+> posture alongside the existing dark lurk).
 
 - Traffic ledger: per-station demand scores fed by activity (docking
   events, mining ticks — start simple: dock count decay-averaged).
