@@ -837,6 +837,40 @@ func _get_port_authorities() -> Array:
 		_port_authority_cache_frame = frame
 	return _port_authority_cache
 
+# M45b perf fix (implementation_plans/m45b_datalink_relay_perf.md): LOS
+# between two ships is a symmetric physical fact -- same segment either
+# direction -- but the datalink relay block used to have EVERY ship raycast
+# LOS to EVERY other linked ship, so each pair's raycast ran TWICE a frame
+# (once from each end). Same frame-cache idiom as _port_authority_cache
+# above / _get_reactor_power_rating_cached below: whichever ship in a pair
+# asks first this physics frame computes and caches the answer; the other
+# ship in the same pair reads the cached bool instead of re-raycasting.
+# Same-tick dedup ONLY -- keyed by Engine.get_physics_frames(), so a cached
+# answer never survives past the tick it was computed in; multi-tick reuse
+# was deliberately ruled out (it would change the relay's documented
+# one-tick-of-latency-per-hop propagation timing that
+# test_sos_relay_bridge.gd and other relay tests assert on directly).
+static var _los_cache: Dictionary = {}
+static var _los_cache_frame: int = -1
+
+func _has_los(other: Node) -> bool:
+	var frame := Engine.get_physics_frames()
+	if frame != _los_cache_frame:
+		_los_cache = {}
+		_los_cache_frame = frame
+	var a_iid := get_instance_id()
+	var b_iid := other.get_instance_id()
+	var key := "%d:%d" % [min(a_iid, b_iid), max(a_iid, b_iid)]
+	if _los_cache.has(key):
+		return _los_cache[key]
+	var space_state = get_world_2d().direct_space_state
+	var ray_query = PhysicsRayQueryParameters2D.create(position, other.position)
+	ray_query.exclude = [self]
+	var ray_res = space_state.intersect_ray(ray_query)
+	var clear: bool = not (ray_res and ray_res.collider != other)
+	_los_cache[key] = clear
+	return clear
+
 func _update_port_zone_membership() -> void:
 	var nearest_authority = null
 	var nearest_dist: float = INF
@@ -3051,7 +3085,6 @@ func _physics_process(delta: float) -> void:
 	# area, see the M45 investigation).
 	var warrant_index_dirty := false
 	if self_comms_range > 0.0:
-		var space_state = get_world_2d().direct_space_state
 		for s in get_tree().get_nodes_in_group("ships"):
 			if s == self or s.is_dead: continue
 
@@ -3076,10 +3109,7 @@ func _physics_process(delta: float) -> void:
 
 			if not _iff_tags_overlap(iff_tags, s.iff_tags): continue
 
-			var ray_query = PhysicsRayQueryParameters2D.create(position, s.position)
-			ray_query.exclude = [self]
-			var ray_res = space_state.intersect_ray(ray_query)
-			if ray_res and ray_res.collider != s:
+			if not _has_los(s):
 				continue # Line of sight blocked
 
 			# M52b -- warrant relay: same link as the contact merge below, own
