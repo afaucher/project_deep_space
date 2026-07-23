@@ -402,7 +402,7 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 				"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"}, {"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
 			{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0, "on_abort": "hunt",
 				"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
-			{"verb": "TAKE_ALONGSIDE", "hold_time": 8.0, "range": 600.0, "on_abort": "hunt",
+			{"verb": "TAKE_ALONGSIDE", "hold_time": 12.0, "range": 200.0, "on_abort": "hunt",
 				"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
 			{"verb": "GO_DARK"}, # re-achieve dark after DEMAND_STOP's show_colors relit us
 			{"verb": "GO_TO", "label": "exfil", "pos": exfil_pos},

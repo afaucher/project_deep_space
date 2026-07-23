@@ -48,6 +48,44 @@ const SELECT_VICTIM_SCAN_INTERVAL := 30 # ticks -- per the design doc's "~30-tic
 # missed beats of slack).
 const DEMAND_REFRESH_FRAMES := int(2.0 * PHYSICS_HZ)
 
+# M52c -- standoff intercept + speed-match hold (implementation_plans/
+# m52c_robbery_mechanics.md items 1-2). The playtest's two failures were the
+# same missing concept: no standoff distance (INTERCEPT drove straight at the
+# victim's live position -- a ram waiting to happen against a moving victim)
+# and no relative-velocity gate (DONE was pure proximity, so "intercept"
+# could tag a moving target without ever matching its speed). INTERCEPT_
+# STANDOFF_DIST sits in the design doc's 300-500u "flanking, not tailgating"
+# band; INTERCEPT_SPEED_MATCH_THRESHOLD is comfortably under Ship's own
+# COMPLIED_STOP_SPEED_LIMIT (80 u/s, ship.gd) -- an intercept "matched" at 50
+# u/s of relative speed reads as alongside, not a flyby.
+const INTERCEPT_STANDOFF_DIST := 400.0
+const INTERCEPT_SPEED_MATCH_THRESHOLD := 50.0
+
+# Position-catchup gain for _pace_at_offset -- u/s of closing speed commanded
+# per u of distance from the pace target, clamped to the caller's cruise cap.
+# Large enough to saturate at "cruise" well outside the standoff band (so a
+# distant approach still reads as a normal cruise-in), small enough to taper
+# smoothly into a matched-velocity hold as the gap closes instead of
+# overshooting through it.
+const PACE_POSITION_GAIN := 0.6
+
+# Derates the sqrt braking profile's assumed accel below the ship's raw
+# thrust/mass -- the profile assumes the ship is ALREADY thrusting at full
+# accel exactly opposite its velocity error every tick, but turning to face
+# that direction (and the velocity-control PID chasing a rapidly-shrinking
+# target) both lag a tick or more behind a perfectly instantaneous response.
+# Empirically tuned against a throwaway debug trace: 1.0 (no derate)
+# consistently overshot the pace target and only satisfied the speed-match
+# threshold well past it, almost on top of the victim; this factor pulls the
+# "start slowing down" point earlier so the real (laggy) ship can actually
+# hold the curve.
+const PACE_BRAKING_SAFETY := 0.3
+
+# Hysteresis on TAKE_ALONGSIDE's in-range check -- see the step's own header
+# comment for why a bare "dist > range" cutoff isn't enough once the hold
+# envelope is tight.
+const TAKE_ALONGSIDE_EXIT_SLACK := 1.25
+
 # M52a: how long (frames) a failed-on victim is skipped by SELECT_VICTIM. A
 # ship we demanded and couldn't take is alerted and running -- 90s of rest
 # lets the hunt move to fresh prey instead of re-locking the same target.
@@ -131,6 +169,92 @@ static func _cruise_toward(actor, target: Vector2, exclude_pos, speed: float) ->
 # accumulate.
 static func _hold_station(actor) -> void:
 	actor.apply_control_input(0.0, 0.0, actor.rotation, 0, 1)
+
+# M52c -- a perpendicular offset from the victim's own heading (its velocity
+# vector, while it has way on; falls back to the last-known heading, then to
+# the actor's own bearing to the victim, for a victim sitting dead still with
+# no prior heading) -- "abeam", not dead ahead/behind, so a closing approach
+# reads as a flanking pass, not a tailgate. Which SIDE is picked once, the
+# first time this is called for the step's current run (`scratch` is cleared
+# on entry to the step -- job_runner_leaf.gd -- so this re-decides on every
+# fresh entry), from the actor's OWN current bearing to the victim at that
+# moment, so the approach doesn't have to loop around to reach its own side.
+static func _standoff_offset(actor, victim_pos: Vector2, victim_vel: Vector2, dist: float, scratch: Dictionary) -> Vector2:
+	var heading_dir: Vector2
+	if victim_vel.length() > 1.0:
+		heading_dir = victim_vel.normalized()
+	elif scratch.has("standoff_heading"):
+		heading_dir = scratch["standoff_heading"]
+	elif actor.position.distance_to(victim_pos) > 0.01:
+		heading_dir = (victim_pos - actor.position).normalized()
+	else:
+		heading_dir = Vector2.RIGHT
+	scratch["standoff_heading"] = heading_dir
+
+	var perp: Vector2 = Vector2(-heading_dir.y, heading_dir.x)
+	if not scratch.has("standoff_side"):
+		var to_actor: Vector2 = actor.position - victim_pos
+		scratch["standoff_side"] = 1.0 if perp.dot(to_actor) >= 0.0 else -1.0
+	return perp * scratch["standoff_side"] * dist
+
+# M52c -- shared "flank and match" steering for INTERCEPT/DEMAND_STOP's
+# approach and TAKE_ALONGSIDE's hold (implementation_plans/
+# m52c_robbery_mechanics.md item 2): steer toward target_pos (typically the
+# victim's position plus a _standoff_offset) while CARRYING the victim's own
+# velocity, not just chasing its raw position the way _cruise_toward does.
+# Position error contributes a catch-up term (clamped to `cruise`) on top of
+# target_vel, so a big gap surges to close it and a small one settles into
+# riding along at the victim's own speed -- a complying (decelerating)
+# victim naturally becomes a stationary alongside as its velocity drops, with
+# no separate "arrived, switch to holding" branch needed. Same steer-then-
+# apply_control_input idiom _cruise_toward uses (velocity-mode, Combat
+# steering); `exclude_pos` follows Steering.steer's own contract and is
+# always the victim's own position here, same as every existing _cruise_
+# toward call this file made against a victim -- the offset target point
+# (never the victim's own position) is what keeps the approach clear of the
+# hull, not generic obstacle avoidance. Passing the victim itself through
+# avoidance instead would fight this: Steering's own anti-overlap "safe"
+# radius (bounding radii + its 400u MARGIN, steering.gd) comfortably exceeds
+# a several-hundred-unit standoff, so an un-excluded victim reads as an
+# obstacle to shove away from right as the approach is trying to settle
+# there, and the two forces fight forever instead of converging.
+#
+# Catch-up speed profile: sqrt(2 * a_max * dist), the same time-optimal
+# "square-root braking curve" idea ship.gd's own rotation controller already
+# uses (its header comment: "Time-Optimal Rotational Controller (Square-root
+# curve braking)"), mirrored here for translation. A first pass used a plain
+# LINEAR ramp (speed proportional to distance, clamped to `cruise`); a
+# throwaway debug trace caught it overshooting the pace target every single
+# approach and orbiting for 30-60+ real seconds before a lucky pass finally
+# landed under the speed-match threshold -- a linear ramp only starts
+# shedding speed once inside `cruise / PACE_POSITION_GAIN`, which is
+# nowhere near enough room for the ship to actually stop given its real
+# thrust/mass deceleration, so it always arrived at the target still going
+# too fast. sqrt(2*a_max*dist) IS the stopping-distance-correct speed for a
+# ship that decelerates at a_max the whole way in -- no overshoot by
+# construction, confirmed against the same debug trace before landing this.
+static func _pace_at_offset(actor, target_pos: Vector2, target_vel: Vector2, exclude_pos, cruise: float) -> void:
+	var to_target: Vector2 = target_pos - actor.position
+	var dist: float = to_target.length()
+	var accel_max: float = (actor.get_ship_max_thrust() / actor.mass) if actor.mass > 0.0 else 0.0
+	var catchup: float
+	if accel_max > 0.0:
+		catchup = clampf(sqrt(2.0 * accel_max * PACE_BRAKING_SAFETY * dist), 0.0, cruise)
+	else:
+		catchup = clampf(dist * PACE_POSITION_GAIN, 0.0, cruise) # fallback: no engines to derive a braking curve from
+	var dir: Vector2 = to_target.normalized() if dist > 0.01 else Vector2.ZERO
+	var avoided: Vector2 = Steering.steer(actor, dir, exclude_pos)
+	var desired_vel: Vector2 = target_vel + avoided.normalized() * catchup
+
+	var steer: Vector2 = desired_vel - actor.linear_velocity
+	var heading: float
+	if steer.length() >= 10.0:
+		heading = steer.angle()
+	elif desired_vel.length() > 1.0:
+		heading = desired_vel.angle()
+	else:
+		heading = actor.rotation
+	actor.apply_control_input(0.0, desired_vel.length(), heading, 1, 1)
 
 static func _contact_for_instance(actor, iid: int) -> Dictionary:
 	if iid == -1:
@@ -519,10 +643,19 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 	return DONE
 
 # ---------------------------------------------------------------------------
-# INTERCEPT {} -- close on job["victim_iid"]'s track to inside comms-hail
-# range, DONE there; ABORT if the track's gone stale (belt to the runner's
-# own victim_lost abort_when, same "suspenders" idiom fire_opportunity_leaf
-# uses alongside fire_weapon's own guard).
+# INTERCEPT {standoff=400.0, cruise=600.0} -- M52c: close to a standoff point
+# OFFSET from job["victim_iid"]'s track (never the victim's own position --
+# see _standoff_offset/_pace_at_offset), DONE once BOTH inside hail range (or
+# the standoff distance, for a jammed/no-comms edge case) AND relative speed
+# is under INTERCEPT_SPEED_MATCH_THRESHOLD -- an intercept that can't be
+# rammed through (the target point itself always sits standoff_dist clear of
+# the victim's hull, continuously recomputed every tick as both move, so the
+# closed-loop approach curves clear of it rather than aiming through it) and
+# can't be flown by without matching speed (pure proximity used to DONE
+# regardless of closing speed -- the playtest's "INTERCEPT done" without ever
+# slowing down). ABORT if the track's gone stale (belt to the runner's own
+# victim_lost abort_when, same "suspenders" idiom fire_opportunity_leaf uses
+# alongside fire_weapon's own guard).
 # ---------------------------------------------------------------------------
 
 static func step_intercept(actor, step: Dictionary, job: Dictionary) -> int:
@@ -532,20 +665,35 @@ static func step_intercept(actor, step: Dictionary, job: Dictionary) -> int:
 		job["_abort_reason"] = "victim track lost"
 		return ABORT
 
+	var scratch: Dictionary = step.get("scratch", {})
+	var victim_pos: Vector2 = c.get("pos", actor.position)
+	var victim_vel: Vector2 = c.get("vel", Vector2.ZERO)
+	var standoff_dist: float = step.get("standoff", INTERCEPT_STANDOFF_DIST)
+
 	var hail_range: float = _hail_range_to(actor, victim_iid)
-	var dist: float = actor.position.distance_to(c.get("pos", actor.position))
-	if hail_range > 0.0 and dist <= hail_range:
+	var dist: float = actor.position.distance_to(victim_pos)
+	var rel_speed: float = (actor.linear_velocity - victim_vel).length()
+	var close_enough: bool = (hail_range > 0.0 and dist <= hail_range) or dist <= standoff_dist * 1.25
+	if close_enough and rel_speed <= INTERCEPT_SPEED_MATCH_THRESHOLD:
 		return DONE
 
-	var victim_pos: Vector2 = c.get("pos", actor.position)
-	_cruise_toward(actor, victim_pos, victim_pos, step.get("cruise", 600.0))
+	var offset: Vector2 = _standoff_offset(actor, victim_pos, victim_vel, standoff_dist, scratch)
+	_pace_at_offset(actor, victim_pos + offset, victim_vel, victim_pos, step.get("cruise", 600.0))
 	return CONTINUE
 
 # ---------------------------------------------------------------------------
-# DEMAND_STOP {show_colors=false, patience=25.0} -- send DEMAND(STOP), then
-# heartbeat-refresh it (M52d); DONE when our own track on the victim shows
-# complied_stop (M49 stamps this on ACKNOWLEDGE receipt); ABORT when
-# outpaced beyond hail range or patience expires un-complied.
+# DEMAND_STOP {show_colors=false, patience=25.0, standoff=400.0} -- send
+# DEMAND(STOP), then heartbeat-refresh it (M52d); DONE when our own track on
+# the victim shows complied_stop (M49 stamps this on ACKNOWLEDGE receipt);
+# ABORT when outpaced beyond hail range or patience expires un-complied.
+#
+# M52c: movement PACES the victim at the standoff offset (_pace_at_offset)
+# instead of chasing its raw position (_cruise_toward) -- this was the
+# playtest's ram: a moving victim's raw position is a pursuit curve that
+# terminates in its hull. A victim that complies decelerates, so the pace
+# naturally settles into a stationary alongside as its velocity drops; a
+# victim that runs opens the gap and the outpaced/patience aborts below fire
+# unchanged.
 # ---------------------------------------------------------------------------
 
 static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
@@ -566,7 +714,10 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 		return DONE
 
 	var victim_pos_demand: Vector2 = c.get("pos", actor.position)
-	_cruise_toward(actor, victim_pos_demand, victim_pos_demand, step.get("cruise", 400.0))
+	var victim_vel_demand: Vector2 = c.get("vel", Vector2.ZERO)
+	var standoff_dist: float = step.get("standoff", INTERCEPT_STANDOFF_DIST)
+	var offset: Vector2 = _standoff_offset(actor, victim_pos_demand, victim_vel_demand, standoff_dist, scratch)
+	_pace_at_offset(actor, victim_pos_demand + offset, victim_vel_demand, victim_pos_demand, step.get("cruise", 400.0))
 
 	# M52d -- heartbeat: first pass ISSUES the demand (new seq), every ~2s
 	# after that RE-ASSERTS it under the same seq so the victim's pending_
@@ -604,10 +755,19 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 	return CONTINUE
 
 # ---------------------------------------------------------------------------
-# TAKE_ALONGSIDE {hold_time=8.0, range=600.0} -- hold within range of the
-# complied victim; accumulate ONLY while in range and still complied. DONE:
-# loot_takes += 1, victim.looted = true. ABORT if complied_stop clears
-# (victim bolted).
+# TAKE_ALONGSIDE {hold_time=12.0, range=200.0} -- M52c robbery theater
+# (soft-dock): formation-lock at `range` -- actor _pace_at_offset's to the
+# victim's own offset point and zeroes RELATIVE velocity, the same "hold
+# rigidly" idiom _hold_station used for a stationary target, extended to
+# hold a moving offset (a victim whose complied_stop still carries a little
+# residual drift is paced, not out-braked out of formation). Accumulate
+# hold_time ONLY while inside `range` and still complied -- drifting out
+# pauses the clock (below), same as before M52c. DONE: loot_takes += 1,
+# victim.looted = true. ABORT if complied_stop clears (victim bolted).
+# `range` doubles as the soft-dock's standoff distance (see _standoff_
+# offset) -- tightened from the old 600u "nearby" to something that reads as
+# genuinely alongside, not the wider flanking distance INTERCEPT/DEMAND_STOP
+# hold at.
 #
 # M52d -- keeps refreshing job["demand_seq"] (stashed by DEMAND_STOP) the
 # WHOLE time this step runs: compelled_stop on the victim is heartbeat-kept
@@ -615,13 +775,25 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 # so without a refresh here the hold would lapse mid-robbery on its own
 # timeout. The refresh keeps going even while out of range/re-closing
 # (below) -- the pirate still wants the hold, it just hasn't caught up yet.
+#
+# M52c -- the in-range check carries hysteresis (TAKE_ALONGSIDE_EXIT_SLACK):
+# a hold already in progress only pauses past range*1.25, not the instant
+# distance ticks over `range` itself. A throwaway debug trace at the
+# tightened 200u default caught the pirate genuinely holding formation
+# (position noise + control-loop response bouncing a few tens of units,
+# +-15-20u, around the boundary) but dist crossing back and forth over the
+# bare `range` cutoff every tick, erasing hold_start_frame each time and
+# never accumulating -- a hold that visibly held station never finished. The
+# 600u default this replaced never showed it (the same jitter is a much
+# smaller fraction of a wider envelope); tightening the envelope is exactly
+# what surfaced it.
 # ---------------------------------------------------------------------------
 
 static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int:
 	var victim_iid: int = job.get("victim_iid", -1)
 	var scratch: Dictionary = step.get("scratch", {})
-	var range: float = step.get("range", 600.0)
-	var hold_time: float = step.get("hold_time", 8.0)
+	var range: float = step.get("range", 200.0)
+	var hold_time: float = step.get("hold_time", 12.0)
 
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty() or not c.get("complied_stop", false):
@@ -635,13 +807,16 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		scratch["last_refresh_frame"] = frame_now
 
 	var victim_pos_take: Vector2 = c.get("pos", actor.position)
+	var victim_vel_take: Vector2 = c.get("vel", Vector2.ZERO)
+	var offset: Vector2 = _standoff_offset(actor, victim_pos_take, victim_vel_take, range, scratch)
+	_pace_at_offset(actor, victim_pos_take + offset, victim_vel_take, victim_pos_take, step.get("cruise", 300.0))
+
 	var dist: float = actor.position.distance_to(victim_pos_take)
-	if dist > range:
-		_cruise_toward(actor, victim_pos_take, victim_pos_take, step.get("cruise", 300.0))
+	var in_hold: bool = scratch.has("hold_start_frame")
+	var within: bool = dist <= (range * TAKE_ALONGSIDE_EXIT_SLACK if in_hold else range)
+	if not within:
 		scratch.erase("hold_start_frame") # only accumulate while actually in range
 		return CONTINUE
-
-	_hold_station(actor)
 
 	var frame := Engine.get_physics_frames()
 	if not scratch.has("hold_start_frame"):
