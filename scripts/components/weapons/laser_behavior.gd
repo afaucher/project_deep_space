@@ -43,6 +43,24 @@ func execute_fire(ship: Ship, comp: Dictionary, target_pos: Vector2, target_cont
 	var global_mount_pos = ship.position + ship.get_component_origin(comp).rotated(ship.rotation)
 	var component_health_ratio = ship._component_health_ratio(comp)
 
+	# M45c bisect: perf_pd_hit_query OFF skips the intersect_shape broad-phase
+	# query entirely and resolves the hit directly against the body the
+	# assignment loop already locked onto (target_contact_id's tracked
+	# instance) -- perf isolation only, see debug_settings.gd. Default ON
+	# (real behavior unchanged): the query still matters for real gameplay
+	# (a laser can miss/hit whatever's actually AT the aim point, not
+	# necessarily the tracked contact if it moved/died/was replaced).
+	if DebugSettings and DebugSettings.get_choice("perf_pd_hit_query") == DebugSettings.PerfSubsystem.OFF:
+		var direct_body = instance_from_id(contact.get("instance_id", -1))
+		if is_instance_valid(direct_body) and direct_body != ship:
+			if direct_body.has_method("take_damage"):
+				var hit_dir = (target_aim_pos - global_mount_pos).normalized()
+				var actual_damage = comp["damage"] * component_health_ratio
+				direct_body.take_damage(actual_damage, global_mount_pos, hit_dir, comp["weapon_type"], ship.get_instance_id())
+			elif direct_body.has_method("get_signature"):
+				direct_body.queue_free()
+		return
+
 	# Find the actual body
 	var space_state = ship.get_world_2d().direct_space_state
 	var query = PhysicsShapeQueryParameters2D.new()

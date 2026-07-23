@@ -1365,7 +1365,27 @@ var sfx_missile: AudioStreamPlayer
 
 # Set true to re-enable verbose combat traces ([Damage]/[PD]); off by default so normal
 # play and headless tests are not flooded with per-hit / per-shot prints.
-const COMBAT_DEBUG := true
+# M45c -- this had silently drifted to `true` (commit 3616ecab, "Add
+# test_station_keeping and fix docking architecture" -- an unrelated change,
+# almost certainly a leftover from local debugging that got swept into that
+# commit) since 2026-07-07, 10 days after c7794d2 deliberately set it false
+# specifically to fix combat log spam (~500KB -> ~6KB per AI duel log). The
+# comment above was never updated either, which is how the regression stayed
+# invisible: the code silently stopped matching its own documented intent.
+# CONFIRMED this session as the dominant source of `perf_combat.gd`'s
+# 278ms-in-one-physics-frame `pd_assign` spike during a missile kill-wave --
+# see implementation_plans/m45c_pd_kill_wave_perf.md's Findings. Every
+# successful PD shot's damage cascade (take_damage -> [Damage]/[Collision]/
+# reactor-overheat/[PD]-shooting prints) runs INSIDE pd_assign's PerfProbe
+# window; with dozens of simultaneous kills in one physics frame, the prints'
+# console/stdout I/O -- not the assignment loop's own algorithm -- dominated
+# the measured cost by roughly two orders of magnitude (isolated via
+# DebugSettings "perf_pd_hit_query"/"perf_pd_multi_pass" bisection knobs,
+# which moved the spike by only tens of microseconds once this flag was back
+# off). Restoring `false` here is the actual M45c fix; it is NOT a
+# perf-only knob and must stay false as the shipped default -- flip to true
+# only for local interactive debugging of combat traces, never commit it On.
+const COMBAT_DEBUG := false
 
 func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: Vector2 = Vector2.ZERO, damage_type: String = "kinetic", attacker_id: int = -1) -> void:
 	if is_dead: return
@@ -4027,8 +4047,17 @@ func _process_point_defense() -> void:
 	# the same priority-ordered target list until every ready laser has
 	# fired or none of them can reach any remaining target.
 	PerfProbe.begin("pd_assign")
+	# M45c bisect: perf_pd_multi_pass OFF caps the outer while loop to a
+	# single pass (breaks the multi-pass concentration guarantee -- see
+	# test_point_defense.gd's _test_multiple_lasers_concentrate_on_one_target
+	# -- perf isolation only, see debug_settings.gd, never the real default).
+	var single_pass_only := DebugSettings and DebugSettings.get_choice("perf_pd_multi_pass") == DebugSettings.PerfSubsystem.OFF
+	var passes_done := 0
 	var fired_any = true
 	while not ready_lasers.is_empty() and fired_any:
+		if single_pass_only and passes_done >= 1:
+			break
+		passes_done += 1
 		fired_any = false
 		for t in targets:
 			if ready_lasers.is_empty(): break

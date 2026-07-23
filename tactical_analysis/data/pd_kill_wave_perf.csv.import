@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://deypyevos0ifj"
+
+[deps]
+
+files=["res://tactical_analysis/data/pd_kill_wave_perf.calls.translation", "res://tactical_analysis/data/pd_kill_wave_perf.total.translation", "res://tactical_analysis/data/pd_kill_wave_perf.avg.translation", "res://tactical_analysis/data/pd_kill_wave_perf.avg.translation", "res://tactical_analysis/data/pd_kill_wave_perf.max.translation"]
+
+source_file="res://tactical_analysis/data/pd_kill_wave_perf.csv"
+dest_files=["res://tactical_analysis/data/pd_kill_wave_perf.calls.translation", "res://tactical_analysis/data/pd_kill_wave_perf.total.translation", "res://tactical_analysis/data/pd_kill_wave_perf.avg.translation", "res://tactical_analysis/data/pd_kill_wave_perf.avg.translation", "res://tactical_analysis/data/pd_kill_wave_perf.max.translation"]
+
+[params]
+
+compress=true
+delimiter=0

@@ -75,9 +75,39 @@ var _last_frame_us: int = -1
 # tick -- this census shows how much of the "ships" group is dead weight.
 var dead_samples: Array = []
 
+# M45c -- per-second PerfProbe snapshots (cumulative total_us per tag at each
+# 60-frame boundary), so the worst BUCKET's own tag breakdown can be reported
+# separately from the whole-run average. A tag that's cheap 24/25 seconds and
+# spikes only during the kill-wave second gets smeared into a small
+# avg_us_per_frame over the whole window; diffing consecutive bucket
+# snapshots recovers what actually happened in JUST the worst second.
+var _bucket_snapshots: Array = []  # index i -> {tag -> total_us at end of bucket i}
+
 func setup(main) -> void:
 	main_node = main
-	print("=== M45 follow-up: combat perf (%d v %d frigates, %.0fs measured window) ===" % [SHIPS_PER_SIDE, SHIPS_PER_SIDE, MEASURE_SECONDS])
+	# M45c -- deterministic RNG for run-to-run comparable kill-wave timing/
+	# magnitude. `--run-tactical-sim` (unlike `--run-test`, see main.gd's
+	# _run_test) does NOT seed the global RNG, so per-frame sensor noise and
+	# missile jink were drawing from an entropy-seeded stream each launch --
+	# the same flakiness CLAUDE.md's determinism rule exists to prevent for
+	# combat-outcome sims, just not yet applied here. Same fixed seed as
+	# _run_test for consistency.
+	var seed_val: int = 20260708
+	var seed_env := OS.get_environment("M45C_SEED")
+	if seed_env != "":
+		seed_val = int(seed_env)
+	seed(seed_val)
+	print("=== M45 follow-up: combat perf (%d v %d frigates, %.0fs measured window, seed=%d) ===" % [SHIPS_PER_SIDE, SHIPS_PER_SIDE, MEASURE_SECONDS, seed_val])
+
+	# M45c bisection env hooks -- so the seed sweep / knob matrix can be driven
+	# from the shell without editing this file per run. Investigation-only;
+	# does not affect the sim when the env vars are unset (default ON/ON).
+	if OS.get_environment("M45C_HIT_QUERY_OFF") == "1":
+		DebugSettings.set_choice("perf_pd_hit_query", DebugSettings.PerfSubsystem.OFF)
+		print("  [bisect] perf_pd_hit_query = OFF")
+	if OS.get_environment("M45C_MULTI_PASS_OFF") == "1":
+		DebugSettings.set_choice("perf_pd_multi_pass", DebugSettings.PerfSubsystem.OFF)
+		print("  [bisect] perf_pd_multi_pass = OFF")
 
 	for i in range(SHIPS_PER_SIDE):
 		var a = Frigate.new()
@@ -140,6 +170,13 @@ func _physics_process(_delta: float) -> void:
 		wall_samples_us.append(now_us - _last_frame_us)
 	_last_frame_us = now_us
 
+	if PerfProbe.enabled and frame % 60 == 0:
+		var rep: Dictionary = PerfProbe.report()
+		var snap := {}
+		for tag in rep:
+			snap[tag] = rep[tag]["total_us"]
+		_bucket_snapshots.append(snap)
+
 	if frame >= MEASURE_FRAMES:
 		_finish()
 
@@ -190,6 +227,36 @@ func _finish() -> void:
 		tf.flush()
 		tf.close()
 		print("\n  wrote ", timeline_path)
+
+	# --- M45c: worst-bucket-specific PerfProbe attribution ---------------
+	# The whole-run average (below) can smear a tag that's cheap 24/25
+	# seconds and only spikes during the kill-wave second. Find the bucket
+	# with the worst max_phys_ms from the timeline just built, then diff
+	# consecutive cumulative-total_us snapshots to recover THAT bucket's own
+	# per-tag breakdown, not the diluted whole-window one.
+	if not _bucket_snapshots.is_empty() and not timeline.is_empty():
+		var worst_row: Dictionary = timeline[0]
+		for row in timeline:
+			if row["max_phys_ms"] > worst_row["max_phys_ms"]:
+				worst_row = row
+		var worst_idx: int = worst_row["t"]
+		if worst_idx < _bucket_snapshots.size():
+			var cur_snap: Dictionary = _bucket_snapshots[worst_idx]
+			var prev_snap: Dictionary = _bucket_snapshots[worst_idx - 1] if worst_idx > 0 else {}
+			var bucket_delta := {}
+			for tag in cur_snap:
+				var prev_v: int = int(prev_snap.get(tag, 0))
+				bucket_delta[tag] = int(cur_snap[tag]) - prev_v
+			var dtags: Array = bucket_delta.keys()
+			dtags.sort_custom(func(a, b): return bucket_delta[a] > bucket_delta[b])
+			print("\n=== M45c: worst bucket (t=%ds, max_phys_ms=%.3f) PerfProbe attribution (this second only) ===" % [worst_idx, worst_row["max_phys_ms"]])
+			print("%-24s %14s %10s" % ["tag", "total us (1s)", "%% of 1s"])
+			const SEC_US := 1_000_000.0
+			for tag in dtags:
+				var v: int = bucket_delta[tag]
+				if v <= 0:
+					continue
+				print("%-24s %14d %9.2f%%" % [tag, v, (float(v) / SEC_US) * 100.0])
 
 	# --- Whole-window summary (same shape as test_perf_baseline, for direct comparison) ---
 	var total := 0.0

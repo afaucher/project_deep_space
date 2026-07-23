@@ -145,6 +145,28 @@ const OPTIONS := {
 		],
 		"default": PerfSubsystem.ON,
 	},
+	# M45c -- PD kill-wave spike bisection. Isolates hypothesis 1 (execute_fire's
+	# per-shot intersect_shape physics query) from hypothesis 2 (the pd_assign
+	# outer-while loop's own iteration shape) so each can be measured
+	# independently via perf_combat.gd. Perf isolation only -- OFF states are
+	# not fairness-safe (see ship.gd call sites) and must never ship as the
+	# default.
+	"perf_pd_hit_query": {
+		"label": "M45c bisect: PD execute_fire intersect_shape query",
+		"choices": [
+			"On (default)",
+			"Off (skip the query, resolve hit against tracked contact directly -- perf isolation only)",
+		],
+		"default": PerfSubsystem.ON,
+	},
+	"perf_pd_multi_pass": {
+		"label": "M45c bisect: PD assignment multi-pass concentration",
+		"choices": [
+			"On (default)",
+			"Off (cap the outer while loop to a single pass -- perf isolation only, breaks concentration fairness)",
+		],
+		"default": PerfSubsystem.ON,
+	},
 	# Both pirate logs default ON (M52a): the console is omniscient by
 	# declaration -- developer visibility, not guild knowledge -- and the
 	# zero-takes campaign loop was invisible until these were flipped on.
