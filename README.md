@@ -4,8 +4,8 @@ A Godot 4.4.1 game.
 
 ## Requirements
 
-- Windows with PowerShell (uses bundled `Godot_v4.4.1-stable_win64.exe`), OR
-- Linux with bash (see setup below)
+- Windows with PowerShell (uses bundled `Godot_v4.4.1-stable_win64.exe`)
+- Building (`build.ps1`) is Windows-only. Linux support is currently limited to running the headless test suite — see "Running tests" below.
 
 ## Building
 
