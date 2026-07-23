@@ -14,6 +14,12 @@ extends Node
 # going quiet). Playtest bug pinned here: "the first demand never went
 # away, it was still there when the second pirate got me."
 #
+# Also covers S6 (design revised in review): Ship.acknowledge() and
+# Ship.engage_dead_stop() are DECOUPLED -- acknowledging a demand declares
+# receipt only, never compliance, since a player might acknowledge while
+# still running to buy time; only engage_dead_stop() actually sets
+# compelled_stop.
+#
 # Style: live ships + real comms delivery (test_honored_stop.gd's settle-
 # loop idiom -- physics isn't bit-deterministic, so margins/timeouts, never
 # exact frames). Scenario casts spawn on a ~150k-radius ring around the
@@ -95,6 +101,7 @@ func setup(main) -> void:
 	await _test_job_abort_clears()
 	await _test_refresh_dedup_and_new_demand()
 	await _test_hold_stays_alive_while_refreshed()
+	await _test_acknowledge_does_not_comply()
 
 	_finish()
 
@@ -315,7 +322,7 @@ func _test_hold_stays_alive_while_refreshed() -> void:
 	# refresh mechanism).
 	var seq := 555555
 	victim.pending_demand = {"rung": Hail.RUNG_STOP, "seq": seq, "sender_iid": pirate.get_instance_id(), "sender_pos": pirate.position, "sender_flag": "", "target_iid": victim.get_instance_id()}
-	victim.acknowledge_stop()
+	victim.engage_dead_stop()
 	_assert(victim.compelled_stop.get("demand_seq", -1) == seq, "S5 setup: victim compelled under the expected seq")
 
 	# Refresh on the JobSteps.DEMAND_REFRESH_FRAMES cadence for LONGER than
@@ -336,6 +343,64 @@ func _test_hold_stays_alive_while_refreshed() -> void:
 			lapsed = true
 			break
 	_assert(lapsed, "S5: once refreshes stop, the hold lapses via the same heartbeat timeout (no RELEASE)")
+
+# --- S6: ACKNOWLEDGE and stopping are DECOUPLED (design revised in review):
+# acknowledging a demand declares receipt only -- it must NOT set
+# compelled_stop or clear pending_demand, since a player might acknowledge
+# while still running, hoping to buy time. engage_dead_stop() (a separate
+# action) is what actually complies. Also covers acknowledge()'s generalized
+# scope: it works for an IDENTIFY demand too, not just STOP. ---------------
+func _test_acknowledge_does_not_comply() -> void:
+	print("\n--- S6: acknowledge() alone does not comply; engage_dead_stop() does ---")
+	var issuer = _make_ship("S6Issuer", 650, Vector2(150000, -150000), ["TEAM_P6"])
+	var victim = _make_ship("S6Victim", 651, Vector2(153000, -150000), ["TEAM_V6"])
+	await main_node.get_tree().physics_frame
+
+	# IDENTIFY first: acknowledge() must work for a non-STOP rung (the verb's
+	# own generalized meaning -- "I heard you," not STOP-specific).
+	var id_seq: int = issuer.send_demand(victim.get_instance_id(), Hail.RUNG_IDENTIFY)
+	var id_landed := false
+	for i in range(120):
+		await main_node.get_tree().physics_frame
+		if victim.pending_demand.get("seq", -1) == id_seq:
+			id_landed = true
+			break
+	_assert(id_landed, "S6 setup: IDENTIFY demand landed")
+	victim.acknowledge()
+	await main_node.get_tree().physics_frame
+	_assert(victim.compelled_stop.is_empty(), "S6: acknowledging an IDENTIFY demand never sets compelled_stop")
+
+	# Now a STOP demand: acknowledge() must NOT comply.
+	var seq: int = issuer.send_demand(victim.get_instance_id(), Hail.RUNG_STOP)
+	var landed := false
+	for i in range(120):
+		await main_node.get_tree().physics_frame
+		if victim.pending_demand.get("seq", -1) == seq:
+			landed = true
+			break
+	_assert(landed, "S6 setup: STOP demand landed")
+
+	victim.acknowledge()
+	await main_node.get_tree().physics_frame
+	await main_node.get_tree().physics_frame
+	_assert(victim.compelled_stop.is_empty(), "S6: acknowledge() alone leaves compelled_stop empty (the player might be buying time)")
+	_assert(victim.pending_demand.get("seq", -1) == seq, "S6: acknowledge() does NOT clear pending_demand -- the demand stays open")
+
+	# The demand must still be a live, heartbeat-kept channel after a bare
+	# acknowledge -- refreshing it from the issuer should still reset its
+	# timer (acknowledge didn't secretly resolve it).
+	for i in range(240): # 4s -- comfortably under the 6s timeout if it's still alive
+		if i % 120 == 0:
+			issuer.refresh_demand(victim.get_instance_id(), Hail.RUNG_STOP, seq)
+		await main_node.get_tree().physics_frame
+	_assert(victim.pending_demand.get("seq", -1) == seq, "S6: the demand survived past its own timeout window via refresh -- acknowledge left it a real, live channel")
+
+	# NOW genuinely comply: engage_dead_stop() reads the SAME still-open
+	# pending_demand and actually holds.
+	victim.engage_dead_stop()
+	_assert(victim.compelled_stop.get("issuer_iid", -1) == issuer.get_instance_id() and victim.compelled_stop.get("demand_seq", -1) == seq,
+		"S6: engage_dead_stop() compels against the demand acknowledge() left open, got compelled_stop=%s" % str(victim.compelled_stop))
+	_assert(victim.pending_demand.is_empty(), "S6: engage_dead_stop() resolves/clears pending_demand (now genuinely complied with)")
 
 func _finish() -> void:
 	if failures.is_empty():

@@ -348,7 +348,7 @@ func _tick_scenario_g() -> int:
 			if target.pending_demand.get("sender_iid", -1) != issuer_a.get_instance_id():
 				return -1 # not landed yet
 			var seq_a: int = target.pending_demand.get("seq", -1)
-			target.acknowledge_stop()
+			target.engage_dead_stop()
 			if target.compelled_stop.get("issuer_iid", -1) != issuer_a.get_instance_id() or target.compelled_stop.get("demand_seq", -1) != seq_a:
 				printerr("  ASSERT FAILED: compelled_stop should reference issuer_a's demand (seq=", seq_a, "), got compelled_stop=", target.compelled_stop)
 				return 0

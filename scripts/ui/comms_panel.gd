@@ -55,7 +55,13 @@ signal transponder_custom_name_changed(new_name: String)
 # M49 -- hail protocol (design_ideas/comms_verbs.md). M52d renamed
 # comply_requested -> acknowledge_requested with the COMPLY -> ACKNOWLEDGE
 # verb rename (the button declares receipt; compliance stays behavioral).
+# Revised in review: ACKNOWLEDGE and stopping are DECOUPLED -- a player
+# might acknowledge while still running, hoping to buy time, so
+# acknowledging must never force compliance. stop_requested is the
+# separate "actually comply" action (Ship.engage_dead_stop) -- the
+# "autopilot" half of the split.
 signal acknowledge_requested()
+signal stop_requested()
 signal sos_requested(nature: String)
 # Post-M51 playtest -- the contact action row moved HERE from the contacts
 # panel (contact rows are prime real estate; comms is where you talk to and
@@ -84,6 +90,7 @@ signal demand_requested(c_id: String, rung: String)
 var hail_banner: PanelContainer
 var hail_banner_label: Label
 var btn_acknowledge: Button
+var btn_stop: Button
 var btn_sos: Button
 var hails_title: Label
 var hails_vbox: VBoxContainer
@@ -179,15 +186,24 @@ func _ready() -> void:
 	hail_banner_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_hbox.add_child(hail_banner_label)
 
-	# M52d -- ACKNOWLEDGE (renamed from COMPLY): the label states the actual
-	# contract, because the playtest's confusion was exactly "do I stop? is
-	# the button just for fun?" -- pressing it declares receipt AND engages
-	# the ship-level dead stop (compelled_stop's throttle override).
+	# M52d -- ACKNOWLEDGE (renamed from COMPLY) and STOP are separate buttons
+	# (design revised in review): the playtest's original confusion was
+	# exactly "do I stop? is the button just for fun?", so a SECOND vague
+	# button would be worse than the bug this fixes -- each tooltip states
+	# its own contract explicitly. ACKNOWLEDGE never stops the ship (a
+	# player might acknowledge while still running, hoping to buy time);
+	# STOP is the deliberate choice to comply (Ship.engage_dead_stop).
 	btn_acknowledge = Button.new()
 	btn_acknowledge.text = "ACKNOWLEDGE"
-	btn_acknowledge.tooltip_text = "ACKNOWLEDGE — confirm receipt and hold station. Moving again voids compliance."
+	btn_acknowledge.tooltip_text = "ACKNOWLEDGE — confirm receipt only. Does not stop your ship."
 	btn_acknowledge.pressed.connect(func(): emit_signal("acknowledge_requested"))
 	banner_hbox.add_child(btn_acknowledge)
+
+	btn_stop = Button.new()
+	btn_stop.text = "STOP"
+	btn_stop.tooltip_text = "STOP — actually hold station and comply. Weapons cold while held. Moving again voids it."
+	btn_stop.pressed.connect(func(): emit_signal("stop_requested"))
+	banner_hbox.add_child(btn_stop)
 
 	top_pane.add_child(HSeparator.new())
 
@@ -337,14 +353,18 @@ func set_selected_contact_id(c_id: String) -> void:
 
 # M49/M52d -- honored-stop banner, two faces:
 #   HELD -- while compelled_stop is active, say so explicitly ("HELD --
-#   acknowledged <ship>'s stop") instead of leaving the player to infer the
+#   stopped for <ship>") instead of leaving the player to infer the
 #   throttle override; no button -- the hold ends on its own once the
 #   issuer stops refreshing it (the RELEASE verb is gone entirely, design
 #   revised in review; see hail.gd/ship.gd).
-#   DEMAND(STOP) -- a pending STOP demand shows the demand + the ACKNOWLEDGE
-#   button. Cleared when we acknowledge (pending_demand cleared server-side),
-#   the issuer's heartbeat goes quiet (M52d expiry), or a fresh demand
-#   replaces it.
+#   Pending demand -- shows for ANY rung (STOP or IDENTIFY): ACKNOWLEDGE is
+#   always available (design revised in review: acknowledging means "I
+#   heard you," not "I'm complying," so it applies to any demand, not just
+#   STOP). STOP only appears for a STOP-rung demand -- there's nothing to
+#   "stop" in response to an IDENTIFY. Cleared when the issuer's heartbeat
+#   goes quiet (M52d expiry) or a fresh demand replaces it; pressing
+#   ACKNOWLEDGE alone does NOT clear it (the demand stays open until
+#   genuinely complied with or it lapses).
 func _update_hail_banner() -> void:
 	if hail_banner == null:
 		return
@@ -352,16 +372,22 @@ func _update_hail_banner() -> void:
 	if not compelled.is_empty():
 		hail_banner.visible = true
 		btn_acknowledge.visible = false
-		hail_banner_label.text = "HELD — acknowledged %s's stop" % _vessel_display_name(compelled.get("issuer_iid", -1))
+		btn_stop.visible = false
+		hail_banner_label.text = "HELD — stopped for %s" % _vessel_display_name(compelled.get("issuer_iid", -1))
 		return
 	var demand: Dictionary = current_state.get("pending_demand", {})
-	var is_stop_demand: bool = demand.get("rung", "") == Hail.RUNG_STOP
-	hail_banner.visible = is_stop_demand
-	btn_acknowledge.visible = is_stop_demand
-	if is_stop_demand:
-		var flag: String = demand.get("sender_flag", "")
-		var flag_text: String = flag if flag != "" else "UNKNOWN (dark)"
-		hail_banner_label.text = "DEMAND(STOP) from flag: %s" % flag_text
+	if demand.is_empty():
+		hail_banner.visible = false
+		btn_acknowledge.visible = false
+		btn_stop.visible = false
+		return
+	var rung: String = demand.get("rung", "")
+	hail_banner.visible = true
+	btn_acknowledge.visible = true
+	btn_stop.visible = rung == Hail.RUNG_STOP
+	var flag: String = demand.get("sender_flag", "")
+	var flag_text: String = flag if flag != "" else "UNKNOWN (dark)"
+	hail_banner_label.text = "DEMAND(%s) from flag: %s" % [rung, flag_text]
 
 # Short display handle for a vessel by instance id: claimed transponder name,
 # else its track id in our contacts, else "vessel".

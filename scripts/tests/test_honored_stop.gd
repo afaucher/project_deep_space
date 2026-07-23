@@ -138,7 +138,7 @@ func _test_overtaken_mid_flight() -> void:
 	_assert(bb.has_value("threat_issuer_iid") and shuttle.compelled_stop.is_empty(),
 		"setup sanity: a peak-50 threat starts a RUN, not a COMPLY")
 
-	# Same pending_demand (never cleared while running -- acknowledge_stop()
+	# Same pending_demand (never cleared while running -- engage_dead_stop()
 	# still reads it later); the SAME track now shows the chaser genuinely
 	# closing at 700, clearing the 625 breakeven with real margin. No new
 	# DEMAND arrives -- this has to be caught by the live re-check, not a
@@ -408,8 +408,8 @@ func _test_release() -> void:
 	# Directly compel (bypass the delivery path -- already covered by
 	# test_hail_protocol.gd; this test is about the hold's heartbeat lapse).
 	held.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 1, "sender_iid": issuer.get_instance_id(), "sender_pos": issuer.position, "sender_flag": "", "target_iid": held.get_instance_id()}
-	held.acknowledge_stop()
-	_assert(not held.compelled_stop.is_empty(), "setup sanity: held ship is compelled after acknowledge_stop()")
+	held.engage_dead_stop()
+	_assert(not held.compelled_stop.is_empty(), "setup sanity: held ship is compelled after engage_dead_stop()")
 
 	# issuer stays ALIVE, in comms range, right next to held -- never sends
 	# anything else. The old presence-based check would hold forever here.
@@ -437,7 +437,7 @@ func _test_auto_resume() -> void:
 	var issuer = _make_ship(Frigate, "AutoResumeIssuer", 541, Vector2(3000, 0), ["TEAM_ISSUER2"])
 
 	held.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 1, "sender_iid": issuer.get_instance_id(), "sender_pos": issuer.position, "sender_flag": "", "target_iid": held.get_instance_id()}
-	held.acknowledge_stop()
+	held.engage_dead_stop()
 	_assert(not held.compelled_stop.is_empty(), "setup sanity: held ship is compelled")
 
 	issuer.queue_free()

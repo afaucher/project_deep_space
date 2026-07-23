@@ -1955,21 +1955,51 @@ func clear_contact_hostile(c_id: String) -> void:
 	c.erase("standing")
 	c.erase("standing_reason")
 
-# M49 -- the honored-stop declaration (design_ideas/comms_verbs.md's
-# "Stopped-under-compulsion"). M52d renamed COMPLY -> ACKNOWLEDGE (the verb
-# is "message received", compliance stays behavioral -- see hail.gd).
-# Requires a live STOP demand addressed to us (pending_demand); forces the
-# transponder on -- a stopped-but-dark ship has NOT complied, STOP implies
-# IDENTIFY -- broadcasts ACKNOWLEDGE {in_reply_to} so the issuer (and any
-# bystander who adopts complied_stop off our track, see the comms_inbox
-# block) honors the hold, and clears pending_demand (answered). Setting
-# compelled_stop is also what BRAKES the ship: the ship-level throttle
-# override in _physics_process holds a zero-velocity dead stop for as long
-# as the hold lasts, so one press = declare + actually stop (no separate
-# autopilot mode needed). Same RPC shape as mark_contact_hostile above; the
-# AI calls this directly (threat_response_leaf.gd), same as fire_weapon.
+# M49/M52d -- the ACKNOWLEDGE declaration (design_ideas/comms_verbs.md's
+# "Stopped-under-compulsion" is a DIFFERENT thing, see engage_dead_stop()
+# below). Revised in review: acknowledging and complying are DECOUPLED --
+# this means "I heard you," nothing else, for ANY pending demand (STOP or
+# IDENTIFY, not STOP-specific). Does NOT set compelled_stop and does NOT
+# clear pending_demand -- the demand stays open (still heartbeat-refreshed
+# by the issuer) until the player genuinely complies (engage_dead_stop) or
+# it lapses on its own. A player might acknowledge while still running,
+# hoping to buy time/distance rather than surrender -- acknowledging must
+# never force compliance. Bystanders who overhear the broadcast still
+# provisionally credit complied_stop (comms_inbox block below, unchanged):
+# this IS the mechanical cash-out of "buying time" -- the issuer gets the
+# same compliance grace window either way, and if the player's actual
+# velocity never drops, the grace period runs out and the bluff is caught,
+# same as it always would have been. Same RPC shape as mark_contact_hostile
+# above.
 @rpc("any_peer", "call_local")
-func acknowledge_stop() -> void:
+func acknowledge() -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	if pending_demand.is_empty():
+		return
+	var demand_seq: int = pending_demand.get("seq", -1)
+	Hail.send_broadcast(self, {"verb": Hail.VERB_ACKNOWLEDGE, "in_reply_to": demand_seq})
+
+# M49/M52d -- the honored-stop declaration (design_ideas/comms_verbs.md's
+# "Stopped-under-compulsion"): the player's (or AI's) deliberate CHOICE to
+# comply -- "the autopilot" half of the acknowledge/autopilot split (design
+# revised in review). Requires a live STOP demand (nothing to comply-stop
+# for an IDENTIFY). Forces the transponder on -- a stopped-but-dark ship has
+# NOT complied, STOP implies IDENTIFY -- broadcasts ACKNOWLEDGE {in_reply_to}
+# itself (a ship that's actually stopping is obviously also telling the
+# issuer so; no separate acknowledge() press required first) so the issuer
+# (and any bystander who adopts complied_stop off our track, see the
+# comms_inbox block) honors the hold, and clears pending_demand (resolved by
+# genuine compliance, not just acknowledged). Setting compelled_stop is also
+# what BRAKES the ship: the ship-level throttle override in _physics_process
+# holds a zero-velocity dead stop for as long as the hold lasts -- this IS
+# the minimal player-facing trigger for that state; M52c's fuller DEAD STOP
+# autopilot mode (matching/pacing a pursuer) is still that milestone's own
+# scope. The AI calls this directly (threat_response_leaf.gd), same as
+# fire_weapon -- its comply-or-run decision has no "buy time" nuance yet, so
+# it always calls this (not acknowledge()) when it decides not to run.
+@rpc("any_peer", "call_local")
+func engage_dead_stop() -> void:
 	if not is_multiplayer_authority() or is_dead: return
 	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
 	if pending_demand.get("rung", "") != Hail.RUNG_STOP:

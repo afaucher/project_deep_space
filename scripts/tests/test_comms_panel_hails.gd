@@ -157,24 +157,39 @@ func _test_rendered_entries(panel) -> void:
 	_assert(not panel._entry_nodes.has("TRK-001"), "deselected: selected-only vessel drops from the list")
 	_assert(panel._entry_nodes.has("TRK-002"), "hailer remains listed regardless of selection")
 
-# --- Banner: ACKNOWLEDGE face vs HELD face -----------------------------------
+# --- Banner: ACKNOWLEDGE vs STOP (decoupled) vs HELD face -------------------
 func _test_banner_states(panel) -> void:
-	print("\n--- banner: DEMAND(STOP)+ACKNOWLEDGE vs HELD ---")
+	print("\n--- banner: DEMAND+ACKNOWLEDGE/STOP vs HELD (decoupled, design revised in review) ---")
 	_assert(panel.btn_acknowledge.text == "ACKNOWLEDGE", "button text is ACKNOWLEDGE (renamed from COMPLY)")
-	_assert(panel.btn_acknowledge.tooltip_text.begins_with("ACKNOWLEDGE — confirm receipt and hold station"),
-		"tooltip states the contract")
+	_assert(panel.btn_acknowledge.tooltip_text.begins_with("ACKNOWLEDGE — confirm receipt only"),
+		"ACKNOWLEDGE's tooltip is explicit that it does NOT stop the ship")
+	_assert(panel.btn_stop.text == "STOP", "a separate STOP button exists")
+	_assert(panel.btn_stop.tooltip_text.begins_with("STOP — actually hold station"),
+		"STOP's tooltip states it's the real compliance action")
 
+	# A STOP-rung demand shows BOTH buttons.
 	panel.update_data(_packet({"pending_demand": {"rung": Hail.RUNG_STOP, "seq": 9,
 		"sender_iid": 202, "sender_flag": "JOLLY_ROGER", "target_iid": MY_IID}}))
 	_assert(panel.hail_banner.visible, "pending STOP demand: banner shows")
 	_assert(panel.btn_acknowledge.visible, "pending STOP demand: ACKNOWLEDGE button shows")
+	_assert(panel.btn_stop.visible, "pending STOP demand: STOP button shows")
 	_assert(panel.hail_banner_label.text == "DEMAND(STOP) from flag: JOLLY_ROGER",
 		"banner names the demanding flag, got '%s'" % panel.hail_banner_label.text)
 
+	# An IDENTIFY-rung demand shows ONLY ACKNOWLEDGE -- nothing to "stop" for.
+	panel.update_data(_packet({"pending_demand": {"rung": Hail.RUNG_IDENTIFY, "seq": 10,
+		"sender_iid": 202, "sender_flag": "JOLLY_ROGER", "target_iid": MY_IID}}))
+	_assert(panel.hail_banner.visible, "pending IDENTIFY demand: banner shows")
+	_assert(panel.btn_acknowledge.visible, "pending IDENTIFY demand: ACKNOWLEDGE button shows (acknowledge is rung-agnostic)")
+	_assert(not panel.btn_stop.visible, "pending IDENTIFY demand: no STOP button (nothing to stop for)")
+	_assert(panel.hail_banner_label.text == "DEMAND(IDENTIFY) from flag: JOLLY_ROGER",
+		"banner names the demand's actual rung, got '%s'" % panel.hail_banner_label.text)
+
 	panel.update_data(_packet({"compelled_stop": {"issuer_iid": 202, "demand_seq": 9, "heartbeat_timer": 0.0}}))
 	_assert(panel.hail_banner.visible, "compelled: banner shows the held state")
-	_assert(not panel.btn_acknowledge.visible, "compelled: no ACKNOWLEDGE button (already declared)")
-	_assert(panel.hail_banner_label.text == "HELD — acknowledged \"Rust Bucket\"'s stop",
+	_assert(not panel.btn_acknowledge.visible, "compelled: no ACKNOWLEDGE button")
+	_assert(not panel.btn_stop.visible, "compelled: no STOP button (already engaged)")
+	_assert(panel.hail_banner_label.text == "HELD — stopped for \"Rust Bucket\"",
 		"held state names the issuer, got '%s'" % panel.hail_banner_label.text)
 
 	panel.update_data(_packet())

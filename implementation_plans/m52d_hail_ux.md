@@ -85,26 +85,66 @@ received," your velocity says whether you're complying.
 
 Scope of the rename:
 - `Hail.VERB_COMPLY` → `VERB_ACKNOWLEDGE` (wire verb + the broadcast
-  string), `comply_with_stop()` → `acknowledge_stop()`, UI button text
-  ACKNOWLEDGE. Tests asserting on the old names update in the same pass.
+  string). Tests asserting on the old names update in the same pass.
 - The behavioral contact field `complied_stop` KEEPS its name: it tracks
-  actual compliance (declared AND holding station — the honor rule and
-  take_alongside read it as "is behaviorally complying"), which is
-  exactly what it says. Acknowledgment is the declaration; compliance is
-  the observed state; the two names now describe two genuinely different
-  things instead of one name straddling both.
+  actual compliance (holding station — the honor rule and take_alongside
+  read it as "is behaviorally complying"), which is exactly what it says.
 
-Presentation on top of the rename:
-- Button label/tooltip states the contract: "ACKNOWLEDGE — confirm
-  receipt and hold station. Moving again voids compliance."
-- Pressing ACKNOWLEDGE engages a dead stop automatically (one press =
-  declare + actually stop). M52c owns the full DEAD STOP autopilot mode;
-  landing M52d first means: wire to the existing M37 autopilot's stop
-  capability if one is trivially available, else declare-only with the
-  seam left marked for M52c.
-- While compelled_stop is active, the panel shows the held state
-  explicitly ("HELD — acknowledged <ship>'s stop") instead of leaving the
-  player to infer it.
+**Revised in review — ACKNOWLEDGE and stopping are DECOUPLED, not one
+button.** The first pass shipped `acknowledge_stop()` doing both
+(broadcast + engage `compelled_stop`) as "one press = declare + actually
+stop." That's wrong: it silently removes a real player choice. A player
+hailed by a pirate might want to ACKNOWLEDGE (say "message received")
+while still running, hoping to buy time/distance rather than surrender
+immediately — acknowledging must not force compliance. Two independent
+actions:
+
+- **`Ship.acknowledge()`** (renamed from `acknowledge_stop()`, and no
+  longer STOP-specific — works for ANY pending demand, IDENTIFY included,
+  per the verb's own meaning: "I heard you," full stop, nothing else).
+  Broadcasts `ACKNOWLEDGE{in_reply_to}`. Does NOT set `compelled_stop`
+  and does NOT clear `pending_demand` — the demand stays open (still
+  heartbeat-refreshed by the issuer) until the player genuinely complies
+  or it lapses. Bystanders who overhear the broadcast still provisionally
+  credit `complied_stop` (unchanged observer-side logic, no code change
+  needed there) — this is what "buying time" cashes out to mechanically:
+  the issuer gets the same compliance grace window either way, and if the
+  player's actual velocity never drops, the grace period runs out and the
+  lie is caught, same as it always would have been. Acknowledging an
+  IDENTIFY demand needs no further action; there is nothing to comply
+  with beyond having answered.
+- **`Ship.engage_dead_stop()`** (new — this IS "the autopilot," the
+  player's own deliberate choice to comply): requires a live STOP demand.
+  Sets `compelled_stop` (heartbeat-kept exactly as before), forces the
+  transponder on (STOP implies IDENTIFY), broadcasts ACKNOWLEDGE itself
+  (a ship that's actually stopping is obviously also telling the issuer
+  so — no separate press needed first), and clears `pending_demand` (now
+  resolved by genuine compliance). Functionally this is the OLD
+  `acknowledge_stop()` body, unchanged, just correctly named for what it
+  actually does and no longer reachable by pressing ACKNOWLEDGE alone.
+  M52c's full DEAD STOP autopilot mode (matching/pacing a pursuer) is
+  still that milestone's scope; this is the minimal player-facing trigger
+  for the SAME `compelled_stop` state, pulled forward because the
+  decoupling requires it to exist as its own action regardless.
+
+UI: two buttons in the banner, not one. ACKNOWLEDGE is always available
+while any demand is pending; STOP only appears for a STOP-rung demand
+(there's nothing to "stop" in response to an IDENTIFY). Tooltips make the
+split explicit given the ORIGINAL playtest confusion was exactly about
+what pressing the button does — reintroducing that ambiguity via a vague
+second button would be worse than the bug this fixes:
+- ACKNOWLEDGE: "confirm receipt only — does not stop your ship."
+- STOP: "actually hold station and comply. Weapons cold while held.
+  Moving again voids it."
+
+While `compelled_stop` is active, the panel shows the held state
+explicitly ("HELD — stopped for <ship>") instead of leaving the player to
+infer it.
+
+AI (threat_response_leaf.gd) has no "buy time" nuance in this milestone —
+its comply branch calls `engage_dead_stop()` directly (one call, same as
+before functionally; ACKNOWLEDGE-only is a player-UI-exposed choice, not
+something the AI's binary comply-or-run decision needs).
 
 ## 4. Hails panel restructure — sort by VESSEL, not by message
 
@@ -208,6 +248,49 @@ failure" design; re-running it will show the identical single failure
 until that bug is separately fixed, independent of M52d's own
 correctness.
 
+### Correction (calling session, post-commit): ACKNOWLEDGE/STOP decoupled
+
+User feedback after reviewing the shipped item 3: bundling ACKNOWLEDGE with
+engaging `compelled_stop` was wrong — a player might acknowledge a demand
+while still running, hoping to buy time or distance, and the original
+one-press design silently removed that choice. Corrected directly
+(implemented by the calling session, not delegated, given the M52d
+subagent's two prior spend-limit failures and the reviewer's now-complete
+grasp of the code):
+
+- `Ship.acknowledge_stop()` split into `acknowledge()` (broadcasts
+  ACKNOWLEDGE, works for ANY pending demand rung including IDENTIFY, does
+  NOT set `compelled_stop`, does NOT clear `pending_demand`) and
+  `engage_dead_stop()` (STOP-rung only, sets `compelled_stop`, broadcasts
+  ACKNOWLEDGE itself, clears `pending_demand`) — functionally the OLD
+  `acknowledge_stop()` body, just no longer reachable via the lighter
+  button alone.
+- `threat_response_leaf.gd`'s two comply branches call `engage_dead_stop()`
+  (AI's comply-or-run decision has no "buy time" nuance yet).
+- `comms_panel.gd` gained a second button (`btn_stop`/`stop_requested`);
+  the banner shows ACKNOWLEDGE for any pending demand and STOP only for a
+  STOP-rung one (nothing to "stop" for an IDENTIFY); tooltips state each
+  button's contract explicitly (the ORIGINAL playtest confusion was
+  exactly "what does this button do," so a second vague button would
+  reintroduce the bug this milestone fixed).
+- `terminal_display.gd` wires the new signal to `engage_dead_stop` RPC.
+- All `acknowledge_stop()` call sites in tests updated (grep-gate clean);
+  new S6 in `test_demand_lifecycle.gd` pins the decoupling itself
+  (acknowledge leaves `compelled_stop` empty and `pending_demand` open,
+  including for IDENTIFY; the still-open demand survives a refresh past
+  its own timeout; `engage_dead_stop()` afterward compels against that
+  SAME demand); `test_comms_panel_hails.gd`'s banner test extended for
+  both buttons' visibility rules and the IDENTIFY case.
+
+**Verification**: every touched/new test file passes individually. Full
+`build.ps1` gate showed two failures, both confirmed unrelated to this
+change: `test_pirate_ambush` (pre-existing, see above) and `test_ai_duel`
+(a 5-trial majority-vote combat test CLAUDE.md documents as physics-
+nondeterministic — re-run in isolation immediately after: 5/5 clean,
+confirming flakiness, not a regression; this change touches no missile/
+PD/combat code). A second full gate run confirmed no additional failures
+beyond these two known, unrelated ones.
+
 ## Tests
 
 - Demand heartbeat/expiry: refreshes stop (kill the pirate / move it out
@@ -221,11 +304,16 @@ correctness.
   freed within the timeout window; while TAKE_ALONGSIDE keeps
   refreshing, the hold never lapses mid-robbery. No live reference to
   VERB_RELEASE/send_release remains (grep gate).
-- ACKNOWLEDGE one-press: acknowledge_stop declares + brakes together;
-  compelled_stop shows held state; moving voids it (existing behavioral
-  check still passes). Rename regression: no live reference to
-  VERB_COMPLY/comply_with_stop remains (grep gate), and the honor rule
-  still holds fire on an acknowledged-and-holding ship.
+- ACKNOWLEDGE/STOP decoupling: pressing ACKNOWLEDGE alone leaves
+  pending_demand open and compelled_stop empty (fire_weapon stays live —
+  the player can still fight or flee); the demand keeps heartbeat-
+  refreshing/eventually lapsing exactly as if never acknowledged.
+  Acknowledging an IDENTIFY demand works (no rung restriction) and has no
+  STOP counterpart. Pressing STOP (engage_dead_stop) sets compelled_stop,
+  broadcasts ACKNOWLEDGE itself even with no prior press, and the honor
+  rule holds fire on the now-held ship. Rename regression: no live
+  reference to VERB_COMPLY/comply_with_stop/acknowledge_stop remains
+  (grep gate).
 - Panel structure is data-driven enough to test headless: given
   (selected, sent-hails, received-hails) fixtures, the entry list groups
   by vessel with the right actions enabled (same widget-level pattern as

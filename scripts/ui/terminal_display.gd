@@ -368,6 +368,7 @@ func _ready() -> void:
 	comms_panel.transponder_share_name_toggled.connect(_on_transponder_share_name_toggled)
 	comms_panel.transponder_share_loc_toggled.connect(_on_transponder_share_loc_toggled)
 	comms_panel.acknowledge_requested.connect(_on_acknowledge_requested)
+	comms_panel.stop_requested.connect(_on_stop_requested)
 	comms_panel.sos_requested.connect(_on_sos_requested)
 	# Post-M51 playtest -- the selected-contact action row lives on the comms
 	# panel now (see comms_panel.gd); same handlers as before, new emitter.
@@ -713,7 +714,14 @@ func _on_demand_requested(c_id: String, rung: String) -> void:
 func _on_acknowledge_requested() -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
-		ship_node.rpc_id(1, "acknowledge_stop")
+		ship_node.rpc_id(1, "acknowledge")
+
+# M52d -- decoupled from ACKNOWLEDGE (design revised in review): STOP is the
+# player's deliberate choice to comply, not a side effect of acknowledging.
+func _on_stop_requested() -> void:
+	var ship_node = _get_my_ship()
+	if ship_node:
+		ship_node.rpc_id(1, "engage_dead_stop")
 
 func _on_sos_requested(nature: String) -> void:
 	var ship_node = _get_my_ship()
