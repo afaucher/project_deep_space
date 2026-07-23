@@ -121,6 +121,21 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
 - **Debug toggles** live in the `DebugSettings` autoload as a registry (`OPTIONS`
   dict); the top-bar Debug menu builds itself from it. Read with
   `DebugSettings.get_choice("key")`. Add a knob by appending one `OPTIONS` entry.
+- **Debug log identifiers.** A ship's `name` (`Cluster_<record_id>` for a
+  cluster-spawned ship — `cluster_manager.gd`), its claimed transponder/cover
+  name, and its bare `get_instance_id()` are three UNRELATED-looking strings
+  for the same entity, each used by a different subsystem's `print()` (job
+  runner, pirate guild director, hail/damage logs) — a real correlation
+  problem once several ships are active at once (M52 overdrive playtesting
+  surfaced this directly: "Cluster_9011" in one log line, "'Second Return'"
+  in another, no way to tell if they're the same ship). Any new per-ship dev
+  print should identify the ship via `Ship.debug_label()` (`ship.gd`) —
+  `"<name> \"<claimed name>\""`, omniscient (works for a dark/undercover
+  ship too, unlike `get_active_transponder_data()`) — and any log keyed on a
+  director's own record (e.g. `pirate_guild.gd`'s ledger) should include the
+  raw `record_id` alongside the display name, so a human can match a
+  `Cluster_<id>` line from one subsystem to a `(record <id>)` line from
+  another.
 - **Sensor fusion** (angular-bin sweep → correlate → classify → decay/dead-reckon
   → datalink) lives in `ship.gd`'s `_physics_process`. See
   `design_ideas/real-time-sensor-signal.md` and `contact_tracing_and_cleanup.md`.

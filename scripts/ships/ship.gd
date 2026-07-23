@@ -1096,6 +1096,25 @@ func get_component_origin(comp: Dictionary) -> Vector2:
 	var r: Rect2 = comp.get("rect", Rect2())
 	return r.position + r.size / 2.0
 
+# Dev-log identifier standard (CLAUDE.md's "Debug log identifiers"): combines
+# the always-present node identity (name -- "Cluster_<record_id>" for a
+# cluster-spawned ship, embedding a stable id every subsystem can key on)
+# with whatever name this ship has claimed for itself (custom transponder/
+# cover name), if any -- so a line from job_runner_leaf's job log, pirate_
+# guild.gd's career log, and ship.gd's own hail/damage logs about the SAME
+# ship read as the same identity instead of three unrelated strings ("Cluster_
+# 9011" vs "Second Return" vs a raw instance id). Deliberately OMNISCIENT --
+# unlike get_active_transponder_data() below, this does NOT gate on transponder_
+# active, so a dark/undercover ship still resolves to its real name in dev
+# logs (pirate_guild_log's own header: "the console is omniscient by
+# declaration -- developer visibility, not guild knowledge").
+func debug_label() -> String:
+	for c in get_components_by_type("comms"):
+		var custom_name: String = c.get("transponder_custom_name", "")
+		if custom_name != "":
+			return "%s \"%s\"" % [name, custom_name]
+	return name
+
 func get_active_transponder_data() -> Dictionary:
 	for c in get_components_by_type("comms"):
 		if _component_powered(c) and c.get("transponder_active", true):
@@ -1305,7 +1324,19 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 	#     anonymous, we don't know who shot us).
 	#   - always posts to the aggression bus for witnesses to consume in
 	#     their own fusion tick, independent of whether we hold a track.
-	if attacker_id != -1:
+	# M52a death-cause instrumentation, fixed (calling session, 2026-07-22):
+	# always overwrite on EVERY hit, attributed or not -- this used to only
+	# update inside the attacker_id != -1 branch below, so a ship that took an
+	# earlier attributed hit and survived, then died to a LATER unattributed
+	# hit (every collision is attacker_id -1, see _on_body_entered's own
+	# comment: "fault is ambiguous"), kept reporting the stale EARLIER
+	# attacker as "killed by" -- actively misleading for exactly the case
+	# this instrumentation exists to diagnose (distinguishing a collision
+	# death from a weapon kill). Now it always reflects the TRUE last hit.
+	if attacker_id == -1:
+		last_damage_attacker_iid = -1
+		last_damage_attacker_name = "unattributed %s" % damage_type
+	else:
 		var attacker_trk: String = "TRK-%03d" % (abs(attacker_id) % 1000)
 		# M52a death-cause instrumentation: remember who last hit us. Prefer the
 		# attacker's claimed transponder name, fall back to the live node name.

@@ -116,7 +116,7 @@ func _abort_reason(job: Dictionary) -> String:
 # happens dark and off-lane; these lines are how a playtester watches it).
 func _job_log(actor: Node, msg: String) -> void:
 	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
-		print("[Job] %s: %s" % [actor.name, msg])
+		print("[Job] %s: %s" % [actor.debug_label(), msg])
 
 # Verb-aware detail for the DONE line -- the milestones worth a number.
 func _done_detail(actor: Node, step: Dictionary, job: Dictionary) -> String:

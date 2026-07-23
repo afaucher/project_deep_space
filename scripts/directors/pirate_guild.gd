@@ -160,8 +160,8 @@ func _check_ins(cluster) -> void:
 				# line can name it. Empty when the hull died to collision/anon.
 				m["killed_by"] = node.last_damage_attacker_name
 				var by: String = node.last_damage_attacker_name
-				_event("'%s' missed check-in (observed dead%s) -> OVERDUE" %
-					[m.get("cover_name", "?"), " -- killed by '%s'" % by if by != "" else ""])
+				_event("'%s' (record %d) missed check-in (observed dead%s) -> OVERDUE" %
+					[m.get("cover_name", "?"), record_id, " -- killed by '%s'" % by if by != "" else ""])
 			else:
 				m["last_seen_pos"] = node.position
 				m["last_loot_takes"] = node.loot_takes
@@ -169,7 +169,7 @@ func _check_ins(cluster) -> void:
 			m["state"] = MemberState.OVERDUE
 			m["overdue_since"] = 0.0
 			m["observed_dead"] = false
-			_event("'%s' missed check-in (vanished) -> OVERDUE" % m.get("cover_name", "?"))
+			_event("'%s' (record %d) missed check-in (vanished) -> OVERDUE" % [m.get("cover_name", "?"), record_id])
 
 # ---------------------------------------------------------------------------
 # 2. Resolve overdue past presumed_lost_delay. Vanished (not observed dead)
@@ -205,8 +205,8 @@ func _resolve_overdue(cluster, period: float) -> void:
 			loss_streak = 0
 			profitless_streak = 0
 			_recompute_backoff()
-			_event("'%s' CASHED OUT (takes +%d -> total %d, streak %d)" %
-				[m.get("cover_name", "?"), loot, takes_total, take_streak])
+			_event("'%s' (record %d) CASHED OUT (takes +%d -> total %d, streak %d)" %
+				[m.get("cover_name", "?"), record_id, loot, takes_total, take_streak])
 		elif vanished_near_wormhole:
 			# Left alive with an empty hold -- withdrew, not lost. Feeds backoff
 			# but never counts as a loss (no hull thinned) or a take.
@@ -215,8 +215,8 @@ func _resolve_overdue(cluster, period: float) -> void:
 			take_streak = 0
 			profitless_streak += 1
 			_recompute_backoff()
-			_event("'%s' RETURNED EMPTY (no take, alive; profitless streak %d, backoff x%.1f)" %
-				[m.get("cover_name", "?"), profitless_streak, backoff_factor])
+			_event("'%s' (record %d) RETURNED EMPTY (no take, alive; profitless streak %d, backoff x%.1f)" %
+				[m.get("cover_name", "?"), record_id, profitless_streak, backoff_factor])
 		else:
 			m["state"] = MemberState.LOST
 			losses += 1
@@ -225,8 +225,12 @@ func _resolve_overdue(cluster, period: float) -> void:
 			profitless_streak += 1
 			_recompute_backoff()
 			_erase_record(cluster, record_id)
-			_event("'%s' presumed LOST (%s; losses %d, streak %d, backoff x%.1f)" %
-				[m.get("cover_name", "?"), "observed dead" if m.get("observed_dead", false) else "vanished off-wormhole", losses, loss_streak, backoff_factor])
+			var kb: String = m.get("killed_by", "")
+			_event("'%s' (record %d) presumed LOST (%s%s; losses %d, streak %d, backoff x%.1f)" %
+				[m.get("cover_name", "?"), record_id,
+					"observed dead" if m.get("observed_dead", false) else "vanished off-wormhole",
+					" -- killed by '%s'" % kb if kb != "" else "",
+					losses, loss_streak, backoff_factor])
 
 # ---------------------------------------------------------------------------
 # 3. Cap adjust -- streak-driven, clamped [base_cap, max_cap] both ways.
