@@ -49,10 +49,18 @@ const NATURE_UNDER_ATTACK := "UNDER_ATTACK"
 const NATURE_DISABLED := "DISABLED"
 
 # SOS must be sendable on minimal/battery power (a distress beacon survives a
-# dead reactor even though the transponder didn't) -- fixed fallback range
-# used ONLY for SOS, and ONLY when the sender's own comms component reads
-# get_comms_range() <= 0 (unpowered/destroyed). Receivers still need working
-# radios; this only relaxes the SENDER's requirement.
+# dead reactor even though the transponder didn't) -- a floor for SOS range,
+# not a fallback triggered only when the comms component is fully dead.
+# Revised (calling session, 2026-07-23): the old version only kicked in at
+# get_comms_range() <= 0, so a comms component that was merely DAMAGED (down
+# to, say, 5000u of its normal 30000u) still capped SOS at that reduced
+# number -- "the consequence of a ship not being able to call for real help
+# because of a damage roll is high, and that breaks the fun." Now SOS always
+# gets AT LEAST this floor regardless of comms health, and a comms component
+# that's still working for MORE than this range lets SOS ride that instead
+# (a good working radio calls further than the battery backup, it just never
+# calls LESS far). Receivers still need a working radio of their own to hear
+# anything, SOS included -- this only relaxes the SENDER's requirement.
 const SOS_BATTERY_RANGE := 30000.0
 
 # Monotonically increasing across the whole process (not per-ship) -- gives
@@ -90,11 +98,10 @@ static func _dispatch(sender, target_iid: int, verb: Dictionary, seq_override: i
 
 	var is_sos: bool = verb.get("verb", "") == VERB_SOS
 	var sender_range: float = sender.get_comms_range()
-	if sender_range <= 0.0:
-		if is_sos:
-			sender_range = SOS_BATTERY_RANGE
-		else:
-			return -1 # no working radio, no send -- not even an overheard copy
+	if is_sos:
+		sender_range = max(sender_range, SOS_BATTERY_RANGE) # battery floor, never a ceiling
+	elif sender_range <= 0.0:
+		return -1 # no working radio, no send -- not even an overheard copy
 
 	var tree = sender.get_tree()
 	if tree == null:

@@ -148,22 +148,26 @@ func _ready() -> void:
 	btn_share_name.text = "Share Name"
 	btn_share_name.toggled.connect(func(pressed): emit_signal("transponder_share_name_toggled", pressed))
 	hbox1.add_child(btn_share_name)
-	
+
 	btn_share_loc = CheckButton.new()
 	btn_share_loc.text = "Share Location"
 	btn_share_loc.toggled.connect(func(pressed): emit_signal("transponder_share_loc_toggled", pressed))
 	hbox1.add_child(btn_share_loc)
-	my_vbox.add_child(hbox1)
 
 	# M49 -- SOS: sends UNDER_ATTACK if a fresh HOSTILE contact exists, else
 	# DISABLED. The actual nature pick happens in _on_sos_pressed() against
 	# current_state, same "packet-polling, not pushed" pattern as every other
-	# reader of current_state in this panel.
+	# reader of current_state in this panel. Deliberately plain -- just
+	# another comm control alongside Share Name/Share Location (calling
+	# session, 2026-07-23: the old standalone "[ SOS ]" button in ORANGE_RED
+	# read as a special, separately-important mechanic; SOS is meant to be
+	# ordinary infrastructure now, not a big red panic button).
 	btn_sos = Button.new()
-	btn_sos.text = "[ SOS ]"
-	btn_sos.add_theme_color_override("font_color", Color.ORANGE_RED)
+	btn_sos.text = "SOS"
 	btn_sos.pressed.connect(_on_sos_pressed)
-	my_vbox.add_child(btn_sos)
+	hbox1.add_child(btn_sos)
+
+	my_vbox.add_child(hbox1)
 
 	# M49 -- honored-stop banner: a red bar + COMPLY button, shown only while
 	# a pending STOP demand exists on the player ship (packet["pending_

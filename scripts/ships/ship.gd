@@ -2863,12 +2863,33 @@ func _physics_process(delta: float) -> void:
 					active_contacts[sender_trk]["complied_stop"] = true
 					active_contacts[sender_trk]["complied_stop_grace"] = COMPLIED_STOP_GRACE
 			Hail.VERB_SOS:
-				# NAV-layer only -- NEVER touches active_contacts/sensor
-				# fusion (the M41 rule, see scripts/story/contract_feed.gd's
-				# header).
+				# heard_sos stays the NAV/comms-layer channel for a sender we
+				# have NO real track on -- comms range >> sensor range is the
+				# whole point (M52 base's SOSResponseLeaf reads exactly this
+				# to close on a ship it can't yet see). Never MANUFACTURE a
+				# synthetic active_contacts entry from this alone -- that
+				# would be the exact M41 hazard (contract_feed.gd's header):
+				# a fabricated "detection" that decays/fuses like a real
+				# sensor blip when it isn't one.
 				var sos_copy: Dictionary = hail.duplicate(true)
 				sos_copy["age"] = 0.0
 				heard_sos[sender_iid] = sos_copy
+				# M52 -- generic contact attribute (calling session,
+				# 2026-07-23): "sos should be a contact attribute... let's
+				# make it more generic" -- but only ever ANNOTATING a track
+				# we already hold, the same eager-cache-stamp idiom
+				# ACKNOWLEDGE (complied_stop, just above) and take_damage()/
+				# post_warrant() (standing) already use. No new hazard: this
+				# never creates a contact, only tags a real one so any UI
+				# already reading active_contacts (weapons panel, contacts
+				# panel, targeting computer) picks up distress status for
+				# free instead of needing its own heard_sos-specific plumbing.
+				var sender_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+				if active_contacts.has(sender_trk):
+					var sc: Dictionary = active_contacts[sender_trk]
+					sc["sos"] = true
+					sc["sos_nature"] = hail.get("nature", "")
+					sc["sos_name"] = sos_copy.get("name", "")
 			Hail.VERB_MARK_HOSTILE:
 				# Broadcast form of the M48 datalink standing share -- only
 				# trusted from our own faction (crypto IFF-tag overlap,
@@ -2896,6 +2917,14 @@ func _physics_process(delta: float) -> void:
 			stale_sos.append(s_iid)
 	for s_iid in stale_sos:
 		heard_sos.erase(s_iid)
+		# Clear the mirrored contact attribute too, if we stamped one --
+		# otherwise an ordinary, still-fresh contact would carry a stale
+		# "sos" flag forever once the actual distress event has aged out.
+		var s_trk: String = "TRK-%03d" % (abs(s_iid) % 1000)
+		if active_contacts.has(s_trk):
+			active_contacts[s_trk].erase("sos")
+			active_contacts[s_trk].erase("sos_nature")
+			active_contacts[s_trk].erase("sos_name")
 
 	# complied_stop clears when a held contact's OBSERVED speed shows it
 	# bolted -- compliance is behavioral, not a one-time declaration. The
