@@ -668,6 +668,34 @@ func log_event(severity: String, text: String) -> void:
 		eng_log.pop_front()
 	eng_event.emit(eng_log[eng_log.size() - 1])
 
+# One readable line per non-refresh hail this ship sees (comms_inbox
+# processing, below) -- addressed to us or merely overheard, whichever verb.
+# Prefers the sender's claimed transponder name; falls back to its declared
+# flag, then to a plain "unidentified sender" for a fully dark hailer.
+func _describe_hail_for_log(hail: Dictionary, addressed_to_me: bool) -> String:
+	var verb: String = hail.get("verb", "")
+	var sender_iid: int = hail.get("sender_iid", -1)
+	var sender_flag: String = hail.get("sender_flag", "")
+	var sender_name: String = active_transponders.get(sender_iid, {}).get("name", "")
+	if sender_name == "":
+		sender_name = sender_flag if sender_flag != "" else "unidentified sender"
+	match verb:
+		Hail.VERB_DEMAND:
+			var rung: String = hail.get("rung", "")
+			if addressed_to_me:
+				return "Hailed: DEMAND(%s) from %s" % [rung, sender_name]
+			var target_iid: int = hail.get("target_iid", -1)
+			var target_name: String = active_transponders.get(target_iid, {}).get("name", "another vessel")
+			return "Overheard DEMAND(%s): %s to %s" % [rung, sender_name, target_name]
+		Hail.VERB_ACKNOWLEDGE:
+			return "Received ACKNOWLEDGE from %s" % sender_name
+		Hail.VERB_SOS:
+			return "Distress call (SOS) heard from %s" % sender_name
+		Hail.VERB_MARK_HOSTILE:
+			return "Standing report relayed from %s" % sender_name
+		_:
+			return "Hail (%s) from %s" % [verb, sender_name]
+
 # M40 -- begin_repairs on the HOST (station). Valid only while `ship` is
 # actually DOCKED at THIS host's own bay -- refuses a ship that's merely
 # CAPTURING (not settled yet), docked somewhere else, not dockable at all, or
@@ -2693,6 +2721,12 @@ func _physics_process(delta: float) -> void:
 			last_hails.append(hail)
 			if last_hails.size() > 8:
 				last_hails.pop_front()
+			# Every distinct hail this ship sees, sent or overheard, any verb --
+			# the same non-refresh gate last_hails itself uses (a heartbeat
+			# re-assert of an already-open demand is a no-op re-statement, not
+			# a new event; logging it every ~2s per active demand would drown
+			# the console under pirate_overdrive with N concurrent holds).
+			log_event(ENG_LOG_SEVERITY_INFO, _describe_hail_for_log(hail, addressed_to_me))
 
 		match verb:
 			Hail.VERB_DEMAND:
@@ -2709,8 +2743,6 @@ func _physics_process(delta: float) -> void:
 						pending_demand = hail
 						pending_demand["heartbeat_timer"] = 0.0
 						transient_events.append({"type": "hail", "verb": verb, "rung": rung, "sender_iid": sender_iid})
-						var hailer_name: String = active_transponders.get(sender_iid, {}).get("name", "unidentified sender")
-						log_event(ENG_LOG_SEVERITY_INFO, "Hailed: DEMAND(%s) from %s" % [rung, hailer_name])
 						# IDENTIFY never changes standing (asking is free); STOP
 						# marks the issuer HOSTILE unless their flag is one we
 						# hold as an authority (the police-stop exemption).
