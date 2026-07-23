@@ -291,6 +291,30 @@ confirming flakiness, not a regression; this change touches no missile/
 PD/combat code). A second full gate run confirmed no additional failures
 beyond these two known, unrelated ones.
 
+### Correction (calling session): STOP button parked
+
+User reconsidered: dead-stop-in-place is really an autopilot function and
+belongs under helm control (alongside a same-shaped "maintain distance /
+follow" mode — both are just "match target velocity/position," one at
+zero). That's a bigger design that needs its own doc and deserves being
+weighed against a full implementation rather than bolted onto the comms
+panel. Decision: park the autopilot design for now, and in the meantime
+the comms-panel STOP button is not the right shape for triggering
+dead-stop, so it's hidden.
+
+- `comms_panel.gd::_update_hail_banner()` forces `btn_stop.visible = false`
+  unconditionally (was `rung == Hail.RUNG_STOP`). The button node,
+  `stop_requested` signal, `Ship.engage_dead_stop()`, and the
+  `terminal_display.gd` wiring are all left in place — AI still calls
+  `engage_dead_stop()` directly, and it's the natural landing spot for a
+  future autopilot-driven STOP action.
+- `test_comms_panel_hails.gd`'s banner test updated: STOP-rung demand now
+  asserts the button stays hidden; kept an assertion that the button node
+  itself still exists (`text == "STOP"`) since nothing about the
+  underlying mechanism changed.
+- Verified via `test_comms_panel_hails` alone (all assertions pass); no
+  other files touched, so no broader gate re-run needed.
+
 ## Tests
 
 - Demand heartbeat/expiry: refreshes stop (kill the pirate / move it out

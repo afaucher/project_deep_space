@@ -384,7 +384,9 @@ func _update_hail_banner() -> void:
 	var rung: String = demand.get("rung", "")
 	hail_banner.visible = true
 	btn_acknowledge.visible = true
-	btn_stop.visible = rung == Hail.RUNG_STOP
+	# STOP hidden pending autopilot design (parked -- see design_ideas/).
+	# engage_dead_stop() still exists and is used by AI; just no player button.
+	btn_stop.visible = false
 	var flag: String = demand.get("sender_flag", "")
 	var flag_text: String = flag if flag != "" else "UNKNOWN (dark)"
 	hail_banner_label.text = "DEMAND(%s) from flag: %s" % [rung, flag_text]

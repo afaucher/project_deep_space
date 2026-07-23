@@ -163,16 +163,16 @@ func _test_banner_states(panel) -> void:
 	_assert(panel.btn_acknowledge.text == "ACKNOWLEDGE", "button text is ACKNOWLEDGE (renamed from COMPLY)")
 	_assert(panel.btn_acknowledge.tooltip_text.begins_with("ACKNOWLEDGE — confirm receipt only"),
 		"ACKNOWLEDGE's tooltip is explicit that it does NOT stop the ship")
-	_assert(panel.btn_stop.text == "STOP", "a separate STOP button exists")
-	_assert(panel.btn_stop.tooltip_text.begins_with("STOP — actually hold station"),
-		"STOP's tooltip states it's the real compliance action")
+	_assert(panel.btn_stop.text == "STOP", "the STOP button node still exists (engage_dead_stop still used by AI)")
 
-	# A STOP-rung demand shows BOTH buttons.
+	# STOP is hidden for ALL rungs -- parked pending autopilot/helm design
+	# (dead-stop-as-autopilot was decided to belong under helm control, not
+	# a standalone comms button; see design_ideas/).
 	panel.update_data(_packet({"pending_demand": {"rung": Hail.RUNG_STOP, "seq": 9,
 		"sender_iid": 202, "sender_flag": "JOLLY_ROGER", "target_iid": MY_IID}}))
 	_assert(panel.hail_banner.visible, "pending STOP demand: banner shows")
 	_assert(panel.btn_acknowledge.visible, "pending STOP demand: ACKNOWLEDGE button shows")
-	_assert(panel.btn_stop.visible, "pending STOP demand: STOP button shows")
+	_assert(not panel.btn_stop.visible, "STOP button parked/hidden even for a STOP-rung demand")
 	_assert(panel.hail_banner_label.text == "DEMAND(STOP) from flag: JOLLY_ROGER",
 		"banner names the demanding flag, got '%s'" % panel.hail_banner_label.text)
 
