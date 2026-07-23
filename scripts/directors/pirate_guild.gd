@@ -232,7 +232,26 @@ func _resolve_overdue(cluster, period: float) -> void:
 # 3. Cap adjust -- streak-driven, clamped [base_cap, max_cap] both ways.
 # ---------------------------------------------------------------------------
 
+# Dev convenience (DebugSettings "pirate_overdrive"): bypasses the streak-
+# gated ramp and the real-world arrival pacing so a playtester can see M52's
+# demand/robbery/interdiction loop repeatedly without waiting out minutes of
+# normal cap-ramp/spawn pacing. `DebugSettings and` guards direct
+# instantiation (tests, headless script contexts) where the autoload may not
+# be registered -- same pattern this file's _log() already uses.
+const OVERDRIVE_CAP := 6
+const OVERDRIVE_ARRIVAL_WINDOW := [8.0, 20.0]
+
+func _overdrive() -> bool:
+	return DebugSettings and DebugSettings.get_choice("pirate_overdrive") == DebugSettings.PirateOverdrive.ON
+
 func _adjust_cap() -> void:
+	if _overdrive():
+		if cap != OVERDRIVE_CAP:
+			_event("overdrive -- cap %d -> %d" % [cap, OVERDRIVE_CAP])
+		cap = OVERDRIVE_CAP
+		take_streak = 0
+		loss_streak = 0
+		return
 	var base_cap: int = config.get("base_cap", 1)
 	var max_cap: int = config.get("max_cap", 3)
 	if take_streak >= config.get("takes_per_cap_raise", 2):
@@ -255,7 +274,7 @@ func _adjust_cap() -> void:
 # ---------------------------------------------------------------------------
 
 func _schedule_floor() -> void:
-	var window: Array = config.get("arrival_window", [120.0, 300.0])
+	var window: Array = OVERDRIVE_ARRIVAL_WINDOW if _overdrive() else config.get("arrival_window", [120.0, 300.0])
 	var hull_mix: Array = config.get("hull_mix", [])
 	if hull_mix.is_empty():
 		return

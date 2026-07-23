@@ -2709,6 +2709,8 @@ func _physics_process(delta: float) -> void:
 						pending_demand = hail
 						pending_demand["heartbeat_timer"] = 0.0
 						transient_events.append({"type": "hail", "verb": verb, "rung": rung, "sender_iid": sender_iid})
+						var hailer_name: String = active_transponders.get(sender_iid, {}).get("name", "unidentified sender")
+						log_event(ENG_LOG_SEVERITY_INFO, "Hailed: DEMAND(%s) from %s" % [rung, hailer_name])
 						# IDENTIFY never changes standing (asking is free); STOP
 						# marks the issuer HOSTILE unless their flag is one we
 						# hold as an authority (the police-stop exemption).

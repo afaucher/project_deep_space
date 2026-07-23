@@ -67,6 +67,16 @@ enum PirateGuildLog { OFF, ON }
 # with pirate_guild_log for the full career: guild events + job milestones.
 enum JobLog { OFF, ON }
 
+# M52 dev convenience -- "pirate overdrive" (pirate_guild.gd). Playtesting
+# M52's demand/robbery/interdiction loop end to end means waiting out the
+# real cap-ramp (streak-gated, +/-1 per policy pass) and arrival pacing
+# (2-5 MINUTES between spawns by default) -- ON bypasses both: cap jumps
+# straight to a high fixed value and arrivals roll every 8-20s instead.
+# Read directly by pirate_guild.gd (same "flip a menu item, host behavior
+# changes immediately" convention this file's header describes), a sandbox
+# debug surface, not authoritative state.
+enum PirateOverdrive { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -153,6 +163,14 @@ const OPTIONS := {
 			"On (default -- one line per job step transition)",
 		],
 		"default": JobLog.ON,
+	},
+	"pirate_overdrive": {
+		"label": "Pirate overdrive (dev)",
+		"choices": [
+			"Off (normal cap ramp + 2-5min arrivals)",
+			"On (cap maxed, arrivals every 8-20s)",
+		],
+		"default": PirateOverdrive.OFF,
 	},
 }
 

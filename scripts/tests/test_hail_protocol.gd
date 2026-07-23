@@ -196,7 +196,15 @@ func _tick_scenario_a() -> int:
 			if not far_ship.last_hails.is_empty():
 				printerr("  ASSERT FAILED: out-of-range far_ship should hear nothing, got last_hails=", far_ship.last_hails)
 				return 0
-			print("  [PASS] directed DEMAND(STOP): target.pending_demand set; in-range bystander overheard; out-of-range far_ship heard nothing")
+			var hailed_logged := false
+			for entry in target.eng_log:
+				if String(entry.get("text", "")).begins_with("Hailed:"):
+					hailed_logged = true
+					break
+			if not hailed_logged:
+				printerr("  ASSERT FAILED: target's eng_log should carry a 'Hailed:' entry for the incoming demand, got eng_log=", target.eng_log)
+				return 0
+			print("  [PASS] directed DEMAND(STOP): target.pending_demand set; in-range bystander overheard; out-of-range far_ship heard nothing; eng_log recorded the hail")
 			return 1
 	return -1
 

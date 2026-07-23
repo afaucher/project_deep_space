@@ -223,6 +223,9 @@ func setup(main) -> void:
 	print("\n--- (e) Determinism ---")
 	_test_determinism()
 
+	print("\n--- (f) Overdrive (M52 dev toggle) ---")
+	_test_overdrive()
+
 	_finish()
 
 # ---------------------------------------------------------------------------
@@ -523,6 +526,38 @@ func _test_determinism() -> void:
 	_assert(guild1.arrivals == guild2.arrivals, "(e) identical pending arrivals across two seeded runs")
 	_assert(guild1.cap == guild2.cap and guild1.takes_total == guild2.takes_total and guild1.losses == guild2.losses,
 		"(e) identical totals/cap across two seeded runs")
+
+# ---------------------------------------------------------------------------
+# (f) Overdrive: DebugSettings "pirate_overdrive" ON bypasses BOTH the
+# streak-gated cap ramp (FAST_CONFIG's own max_cap=3 would otherwise clamp
+# it) and the config's arrival_window -- cap jumps straight to
+# PirateGuild.OVERDRIVE_CAP on the very next policy pass, and enough
+# arrivals roster up to actually reach it. Reset to OFF afterward so it
+# doesn't leak into a later run in this same process.
+# ---------------------------------------------------------------------------
+
+func _test_overdrive() -> void:
+	DebugSettings.set_choice("pirate_overdrive", DebugSettings.PirateOverdrive.ON)
+	var cluster = _make_cluster()
+	var guild = PirateGuild.new(FAST_CONFIG)
+	cluster.directors.append(guild)
+	var period: float = FAST_CONFIG["policy_period"]
+
+	cluster.tick(period)
+	_assert(guild.cap == PirateGuild.OVERDRIVE_CAP,
+		"(f) overdrive cap applies on the very next policy pass, bypassing config's max_cap=%d (got cap=%d, want %d)"
+			% [FAST_CONFIG["max_cap"], guild.cap, PirateGuild.OVERDRIVE_CAP])
+
+	var reached_full_roster := false
+	for i in range(120):
+		if _roster_count(guild) >= PirateGuild.OVERDRIVE_CAP:
+			reached_full_roster = true
+			break
+		cluster.tick(period)
+	_assert(reached_full_roster, "(f) roster pressure climbs past FAST_CONFIG's max_cap=%d, up to the overdrive cap (got %d)"
+		% [FAST_CONFIG["max_cap"], _roster_count(guild)])
+
+	DebugSettings.set_choice("pirate_overdrive", DebugSettings.PirateOverdrive.OFF)
 
 # ---------------------------------------------------------------------------
 
