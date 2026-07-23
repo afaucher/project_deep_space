@@ -86,6 +86,32 @@ const PACE_BRAKING_SAFETY := 0.3
 # envelope is tight.
 const TAKE_ALONGSIDE_EXIT_SLACK := 1.25
 
+# M52 playtest fix -- thermal governor for _pace_at_offset (calling session,
+# 2026-07-22): two pirates converging on the SAME victim never exclude EACH
+# OTHER from Steering.steer's avoidance (only the victim is excluded), so
+# their pacing math and their mutual anti-overlap push fight indefinitely --
+# neither ever settles, both hold near-max commanded speed forever. That's
+# real heat: _engine_heat_contribution scales with abs(throttle), and once
+# current_heat pegs at max_heat, ship.gd's OWN periodic check drains the
+# reactor's health directly (10 HP/s) -- a path that never goes through
+# take_damage(), so it produced zero [Damage] print, zero collision, and no
+# last_damage_attacker_name -- a pirate simply died mid-encounter with no
+# visible cause. Confirmed empirically: 2 pirates vs. 1 complying victim,
+# heat climbed 0 -> 140/140 in ~35s at throttle 0.7-1.0, reactor cooked to 0
+# HP by ~48s.
+#
+# Fix: _pace_at_offset now derates its OWN catchup surge as the actor's own
+# current_heat climbs, so no matter what's fighting it (another pirate's
+# avoidance, a target that never converges, anything), it can never hold
+# near-max commanded speed indefinitely -- it eases off well before
+# current_heat ever reaches max_heat, giving passive/active dissipation room
+# to work, self-stabilizing instead of pegging and taking reactor damage.
+# Below HEAT_SAFE_RATIO: no effect (normal single-target pacing, already
+# proven convergent by test_robbery_mechanics, is untouched). Above it:
+# linear derate to 0 at max_heat -- a ship that's ALREADY overheated (from
+# combat, not just maneuvering) coasts to a stop rather than adding more.
+const HEAT_SAFE_RATIO := 0.75
+
 # M52a: how long (frames) a failed-on victim is skipped by SELECT_VICTIM. A
 # ship we demanded and couldn't take is alerted and running -- 90s of rest
 # lets the hunt move to fresh prey instead of re-locking the same target.
@@ -233,6 +259,19 @@ static func _standoff_offset(actor, victim_pos: Vector2, victim_vel: Vector2, di
 # too fast. sqrt(2*a_max*dist) IS the stopping-distance-correct speed for a
 # ship that decelerates at a_max the whole way in -- no overshoot by
 # construction, confirmed against the same debug trace before landing this.
+# Linear derate 1.0 -> 0.0 as actor.current_heat climbs from HEAT_SAFE_RATIO
+# to max_heat. 1.0 (no effect) below the safe ratio or for a heatless/
+# max_heat<=0 actor (defensive -- every catalog hull has a reactor, but a
+# bare test fixture might not).
+static func _thermal_derate(actor) -> float:
+	var max_heat: float = actor.max_heat
+	if max_heat <= 0.0:
+		return 1.0
+	var ratio: float = actor.current_heat / max_heat
+	if ratio <= HEAT_SAFE_RATIO:
+		return 1.0
+	return clampf(1.0 - (ratio - HEAT_SAFE_RATIO) / (1.0 - HEAT_SAFE_RATIO), 0.0, 1.0)
+
 static func _pace_at_offset(actor, target_pos: Vector2, target_vel: Vector2, exclude_pos, cruise: float) -> void:
 	var to_target: Vector2 = target_pos - actor.position
 	var dist: float = to_target.length()
@@ -242,6 +281,7 @@ static func _pace_at_offset(actor, target_pos: Vector2, target_vel: Vector2, exc
 		catchup = clampf(sqrt(2.0 * accel_max * PACE_BRAKING_SAFETY * dist), 0.0, cruise)
 	else:
 		catchup = clampf(dist * PACE_POSITION_GAIN, 0.0, cruise) # fallback: no engines to derive a braking curve from
+	catchup *= _thermal_derate(actor)
 	var dir: Vector2 = to_target.normalized() if dist > 0.01 else Vector2.ZERO
 	var avoided: Vector2 = Steering.steer(actor, dir, exclude_pos)
 	var desired_vel: Vector2 = target_vel + avoided.normalized() * catchup
