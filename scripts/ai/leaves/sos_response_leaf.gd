@@ -60,7 +60,21 @@ func tick(actor: Node, blackboard) -> int:
 		blackboard.erase_value("sos_responding_to")
 		return FAILURE
 
+	# Prefer a live sensor/relay contact's position over the SOS's static
+	# send-time snapshot, if we happen to already hold (or have since
+	# gained) a fresh one -- a real, continuously-updated track is always
+	# more current than a fixed report, especially once relay hops start
+	# aging the snapshot further. This is the same "sos is a contact
+	# attribute, generic" idea applied to navigation: if we can actually see
+	# the ship, its own track IS the freshest source of truth for where it
+	# is, not the distress call that first told us to go looking.
 	var pos: Vector2 = sos.get("pos", actor.position)
+	var sender_trk: String = "TRK-%03d" % (abs(responding_to) % 1000)
+	if actor.active_contacts.has(sender_trk):
+		var c: Dictionary = actor.active_contacts[sender_trk]
+		if c.get("last_seen_timer", 999.0) <= actor.FIRE_STALENESS_MAX:
+			pos = c.get("pos", pos)
+
 	if actor.position.distance_to(pos) <= ARRIVAL_RADIUS:
 		blackboard.erase_value("sos_responding_to")
 		return FAILURE
