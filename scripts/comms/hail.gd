@@ -29,8 +29,14 @@
 
 # --- Verbs ------------------------------------------------------------------
 const VERB_DEMAND := "DEMAND"
-const VERB_COMPLY := "COMPLY"
-const VERB_RELEASE := "RELEASE"
+# M52d -- renamed from COMPLY (playtest decision): the verb is a DECLARATION
+# ("message received, holding station"), not the compliance itself --
+# compliance stays behavioral (the receiver-side complied_stop contact field,
+# which keeps its name; see implementation_plans/m52d_hail_ux.md item 3).
+# M52d -- VERB_RELEASE removed entirely (design revised in review): under the
+# channel model a demand/hold ends when the issuer stops refreshing it, so a
+# dedicated "stop the demand" verb was redundant with the heartbeat itself.
+const VERB_ACKNOWLEDGE := "ACKNOWLEDGE"
 const VERB_SOS := "SOS"
 const VERB_MARK_HOSTILE := "MARK_HOSTILE"
 
@@ -50,8 +56,8 @@ const NATURE_DISABLED := "DISABLED"
 const SOS_BATTERY_RANGE := 30000.0
 
 # Monotonically increasing across the whole process (not per-ship) -- gives
-# COMPLY {in_reply_to} a value that disambiguates simultaneous demands from
-# different issuers. reset() for tests (no cross-scenario bleed, same
+# ACKNOWLEDGE {in_reply_to} a value that disambiguates simultaneous demands
+# from different issuers. reset() for tests (no cross-scenario bleed, same
 # pattern as Standing.reset()).
 static var hail_seq: int = 0
 
@@ -66,16 +72,19 @@ static func _next_seq() -> int:
 # copy it (and every bystander in range) receives. Returns the hail's seq, or
 # -1 if the sender has no comms (silent failure -- a dark/reactor-dead ship
 # just can't transmit, except SOS's battery exception below).
-static func send(sender, target, verb: Dictionary) -> int:
+# M52d -- seq_override != -1 re-sends under an EXISTING seq (the demand
+# heartbeat: a refresh of a live demand, not a new hail; receivers key
+# refresh-vs-new on sender+seq). Default -1 draws a fresh seq as always.
+static func send(sender, target, verb: Dictionary, seq_override: int = -1) -> int:
 	if target == null or not is_instance_valid(target):
 		return -1
-	return _dispatch(sender, target.get_instance_id(), verb)
+	return _dispatch(sender, target.get_instance_id(), verb, seq_override)
 
 # Undirected/broadcast send: target_iid == -1 on the delivered copy.
 static func send_broadcast(sender, verb: Dictionary) -> int:
 	return _dispatch(sender, -1, verb)
 
-static func _dispatch(sender, target_iid: int, verb: Dictionary) -> int:
+static func _dispatch(sender, target_iid: int, verb: Dictionary, seq_override: int = -1) -> int:
 	if sender == null or not is_instance_valid(sender):
 		return -1
 
@@ -91,7 +100,7 @@ static func _dispatch(sender, target_iid: int, verb: Dictionary) -> int:
 	if tree == null:
 		return -1
 
-	var seq := _next_seq()
+	var seq := seq_override if seq_override != -1 else _next_seq()
 	var transponder_data: Dictionary = sender.get_active_transponder_data()
 	var hail: Dictionary = verb.duplicate(true)
 	hail["seq"] = seq

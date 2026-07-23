@@ -39,6 +39,15 @@ const PHYSICS_HZ := 60.0
 
 const SELECT_VICTIM_SCAN_INTERVAL := 30 # ticks -- per the design doc's "~30-tick-gated scoring"
 
+# M52d -- demand/hold heartbeat cadence (implementation_plans/m52d_hail_ux.md
+# item 1, design revised in review: RELEASE removed, both DEMAND_STOP and
+# TAKE_ALONGSIDE refresh the SAME seq via Ship.refresh_demand for as long as
+# the pirate wants the demand/hold). A demand/hold is a channel the issuer
+# keeps asserting; the victim clears it a few missed beats after the channel
+# goes quiet (Ship.HAIL_HEARTBEAT_TIMEOUT = 6s, so a 2s cadence gives ~3
+# missed beats of slack).
+const DEMAND_REFRESH_FRAMES := int(2.0 * PHYSICS_HZ)
+
 # M52a: how long (frames) a failed-on victim is skipped by SELECT_VICTIM. A
 # ship we demanded and couldn't take is alerted and running -- 90s of rest
 # lets the hunt move to fresh prey instead of re-locking the same target.
@@ -533,10 +542,10 @@ static func step_intercept(actor, step: Dictionary, job: Dictionary) -> int:
 	return CONTINUE
 
 # ---------------------------------------------------------------------------
-# DEMAND_STOP {show_colors=false, patience=25.0} -- send DEMAND(STOP) once;
-# DONE when our own track on the victim shows complied_stop (M49 stamps this
-# on COMPLY receipt); ABORT when outpaced beyond hail range or patience
-# expires un-complied.
+# DEMAND_STOP {show_colors=false, patience=25.0} -- send DEMAND(STOP), then
+# heartbeat-refresh it (M52d); DONE when our own track on the victim shows
+# complied_stop (M49 stamps this on ACKNOWLEDGE receipt); ABORT when
+# outpaced beyond hail range or patience expires un-complied.
 # ---------------------------------------------------------------------------
 
 static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
@@ -559,9 +568,25 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 	var victim_pos_demand: Vector2 = c.get("pos", actor.position)
 	_cruise_toward(actor, victim_pos_demand, victim_pos_demand, step.get("cruise", 400.0))
 
+	# M52d -- heartbeat: first pass ISSUES the demand (new seq), every ~2s
+	# after that RE-ASSERTS it under the same seq so the victim's pending_
+	# demand stays alive exactly as long as this step keeps running. The seq
+	# is ALSO stashed on the job dict (not just this step's own scratch,
+	# which resets on entry to a DIFFERENT step) -- TAKE_ALONGSIDE needs the
+	# same seq to keep refreshing the HOLD once the victim has complied.
+	# Abort/DONE simply stops the refreshes; no explicit "end the demand"
+	# send is needed on any path -- the RELEASE verb doesn't exist under the
+	# channel model, the victim's own heartbeat timeout is the only cleanup.
+	var frame_now := Engine.get_physics_frames()
 	if not scratch.get("demand_sent", false):
-		actor.send_demand(victim_iid, Hail.RUNG_STOP)
+		var seq: int = actor.send_demand(victim_iid, Hail.RUNG_STOP)
+		scratch["demand_seq"] = seq
 		scratch["demand_sent"] = true
+		scratch["last_refresh_frame"] = frame_now
+		job["demand_seq"] = seq
+	elif frame_now - scratch.get("last_refresh_frame", 0) >= DEMAND_REFRESH_FRAMES:
+		actor.refresh_demand(victim_iid, Hail.RUNG_STOP, scratch.get("demand_seq", -1))
+		scratch["last_refresh_frame"] = frame_now
 
 	var patience: float = step.get("patience", 25.0)
 	if _elapsed_seconds(scratch, "start_frame") > patience:
@@ -581,8 +606,15 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 # ---------------------------------------------------------------------------
 # TAKE_ALONGSIDE {hold_time=8.0, range=600.0} -- hold within range of the
 # complied victim; accumulate ONLY while in range and still complied. DONE:
-# loot_takes += 1, victim.looted = true, send RELEASE. ABORT if complied_stop
-# clears (victim bolted).
+# loot_takes += 1, victim.looted = true. ABORT if complied_stop clears
+# (victim bolted).
+#
+# M52d -- keeps refreshing job["demand_seq"] (stashed by DEMAND_STOP) the
+# WHOLE time this step runs: compelled_stop on the victim is heartbeat-kept
+# exactly like pending_demand (design revised in review, RELEASE removed),
+# so without a refresh here the hold would lapse mid-robbery on its own
+# timeout. The refresh keeps going even while out of range/re-closing
+# (below) -- the pirate still wants the hold, it just hasn't caught up yet.
 # ---------------------------------------------------------------------------
 
 static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int:
@@ -596,6 +628,11 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		job["_abort_reason"] = "victim bolted (complied_stop cleared)"
 		_blacklist_victim(job, victim_iid)
 		return ABORT
+
+	var frame_now := Engine.get_physics_frames()
+	if frame_now - scratch.get("last_refresh_frame", -DEMAND_REFRESH_FRAMES) >= DEMAND_REFRESH_FRAMES:
+		actor.refresh_demand(victim_iid, Hail.RUNG_STOP, job.get("demand_seq", -1))
+		scratch["last_refresh_frame"] = frame_now
 
 	var victim_pos_take: Vector2 = c.get("pos", actor.position)
 	var dist: float = actor.position.distance_to(victim_pos_take)
@@ -636,7 +673,10 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		if not pirate_c.is_empty():
 			pirate_c["standing"] = Standing.HOSTILE
 			pirate_c["standing_reason"] = "took cargo"
-	actor.send_release(victim_iid)
+	# M52d -- no RELEASE send: the step simply stops running (and therefore
+	# stops refreshing), and the victim's own compelled_stop heartbeat
+	# timeout ends the hold a few seconds later. Same latency trade as the
+	# demand side -- "the fiction working FOR us" per the design doc.
 	return DONE
 
 # ---------------------------------------------------------------------------

@@ -5,8 +5,9 @@ extends Node
 # (ArmedPinnace) arrives under a cover identity reading NEUTRAL to a watcher,
 # goes dark, lurks, selects a lone cargo shuttle crossing the lane, demands a
 # stop (colors shown), the victim complies (M49), the pirate takes it
-# (loot_takes==1, victim.looted, RELEASE received), exfils dark, relights
-# under a NEW name, and reads NEUTRAL again to a fresh observer. Full arc,
+# (loot_takes==1, victim.looted, hold lapses once the pirate stops refreshing
+# -- M52d's heartbeat model, no RELEASE verb), exfils dark, relights under a
+# NEW name, and reads NEUTRAL again to a fresh observer. Full arc,
 # built entirely from the canonical hunt job assembled here (the guild
 # director assembles this same shape in M51 -- test-issued in M50 per the
 # plan).
@@ -159,8 +160,8 @@ func setup(main) -> void:
 	_assert(job.get("victim_iid", -1) == victim.get_instance_id(), "SELECT_VICTIM picked the (only) cargo shuttle in the lane")
 	_assert(complied, "the victim complied with the pirate's DEMAND(STOP) (compelled_stop=%s)" % str(victim.compelled_stop))
 
-	# --- Phase 3: the take -- loot_takes, looted, RELEASE. ---
-	print("\n--- Phase 3: TAKE_ALONGSIDE -- loot_takes, victim.looted, RELEASE ---")
+	# --- Phase 3: the take -- loot_takes, looted, hold lapses. ---
+	print("\n--- Phase 3: TAKE_ALONGSIDE -- loot_takes, victim.looted, hold lapses ---")
 	var taken := false
 	for i in range(3600): # up to 60s -- TAKE_ALONGSIDE closes at a deliberately gentle pace, then holds 8s
 		await main_node.get_tree().physics_frame
@@ -172,15 +173,20 @@ func setup(main) -> void:
 	_assert(taken, "pirate.loot_takes incremented (loot_takes=%d)" % (pirate.loot_takes if is_instance_valid(pirate) else -1))
 	_assert(is_instance_valid(victim) and victim.looted, "victim.looted was stamped by the take")
 
+	# M52d -- no RELEASE verb: the pirate's TAKE_ALONGSIDE step (which was
+	# refreshing the hold) is done and the job moves on to exfil, so the
+	# refreshes simply stop. The victim's compelled_stop clears once its own
+	# heartbeat timeout (Ship.HAIL_HEARTBEAT_TIMEOUT, 6s) elapses -- generous
+	# margin past that, not "promptly".
 	var released := false
-	for i in range(180): # up to 3s -- RELEASE should land promptly
+	for i in range(600): # up to 10s -- comfortably past the 6s heartbeat timeout
 		await main_node.get_tree().physics_frame
 		if not is_instance_valid(victim):
 			break
 		if victim.compelled_stop.is_empty():
 			released = true
 			break
-	_assert(released, "victim received RELEASE (compelled_stop cleared)")
+	_assert(released, "victim's hold lapsed once the pirate stopped refreshing it (heartbeat timeout, no RELEASE)")
 
 	# --- Phase 4: exfil dark, launder wait, relight under a NEW name. -------
 	print("\n--- Phase 4: exfil dark -> AWAIT track_quiet -> RELIGHT (new name) ---")

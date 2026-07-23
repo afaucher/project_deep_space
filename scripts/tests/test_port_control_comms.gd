@@ -535,7 +535,7 @@ func _run_scenario_4_fast_path_parity() -> void:
 	control.player_ship = ship_fast
 	control.target_station = station_fast
 	control.refresh()
-	_assert(control.text == "Request Docking", "scenario 4: control reads 'Request Docking' before any grant")
+	_assert(control.text == "REQUEST DOCKING", "scenario 4: control reads 'REQUEST DOCKING' before any grant")
 
 	# Note: GDScript lambdas capture locals by VALUE at connect-time, not by
 	# reference, so a `func(o): got_outcome = o` closure would silently never
@@ -562,8 +562,8 @@ func _run_scenario_4_fast_path_parity() -> void:
 	_run_scenario_5_context_flip()
 
 # ---------------------------------------------------------------------------
-# Scenario 5: context flip. DockingControl reads "Request Docking" when
-# clear, flips to "Undock" once actually captured (docking_bay != null,
+# Scenario 5: context flip. DockingControl reads "REQUEST DOCKING" when
+# clear, flips to "UNDOCK" once actually captured (docking_bay != null,
 # DOCKED), and pressing Undock drives M32's request_undock() to EMPTY.
 # ---------------------------------------------------------------------------
 var s5_station = null
@@ -589,7 +589,7 @@ func _run_scenario_5_context_flip() -> void:
 	s5_control.player_ship = s5_shuttle
 	s5_control.target_station = s5_station
 	s5_control.refresh()
-	_assert(s5_control.text == "Request Docking", "scenario 5: reads 'Request Docking' before docking")
+	_assert(s5_control.text == "REQUEST DOCKING", "scenario 5: reads 'REQUEST DOCKING' before docking")
 
 	var result: Dictionary = s5_station.request_docking_via_control(s5_shuttle)
 	_assert(result.get("outcome") == "granted", "scenario 5: setup grant issued")
@@ -603,7 +603,7 @@ func _step_scenario_5(delta: float) -> void:
 		0:
 			if s5_bay.state == DockingBay.State.DOCKED:
 				s5_control.refresh()
-				_assert(s5_control.text == "Undock", "scenario 5: control flips to 'Undock' once DOCKED")
+				_assert(s5_control.text == "UNDOCK", "scenario 5: control flips to 'UNDOCK' once DOCKED")
 				s5_control._on_pressed()  # press Undock
 				s5_sub_phase = 1
 				s5_t = 0.0
@@ -614,7 +614,7 @@ func _step_scenario_5(delta: float) -> void:
 			if s5_t > 1.5:
 				_assert(s5_bay.state == DockingBay.State.EMPTY, "scenario 5: Undock press drives the bay to EMPTY")
 				s5_control.refresh()
-				_assert(s5_control.text == "Request Docking", "scenario 5: control flips back to 'Request Docking' after undock")
+				_assert(s5_control.text == "REQUEST DOCKING", "scenario 5: control flips back to 'REQUEST DOCKING' after undock")
 				_finish_scenario_5()
 
 func _finish_scenario_5() -> void:

@@ -12,10 +12,13 @@ extends Node
 # standing rules: (a) directed delivery + comms-range gating, (b) the
 # addressed target's own STOP standing rule (+ police-stop exemption),
 # (c) the overheard witness rule (+ authority-flag and assistance
-# exemptions), (d) COMPLY's in_reply_to disambiguation, (e) SOS delivery +
-# nature/name + TTL decay. Honored-stop mechanics (comply-or-run, the fire
-# guard, RELEASE, auto-resume) live in test_honored_stop.gd; the patrol
-# IDENTIFY challenge flow lives in test_patrol_challenge.gd.
+# exemptions), (d) ACKNOWLEDGE's in_reply_to disambiguation (M52d renamed
+# the verb from COMPLY), (e) SOS delivery + nature/name + TTL decay.
+# Honored-stop mechanics (comply-or-run, the fire guard, the hold's
+# heartbeat lapse, auto-resume) live in test_honored_stop.gd; the patrol
+# IDENTIFY challenge flow lives in test_patrol_challenge.gd; the M52d demand
+# heartbeat/expiry lives in test_demand_lifecycle.gd. (M52d removed the
+# RELEASE verb entirely -- see hail.gd/ship.gd.)
 
 const Ship = preload("res://scripts/ships/frigate.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
@@ -323,7 +326,7 @@ func _tick_scenario_f() -> int:
 			return 1
 	return -1
 
-# --- Scenario G: COMPLY in_reply_to disambiguation ---------------------------
+# --- Scenario G: ACKNOWLEDGE in_reply_to disambiguation ----------------------
 func _tick_scenario_g() -> int:
 	var target: Ship = ships["target"]
 	var issuer_a: Ship = ships["issuer_a"]
@@ -345,7 +348,7 @@ func _tick_scenario_g() -> int:
 			if target.pending_demand.get("sender_iid", -1) != issuer_a.get_instance_id():
 				return -1 # not landed yet
 			var seq_a: int = target.pending_demand.get("seq", -1)
-			target.comply_with_stop()
+			target.acknowledge_stop()
 			if target.compelled_stop.get("issuer_iid", -1) != issuer_a.get_instance_id() or target.compelled_stop.get("demand_seq", -1) != seq_a:
 				printerr("  ASSERT FAILED: compelled_stop should reference issuer_a's demand (seq=", seq_a, "), got compelled_stop=", target.compelled_stop)
 				return 0
@@ -363,7 +366,7 @@ func _tick_scenario_g() -> int:
 			if target.compelled_stop.get("demand_seq", -1) != _seq_a_captured or target.compelled_stop.get("issuer_iid", -1) != issuer_a.get_instance_id():
 				printerr("  ASSERT FAILED: compelled_stop.demand_seq must still reference issuer_a's demand (seq=", _seq_a_captured, ") after issuer_b's later demand landed, got compelled_stop=", target.compelled_stop)
 				return 0
-			print("  [PASS] COMPLY's in_reply_to disambiguated: compelled_stop.demand_seq=", _seq_a_captured, " (issuer_a) survives a later demand from issuer_b")
+			print("  [PASS] ACKNOWLEDGE's in_reply_to disambiguated: compelled_stop.demand_seq=", _seq_a_captured, " (issuer_a) survives a later demand from issuer_b")
 			return 1
 	return -1
 

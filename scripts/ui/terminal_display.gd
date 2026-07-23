@@ -32,6 +32,7 @@ var sfx_laser: AudioStreamPlayer
 var sfx_fan: AudioStreamPlayer       # looping coolant whir, ramped with heat
 var sfx_alarm: AudioStreamPlayer     # looping overheat klaxon
 var sfx_impact: AudioStreamPlayer    # one-shot hull thud on damage
+var sfx_hail: AudioStreamPlayer      # M52d -- one-shot incoming-hail ping
 var damage_flash: ColorRect          # red full-screen flash on damage
 var overheat_label: Label            # blinking on-screen overheat alert
 var zone_banner_label: Label         # M35 -- transient banner, now docking-outcome feedback only (zone-crossing use removed)
@@ -140,6 +141,19 @@ func _ready() -> void:
 	sfx_impact = AudioStreamPlayer.new()
 	sfx_impact.stream = load("res://assets/audio/impact.wav")
 	add_child(sfx_impact)
+
+	# M52d -- incoming-hail ping: one short NON-looping shot of the existing
+	# alarm sample (no new asset). duplicate() the stream -- the overheat
+	# klaxon above sets LOOP_FORWARD on the load()-cached resource, and a
+	# shared instance would loop this player too.
+	sfx_hail = AudioStreamPlayer.new()
+	var hail_stream = load("res://assets/audio/alarm.wav")
+	if hail_stream is AudioStreamWAV:
+		hail_stream = hail_stream.duplicate()
+		hail_stream.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	sfx_hail.stream = hail_stream
+	sfx_hail.volume_db = -8.0
+	add_child(sfx_hail)
 
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	
@@ -353,13 +367,13 @@ func _ready() -> void:
 	comms_panel.transponder_toggled.connect(_on_transponder_toggled)
 	comms_panel.transponder_share_name_toggled.connect(_on_transponder_share_name_toggled)
 	comms_panel.transponder_share_loc_toggled.connect(_on_transponder_share_loc_toggled)
-	comms_panel.comply_requested.connect(_on_comply_requested)
+	comms_panel.acknowledge_requested.connect(_on_acknowledge_requested)
 	comms_panel.sos_requested.connect(_on_sos_requested)
 	# Post-M51 playtest -- the selected-contact action row lives on the comms
 	# panel now (see comms_panel.gd); same handlers as before, new emitter.
-	# (MARK HOSTILE/UNMARK moved to weapons_panel -- wired above.)
+	# (MARK HOSTILE/UNMARK moved to weapons_panel -- wired above. M52d removed
+	# RELEASE entirely -- no release_requested signal/handler anymore.)
 	comms_panel.demand_requested.connect(_on_demand_requested)
-	comms_panel.release_requested.connect(_on_release_requested)
 	# M33 "Request Docking"/"Undock" context-flip control -- relocated from
 	# the top bar to the comms panel (post-M51 playtest: the top bar isn't
 	# gameplay space, and talking to port control IS comms). Same handshake
@@ -529,6 +543,12 @@ func update_data(packet: Dictionary) -> void:
 				sfx_laser.play()
 			elif ev["type"] == "damage":
 				_on_player_damage(ev.get("amount", 0.0))
+			elif ev["type"] == "hail":
+				# M52d -- incoming-hail alert (playtest: a DEMAND landed
+				# silently in a list you may not be looking at). Banner line
+				# (same slot/fade as the zone-crossing banner), a flash on the
+				# comms panel's HAILS header, and one short ping.
+				_on_incoming_hail(ev)
 			# zone_enter/zone_exit no longer raise the transient blue crossing
 			# banner (removed per playtest feedback); persistent zone info now
 			# lives with the helm velocity gauge (helm_panel.zone_limit_lbl).
@@ -569,6 +589,26 @@ func _on_zone_crossing(entering: bool, authority: String) -> void:
 		zone_banner_label.visible = true
 		zone_banner_label.modulate.a = 1.0
 	_zone_banner_timer = ZONE_BANNER_DURATION
+
+# M52d -- incoming-hail alert: a DEMAND addressed to the player raises the
+# same transient banner slot the zone-crossing/docking lines use, flashes
+# the comms panel's HAILS header, and pings once (ship.gd emits the "hail"
+# transient event only for demands ADDRESSED TO this ship -- overheard
+# traffic never alerts).
+func _on_incoming_hail(ev: Dictionary) -> void:
+	var rung: String = ev.get("rung", "")
+	var text: String = "INCOMING HAIL: %s%s" % [ev.get("verb", "HAIL"),
+		"(" + rung + ")" if rung != "" else ""]
+	zone_banner_text = text
+	if zone_banner_label != null:
+		zone_banner_label.text = text
+		zone_banner_label.visible = true
+		zone_banner_label.modulate.a = 1.0
+	_zone_banner_timer = ZONE_BANNER_DURATION
+	if comms_panel != null and comms_panel.has_method("flash_hails_alert"):
+		comms_panel.flash_hails_alert()
+	if sfx_hail != null and not sfx_hail.playing:
+		sfx_hail.play()
 
 # Fast-path "Request Docking" outcome -> transient banner line (same slot,
 # fade, and duration as the zone-crossing banner). PURE presentation of
@@ -649,12 +689,13 @@ func _on_mark_hostile_requested(c_id: String) -> void:
 	if ship_node:
 		ship_node.rpc_id(1, "mark_contact_hostile", c_id, "flagged by operator")
 
-# M49 -- DEMAND/RELEASE need the target's INSTANCE id (send_demand/
-# send_release RPCs take target_iid, not a track string -- Hail.send needs
-# an actual node). c_id is a track id local to OUR OWN active_contacts;
-# resolve it via contacts_panel's own current_state["contacts"] (the packet
-# already carries "instance_id" per contact record, same field
-# contacts_panel.gd already reads to merge transponder data).
+# M49 -- DEMAND needs the target's INSTANCE id (send_demand RPC takes
+# target_iid, not a track string -- Hail.send needs an actual node). c_id is
+# a track id local to OUR OWN active_contacts; resolve it via
+# contacts_panel's own current_state["contacts"] (the packet already
+# carries "instance_id" per contact record, same field contacts_panel.gd
+# already reads to merge transponder data). M52d removed RELEASE entirely,
+# so this is DEMAND-only now.
 func _resolve_contact_instance_id(c_id: String) -> int:
 	if not is_instance_valid(contacts_panel):
 		return -1
@@ -669,18 +710,10 @@ func _on_demand_requested(c_id: String, rung: String) -> void:
 	if ship_node:
 		ship_node.rpc_id(1, "send_demand", target_iid, rung)
 
-func _on_release_requested(c_id: String) -> void:
-	var target_iid: int = _resolve_contact_instance_id(c_id)
-	if target_iid == -1:
-		return
+func _on_acknowledge_requested() -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
-		ship_node.rpc_id(1, "send_release", target_iid)
-
-func _on_comply_requested() -> void:
-	var ship_node = _get_my_ship()
-	if ship_node:
-		ship_node.rpc_id(1, "comply_with_stop")
+		ship_node.rpc_id(1, "acknowledge_stop")
 
 func _on_sos_requested(nature: String) -> void:
 	var ship_node = _get_my_ship()

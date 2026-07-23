@@ -112,18 +112,26 @@ const FIRE_STALENESS_MAX := 3.0
 # accumulated seconds, not wall-clock, same convention as Standing's
 # AGGRESSION_EVENT_TTL). COMPLIED_STOP_SPEED_LIMIT: compliance is behavioral,
 # not a one-time declaration -- a contact we're crediting with complied_stop
-# loses it the moment its OBSERVED speed shows it bolted. COMPELLED_STOP_
-# LOST_ISSUER_TIMEOUT: nobody waits forever on a dead/out-of-range issuer's
-# permission (see the auto-resume block in _physics_process).
+# loses it the moment its OBSERVED speed shows it bolted.
 const HEARD_SOS_TTL := 90.0
 const COMPLIED_STOP_SPEED_LIMIT := 80.0
 # The behavioral check above only starts biting this many seconds after the
-# COMPLY was heard: the declaration arrives the instant compliance is DECIDED,
-# while the sender is usually still braking from cruise speed -- without the
-# grace, the flag was erased on the very next fusion tick (observed speed
-# still > limit) and never restored, since COMPLY is a one-shot event.
+# ACKNOWLEDGE was heard: the declaration arrives the instant compliance is
+# DECIDED, while the sender is usually still braking from cruise speed --
+# without the grace, the flag was erased on the very next fusion tick
+# (observed speed still > limit) and never restored, since ACKNOWLEDGE is a
+# one-shot event.
 const COMPLIED_STOP_GRACE := 15.0
-const COMPELLED_STOP_LOST_ISSUER_TIMEOUT := 10.0
+# M52d -- HAIL_HEARTBEAT_TIMEOUT (design revised in review, RELEASE removed
+# entirely): a demand/hold is a CHANNEL the issuer keeps asserting, not a
+# datagram plus a release contract. pending_demand AND compelled_stop are
+# both heartbeat-kept the same way -- the issuer re-sends the demand (same
+# seq) on a ~2s cadence while it still wants it (JobSteps.DEMAND_REFRESH_
+# FRAMES, both DEMAND_STOP and TAKE_ALONGSIDE refresh); a few missed beats
+# and the channel is considered dead. ONE timeout, ONE mechanism, covers
+# issuer death, out-of-comms, job abort, and lost interest for BOTH states --
+# no per-cause cleanup code, no verb whose only job is "stop the demand".
+const HAIL_HEARTBEAT_TIMEOUT := 6.0
 
 const CONTACT_CORRELATION_RANGE := 2000.0 # max distance (no instance_id match) to fuse a new blip into an existing contact instead of starting a new one
 const CONTACT_RESOLUTION_STALE_TIME := 0.3 # seconds since the last position update before a coarser-resolution bin is allowed to override position anyway
@@ -483,17 +491,25 @@ var warrant_index: Dictionary = {}
 # heard_sos: sender_iid -> the latest SOS hail heard from them (plus "age"),
 # NAV-layer only -- never touches active_contacts/sensor fusion (the M41
 # rule, see scripts/story/contract_feed.gd's header). pending_demand: the
-# latest unresolved DEMAND addressed to me (rung STOP or IDENTIFY).
-# compelled_stop: {} = not held; else {issuer_iid, demand_seq,
-# lost_issuer_timer} -- the honored-stop hard state, enforced at the ship
-# level (throttle override + fire guard), not the AI level. last_hails:
+# latest unresolved DEMAND addressed to me (rung STOP or IDENTIFY), heartbeat-
+# kept (see HAIL_HEARTBEAT_TIMEOUT) -- carries a "heartbeat_timer" scratch
+# field alongside the hail fields. compelled_stop: {} = not held; else
+# {issuer_iid, demand_seq, heartbeat_timer} -- the honored-stop hard state,
+# enforced at the ship level (throttle override + fire guard), not the AI
+# level, and heartbeat-kept the SAME way as pending_demand (M52d: RELEASE is
+# gone, channel-liveness replaces presence-checking for both). last_hails:
 # rolling log of the last ~8 hails heard, for the comms panel's HAILS
-# section.
+# section (heartbeat REFRESHES are excluded -- only first-receipt hails log).
+# sent_hails (M52d): rolling log of directed hails WE sent ({verb, rung,
+# target_iid, seq} -- appended by send_demand), the sender-side memory the
+# comms panel's vessel-grouped list needs (a vessel we hailed stays listed
+# so the hail can be tracked); same 8-entry ring as last_hails.
 var comms_inbox: Array = []
 var heard_sos: Dictionary = {}
 var pending_demand: Dictionary = {}
 var compelled_stop: Dictionary = {}
 var last_hails: Array = []
+var sent_hails: Array = []
 
 # M50 -- the job runner (design_ideas/jobs_and_itineraries.md, implementation_
 # plans/m50_pirate_tree_design.md). Two-slot model, NOT a stack: `assignment`
@@ -1940,24 +1956,32 @@ func clear_contact_hostile(c_id: String) -> void:
 	c.erase("standing_reason")
 
 # M49 -- the honored-stop declaration (design_ideas/comms_verbs.md's
-# "Stopped-under-compulsion"). Requires a live STOP demand addressed to us
-# (pending_demand); forces the transponder on -- a stopped-but-dark ship has
-# NOT complied, STOP implies IDENTIFY -- broadcasts COMPLY {in_reply_to} so
-# the issuer (and any bystander who adopts complied_stop off our track, see
-# the comms_inbox block) honors the hold, and clears pending_demand
-# (answered). Same RPC shape as mark_contact_hostile above; the AI calls
-# this directly (threat_response_leaf.gd), same as fire_weapon.
+# "Stopped-under-compulsion"). M52d renamed COMPLY -> ACKNOWLEDGE (the verb
+# is "message received", compliance stays behavioral -- see hail.gd).
+# Requires a live STOP demand addressed to us (pending_demand); forces the
+# transponder on -- a stopped-but-dark ship has NOT complied, STOP implies
+# IDENTIFY -- broadcasts ACKNOWLEDGE {in_reply_to} so the issuer (and any
+# bystander who adopts complied_stop off our track, see the comms_inbox
+# block) honors the hold, and clears pending_demand (answered). Setting
+# compelled_stop is also what BRAKES the ship: the ship-level throttle
+# override in _physics_process holds a zero-velocity dead stop for as long
+# as the hold lasts, so one press = declare + actually stop (no separate
+# autopilot mode needed). Same RPC shape as mark_contact_hostile above; the
+# AI calls this directly (threat_response_leaf.gd), same as fire_weapon.
 @rpc("any_peer", "call_local")
-func comply_with_stop() -> void:
+func acknowledge_stop() -> void:
 	if not is_multiplayer_authority() or is_dead: return
 	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
 	if pending_demand.get("rung", "") != Hail.RUNG_STOP:
 		return
 	var demand_seq: int = pending_demand.get("seq", -1)
 	var issuer_iid: int = pending_demand.get("sender_iid", -1)
-	compelled_stop = {"issuer_iid": issuer_iid, "demand_seq": demand_seq, "lost_issuer_timer": 0.0}
+	# M52d -- heartbeat_timer, not lost_issuer_timer: the hold is kept alive
+	# by the SAME demand_seq being refreshed (TAKE_ALONGSIDE keeps re-sending
+	# it), not by presence-checking the issuer. See HAIL_HEARTBEAT_TIMEOUT.
+	compelled_stop = {"issuer_iid": issuer_iid, "demand_seq": demand_seq, "heartbeat_timer": 0.0}
 	set_transponder_active(true)
-	Hail.send_broadcast(self, {"verb": Hail.VERB_COMPLY, "in_reply_to": demand_seq})
+	Hail.send_broadcast(self, {"verb": Hail.VERB_ACKNOWLEDGE, "in_reply_to": demand_seq})
 	pending_demand = {}
 
 # M32 -- player/AI-initiated undock. Only meaningful while actually captured
@@ -2611,39 +2635,68 @@ func _physics_process(delta: float) -> void:
 	PerfProbe.begin("comms_inbox")
 	var my_iid_hail := get_instance_id()
 	for hail in comms_inbox:
-		last_hails.append(hail)
-		if last_hails.size() > 8:
-			last_hails.pop_front()
-
 		var verb: String = hail.get("verb", "")
 		var sender_iid: int = hail.get("sender_iid", -1)
 		var target_iid: int = hail.get("target_iid", -1)
 		var addressed_to_me: bool = target_iid == my_iid_hail
 
+		# M52d -- heartbeat refresh detection (design revised in review: no
+		# RELEASE verb, no per-sender seq-tracking dict; a refresh is
+		# recognized by carrying the EXACT seq already stored on our own
+		# pending_demand or compelled_stop -- seqs are process-globally
+		# monotonic (Hail.hail_seq), so an exact match can only mean "the
+		# same demand, re-asserted"). A refresh must not re-alert, re-decide,
+		# re-mark, or spam the last_hails ring -- its only receiver-side
+		# effect is resetting the matching state's heartbeat_timer below.
+		var hail_seq: int = hail.get("seq", -1)
+		var refreshes_pending: bool = (verb == Hail.VERB_DEMAND and addressed_to_me and hail_seq != -1
+			and not pending_demand.is_empty()
+			and pending_demand.get("sender_iid", -1) == sender_iid
+			and pending_demand.get("seq", -1) == hail_seq)
+		var refreshes_hold: bool = (verb == Hail.VERB_DEMAND and addressed_to_me and hail_seq != -1
+			and not compelled_stop.is_empty()
+			and compelled_stop.get("issuer_iid", -1) == sender_iid
+			and compelled_stop.get("demand_seq", -1) == hail_seq)
+		var is_refresh: bool = refreshes_pending or refreshes_hold
+
+		if not is_refresh:
+			last_hails.append(hail)
+			if last_hails.size() > 8:
+				last_hails.pop_front()
+
 		match verb:
 			Hail.VERB_DEMAND:
 				var rung: String = hail.get("rung", "")
 				if addressed_to_me:
-					pending_demand = hail
-					transient_events.append({"type": "hail", "verb": verb, "rung": rung, "sender_iid": sender_iid})
-					# IDENTIFY never changes standing (asking is free); STOP
-					# marks the issuer HOSTILE unless their flag is one we
-					# hold as an authority (the police-stop exemption).
-					if rung == Hail.RUNG_STOP:
-						var sender_flag: String = hail.get("sender_flag", "")
-						var police_stop: bool = sender_flag != "" and authority_flags.has(sender_flag)
-						if not police_stop:
-							var issuer_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
-							if active_contacts.has(issuer_trk):
-								# M52b -- ARMED_THREAT warrant (replaces the old
-								# direct sticky-HOSTILE write): a non-authority
-								# STOP demand issued at us.
-								var issuer_claimed: String = active_transponders.get(sender_iid, {}).get("name", "")
-								post_warrant(Standing.OFF_ARMED_THREAT, issuer_claimed, active_contacts[issuer_trk].get("signature", {}), "demanding we stop")
-								# Eager same-tick cache stamp -- see take_damage's
-								# own instant-flip comment for why.
-								active_contacts[issuer_trk]["standing"] = Standing.HOSTILE
-								active_contacts[issuer_trk]["standing_reason"] = "demanding we stop"
+					if refreshes_hold:
+						compelled_stop["heartbeat_timer"] = 0.0
+					elif refreshes_pending:
+						pending_demand["heartbeat_timer"] = 0.0
+					else:
+						# Genuinely new demand (fresh seq): overwrites
+						# whatever was pending and re-alerts, per the
+						# playtest regression this milestone fixes.
+						pending_demand = hail
+						pending_demand["heartbeat_timer"] = 0.0
+						transient_events.append({"type": "hail", "verb": verb, "rung": rung, "sender_iid": sender_iid})
+						# IDENTIFY never changes standing (asking is free); STOP
+						# marks the issuer HOSTILE unless their flag is one we
+						# hold as an authority (the police-stop exemption).
+						if rung == Hail.RUNG_STOP:
+							var sender_flag: String = hail.get("sender_flag", "")
+							var police_stop: bool = sender_flag != "" and authority_flags.has(sender_flag)
+							if not police_stop:
+								var issuer_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+								if active_contacts.has(issuer_trk):
+									# M52b -- ARMED_THREAT warrant (replaces the old
+									# direct sticky-HOSTILE write): a non-authority
+									# STOP demand issued at us.
+									var issuer_claimed: String = active_transponders.get(sender_iid, {}).get("name", "")
+									post_warrant(Standing.OFF_ARMED_THREAT, issuer_claimed, active_contacts[issuer_trk].get("signature", {}), "demanding we stop")
+									# Eager same-tick cache stamp -- see take_damage's
+									# own instant-flip comment for why.
+									active_contacts[issuer_trk]["standing"] = Standing.HOSTILE
+									active_contacts[issuer_trk]["standing_reason"] = "demanding we stop"
 				elif sender_iid != my_iid_hail:
 					# Overheard: only the STOP rung is witness-relevant --
 					# demanding INFORMATION is never coercion (comms_verbs.md).
@@ -2679,7 +2732,7 @@ func _physics_process(delta: float) -> void:
 									# take_damage's own instant-flip comment for why.
 									issuer_c["standing"] = Standing.HOSTILE
 									issuer_c["standing_reason"] = stop_reason
-			Hail.VERB_COMPLY:
+			Hail.VERB_ACKNOWLEDGE:
 				# What the AI honor rule reads (acquire_target_leaf.gd) --
 				# no leaf targets a compliant stopped ship, regardless of
 				# whether the demand was ours to issue. The grace timer lets
@@ -2689,18 +2742,6 @@ func _physics_process(delta: float) -> void:
 				if active_contacts.has(sender_trk):
 					active_contacts[sender_trk]["complied_stop"] = true
 					active_contacts[sender_trk]["complied_stop_grace"] = COMPLIED_STOP_GRACE
-			Hail.VERB_RELEASE:
-				if addressed_to_me:
-					if not compelled_stop.is_empty() and compelled_stop.get("issuer_iid", -1) == sender_iid:
-						compelled_stop = {}
-				else:
-					# Overheard / addressed to someone else: if we hold a
-					# track on the released ship carrying complied_stop, the
-					# hold is over -- they're free to move without becoming
-					# fair game the instant they thrust.
-					var released_trk: String = "TRK-%03d" % (abs(target_iid) % 1000)
-					if active_contacts.has(released_trk) and active_contacts[released_trk].get("complied_stop", false):
-						active_contacts[released_trk].erase("complied_stop")
 			Hail.VERB_SOS:
 				# NAV-layer only -- NEVER touches active_contacts/sensor
 				# fusion (the M41 rule, see scripts/story/contract_feed.gd's
@@ -2738,7 +2779,7 @@ func _physics_process(delta: float) -> void:
 
 	# complied_stop clears when a held contact's OBSERVED speed shows it
 	# bolted -- compliance is behavioral, not a one-time declaration. The
-	# grace window (decremented here, set on COMPLY receipt) covers the
+	# grace window (decremented here, set on ACKNOWLEDGE receipt) covers the
 	# braking distance between declaring compliance and actually being
 	# stopped; only after it expires does speed become disqualifying.
 	for c_id in active_contacts:
@@ -2752,27 +2793,38 @@ func _physics_process(delta: float) -> void:
 			c.erase("complied_stop")
 			c.erase("complied_stop_grace")
 
-	# Auto-resume: a held ship doesn't wait forever on a dead/out-of-range
-	# issuer's permission. Reset the timer whenever the issuer is present
-	# (alive AND in comms-link range); past the timeout, clear the hold.
+	# M52d -- compelled_stop is heartbeat-kept the SAME way as pending_demand
+	# below (design revised in review: the RELEASE verb is gone; presence-
+	# checking the issuer is replaced by channel-liveness for BOTH states --
+	# see HAIL_HEARTBEAT_TIMEOUT). TAKE_ALONGSIDE keeps re-sending the same
+	# demand_seq for as long as the pirate wants the hold (JobSteps.
+	# step_take_alongside); a matching refresh resets heartbeat_timer in the
+	# VERB_DEMAND branch above. Quiet past the timeout -- pirate dead, out
+	# of comms, job finished/aborted, lost interest, ONE mechanism for all
+	# four -- and the hold ends. This also fixes a gap the old presence
+	# check had: a pirate sitting right next to you with nothing left to
+	# say (job complete, no more refreshes) used to hold you forever, since
+	# "present" was true regardless of whether it was still asserting
+	# anything.
 	if not compelled_stop.is_empty():
 		set_transponder_active(true) # re-assert -- STOP implies IDENTIFY, every tick of the hold
-		var issuer_iid: int = compelled_stop.get("issuer_iid", -1)
-		var issuer = instance_from_id(issuer_iid)
-		var issuer_present := false
-		if issuer != null and is_instance_valid(issuer) and not issuer.is_dead:
-			var issuer_range: float = issuer.get_comms_range() if issuer.has_method("get_comms_range") else 0.0
-			var self_range_hail: float = get_comms_range()
-			if self_range_hail > 0.0 and issuer_range > 0.0:
-				var link_range_hail: float = min(self_range_hail, issuer_range)
-				if position.distance_to(issuer.position) <= link_range_hail:
-					issuer_present = true
-		if issuer_present:
-			compelled_stop["lost_issuer_timer"] = 0.0
-		else:
-			compelled_stop["lost_issuer_timer"] = compelled_stop.get("lost_issuer_timer", 0.0) + delta
-			if compelled_stop["lost_issuer_timer"] > COMPELLED_STOP_LOST_ISSUER_TIMEOUT:
-				compelled_stop = {}
+		compelled_stop["heartbeat_timer"] = compelled_stop.get("heartbeat_timer", 0.0) + delta
+		if compelled_stop["heartbeat_timer"] > HAIL_HEARTBEAT_TIMEOUT:
+			compelled_stop = {}
+
+	# M52d -- demand heartbeat decay (implementation_plans/m52d_hail_ux.md
+	# item 1): a demand is a channel the issuer keeps asserting, not a
+	# datagram. The sender re-sends on a cadence with the SAME seq (see
+	# JobSteps.step_demand_stop); a matching refresh resets heartbeat_timer
+	# in the VERB_DEMAND branch above; a channel quiet past the timeout --
+	# issuer dead, out of comms, job aborted, lost interest, ONE mechanism
+	# for all four -- clears the demand. Playtest bug this kills: "the
+	# first demand never went away, it was still there when the second
+	# pirate got me."
+	if not pending_demand.is_empty():
+		pending_demand["heartbeat_timer"] = pending_demand.get("heartbeat_timer", 0.0) + delta
+		if pending_demand["heartbeat_timer"] > HAIL_HEARTBEAT_TIMEOUT:
+			pending_demand = {}
 	PerfProbe.end("comms_inbox")
 
 	# Datalink Relay: friendly ships in mutual comms range and line-of-sight
@@ -3411,23 +3463,49 @@ func set_transponder_custom_name(custom_name: String) -> void:
 # M49 -- player/AI send APIs for the hail protocol (design_ideas/comms_verbs.md).
 # Same RPC shape as the sibling setters above; the AI calls these directly
 # (server-side), same pattern as fire_weapon/mark_contact_hostile.
+# M52d -- the directed send also appends to sent_hails (the sender-side
+# memory the comms panel's vessel list needs; see the state block near
+# last_hails) -- only on an actual dispatch (seq != -1), a dead radio's
+# failed send is not something we "sent". Returns the hail's seq
+# (meaningful for DIRECT server-side callers like the pirate job, which
+# needs it to refresh the demand via refresh_demand() below; RPC
+# invocations just ignore it).
 @rpc("any_peer", "call_local")
-func send_demand(target_iid: int, rung: String) -> void:
-	if not is_multiplayer_authority() or is_dead: return
-	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+func send_demand(target_iid: int, rung: String) -> int:
+	if not is_multiplayer_authority() or is_dead: return -1
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return -1
 	var target = instance_from_id(target_iid)
 	if target == null or not is_instance_valid(target):
-		return
-	Hail.send(self, target, {"verb": Hail.VERB_DEMAND, "rung": rung})
+		return -1
+	var seq: int = Hail.send(self, target, {"verb": Hail.VERB_DEMAND, "rung": rung})
+	_remember_sent_hail({"verb": Hail.VERB_DEMAND, "rung": rung, "target_iid": target_iid, "seq": seq})
+	return seq
 
-@rpc("any_peer", "call_local")
-func send_release(target_iid: int) -> void:
-	if not is_multiplayer_authority() or is_dead: return
-	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+# M52d -- demand heartbeat, sender side: re-assert an already-issued demand
+# with its ORIGINAL seq (Hail.send's seq_override). The receiver treats a
+# matching seq as a refresh -- resets pending_demand's or compelled_stop's
+# heartbeat_timer (whichever it matches), no new alert/decision -- so the
+# demand/hold stays alive exactly as long as the issuer keeps caring.
+# JobSteps.step_demand_stop AND step_take_alongside both call this on a ~2s
+# cadence (design revised in review: RELEASE is gone, so TAKE_ALONGSIDE must
+# keep refreshing too, or the hold it depends on would lapse mid-robbery).
+# Direct server-side API (the AI is the only caller); not an RPC.
+func refresh_demand(target_iid: int, rung: String, seq: int) -> void:
+	if is_dead or seq == -1:
+		return
 	var target = instance_from_id(target_iid)
 	if target == null or not is_instance_valid(target):
 		return
-	Hail.send(self, target, {"verb": Hail.VERB_RELEASE})
+	Hail.send(self, target, {"verb": Hail.VERB_DEMAND, "rung": rung}, seq)
+
+# Ring-buffered like last_hails (same cap) -- the panel only needs recent
+# traffic, not a transcript.
+func _remember_sent_hail(entry: Dictionary) -> void:
+	if entry.get("seq", -1) == -1:
+		return
+	sent_hails.append(entry)
+	if sent_hails.size() > 8:
+		sent_hails.pop_front()
 
 # nature: Hail.NATURE_UNDER_ATTACK | Hail.NATURE_DISABLED. Stamps name/flag
 # from our own transponder data (a distress call identifies the caller --
@@ -3484,8 +3562,9 @@ func fire_weapon(weapon_id: String, target_pos: Vector2, target_contact_id: Stri
 	if not is_multiplayer_authority() or is_dead:
 		return # Only host executes this
 
-	# M49 -- held under compulsion: weapons cold until RELEASE/auto-resume
-	# (design_ideas/comms_verbs.md's "Stopped-under-compulsion" honor rule).
+	# M49 -- held under compulsion: weapons cold until the hold lapses
+	# (design_ideas/comms_verbs.md's "Stopped-under-compulsion" honor rule;
+	# M52d: the hold ends via heartbeat timeout, no RELEASE verb anymore).
 	# One state (compelled_stop), one gate -- belt to fire_opportunity_leaf's
 	# own suspender on the AI side.
 	if not compelled_stop.is_empty():

@@ -553,9 +553,12 @@ func _distribute_state() -> void:
 			# the packet the same way "contracts" does -- NAV-layer data, never
 			# merged into "contacts" (the M41 rule: SOS never touches sensor
 			# fusion). "last_hails"/"pending_demand"/"compelled_stop" feed the
-			# comms panel's HAILS section + honored-stop banner.
+			# comms panel's HAILS section + honored-stop banner. "sent_hails"
+			# (M52d) is the sender-side memory for the panel's vessel-grouped
+			# list -- vessels WE hailed stay listed for tracking/cancel.
 			"sos": ship.heard_sos.duplicate(true),
 			"last_hails": ship.last_hails.duplicate(true),
+			"sent_hails": ship.sent_hails.duplicate(true),
 			"pending_demand": ship.pending_demand.duplicate(true),
 			"compelled_stop": ship.compelled_stop.duplicate(true),
 			"debug_ships": _get_debug_ships() if debug_show_all_ships else []

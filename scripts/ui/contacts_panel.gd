@@ -5,8 +5,8 @@ extends Control
 # class_name. (Standing/Hail preloads removed with the action buttons --
 # row colors key on the literal standing strings in _STANDING_COLORS below.
 # The standing text readout + MARK HOSTILE/UNMARK buttons moved to the
-# weapons panel's targeting-computer section; the DEMAND ID/STOP/RELEASE
-# action row lives in comms_panel.gd.)
+# weapons panel's targeting-computer section; the DEMAND ID/STOP action
+# row lives in comms_panel.gd. M52d removed the RELEASE verb entirely.)
 
 signal contact_pin_toggled(c_id: String, is_pinned: bool)
 signal selection_changed(c_id: String)
@@ -352,9 +352,9 @@ func _update_contact_list(contacts: Dictionary) -> void:
 
 		# Update state without emitting signal
 		pin_btn.set_pressed_no_signal(c_id in pinned_list)
-		# (The M48/M49 action buttons -- MARK HOSTILE, DEMAND ID/STOP,
-		# RELEASE -- moved to the comms panel's HAILS action row; contact
-		# rows here are read-only + pin. See comms_panel.gd.)
+		# (The M48/M49 action buttons -- MARK HOSTILE, DEMAND ID/STOP -- moved
+		# to the comms panel's HAILS action row; contact rows here are
+		# read-only + pin. See comms_panel.gd.)
 
 # ---------------------------------------------------------------------------
 # M41 -- "Contracts" section: one row per contract_feed.gd entry (the current

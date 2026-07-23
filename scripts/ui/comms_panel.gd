@@ -52,8 +52,10 @@ signal transponder_share_name_toggled(share: bool)
 signal transponder_share_loc_toggled(share: bool)
 signal transponder_custom_name_changed(new_name: String)
 
-# M49 -- hail protocol (design_ideas/comms_verbs.md).
-signal comply_requested()
+# M49 -- hail protocol (design_ideas/comms_verbs.md). M52d renamed
+# comply_requested -> acknowledge_requested with the COMPLY -> ACKNOWLEDGE
+# verb rename (the button declares receipt; compliance stays behavioral).
+signal acknowledge_requested()
 signal sos_requested(nature: String)
 # Post-M51 playtest -- the contact action row moved HERE from the contacts
 # panel (contact rows are prime real estate; comms is where you talk to and
@@ -63,25 +65,36 @@ signal sos_requested(nature: String)
 # (mark_hostile_requested/unmark_hostile_requested moved to weapons_panel.gd
 # alongside the standing readout -- MARK/UNMARK is a targeting-computer
 # judgment call, not a comms action; this panel keeps only genuine comms
-# verbs: identify/stop demands, docking, release.)
+# verbs: identify/stop demands, docking. M52d removed the RELEASE verb
+# entirely (design revised in review -- see hail.gd), so there is no
+# release_requested signal anymore; a demand/hold ends when the issuer
+# stops refreshing it, not by anyone pressing a button.)
 signal demand_requested(c_id: String, rung: String)
-signal release_requested(c_id: String)
 
-# HAILS section (last_hails newest-first) + honored-stop banner/COMPLY + SOS
-# button + the selected-contact action row.
+# M52d -- HAILS section restructured (implementation_plans/m52d_hail_ux.md
+# item 4): ONE list of VESSEL entries (was: a selected-contact action row +
+# a flat message list). A vessel appears if it's the selected contact, we
+# sent it a hail (sent_hails, new in the packet), or it hailed us. Each
+# entry: header (track id + name + flag), its to/from hail traffic, and the
+# applicable action buttons -- all built from build_vessel_entries(), a pure
+# function over packet data so the grouping is testable headless
+# (test_comms_panel_hails.gd, same widget-level pattern as
+# test_controls_menu_ui.gd). Plus the honored-stop banner (ACKNOWLEDGE /
+# HELD state) and the SOS button.
 var hail_banner: PanelContainer
 var hail_banner_label: Label
-var btn_comply: Button
+var btn_acknowledge: Button
 var btn_sos: Button
+var hails_title: Label
 var hails_vbox: VBoxContainer
-var _last_hails_rendered: Array = []
+var _last_entries_rendered: Array = []
+var _entry_nodes: Dictionary = {} # c_id -> {header, traffic, actions_hbox, buttons: {..}}
 var selected_contact_id: String = ""
-var action_hbox: HBoxContainer
 var _hosted_docking: Control = null
-var action_target_lbl: Label
-var btn_demand_id: Button
-var btn_demand_stop: Button
-var btn_release: Button
+var _docking_fallback_row: HBoxContainer = null
+# Test seam: headless widget tests have no /root/Main/Ship_<peer> node to
+# resolve, so they set this to the instance id last_hails' target_iid uses.
+var my_iid_override: int = -1
 
 func _ready() -> void:
 	clip_contents = true
@@ -166,59 +179,38 @@ func _ready() -> void:
 	hail_banner_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_hbox.add_child(hail_banner_label)
 
-	btn_comply = Button.new()
-	btn_comply.text = "COMPLY"
-	btn_comply.pressed.connect(func(): emit_signal("comply_requested"))
-	banner_hbox.add_child(btn_comply)
+	# M52d -- ACKNOWLEDGE (renamed from COMPLY): the label states the actual
+	# contract, because the playtest's confusion was exactly "do I stop? is
+	# the button just for fun?" -- pressing it declares receipt AND engages
+	# the ship-level dead stop (compelled_stop's throttle override).
+	btn_acknowledge = Button.new()
+	btn_acknowledge.text = "ACKNOWLEDGE"
+	btn_acknowledge.tooltip_text = "ACKNOWLEDGE — confirm receipt and hold station. Moving again voids compliance."
+	btn_acknowledge.pressed.connect(func(): emit_signal("acknowledge_requested"))
+	banner_hbox.add_child(btn_acknowledge)
 
 	top_pane.add_child(HSeparator.new())
 
-	# M49 -- HAILS: last_hails newest-first (sender name/flag, verb+rung,
-	# addressed-to-me highlight).
-	var hails_title = Label.new()
+	# M52d -- HAILS: one vessel-grouped list (see the state block above).
+	hails_title = Label.new()
 	hails_title.text = "HAILS"
 	hails_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hails_title.add_theme_color_override("font_color", Color.ORANGE_RED)
 	top_pane.add_child(hails_title)
 
-	# Selected-contact action row (moved here from the contacts panel --
-	# post-M51 playtest): who it acts on + the judgment/verb buttons.
-	# Visibility rules live in _update_action_row().
-	action_target_lbl = Label.new()
-	action_target_lbl.text = "No contact selected"
-	action_target_lbl.add_theme_font_size_override("font_size", 12)
-	action_target_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-	top_pane.add_child(action_target_lbl)
-
-	action_hbox = HBoxContainer.new()
-	top_pane.add_child(action_hbox)
-
-	btn_demand_id = Button.new()
-	btn_demand_id.text = "DEMAND ID"
-	btn_demand_id.pressed.connect(func(): emit_signal("demand_requested", selected_contact_id, Hail.RUNG_IDENTIFY))
-	action_hbox.add_child(btn_demand_id)
-
-	btn_demand_stop = Button.new()
-	btn_demand_stop.text = "DEMAND STOP"
-	btn_demand_stop.pressed.connect(func(): emit_signal("demand_requested", selected_contact_id, Hail.RUNG_STOP))
-	action_hbox.add_child(btn_demand_stop)
-
-	# Request Docking / Undock sits HERE, right beside the demands -- it is
-	# a peer per-track action (it already targets the SELECTED station via
-	# terminal_display's _update_docking_control). Adopted now if it was
-	# hosted before this panel entered the tree.
-	if _pending_docking_control != null:
-		action_hbox.add_child(_pending_docking_control)
-		_hosted_docking = _pending_docking_control
-		_pending_docking_control = null
-
-	btn_release = Button.new()
-	btn_release.text = "RELEASE"
-	btn_release.pressed.connect(func(): emit_signal("release_requested", selected_contact_id))
-	action_hbox.add_child(btn_release)
-
 	hails_vbox = VBoxContainer.new()
 	top_pane.add_child(hails_vbox)
+
+	# Fallback home for the hosted docking control while no vessel entry is
+	# selected -- the Undock face must never vanish just because the
+	# selection cleared (same rule the old action row had). Adopt the control
+	# now if it was hosted before this panel entered the tree.
+	_docking_fallback_row = HBoxContainer.new()
+	top_pane.add_child(_docking_fallback_row)
+	if _pending_docking_control != null:
+		_docking_fallback_row.add_child(_pending_docking_control)
+		_hosted_docking = _pending_docking_control
+		_pending_docking_control = null
 
 	top_pane.add_child(HSeparator.new())
 
@@ -316,21 +308,23 @@ func update_data(packet: Dictionary) -> void:
 	_update_contacts_list()
 	_update_missions_list()
 	_update_hail_banner()
-	_update_hails_list()
-	_update_action_row()
+	_update_vessel_list()
 
 # Hosts the terminal's DockingControl button (created + wired by
-# terminal_display) in the action row beside DEMAND ID/STOP. Callable
-# BEFORE this panel enters the tree (terminal_display wires panels prior
-# to add_child, so _ready -- which builds the row -- hasn't run yet): the
-# control parks in _pending_docking_control and _ready adopts it.
+# terminal_display). M52d: it rides the SELECTED vessel's entry row in the
+# vessel list (docking is a per-track action aimed at the selected station);
+# _rebuild_vessel_list reparents it on every rebuild, with
+# _docking_fallback_row as its home while nothing is selected (the Undock
+# face must never vanish mid-dock). Callable BEFORE this panel enters the
+# tree (terminal_display wires panels prior to add_child, so _ready hasn't
+# run yet): the control parks in _pending_docking_control and _ready adopts
+# it.
 var _pending_docking_control: Control = null
 
 func host_docking_control(ctrl: Control) -> void:
 	ctrl.focus_mode = Control.FOCUS_NONE # don't steal the spacebar hotkey
-	if action_hbox != null:
-		action_hbox.add_child(ctrl)
-		action_hbox.move_child(ctrl, 2) # after DEMAND ID / DEMAND STOP
+	if _docking_fallback_row != null:
+		_docking_fallback_row.add_child(ctrl)
 		_hosted_docking = ctrl
 	else:
 		_pending_docking_control = ctrl
@@ -339,98 +333,252 @@ func host_docking_control(ctrl: Control) -> void:
 # same duck-typed method the sensor/contacts panels expose).
 func set_selected_contact_id(c_id: String) -> void:
 	selected_contact_id = c_id
-	_update_action_row()
+	_update_vessel_list()
 
-# Visibility rules (carried over from the contacts-panel buttons this row
-# replaces): everything needs a selected VESSEL contact. DEMAND ID/STOP --
-# always (asking is free; even a hostile can be demanded a stop). RELEASE --
-# only a contact we're crediting with complied_stop. (MARK HOSTILE/UNMARK
-# moved to weapons_panel.gd -- see that panel's own visibility rule.)
-func _update_action_row() -> void:
-	if action_target_lbl == null:
-		return
-	var contacts: Dictionary = current_state.get("contacts", {})
-	var c: Dictionary = contacts.get(selected_contact_id, {})
-	var classification: String = c.get("classification", "")
-	var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
-	var standing: String = c.get("standing", "")
-
-	# Request Docking/Undock rides the row but with its own rule: visible for
-	# a selected vessel (it targets the selected station) OR while actually
-	# docked -- the Undock face must never vanish just because the selection
-	# cleared. Its own refresh() handles enabled/disabled and the label flip.
-	var my_ship = _get_my_ship()
-	var is_docked: bool = my_ship != null and my_ship.get("docking_bay") != null
-
-	if c.is_empty() or not is_vessel:
-		action_target_lbl.text = "No vessel selected (select one in CONTACTS)"
-		for b in [btn_demand_id, btn_demand_stop, btn_release]:
-			b.visible = false
-		if _hosted_docking != null:
-			_hosted_docking.visible = is_docked
-		return
-
-	var t_name: String = c.get("transponder_name", "")
-	action_target_lbl.text = "Selected: %s%s%s" % [selected_contact_id,
-		(" '" + t_name + "'") if t_name != "" else "",
-		(" [" + standing + "]") if standing != "" else ""]
-	btn_demand_id.visible = true
-	btn_demand_stop.visible = true
-	btn_release.visible = c.get("complied_stop", false)
-	if _hosted_docking != null:
-		_hosted_docking.visible = true
-
-# M49 -- honored-stop banner: visible whenever the player ship holds a
-# pending STOP demand (packet["pending_demand"], set by ship.gd's comms_inbox
-# processing). Cleared the moment we COMPLY (pending_demand is cleared
-# server-side) or a fresh demand replaces it.
+# M49/M52d -- honored-stop banner, two faces:
+#   HELD -- while compelled_stop is active, say so explicitly ("HELD --
+#   acknowledged <ship>'s stop") instead of leaving the player to infer the
+#   throttle override; no button -- the hold ends on its own once the
+#   issuer stops refreshing it (the RELEASE verb is gone entirely, design
+#   revised in review; see hail.gd/ship.gd).
+#   DEMAND(STOP) -- a pending STOP demand shows the demand + the ACKNOWLEDGE
+#   button. Cleared when we acknowledge (pending_demand cleared server-side),
+#   the issuer's heartbeat goes quiet (M52d expiry), or a fresh demand
+#   replaces it.
 func _update_hail_banner() -> void:
 	if hail_banner == null:
+		return
+	var compelled: Dictionary = current_state.get("compelled_stop", {})
+	if not compelled.is_empty():
+		hail_banner.visible = true
+		btn_acknowledge.visible = false
+		hail_banner_label.text = "HELD — acknowledged %s's stop" % _vessel_display_name(compelled.get("issuer_iid", -1))
 		return
 	var demand: Dictionary = current_state.get("pending_demand", {})
 	var is_stop_demand: bool = demand.get("rung", "") == Hail.RUNG_STOP
 	hail_banner.visible = is_stop_demand
+	btn_acknowledge.visible = is_stop_demand
 	if is_stop_demand:
 		var flag: String = demand.get("sender_flag", "")
 		var flag_text: String = flag if flag != "" else "UNKNOWN (dark)"
 		hail_banner_label.text = "DEMAND(STOP) from flag: %s" % flag_text
 
-# M49 -- last_hails newest-first: sender name/flag, verb+rung, addressed-to-me
-# highlight. Rebuilt only when the newest hail actually changed, keyed on its
-# seq -- NOT on array size: last_hails is a rolling ring buffer capped at 8,
-# so once full its size never changes again and a size check would freeze the
-# list on the first 8 hails forever. (seq + count together also cover the
-# buffer draining/reset case.)
-func _update_hails_list() -> void:
+# Short display handle for a vessel by instance id: claimed transponder name,
+# else its track id in our contacts, else "vessel".
+func _vessel_display_name(iid: int) -> String:
+	var t: Dictionary = current_state.get("transponders", {}).get(iid, {})
+	if t.get("name", "") != "":
+		return "\"%s\"" % t.get("name")
+	var contacts: Dictionary = current_state.get("contacts", {})
+	for c_id in contacts:
+		if contacts[c_id].get("instance_id", -1) == iid:
+			return c_id
+	return "vessel"
+
+# M52d -- incoming-hail alert hook (terminal_display calls this off the
+# "hail" transient event): flash the HAILS header so a demand landing in a
+# panel you aren't looking at is still noticeable.
+func flash_hails_alert() -> void:
+	if hails_title == null:
+		return
+	var tw := create_tween()
+	for i in range(3):
+		tw.tween_property(hails_title, "modulate", Color(3.0, 0.3, 0.3), 0.15)
+		tw.tween_property(hails_title, "modulate", Color.WHITE, 0.15)
+
+# ---------------------------------------------------------------------------
+# M52d -- vessel-grouped HAILS list (implementation_plans/m52d_hail_ux.md
+# item 4). build_vessel_entries is PURE (packet data in, display dicts out)
+# so the grouping/qualification rules are testable headless without a ship
+# or a frame tick; _update_vessel_list/_rebuild_vessel_list are the thin
+# Control glue on top.
+# ---------------------------------------------------------------------------
+
+# One entry per vessel that is (a) the selected contact, (b) a vessel we
+# sent a directed hail to, or (c) a vessel that hailed US directly. Entry:
+# {c_id, iid, name, flag, selected, known_contact, traffic:[..]} ordered
+# selected-first then by c_id. Traffic lines are that vessel's
+# directed exchanges with us, oldest first: "> them" = ours, "< them" =
+# theirs. No "[TO YOU]" tag -- being listed under the vessel already says so.
+func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
+		last_hails: Array, sent_hails: Array, selected_id: String, my_iid: int) -> Array:
+	var by_iid: Dictionary = {} # iid -> entry-in-progress
+	var iid_to_cid: Dictionary = {}
+	for c_id in contacts:
+		var inst: int = contacts[c_id].get("instance_id", -1)
+		if inst != -1:
+			iid_to_cid[inst] = c_id
+
+	# Reason (a): the selected contact, if it's a vessel we hold a track on.
+	var sel: Dictionary = contacts.get(selected_id, {})
+	var sel_class: String = sel.get("classification", "")
+	if not sel.is_empty() and (sel_class == "UNIDENTIFIED VESSEL" or sel_class == "FRIENDLY VESSEL"):
+		var sel_iid: int = sel.get("instance_id", -1)
+		by_iid[sel_iid] = _blank_entry(selected_id, sel_iid)
+
+	# Reason (b): vessels we sent a directed hail to.
+	for sh in sent_hails:
+		var t_iid: int = sh.get("target_iid", -1)
+		if t_iid == -1:
+			continue
+		if not by_iid.has(t_iid):
+			by_iid[t_iid] = _blank_entry(iid_to_cid.get(t_iid, "TRK-%03d" % (abs(t_iid) % 1000)), t_iid)
+
+	# Reason (c): vessels that hailed US directly.
+	for h in last_hails:
+		if h.get("target_iid", -1) != my_iid:
+			continue
+		var s_iid: int = h.get("sender_iid", -1)
+		if s_iid == -1 or s_iid == my_iid:
+			continue
+		if not by_iid.has(s_iid):
+			by_iid[s_iid] = _blank_entry(iid_to_cid.get(s_iid, "TRK-%03d" % (abs(s_iid) % 1000)), s_iid)
+		# A hail's stamped flag is the freshest read we have on a sender that
+		# may not be transponding now.
+		if by_iid[s_iid]["flag"] == "":
+			by_iid[s_iid]["flag"] = h.get("sender_flag", "")
+
+	# Fill in identity + per-vessel traffic + action gating.
+	for iid in by_iid:
+		var e: Dictionary = by_iid[iid]
+		var t: Dictionary = transponders.get(iid, {})
+		if t.get("name", "") != "":
+			e["name"] = t.get("name")
+		if t.get("flag", "") != "" and e["flag"] == "":
+			e["flag"] = t.get("flag")
+		e["selected"] = e["c_id"] == selected_id and selected_id != ""
+		var c: Dictionary = contacts.get(e["c_id"], {})
+		e["known_contact"] = not c.is_empty()
+		# Traffic, buffer order (oldest first) -- theirs to us, then ours to
+		# them interleaved per source buffer (both are small rings).
+		for h2 in last_hails:
+			if h2.get("sender_iid", -1) == iid and h2.get("target_iid", -1) == my_iid:
+				e["traffic"].append("< %s" % _verb_text(h2))
+		for sh2 in sent_hails:
+			if sh2.get("target_iid", -1) == iid:
+				e["traffic"].append("> %s" % _verb_text(sh2))
+
+	var entries: Array = by_iid.values()
+	entries.sort_custom(func(a, b):
+		if a["selected"] != b["selected"]:
+			return a["selected"]
+		return a["c_id"] < b["c_id"])
+	return entries
+
+func _blank_entry(c_id: String, iid: int) -> Dictionary:
+	return {"c_id": c_id, "iid": iid, "name": "", "flag": "", "selected": false,
+		"known_contact": false, "traffic": []}
+
+func _verb_text(hail: Dictionary) -> String:
+	var verb: String = hail.get("verb", "")
+	var rung: String = hail.get("rung", "")
+	return verb + ("(" + rung + ")" if rung != "" else "")
+
+# Header per the playtest's ask: track id + claimed name + flag.
+func entry_header_text(e: Dictionary) -> String:
+	var name_part: String = " \"%s\"" % e["name"] if e["name"] != "" else ""
+	var flag_part: String = e["flag"] if e["flag"] != "" else "dark"
+	return "%s%s — %s" % [e["c_id"], name_part, flag_part]
+
+func _update_vessel_list() -> void:
 	if hails_vbox == null:
 		return
-	var hails: Array = current_state.get("last_hails", [])
-	var newest_seq: int = hails.back().get("seq", -1) if not hails.is_empty() else -1
-	var rendered_seq: int = _last_hails_rendered.back().get("seq", -1) if not _last_hails_rendered.is_empty() else -1
-	if newest_seq == rendered_seq and hails.size() == _last_hails_rendered.size():
-		return
-	_last_hails_rendered = hails.duplicate()
+	var my_ship = _get_my_ship()
+	var my_iid: int = my_ship.get_instance_id() if my_ship != null else my_iid_override
+	var entries: Array = build_vessel_entries(
+		current_state.get("contacts", {}),
+		current_state.get("transponders", {}),
+		current_state.get("last_hails", []),
+		current_state.get("sent_hails", []),
+		selected_contact_id, my_iid)
+	if entries != _last_entries_rendered:
+		_last_entries_rendered = entries.duplicate(true)
+		_rebuild_vessel_list(entries)
+	# Dock-state can change with an unchanged entry list (e.g. capture
+	# completes while nothing is selected) -- keep the fallback-parked
+	# control's Undock face live every tick, not just on rebuilds.
+	if _hosted_docking != null and _hosted_docking.get_parent() == _docking_fallback_row:
+		var my_ship_dock = _get_my_ship()
+		_hosted_docking.visible = my_ship_dock != null and my_ship_dock.get("docking_bay") != null
 
+func _rebuild_vessel_list(entries: Array) -> void:
+	# The hosted docking control survives rebuilds by reparenting -- pull it
+	# out BEFORE the children are freed.
+	if _hosted_docking != null and _hosted_docking.get_parent() != null:
+		_hosted_docking.get_parent().remove_child(_hosted_docking)
 	for child in hails_vbox.get_children():
 		child.queue_free()
+	_entry_nodes.clear()
 
 	var my_ship = _get_my_ship()
-	var my_iid: int = my_ship.get_instance_id() if my_ship != null else -1
+	var is_docked: bool = my_ship != null and my_ship.get("docking_bay") != null
+	var docking_hosted := false
 
-	for i in range(hails.size() - 1, -1, -1):
-		var hail: Dictionary = hails[i]
-		var verb: String = hail.get("verb", "")
-		var rung: String = hail.get("rung", "")
-		var flag: String = hail.get("sender_flag", "")
-		var flag_text: String = flag if flag != "" else "dark"
-		var verb_text: String = verb + ("(" + rung + ")" if rung != "" else "")
-		var addressed_to_me: bool = hail.get("target_iid", -1) == my_iid
+	if entries.is_empty():
+		var none = Label.new()
+		none.text = "(no vessels -- select one in CONTACTS, or await a hail)"
+		none.add_theme_font_size_override("font_size", 12)
+		none.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		hails_vbox.add_child(none)
 
-		var lbl = Label.new()
-		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-		lbl.text = "%s -- flag: %s%s" % [verb_text, flag_text, " [TO YOU]" if addressed_to_me else ""]
-		lbl.add_theme_color_override("font_color", Color.RED if addressed_to_me else Color(0.8, 0.8, 0.8))
-		hails_vbox.add_child(lbl)
+	for e in entries:
+		var entry_box = VBoxContainer.new()
+		hails_vbox.add_child(entry_box)
+
+		var header = Label.new()
+		header.text = entry_header_text(e)
+		header.autowrap_mode = TextServer.AUTOWRAP_WORD
+		header.add_theme_color_override("font_color", Color.CYAN if e["selected"] else Color.WHITE)
+		entry_box.add_child(header)
+
+		var traffic_labels: Array = []
+		for line in e["traffic"]:
+			var lbl = Label.new()
+			lbl.text = "  " + line
+			lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+			lbl.add_theme_font_size_override("font_size", 12)
+			lbl.add_theme_color_override("font_color", Color(1.0, 0.6, 0.6) if line.begins_with("<") else Color(0.7, 0.85, 1.0))
+			entry_box.add_child(lbl)
+			traffic_labels.append(lbl)
+
+		# Action row: consistent button style/casing across every verb (the
+		# playtest called out the caps/prose mix). Demands are free to ask of
+		# any tracked vessel. Buttons stay disabled for a hail-only entry we
+		# hold no track on (nothing to aim the send at). M52d removed the
+		# RELEASE verb/button entirely -- a demand/hold ends on its own once
+		# the issuer stops refreshing it, nobody presses a button for it.
+		var actions = HBoxContainer.new()
+		entry_box.add_child(actions)
+		var c_id: String = e["c_id"]
+
+		var b_id = Button.new()
+		b_id.text = "DEMAND ID"
+		b_id.disabled = not e["known_contact"]
+		b_id.pressed.connect(func(): emit_signal("demand_requested", c_id, Hail.RUNG_IDENTIFY))
+		actions.add_child(b_id)
+
+		var b_stop = Button.new()
+		b_stop.text = "DEMAND STOP"
+		b_stop.disabled = not e["known_contact"]
+		b_stop.pressed.connect(func(): emit_signal("demand_requested", c_id, Hail.RUNG_STOP))
+		actions.add_child(b_stop)
+
+		# The docking control rides the SELECTED vessel's row (it targets the
+		# selected station via terminal_display's _update_docking_control).
+		if e["selected"] and _hosted_docking != null:
+			actions.add_child(_hosted_docking)
+			_hosted_docking.visible = true
+			docking_hosted = true
+
+		_entry_nodes[c_id] = {"header": header, "traffic": traffic_labels,
+			"actions_hbox": actions,
+			"buttons": {"demand_id": b_id, "demand_stop": b_stop}}
+
+	# No selected entry took the docking control: park it in the fallback
+	# row, visible only while actually docked (the Undock face rule).
+	if _hosted_docking != null and not docking_hosted:
+		_docking_fallback_row.add_child(_hosted_docking)
+		_hosted_docking.visible = is_docked
 
 # M49 -- SOS nature pick: UNDER_ATTACK if we hold any fresh HOSTILE contact,
 # else DISABLED. Mirrors Ship._nearest_fresh_hostile_pos()'s freshness gate

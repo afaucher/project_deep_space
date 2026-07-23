@@ -2,16 +2,17 @@ extends Node
 
 # M49 -- the honored-stop hard guarantees (design_ideas/comms_verbs.md's
 # "Stopped-under-compulsion"): ship-level enforcement (compelled_stop), AI
-# honor rules (acquire/fire suspenders), RELEASE, and auto-resume. Also folds
-# in the cargo comply-or-run speed-ratio decision (comms_verbs.md's "Cargo/
-# civilian" policy) -- the milestone spec explicitly says this doesn't need
-# its own file ("test_fast_ship_runs").
+# honor rules (acquire/fire suspenders), the hold's heartbeat lapse (M52d --
+# no RELEASE verb, see ship.gd's HAIL_HEARTBEAT_TIMEOUT), and auto-resume.
+# Also folds in the cargo comply-or-run speed-ratio decision (comms_verbs.md's
+# "Cargo/civilian" policy) -- the milestone spec explicitly says this doesn't
+# need its own file ("test_fast_ship_runs").
 #
 # Mixes test_fire_staleness_gate.gd's synchronous MANUAL-tree/hand-injected-
 # contact style (mechanical ship/leaf-level guarantees: fire guard, acquire-
 # skip) with test_drift_residents.gd's `await get_tree().physics_frame`
-# live-ship style (RELEASE/auto-resume/comply-or-run, which need real comms
-# delivery + AI ticking over sim time). Godot 2D physics/timing isn't
+# live-ship style (heartbeat lapse/auto-resume/comply-or-run, which need real
+# comms delivery + AI ticking over sim time). Godot 2D physics/timing isn't
 # bit-deterministic run-to-run (CLAUDE.md), so live-ship assertions use
 # generous settle loops/margins, never exact frames.
 
@@ -137,7 +138,7 @@ func _test_overtaken_mid_flight() -> void:
 	_assert(bb.has_value("threat_issuer_iid") and shuttle.compelled_stop.is_empty(),
 		"setup sanity: a peak-50 threat starts a RUN, not a COMPLY")
 
-	# Same pending_demand (never cleared while running -- comply_with_stop()
+	# Same pending_demand (never cleared while running -- acknowledge_stop()
 	# still reads it later); the SAME track now shows the chaser genuinely
 	# closing at 700, clearing the 625 breakeven with real margin. No new
 	# DEMAND arrives -- this has to be caught by the live re-check, not a
@@ -165,7 +166,7 @@ func _finish() -> void:
 func _test_fire_guard() -> void:
 	print("\n--- Fire guard: compelled_stop suspends fire_weapon ---")
 	var ship = _make_ship(Frigate, "FireGuardShip", 500, Vector2.ZERO)
-	ship.compelled_stop = {"issuer_iid": -1, "demand_seq": 1, "lost_issuer_timer": 0.0}
+	ship.compelled_stop = {"issuer_iid": -1, "demand_seq": 1, "heartbeat_timer": 0.0}
 
 	var laser_id := ""
 	for w in ship.get_components_by_type("weapons"):
@@ -188,7 +189,7 @@ func _test_acquire_skip() -> void:
 	# (a) the ACTOR is held -- a held ship doesn't hunt, regardless of what's
 	# in weapons range.
 	var actor_a = _make_ship(Frigate, "HeldHunter", 501, Vector2.ZERO)
-	actor_a.compelled_stop = {"issuer_iid": -1, "demand_seq": 1, "lost_issuer_timer": 0.0}
+	actor_a.compelled_stop = {"issuer_iid": -1, "demand_seq": 1, "heartbeat_timer": 0.0}
 	actor_a.active_contacts["TGT"] = {"pos": Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_timer": 0.0}
 	var r_a = acquire.tick(actor_a, BlackboardScript.new())
 	_assert(r_a == acquire.FAILURE, "compelled actor: AcquireTarget returns FAILURE even with a fresh HOSTILE contact in range")
@@ -203,7 +204,7 @@ func _test_acquire_skip() -> void:
 	# fire_opportunity_leaf's own suspender (belt to fire_weapon's).
 	var fire_leaf = FireOpportunityLeaf.new()
 	var actor_c = _make_ship(Frigate, "HeldShooter", 503, Vector2.ZERO)
-	actor_c.compelled_stop = {"issuer_iid": -1, "demand_seq": 1, "lost_issuer_timer": 0.0}
+	actor_c.compelled_stop = {"issuer_iid": -1, "demand_seq": 1, "heartbeat_timer": 0.0}
 	var laser_id2 := ""
 	for w in actor_c.get_components_by_type("weapons"):
 		if w.get("weapon_type", "") == "laser":
@@ -309,10 +310,19 @@ func _test_comply_flow() -> void:
 			break
 	_assert(settled, "setup sanity: shuttle and issuer hold mutual fresh tracks before the demand")
 
-	issuer.send_demand(shuttle.get_instance_id(), Hail.RUNG_STOP)
+	var demand_seq: int = issuer.send_demand(shuttle.get_instance_id(), Hail.RUNG_STOP)
 
+	# M52d -- this scenario has no pirate JOB running (the issuer is a bare
+	# ship, not a JobRunnerLeaf-driven actor), so nothing else re-asserts the
+	# demand/hold -- without a manual refresh here, compelled_stop would
+	# expire on its own heartbeat timeout (6s) well before a low-accel hull
+	# finishes braking (up to 15s budgeted below). Refresh on the same ~2s
+	# cadence JobSteps.DEMAND_STOP/TAKE_ALONGSIDE use, standing in for "the
+	# issuer still wants this" for the whole settle wait.
 	var complied := false
 	for i in range(900): # up to 15s -- low-accel hull rotating onto its drift + braking at Smooth-mode authority
+		if i % 120 == 0:
+			issuer.refresh_demand(shuttle.get_instance_id(), Hail.RUNG_STOP, demand_seq)
 		await main_node.get_tree().physics_frame
 		if shuttle.compelled_stop.get("issuer_iid", -1) == issuer.get_instance_id() and shuttle.linear_velocity.length() < 40.0:
 			complied = true
@@ -332,6 +342,8 @@ func _test_comply_flow() -> void:
 	var issuer_saw_comply := false
 	var sos_heard := false
 	for i in range(180): # up to 3s
+		if i % 120 == 0:
+			issuer.refresh_demand(shuttle.get_instance_id(), Hail.RUNG_STOP, demand_seq) # keep the hold alive (see above)
 		await main_node.get_tree().physics_frame
 		if not issuer_saw_comply:
 			var ic2: Dictionary = _find_contact(issuer, shuttle)
@@ -379,27 +391,37 @@ func _test_fast_ship_runs() -> void:
 	_assert(sos_heard, "shuttle broadcasts SOS(UNDER_ATTACK) on the incident even while running")
 	_assert(shuttle.compelled_stop.is_empty(), "a running shuttle never sets compelled_stop")
 
-# --- RELEASE clears compelled_stop; ship is free to thrust again ------------
+# --- M52d: a present-but-SILENT issuer no longer holds forever --------------
+# (design revised in review: RELEASE removed entirely, compelled_stop is
+# heartbeat-kept exactly like pending_demand -- see ship.gd's
+# HAIL_HEARTBEAT_TIMEOUT). This pins the exact gap the old presence-only
+# check had: an issuer sitting right next to the held ship, alive and in
+# comms range the WHOLE time, but simply not refreshing (its job finished/
+# it lost interest) -- the old check would have held the ship forever since
+# "present" was true. The new channel model doesn't care about presence,
+# only about whether the issuer is still asserting the hold.
 func _test_release() -> void:
-	print("\n--- RELEASE clears compelled_stop; ship is free to thrust again ---")
-	var held = _make_ship(Frigate, "ReleaseHeld", 530, Vector2.ZERO, ["TEAM_HELD"])
-	var issuer = _make_ship(Frigate, "ReleaseIssuer", 531, Vector2(3000, 0), ["TEAM_ISSUER"])
+	print("\n--- M52d: a present-but-silent issuer's hold still lapses (no RELEASE verb) ---")
+	var held = _make_ship(Frigate, "SilentHoldHeld", 530, Vector2.ZERO, ["TEAM_HELD"])
+	var issuer = _make_ship(Frigate, "SilentHoldIssuer", 531, Vector2(3000, 0), ["TEAM_ISSUER"])
 
 	# Directly compel (bypass the delivery path -- already covered by
-	# test_hail_protocol.gd; this test is about RELEASE + resumed motion).
+	# test_hail_protocol.gd; this test is about the hold's heartbeat lapse).
 	held.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 1, "sender_iid": issuer.get_instance_id(), "sender_pos": issuer.position, "sender_flag": "", "target_iid": held.get_instance_id()}
-	held.comply_with_stop()
-	_assert(not held.compelled_stop.is_empty(), "setup sanity: held ship is compelled after comply_with_stop()")
+	held.acknowledge_stop()
+	_assert(not held.compelled_stop.is_empty(), "setup sanity: held ship is compelled after acknowledge_stop()")
 
-	issuer.send_release(held.get_instance_id())
-
+	# issuer stays ALIVE, in comms range, right next to held -- never sends
+	# anything else. The old presence-based check would hold forever here.
 	var released := false
-	for i in range(180): # up to 3s
+	for i in range(600): # up to 10s -- comfortably past the 6s heartbeat timeout
 		await main_node.get_tree().physics_frame
+		if not is_instance_valid(issuer) or issuer.is_dead:
+			break # sanity: issuer must still be alive/present for this scenario
 		if held.compelled_stop.is_empty():
 			released = true
 			break
-	_assert(released, "RELEASE clears compelled_stop")
+	_assert(released, "a present, silent, never-refreshing issuer still loses the hold (heartbeat timeout, no RELEASE)")
 
 	held.apply_control_input(1.0, 0.0, 0.0, 1, 0) # direct throttle, full forward, combat mode
 	var speed_before: float = held.linear_velocity.length()
@@ -415,14 +437,16 @@ func _test_auto_resume() -> void:
 	var issuer = _make_ship(Frigate, "AutoResumeIssuer", 541, Vector2(3000, 0), ["TEAM_ISSUER2"])
 
 	held.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 1, "sender_iid": issuer.get_instance_id(), "sender_pos": issuer.position, "sender_flag": "", "target_iid": held.get_instance_id()}
-	held.comply_with_stop()
+	held.acknowledge_stop()
 	_assert(not held.compelled_stop.is_empty(), "setup sanity: held ship is compelled")
 
 	issuer.queue_free()
 	spawned.erase(issuer)
 	await main_node.get_tree().physics_frame # let the free actually take effect
 
-	# COMPELLED_STOP_LOST_ISSUER_TIMEOUT is 10s -- tick comfortably past it.
+	# M52d: HAIL_HEARTBEAT_TIMEOUT is 6s (same mechanism as _test_release
+	# above -- a dead issuer is just another way the channel goes quiet) --
+	# tick comfortably past it.
 	var resumed := false
 	for i in range(900): # ~15s
 		await main_node.get_tree().physics_frame

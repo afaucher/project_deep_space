@@ -79,12 +79,12 @@ func tick(actor: Node, blackboard) -> int:
 		var live_threat_capability: float = live_peaks.get(issuer_iid, 0.0)
 		if actor.max_speed <= live_threat_capability * run_ratio:
 			if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
-				print("[Cargo] %s: overtaken mid-flight (threat now %.0f x%.1f >= my %.0f) -- giving up, COMPLY" %
+				print("[Cargo] %s: overtaken mid-flight (threat now %.0f x%.1f >= my %.0f) -- giving up, ACKNOWLEDGE" %
 					[actor.name, live_threat_capability, run_ratio, actor.max_speed])
 			blackboard.erase_value("threat_issuer_iid")
 			blackboard.erase_value("threat_ratio")
-			if actor.has_method("comply_with_stop"):
-				actor.comply_with_stop()
+			if actor.has_method("acknowledge_stop"):
+				actor.acknowledge_stop()
 			return SUCCESS
 
 		_run_from(actor, c.get("pos", actor.position))
@@ -123,7 +123,7 @@ func tick(actor: Node, blackboard) -> int:
 
 	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
 		print("[Cargo] %s: %s (my max %.0f vs threat cap %.0f x%.1f = %.0f)" %
-			[actor.name, "RUN" if will_run else "COMPLY", actor.max_speed, threat_capability, ratio, threat_capability * ratio])
+			[actor.name, "RUN" if will_run else "ACKNOWLEDGE", actor.max_speed, threat_capability, ratio, threat_capability * ratio])
 
 	# Always broadcast SOS once per incident, regardless of the comply-or-run call.
 	if actor.has_method("send_sos"):
@@ -133,8 +133,8 @@ func tick(actor: Node, blackboard) -> int:
 		blackboard.set_value("threat_issuer_iid", issuer_iid)
 		blackboard.set_value("threat_ratio", ratio)
 		_run_from(actor, threat_pos)
-	elif actor.has_method("comply_with_stop"):
-		actor.comply_with_stop()
+	elif actor.has_method("acknowledge_stop"):
+		actor.acknowledge_stop()
 	return SUCCESS
 
 # Per-contact peak observed speed, keyed by true instance id, held only while

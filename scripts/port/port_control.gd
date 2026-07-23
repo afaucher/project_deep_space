@@ -152,7 +152,10 @@ static func request_docking(station, ship) -> Dictionary:
 # so a test can assert the button text purely from ship/station state with no
 # Control node involved.
 static func button_text(is_docked: bool) -> String:
-	return "Undock" if is_docked else "Request Docking"
+	# M52d -- caps for style consistency with the comms panel's per-vessel
+	# action buttons (DEMAND ID / DEMAND STOP), per the playtest's
+	# "consistent style buttons with similar style text".
+	return "UNDOCK" if is_docked else "REQUEST DOCKING"
 
 # Delegates to Ship.request_undock() -- the SAME M32 undock command the
 # dialogue-free player path and NPC docking AI use. No duplicate logic.
