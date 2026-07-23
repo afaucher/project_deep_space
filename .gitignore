@@ -22,6 +22,9 @@ Thumbs.db
 *.exe
 *.zip
 
+# Linux specific (bundled Godot binary is downloaded locally, not committed)
+Godot_v*_linux.x86_64
+
 # Python (generate_audio.py helper)
 __pycache__/
 *.pyc
