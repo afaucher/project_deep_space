@@ -63,16 +63,19 @@ func setup(main) -> void:
 	_finish()
 
 # ---------------------------------------------------------------------------
-# Phase 1: standoff intercept. A pirate vs. a scripted straight-line-moving
-# victim (a bare CargoShuttle, no AI/job -- just a constant linear_velocity,
-# same "no engines commanding it, nothing decelerates it" shape test_
-# collision_damage.gd's frigates use). Asserts: closes to the standoff (not
-# the victim's own position), relative speed drops under the match threshold
-# at DONE, and -- the critical regression check -- ZERO hull contact the
-# whole encounter (instant fail on any detected damage, margin-based).
+# Phase 1: hail-from-range sequencing (revised, calling session 2026-07-23:
+# playtest read the old order -- INTERCEPT closes all the way to standoff
+# AND matches speed BEFORE DEMAND_STOP ever shows colors/sends the demand --
+# as "they were already trying to board me before the hail even showed up."
+# Now INTERCEPT completes as soon as the victim is within hailing range,
+# full stop; DEMAND_STOP shows colors and sends the demand on ITS first
+# tick, from wherever that is (still far from boarding range); THEN its own
+# pacing closes to standoff and matches speed while the demand is live.
+# Asserts each leg of that order explicitly, plus the still-critical
+# regression check: ZERO hull contact across the whole encounter.
 # ---------------------------------------------------------------------------
 func _phase_1_standoff_intercept() -> void:
-	print("\n--- Phase 1: standoff intercept vs. a straight-line-moving victim ---")
+	print("\n--- Phase 1: INTERCEPT completes from range -> DEMAND_STOP hails immediately -> THEN closes to standoff ---")
 
 	var victim = _make_ship(CargoShuttle, "P1_Victim", 900, Vector2(3200, 600), ["TEAM_P1_VICTIM"])
 	victim.linear_velocity = Vector2(0, 150) # constant drift, no AI/job to decelerate it
@@ -83,14 +86,53 @@ func _phase_1_standoff_intercept() -> void:
 	var job := {
 		"steps": [
 			{"verb": "INTERCEPT"},
+			{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0},
 		],
 		"current": 0,
 		"victim_iid": victim.get_instance_id(),
 	}
 	pirate.assign_job(job)
 
-	var done := false
 	var never_contacted := true
+
+	# --- INTERCEPT completes well outside boarding range -- no more waiting
+	# to close in AND match speed before handing off to DEMAND_STOP. ---
+	var intercept_done := false
+	var dist_at_intercept_done := -1.0
+	for i in range(600): # up to 10s -- already within hail range at spawn (~3255 vs ~27000), should be near-instant
+		await main_node.get_tree().physics_frame
+		if not is_instance_valid(pirate) or not is_instance_valid(victim):
+			break
+		if not _healthy(pirate) or not _healthy(victim):
+			never_contacted = false
+			break
+		if job.get("current", 0) >= 1:
+			intercept_done = true
+			dist_at_intercept_done = pirate.position.distance_to(victim.position)
+			break
+
+	_assert(intercept_done, "INTERCEPT reached DONE (current=%d)" % job.get("current", 0))
+	if intercept_done:
+		_assert(dist_at_intercept_done > JobSteps.INTERCEPT_STANDOFF_DIST * 3.0,
+			"INTERCEPT completed from well outside boarding range (dist=%.1f, standoff=%.1f) -- hailing from range, not after already arriving" %
+			[dist_at_intercept_done, JobSteps.INTERCEPT_STANDOFF_DIST])
+
+	# --- DEMAND_STOP shows colors + sends the demand on its very first
+	# tick, from that same far-away distance -- before any further closing.
+	var demand_sent_far_out := false
+	for i in range(120): # up to 2s -- fires immediately on entry
+		await main_node.get_tree().physics_frame
+		if not is_instance_valid(pirate) or not is_instance_valid(victim):
+			break
+		if victim.pending_demand.get("rung", "") == Hail.RUNG_STOP:
+			var dist_now: float = pirate.position.distance_to(victim.position)
+			demand_sent_far_out = dist_now > JobSteps.INTERCEPT_STANDOFF_DIST * 2.0
+			break
+	_assert(demand_sent_far_out, "the demand (and showing colors) went out while still well outside standoff range -- fly colors, THEN get into position")
+
+	# --- DEMAND_STOP's own pacing (unchanged M52c convergence math) THEN
+	# closes to standoff and matches speed while the demand stays live. ---
+	var converged := false
 	for i in range(5400): # up to 90s -- generous convergence budget
 		await main_node.get_tree().physics_frame
 		if not is_instance_valid(pirate) or not is_instance_valid(victim):
@@ -98,21 +140,14 @@ func _phase_1_standoff_intercept() -> void:
 		if not _healthy(pirate) or not _healthy(victim):
 			never_contacted = false
 			break # instant fail, no point continuing
-		if job.get("current", 0) >= job["steps"].size():
-			done = true
-			break
-
-	_assert(done, "INTERCEPT reached DONE within the time budget (current=%d)" % job.get("current", -1))
-	_assert(never_contacted, "zero hull contact damage during the standoff approach")
-
-	if done and is_instance_valid(pirate) and is_instance_valid(victim):
 		var dist: float = pirate.position.distance_to(victim.position)
 		var rel_speed: float = (pirate.linear_velocity - victim.linear_velocity).length()
-		print("[P1] at DONE: dist=%.1f rel_speed=%.1f (standoff=%.1f, match_threshold=%.1f)" %
-			[dist, rel_speed, JobSteps.INTERCEPT_STANDOFF_DIST, JobSteps.INTERCEPT_SPEED_MATCH_THRESHOLD])
-		_assert(rel_speed <= JobSteps.INTERCEPT_SPEED_MATCH_THRESHOLD * 1.5, "relative speed (%.1f) is under (a generous margin past) the match threshold (%.1f) at DONE" % [rel_speed, JobSteps.INTERCEPT_SPEED_MATCH_THRESHOLD])
-		_assert(dist <= JobSteps.INTERCEPT_STANDOFF_DIST * 2.0, "closed to near the standoff distance (%.1f), not left far out on hail range alone (standoff=%.1f)" % [dist, JobSteps.INTERCEPT_STANDOFF_DIST])
-		_assert(dist >= JobSteps.INTERCEPT_STANDOFF_DIST * 0.25, "stopped at a standoff, not flown into the victim's exact position (dist=%.1f)" % dist)
+		if dist <= JobSteps.INTERCEPT_STANDOFF_DIST * 2.0 and rel_speed <= JobSteps.INTERCEPT_SPEED_MATCH_THRESHOLD * 1.5:
+			converged = true
+			break
+
+	_assert(converged, "closed to near the standoff distance and matched speed eventually, via DEMAND_STOP's own pacing")
+	_assert(never_contacted, "zero hull contact damage across the whole encounter")
 
 	_free_all()
 

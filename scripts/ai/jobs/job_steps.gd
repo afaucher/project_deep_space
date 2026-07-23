@@ -683,18 +683,22 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 	return DONE
 
 # ---------------------------------------------------------------------------
-# INTERCEPT {standoff=400.0, cruise=600.0} -- M52c: close to a standoff point
-# OFFSET from job["victim_iid"]'s track (never the victim's own position --
-# see _standoff_offset/_pace_at_offset), DONE once BOTH inside hail range (or
-# the standoff distance, for a jammed/no-comms edge case) AND relative speed
-# is under INTERCEPT_SPEED_MATCH_THRESHOLD -- an intercept that can't be
-# rammed through (the target point itself always sits standoff_dist clear of
-# the victim's hull, continuously recomputed every tick as both move, so the
-# closed-loop approach curves clear of it rather than aiming through it) and
-# can't be flown by without matching speed (pure proximity used to DONE
-# regardless of closing speed -- the playtest's "INTERCEPT done" without ever
-# slowing down). ABORT if the track's gone stale (belt to the runner's own
-# victim_lost abort_when, same "suspenders" idiom fire_opportunity_leaf uses
+# INTERCEPT {standoff=400.0, cruise=600.0} -- revised (calling session,
+# 2026-07-23): DONE once within hailing range of job["victim_iid"]'s track,
+# full stop -- no speed-match requirement anymore. The old gate (ALSO
+# requiring relative speed under INTERCEPT_SPEED_MATCH_THRESHOLD) forced the
+# approach to already be basically at boarding position AND velocity-matched
+# before DEMAND_STOP's hail/show-colors ever fired -- playtest read that as
+# "they were trying to board me before the hail even showed up." Now the
+# demand (and showing colors) goes out from communication range, well
+# outside boarding distance; DEMAND_STOP's own pacing (_pace_at_offset, the
+# same safe standoff approach this step still uses on its way there) does
+# the actual closing-in AFTER the hail is already out -- "hail from farther
+# away, fly colors, THEN get into position," not the reverse. The standoff-
+# offset target point (never the victim's own position) still keeps this
+# leg from ever aiming through the victim's hull even while covering that
+# ground. ABORT if the track's gone stale (belt to the runner's own victim_
+# lost abort_when, same "suspenders" idiom fire_opportunity_leaf uses
 # alongside fire_weapon's own guard).
 # ---------------------------------------------------------------------------
 
@@ -712,9 +716,8 @@ static func step_intercept(actor, step: Dictionary, job: Dictionary) -> int:
 
 	var hail_range: float = _hail_range_to(actor, victim_iid)
 	var dist: float = actor.position.distance_to(victim_pos)
-	var rel_speed: float = (actor.linear_velocity - victim_vel).length()
 	var close_enough: bool = (hail_range > 0.0 and dist <= hail_range) or dist <= standoff_dist * 1.25
-	if close_enough and rel_speed <= INTERCEPT_SPEED_MATCH_THRESHOLD:
+	if close_enough:
 		return DONE
 
 	var offset: Vector2 = _standoff_offset(actor, victim_pos, victim_vel, standoff_dist, scratch)
