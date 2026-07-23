@@ -21,6 +21,17 @@ const _STANDING_COLORS := {
 	"FRIENDLY": Color(0.2, 0.8, 0.2),
 }
 
+# M52 -- SOS as a generic contact attribute (calling session, 2026-07-23):
+# same RGB as navigation_panel.gd's SOS_COLOR (its own local const there too
+# -- this file doesn't import colors from other panels, matches the existing
+# "standing.gd is phase-1, not ours to touch" convention just above). A
+# contact carrying sos/sos_nature/sos_name (ship.gd's comms_inbox VERB_SOS
+# branch -- only ever stamped onto a REAL, already-existing track, never a
+# manufactured one, per the M41 rule) gets this instead of its usual
+# standing/classification color, so a friendly-standing ship in distress
+# still reads as urgent rather than blending into the ordinary green row.
+const _SOS_COLOR := Color(1.0, 0.25, 0.1, 0.95)
+
 var current_state: Dictionary = {}
 var contact_panels: Dictionary = {}
 
@@ -311,9 +322,16 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		# over raw classification for a vessel's row color when present;
 		# non-vessels (ordnance/wreckage/asteroids) never carry a standing
 		# ("") and fall back to the pre-M48 classification coloring.
+		# M52 -- SOS takes priority over BOTH: a friendly ship calling for
+		# help is more urgent than its ordinary standing color, and the row
+		# should read as unmistakably distinct at a glance (matches the nav
+		# map's pulsing-cross treatment for the same event).
+		var is_sos: bool = c.get("sos", false)
 		var standing: String = c.get("standing", "")
 		var color: Color
-		if standing != "" and _STANDING_COLORS.has(standing):
+		if is_sos:
+			color = _SOS_COLOR
+		elif standing != "" and _STANDING_COLORS.has(standing):
 			color = _STANDING_COLORS[standing]
 		else:
 			color = Color(0.8, 0.8, 0.8)
@@ -321,27 +339,29 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			elif classification_str == "UNIDENTIFIED VESSEL": color = Color(0.8, 0.2, 0.2)
 		p_style.border_color = color
 		header.add_theme_color_override("font_color", color)
-		
+
 		var t_name = c.get("transponder_name", "")
-		if t_name != "":
-			header.text = t_name + " [" + classification_str + "]"
-		else:
-			header.text = c_id + " [" + classification_str + "]"
-		
+		var base_name = t_name if t_name != "" else c_id
+		header.text = ("[SOS] " + base_name + " [" + classification_str + "]") if is_sos else (base_name + " [" + classification_str + "]")
+
 		var dist = c["_dist"]
 		var vel = c.get("vel", Vector2.ZERO)
 		var speed = vel.length()
 		var age_s = c.get("last_seen_timer", 0.0)
-		
+
 		var their_pos = c.get("pos", Vector2.ZERO)
 		var hdg = wrapf(rad_to_deg((their_pos - my_pos).angle()) + 90.0, 0.0, 360.0)
-		
+
 		var angle_from_them_to_us = (my_pos - their_pos).angle()
 		var my_em_emit = Utils.get_directional_em(mock_my_sig, angle_from_them_to_us)
 		var detect_dist = my_em_emit * (10000.0 / 15.0)
-		
+
 		var sig = c.get("signature", {})
-		info.text = "Dist: %s | Hdg: %03d | Spd: %.1f m/s | Age: %.1fs\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nOur Emit: %.1f | Det Limit: %s" % [
+		var sos_line: String = ""
+		if is_sos:
+			var nature: String = c.get("sos_nature", "")
+			sos_line = "\nSOS: %s" % (nature if nature != "" else "distress call")
+		info.text = ("Dist: %s | Hdg: %03d | Spd: %.1f m/s | Age: %.1fs\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nOur Emit: %.1f | Det Limit: %s" + sos_line) % [
 			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0),
 			my_em_emit, Utils.format_dist(detect_dist)
 		]

@@ -55,6 +55,28 @@ func setup(main) -> void:
 	_assert(panel.standing_label.text == "",
 		"no target locked -> blank, got '%s'" % panel.standing_label.text)
 
+	# M52 -- SOS as a generic contact attribute: appends regardless of
+	# standing, since a distressed ship's tactical urgency isn't the same
+	# axis as its standing.
+	panel._update_standing_row({
+		"classification": "FRIENDLY VESSEL",
+		"standing": "FRIENDLY",
+		"standing_reason": "",
+		"sos": true,
+		"sos_nature": "UNDER_ATTACK",
+	})
+	_assert(panel.standing_label.text == "Standing: FRIENDLY\nSOS: UNDER_ATTACK",
+		"SOS appends on its own line regardless of standing, got '%s'" % panel.standing_label.text)
+
+	panel._update_standing_row({
+		"classification": "FRIENDLY VESSEL",
+		"standing": "FRIENDLY",
+		"standing_reason": "",
+		"sos": false,
+	})
+	_assert(panel.standing_label.text == "Standing: FRIENDLY",
+		"no SOS -> no SOS line, got '%s'" % panel.standing_label.text)
+
 	panel.queue_free()
 
 	if failures.is_empty():

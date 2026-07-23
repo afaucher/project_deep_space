@@ -339,6 +339,17 @@ func _update_standing_row(c: Dictionary) -> void:
 	else:
 		standing_label.text = "Standing: %s" % standing
 
+	# M52 -- SOS as a generic contact attribute (calling session, 2026-07-23):
+	# same source contacts_panel.gd's row badge reads (ship.gd's comms_inbox
+	# VERB_SOS branch, only ever stamped onto a real, already-existing
+	# track). The targeting computer is exactly where a player checking a
+	# locked ship's tactical status would want to know it's calling for
+	# help, independent of whatever its standing happens to be.
+	var is_sos: bool = c.get("sos", false) if is_vessel else false
+	if is_sos:
+		var nature: String = c.get("sos_nature", "")
+		standing_label.text += "\nSOS: %s" % (nature if nature != "" else "distress call")
+
 	if c.is_empty() or not is_vessel:
 		btn_mark_hostile.disabled = true
 		btn_unmark.disabled = true
