@@ -35,6 +35,8 @@ const CargoRunLeaf = preload("res://scripts/ai/leaves/cargo_run_leaf.gd")
 const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
 const ChallengeLeaf = preload("res://scripts/ai/leaves/challenge_leaf.gd")
 const JobRunnerLeaf = preload("res://scripts/ai/jobs/job_runner_leaf.gd")
+const InterdictLeaf = preload("res://scripts/ai/leaves/interdict_leaf.gd")
+const SOSResponseLeaf = preload("res://scripts/ai/leaves/sos_response_leaf.gd")
 
 static func build_default() -> Node:
 	var tree = BeehaveTreeScript.new()
@@ -121,6 +123,12 @@ static func build_pirate() -> Node:
 
 	return tree
 
+# M52 -- Interdict/JobRunner (implementation_plans/m52_patrol_interdiction.md
+# item 1) slot into the inner ActionSelector immediately before Engage, same
+# relative position/contract as build_patrol below: Interdict assigns a demand
+# job against a fresh HOSTILE contact (always FAILURE), JobRunner picks it up
+# the SAME tick and pre-empts Engage while the job runs. No SOSResponse here
+# (item 2 is patrol-only -- a station doesn't fly anywhere).
 static func build_station() -> Node:
 	var tree = BeehaveTreeScript.new()
 	tree.name = "AITree"
@@ -136,6 +144,19 @@ static func build_station() -> Node:
 	var root = SelectorScript.new()
 	root.name = "ActionSelector"
 	root_seq.add_child(root)
+
+	# M52 -- Interdict/JobRunner slot in immediately before Engage (same
+	# relative position as build_patrol below): a fresh HOSTILE contact gets
+	# demanded before it gets fired on. Interdict always returns FAILURE
+	# (side-effect leaf); JobRunner claims the tick the same tick a demand job
+	# is assigned, which is what actually pre-empts Engage.
+	var interdict = InterdictLeaf.new()
+	interdict.name = "Interdict"
+	root.add_child(interdict)
+
+	var job_runner = JobRunnerLeaf.new()
+	job_runner.name = "JobRunner"
+	root.add_child(job_runner)
 
 	var engage = SequenceScript.new()
 	engage.name = "Engage"
@@ -170,9 +191,20 @@ static func build_station() -> Node:
 # via Engage above it, and with no challenge to send the tree falls straight
 # through to FollowRoute exactly as before M49.
 #
+# M52 -- Interdict (implementation_plans/m52_patrol_interdiction.md item 1):
+# sits BETWEEN Disengage and Engage. Assigns a demand (INTERCEPT+DEMAND_STOP)
+# job against a fresh HOSTILE contact, always returns FAILURE; JobRunner (next)
+# picks the job up the SAME tick, which is what pre-empts Engage below --
+# "demand surrender before weapons." SOSResponse (item 2): sits BETWEEN Engage
+# and Challenge -- flies toward a heard SOS's snapshot position when nothing
+# closer is already HOSTILE (Engage still wins first).
+#
 #   Selector
 #   |-- Disengage (flee when crippled)
+#   |-- Interdict (assign a demand job against a fresh HOSTILE contact; always FAILURE)
+#   |-- JobRunner (ticks the demand job Interdict just assigned; FAILURE if no job)
 #   |-- Engage (acquire -> steer -> fire; a hostile preempts the patrol)
+#   |-- SOSResponse (fly toward a heard SOS's marker; FAILURE when none/arrived/stale)
 #   |-- Challenge (DEMAND(IDENTIFY) UNREPORTED contacts in controlled space; always FAILURE)
 #   |-- FollowRoute (cruise the waypoints; SUCCESS while patrolling)
 #   +-- Idle (no route -> hold heading)
@@ -194,6 +226,18 @@ static func build_patrol() -> Node:
 	flee.name = "Flee"
 	disengage.add_child(flee)
 
+	# M52 -- Interdict/JobRunner sit between Disengage and Engage: a fresh
+	# HOSTILE contact gets demanded before it gets fired on. Interdict always
+	# returns FAILURE (side-effect leaf); JobRunner claims the tick the same
+	# tick a demand job is assigned, which is what actually pre-empts Engage.
+	var interdict = InterdictLeaf.new()
+	interdict.name = "Interdict"
+	root.add_child(interdict)
+
+	var job_runner = JobRunnerLeaf.new()
+	job_runner.name = "JobRunner"
+	root.add_child(job_runner)
+
 	var engage = SequenceScript.new()
 	engage.name = "Engage"
 	root.add_child(engage)
@@ -206,6 +250,14 @@ static func build_patrol() -> Node:
 	var fire = FireOpportunityLeaf.new()
 	fire.name = "FireOpportunity"
 	engage.add_child(fire)
+
+	# M52 -- SOS response sits between Engage and Challenge: a closer HOSTILE
+	# contact (including one the SOS itself reported) still wins via Engage
+	# above; this is what gets the patrol close enough to sense one in the
+	# first place (comms range >> sensor range).
+	var sos_response = SOSResponseLeaf.new()
+	sos_response.name = "SOSResponse"
+	root.add_child(sos_response)
 
 	var challenge = ChallengeLeaf.new()
 	challenge.name = "Challenge"

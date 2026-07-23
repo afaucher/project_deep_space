@@ -90,6 +90,16 @@ func _check_windows(actor: Node, blackboard) -> void:
 		if frame >= entry.get("expire_frame", 0):
 			if standing == Standing.UNREPORTED:
 				ignored[trk] = true
+				# M52 -- suspicion assessment folded into the warrant pipeline
+				# (implementation_plans/m52_patrol_interdiction.md item 3): an
+				# ignored IDENTIFY challenge posts a NO_ID warrant against
+				# whatever this actor could actually see (claimed name is
+				# empty for a true UNREPORTED contact -- subject_key falls
+				# back to the signature). Closes the loop end to end: next
+				# fusion tick's compute_standing reads it via warrant_index ->
+				# HOSTILE -> InterdictLeaf picks it up.
+				var claimed_name: String = actor.active_transponders.get(c.get("instance_id", -1), {}).get("name", "")
+				actor.post_warrant(Standing.OFF_NO_ID, claimed_name, c.get("signature", {}), "ignored identify challenge")
 			to_erase.append(trk)
 	for trk in to_erase:
 		challenged.erase(trk)
