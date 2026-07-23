@@ -654,6 +654,18 @@ var _eng_crossing_state: Dictionary = {}
 var _eng_was_overheated: bool = false
 var _eng_was_hulk_logged: bool = false
 
+# M52 playtest fix (calling session, 2026-07-22) -- separate from
+# _eng_was_overheated above: that one only gates _check_eng_log_crossings'
+# OWN eng_log line (this ship's private panel, toggle-gated by
+# "perf_eng_log", useless for an NPC nobody's looking at). This flag gates
+# the death-cause ATTRIBUTION (last_damage_attacker_name/iid) and the shared
+# [Damage]-style console print, unconditionally, right where the reactor
+# health drain actually happens -- the mystery-death gap this closes: a ship
+# that cooked its own reactor from heat never showed up in any cross-ship-
+# visible log (pirate_guild.gd's "killed_by" line stayed blank, no console
+# line anywhere), because that path never went through take_damage() at all.
+var _reactor_overheat_attributed: bool = false
+
 # M40 -- repair mechanism (station.begin_repairs(ship) registers the ship
 # here; see begin_repairs() below). Keyed by the repaired ship's instance_id
 # so the same ship can't double-register, valued with the Ship reference
@@ -2406,6 +2418,17 @@ func _physics_process(delta: float) -> void:
 		current_heat = clampf(current_heat, 0.0, max_heat)
 		
 		if current_heat >= max_heat:
+			if not _reactor_overheat_attributed:
+				_reactor_overheat_attributed = true
+				# Same death-cause fields take_damage() populates on every hit
+				# (attacker_id -1 case) -- this IS the ship's own doing, not an
+				# external attacker, so it gets the same "unattributed" shape a
+				# collision does. Without this, pirate_guild.gd's "killed by"
+				# line (and anything else reading last_damage_attacker_name)
+				# stayed blank forever for a self-cooked death.
+				last_damage_attacker_iid = -1
+				last_damage_attacker_name = "unattributed thermal"
+				if COMBAT_DEBUG: print("[Damage] ", name, " reactor overheating -- current_heat pegged at max_heat, draining reactor health")
 			for c in ship_components:
 				if c["type"] == "reactor":
 					c["health"] -= OVERHEAT_DAMAGE_RATE * delta
@@ -2420,6 +2443,8 @@ func _physics_process(delta: float) -> void:
 			# take_damage()'s own death check (line ~910) exactly.
 			if not is_dead and (is_sys_destroyed("reactor") or is_sys_destroyed("hull")):
 				hulk()
+		else:
+			_reactor_overheat_attributed = false
 		PerfProbe.end("he_totals")
 
 		# Update Component EM & Heat

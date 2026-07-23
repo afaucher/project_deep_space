@@ -56,7 +56,22 @@ func setup(main) -> void:
 
 	var pirates: Array = []
 	for i in range(2):
-		var p = _make_ship(ArmedPinnace, "Pirate%d" % i, 910 + i, Vector2(6000, 0).rotated(TAU * float(i) / 2.0), ["PIRATE_%d" % (910 + i)])
+		# Shared "PIRATE_GUILD" tag, unique per-member tag riding alongside --
+		# mirrors pirate_guild.gd's own spawn convention EXACTLY (its own
+		# comment: "guild members never rob or get spooked by their own --
+		# the viability sim showed pirates targeting each other as prey").
+		# Without the shared tag, two pirates that both show FLAG_PIRATE
+		# colors read EACH OTHER as HOSTILE via the default known_enemy_
+		# flags=[FLAG_PIRATE] every ship carries -- an artifact of an
+		# unrealistic test fixture, not something that can happen to real
+		# guild-spawned pirates, but it WOULD make ShouldDisengage's Flee
+		# leaf take its "flee at full speed from a hostile" branch instead
+		# of the intended "nothing hostile, just coast" branch once heat-
+		# disengage kicks in -- actively fleeing doesn't cool down the way
+		# coasting does. Caught by exactly that symptom: heat pegged at
+		# max_heat and stayed there for 7+ seconds AFTER disengage was
+		# already active, when it should have started dropping immediately.
+		var p = _make_ship(ArmedPinnace, "Pirate%d" % i, 910 + i, Vector2(6000, 0).rotated(TAU * float(i) / 2.0), ["PIRATE_GUILD", "PIRATE_GUILD_%d" % (910 + i)])
 		p.add_child(AITreeFactory.build_pirate())
 		# Hand-built job, same shape test_robbery_mechanics.gd/test_patrol_
 		# interdiction.gd use -- BOTH pirates target the SAME victim_iid, the
