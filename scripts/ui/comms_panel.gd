@@ -62,7 +62,12 @@ signal transponder_custom_name_changed(new_name: String)
 # "autopilot" half of the split.
 signal acknowledge_requested()
 signal stop_requested()
-signal sos_requested(nature: String)
+# M52 -- SOS becomes an actual toggle (implementation_plans/
+# m52_sos_as_contact.md item 4), wired to Ship.set_sos_active instead of a
+# one-shot fire-and-forget -- `active` mirrors the CheckButton's new state,
+# `nature` is only meaningful when active is true (re-evaluated fresh on
+# every toggle-ON press, see _on_sos_toggled below).
+signal sos_toggled(active: bool, nature: String)
 # Post-M51 playtest -- the contact action row moved HERE from the contacts
 # panel (contact rows are prime real estate; comms is where you talk to and
 # judge ships). All act on the currently SELECTED contact (selection is
@@ -91,7 +96,7 @@ var hail_banner: PanelContainer
 var hail_banner_label: Label
 var btn_acknowledge: Button
 var btn_stop: Button
-var btn_sos: Button
+var btn_sos: CheckButton
 var hails_title: Label
 var hails_vbox: VBoxContainer
 var _last_entries_rendered: Array = []
@@ -155,16 +160,19 @@ func _ready() -> void:
 	hbox1.add_child(btn_share_loc)
 
 	# M49 -- SOS: sends UNDER_ATTACK if a fresh HOSTILE contact exists, else
-	# DISABLED. The actual nature pick happens in _on_sos_pressed() against
+	# DISABLED. The actual nature pick happens in _on_sos_toggled() against
 	# current_state, same "packet-polling, not pushed" pattern as every other
 	# reader of current_state in this panel. Deliberately plain -- just
 	# another comm control alongside Share Name/Share Location (calling
 	# session, 2026-07-23: the old standalone "[ SOS ]" button in ORANGE_RED
 	# read as a special, separately-important mechanic; SOS is meant to be
-	# ordinary infrastructure now, not a big red panic button).
-	btn_sos = Button.new()
+	# ordinary infrastructure now, not a big red panic button). M52 follow-up
+	# (implementation_plans/m52_sos_as_contact.md item 4): a CheckButton, not
+	# a one-shot Button -- SOS is now a heartbeat the player turns on and off,
+	# matching Share Name/Share Location's own control type.
+	btn_sos = CheckButton.new()
 	btn_sos.text = "SOS"
-	btn_sos.pressed.connect(_on_sos_pressed)
+	btn_sos.toggled.connect(_on_sos_toggled)
 	hbox1.add_child(btn_sos)
 
 	my_vbox.add_child(hbox1)
@@ -615,15 +623,20 @@ func _rebuild_vessel_list(entries: Array) -> void:
 # M49 -- SOS nature pick: UNDER_ATTACK if we hold any fresh HOSTILE contact,
 # else DISABLED. Mirrors Ship._nearest_fresh_hostile_pos()'s freshness gate
 # (FIRE_STALENESS_MAX) against the same "contacts" the packet already carries.
-func _on_sos_pressed() -> void:
-	var contacts: Dictionary = current_state.get("contacts", {})
+# M52 follow-up (implementation_plans/m52_sos_as_contact.md item 4):
+# re-evaluated on every toggle-ON press (not just once) -- a player toggling
+# SOS off and back on later might have a different nature by then. Toggling
+# OFF sends no nature pick at all (the RPC ignores it when active=false).
+func _on_sos_toggled(pressed: bool) -> void:
 	var nature := Hail.NATURE_DISABLED
-	for c_id in contacts:
-		var c: Dictionary = contacts[c_id]
-		if c.get("standing", "") == Standing.HOSTILE and c.get("last_seen_timer", 999.0) <= SOS_FRESH_STALENESS:
-			nature = Hail.NATURE_UNDER_ATTACK
-			break
-	emit_signal("sos_requested", nature)
+	if pressed:
+		var contacts: Dictionary = current_state.get("contacts", {})
+		for c_id in contacts:
+			var c: Dictionary = contacts[c_id]
+			if c.get("standing", "") == Standing.HOSTILE and c.get("last_seen_timer", 999.0) <= SOS_FRESH_STALENESS:
+				nature = Hail.NATURE_UNDER_ATTACK
+				break
+	emit_signal("sos_toggled", pressed, nature)
 
 # M41 -- packet["missions"] is built by main.gd's _distribute_state() as
 # [{title, objective_text}, ...] straight off the player ship's MissionLog

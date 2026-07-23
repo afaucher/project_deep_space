@@ -261,24 +261,34 @@ func _test_refresh_dedup_and_new_demand() -> void:
 
 	# The victim's comply-or-run decision is made once, keyed on seq
 	# (threat_response_leaf's last_decided_seq) -- tick it to consume the
-	# decision (which also broadcasts the incident's ONE SOS), then verify a
-	# refresh does NOT re-open it. "No fresh SOS" is observed via the
-	# pirate's own heard_sos age: a re-sent SOS would overwrite the entry
-	# with age ~0.
+	# decision (which also turns on the incident's SOS heartbeat -- M52
+	# follow-up, implementation_plans/m52_sos_as_contact.md item 2), then
+	# verify a refresh does NOT re-open it (no re-decision, no re-priming
+	# of the heartbeat). "No re-trigger" is observed directly on the
+	# victim's OWN sos_heartbeat_timer: a fresh decision primes it to
+	# EXACTLY SOS_HEARTBEAT_INTERVAL synchronously (see threat_response_
+	# leaf.gd), so checking it immediately after leaf.tick() (no awaited
+	# frame in between) is race-free -- unlike inferring from the pirate's
+	# received contact, whose last_seen_timer is ALSO reset by ordinary
+	# real sensor detections at this range, which would confound the check.
 	var leaf = ThreatResponseLeaf.new()
 	var bb = BlackboardScript.new()
 	var first_tick: int = leaf.tick(victim, bb)
 	_assert(first_tick == leaf.SUCCESS, "S4: first tick decides (SUCCESS) on the fresh demand")
+	_assert(victim.sos_active, "S4 setup: the decision turned the SOS heartbeat on")
+	_assert(victim.sos_heartbeat_timer == victim.SOS_HEARTBEAT_INTERVAL, "S4 setup: heartbeat primed to fire on the very next physics tick")
 
-	for i in range(60): # let the SOS land and age ~1s
+	for i in range(60): # let the heartbeat actually fire once and start accumulating again
 		await main_node.get_tree().physics_frame
-	var sos_age_before: float = pirate.heard_sos.get(victim.get_instance_id(), {}).get("age", -1.0)
-	_assert(sos_age_before > 0.0, "S4 setup: the decision's ONE SOS landed and is aging")
+	var sos_timer_before_refresh: float = victim.sos_heartbeat_timer
+	_assert(sos_timer_before_refresh < victim.SOS_HEARTBEAT_INTERVAL, "S4 setup: the heartbeat fired once and is aging again, not still primed")
 
 	pirate.refresh_demand(victim.get_instance_id(), Hail.RUNG_STOP, seq)
 	await main_node.get_tree().physics_frame
 	await main_node.get_tree().physics_frame
-	leaf.tick(victim, bb) # tick again against the refreshed demand
+	leaf.tick(victim, bb) # tick again against the refreshed demand -- must NOT re-decide
+	var sos_timer_after_refresh: float = victim.sos_heartbeat_timer
+	_assert(sos_timer_after_refresh != victim.SOS_HEARTBEAT_INTERVAL, "S4: refresh did NOT re-prime the SOS heartbeat (no re-decision, no fresh broadcast)")
 	await main_node.get_tree().physics_frame
 	await main_node.get_tree().physics_frame
 
@@ -288,9 +298,6 @@ func _test_refresh_dedup_and_new_demand() -> void:
 	_assert(victim.last_hails.size() == last_hails_before, "S4: refresh did NOT spam the last_hails ring")
 	_assert(bb.get_value("last_decided_seq", -1) == seq,
 		"S4: the decision stayed keyed to the original seq (refresh opened no new incident)")
-	var sos_age_after: float = pirate.heard_sos.get(victim.get_instance_id(), {}).get("age", -1.0)
-	_assert(sos_age_after > sos_age_before,
-		"S4: no fresh SOS on refresh (heard_sos kept aging: %.2f -> %.2f)" % [sos_age_before, sos_age_after])
 
 	# A genuinely NEW demand (fresh seq) DOES overwrite and re-alert.
 	var seq2: int = pirate.send_demand(victim.get_instance_id(), Hail.RUNG_STOP)

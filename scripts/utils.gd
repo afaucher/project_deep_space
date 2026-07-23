@@ -48,6 +48,13 @@ static func classification_color(classification: String) -> Color:
 		"FRIENDLY VESSEL": return Color.GREEN
 		"FRIENDLY ORDNANCE": return Color.DARK_GREEN
 		"ASTEROID": return Color.GRAY
+		# M52 -- SOS is now a real classified contact (implementation_plans/
+		# m52_sos_as_contact.md item 6), riding the same generic per-contact
+		# drawing path as everything else instead of navigation_panel.gd's
+		# old special-case marker. Same literal that marker used to use
+		# (this file doesn't import colors from navigation_panel.gd -- local
+		# literal, matching the convention everywhere else in this area).
+		"DISTRESS CALL": return Color(1.0, 0.25, 0.1, 0.95)
 		_: return Color.WHITE
 
 # True world-to-screen rotation offset shared by every map/compass-style

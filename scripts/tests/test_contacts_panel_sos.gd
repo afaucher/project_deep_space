@@ -2,12 +2,14 @@ extends Node
 
 # M52 -- pins ContactsPanel's SOS badge (scripts/ui/contacts_panel.gd): a
 # contact carrying sos/sos_nature/sos_name (ship.gd's comms_inbox VERB_SOS
-# branch -- only ever stamped onto a REAL, already-existing track, never a
-# manufactured one) now shows a "[SOS]" header prefix, a distinct row color
-# (matching navigation_panel.gd's SOS_COLOR), and an "SOS: <nature>" line in
-# the detail text -- taking priority over the contact's ordinary standing
-# color, since a friendly ship in distress is more urgent than its usual
-# green row. Drives the actual widget (headless-safe: no scene/physics
+# branch -- either stamped onto a real, already-existing track, or, since
+# the M52 follow-up (implementation_plans/m52_sos_as_contact.md), a brand-
+# new "DISTRESS CALL"-classified entry with no real detection behind it at
+# all) now shows a "[SOS]" header prefix, a distinct row color (matching
+# utils.gd's classification_color("DISTRESS CALL")), and an "SOS: <nature>"
+# line in the detail text -- taking priority over the contact's ordinary
+# standing color, since a friendly ship in distress is more urgent than its
+# usual green row. Drives the actual widget (headless-safe: no scene/physics
 # dependency), same "instantiate the Control directly" pattern test_weapons_
 # panel_standing.gd uses.
 #
@@ -67,6 +69,30 @@ func setup(main) -> void:
 		var info2: Label = refs2["info"]
 		_assert(not header2.text.begins_with("[SOS] "), "an ordinary contact's header carries no SOS prefix, got '%s'" % header2.text)
 		_assert(not info2.text.contains("SOS:"), "an ordinary contact's detail text carries no SOS line")
+
+	# M52 follow-up -- an UNRESOLVED distress contact (no real transponder/
+	# sensor data at all -- classification "DISTRESS CALL", no transponders
+	# entry for its instance_id) falls back to sos_name for the header
+	# instead of the bare "TRK-xxx" track id.
+	panel.update_data({
+		"pos": Vector2.ZERO,
+		"contacts": {
+			"TRK-300": {
+				"instance_id": 300, "classification": "DISTRESS CALL", "pos": Vector2(3000, 0),
+				"vel": Vector2.ZERO, "last_seen_timer": 0.0, "signature": {},
+				"sos": true, "sos_nature": "DISABLED", "sos_name": "Mystery Caller",
+			},
+		},
+		"transponders": {},
+	})
+	_assert(panel.contact_panels.has("TRK-300"), "the unresolved distress contact rendered")
+	if panel.contact_panels.has("TRK-300"):
+		var refs4: Dictionary = panel.contact_panels["TRK-300"]
+		var header4: Label = refs4["header"]
+		var style4: StyleBoxFlat = refs4["style"]
+		_assert(header4.text.begins_with("[SOS] Mystery Caller"), "no transponder data -> header falls back to sos_name, got '%s'" % header4.text)
+		_assert(not header4.text.contains("TRK-300"), "the bare track id is NOT shown once sos_name is available, got '%s'" % header4.text)
+		_assert(style4.border_color == Color(1.0, 0.25, 0.1, 0.95), "unresolved distress row still uses the distress color, got %s" % str(style4.border_color))
 
 	# SOS clears (e.g. once the report ages out server-side) -> the badge
 	# and color revert to the plain standing-based treatment.

@@ -134,13 +134,6 @@ const CHANNEL_EDGE_COLOR := Color(0.55, 0.42, 0.12, 0.5)
 const CONTRACT_COLOR := Color(1.0, 0.68, 0.05, 0.95)
 const CONTRACT_RING_COLOR := Color(1.0, 0.68, 0.05, 0.4)
 
-# M49 -- SOS markers (design_ideas/comms_verbs.md). NAV layer only, like
-# contract markers above -- packet["sos"] (ship.heard_sos) never touches
-# sensor fusion (the M41 rule). Distinct orange-red so it reads apart from
-# both classification-colored contacts and amber contract markers.
-const SOS_COLOR := Color(1.0, 0.25, 0.1, 0.95)
-const SOS_MARKER_RADIUS_PX := 10.0
-const SOS_PULSE_PERIOD := 0.8 # seconds per pulse cycle, on-screen marker only
 const CONTRACT_MARKER_RADIUS_PX := 9.0
 # GO_TO_AREA ring dash pattern, in WORLD units (not screen pixels) so the
 # dash rhythm holds steady across zoom -- only the stroke WIDTH stays
@@ -923,40 +916,12 @@ func _draw() -> void:
 			var text_size = font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
 			draw_string(font, screen_pos + Vector2(10, -10 - text_size.y), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CONTRACT_COLOR)
 
-	# M49 -- SOS markers (design_ideas/comms_verbs.md): packet["sos"] rides
-	# the same NAV-layer channel as contracts (main.gd's _distribute_state --
-	# ship.heard_sos, NEVER merged into "contacts"). Reuses the off-screen
-	# edge-arrow affordance for off-screen callers; an on-screen caller gets a
-	# small pulsing cross instead of the dorito (distinct from both the
-	# contract pin and any sensor contact blip).
-	var sos_calls: Dictionary = current_state.get("sos", {})
-	var sos_pulse: float = 0.7 + 0.3 * sin(Time.get_ticks_msec() / 1000.0 * TAU / SOS_PULSE_PERIOD)
-	for s_iid in sos_calls:
-		var sos: Dictionary = sos_calls[s_iid]
-		var s_pos = sos.get("pos", Vector2.ZERO)
-		var s_name: String = sos.get("name", "SOS")
-		var nature: String = sos.get("nature", "")
-		var label: String = s_name + (" (" + nature + ")" if nature != "" else "")
-		var screen_pos = t.basis_xform(s_pos) + t.origin
-
-		var geo = edge_arrow_geometry(screen_pos, center, size, margin)
-		if geo != null:
-			_draw_offscreen_indicator(geo["edge_pos"], geo["dir"], SOS_COLOR, label, font)
-		else:
-			_draw_sos_marker(screen_pos, sos_pulse, label, font)
-
-# M49 -- on-screen SOS marker: a pulsing cross (distinct silhouette from the
-# contract diamond/pin and any sensor blip) so a distress call is
-# unmistakable at a glance.
-func _draw_sos_marker(screen_pos: Vector2, pulse: float, label: String, font: Font) -> void:
-	var r: float = SOS_MARKER_RADIUS_PX * pulse
-	var color := Color(SOS_COLOR.r, SOS_COLOR.g, SOS_COLOR.b, SOS_COLOR.a * pulse)
-	draw_line(screen_pos + Vector2(-r, 0), screen_pos + Vector2(r, 0), color, 3.0)
-	draw_line(screen_pos + Vector2(0, -r), screen_pos + Vector2(0, r), color, 3.0)
-	draw_arc(screen_pos, r * 1.6, 0, TAU, 16, color, 1.5)
-	if label != "":
-		var text_size = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
-		draw_string(font, screen_pos + Vector2(10, -10 - text_size.y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, SOS_COLOR)
+	# M52 -- SOS markers removed as a special case (implementation_plans/
+	# m52_sos_as_contact.md item 7): a "DISTRESS CALL"-classified contact now
+	# flows through the SAME generic per-contact drawing path every other
+	# contact already uses (_get_contact_color -> Utils.classification_color),
+	# blip/label/off-screen-arrow all already generic -- no bespoke pulsing-
+	# cross marker or NAV-layer packet["sos"] channel needed anymore.
 
 # Draws the four-corner white-bracket "selected" highlight around a screen
 # position -- factored out of the contact-selection code above (M41) so

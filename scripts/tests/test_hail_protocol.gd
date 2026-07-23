@@ -31,9 +31,12 @@ var ships: Dictionary = {}
 var scenario_idx: int = -1
 const NUM_SCENARIOS = 8
 # Per-scenario timeout (sim seconds) -- most scenarios settle in a couple of
-# sensor-fusion ticks, but SOS decay (scenario 7) needs to tick past its own
-# ~90s TTL, so it gets a much longer budget.
-const SCENARIO_TIMEOUTS := [8.0, 10.0, 10.0, 10.0, 10.0, 10.0, 8.0, 110.0]
+# sensor-fusion ticks. SOS decay (scenario 7) forces staleness directly
+# (implementation_plans/m52_sos_as_contact.md: SOS is now a real
+# active_contacts entry decaying on the normal CONTACT_TIMEOUT clock, no
+# separate TTL) rather than ticking out a real timer, so it needs no more
+# budget than the others.
+const SCENARIO_TIMEOUTS := [8.0, 10.0, 10.0, 10.0, 10.0, 10.0, 8.0, 10.0]
 var scenario_timer: float = 0.0
 
 var phase: int = 0
@@ -135,7 +138,15 @@ func _start_scenario(idx: int) -> void:
 		7:
 			print("\n--- Scenario H: SOS delivery (nature+name) and TTL decay ---")
 			_spawn("caller", ["TEAM_C8"], Vector2.ZERO)
-			_spawn("listener", ["TEAM_L8"], Vector2(2000, 0))
+			var listener_h := _spawn("listener", ["TEAM_L8"], Vector2(2000, 0))
+			# A Frigate's active sensors reach 40000 units with no distance
+			# falloff -- at this close range a real correlation would land
+			# almost immediately and keep refreshing last_seen_timer right
+			# back down every sweep, defeating phase 2's forced-staleness
+			# decay check below. Strip sensors so the listener's
+			# active_contacts entry can only ever come from the SOS itself
+			# (test_comms_relay.gd's existing pattern).
+			listener_h.ship_components = listener_h.ship_components.filter(func(c): return c["type"] != "sensors")
 		_:
 			print("\nAll hail protocol scenarios passed!")
 			print(">>> [TEST PASSED] test_hail_protocol <<<")
@@ -378,10 +389,21 @@ func _tick_scenario_g() -> int:
 			return 1
 	return -1
 
-# --- Scenario H: SOS delivery + nature/name + TTL decay ---------------------
+# --- Scenario H: SOS delivery + nature/name + CONTACT_TIMEOUT decay --------
+# M52 follow-up (implementation_plans/m52_sos_as_contact.md): SOS is now a
+# real active_contacts entry classified "DISTRESS CALL" (no more heard_sos
+# side-channel), decaying on the SAME CONTACT_TIMEOUT clock as every other
+# contact. Phase 2 forces staleness directly (mutating last_seen_timer)
+# rather than ticking out the real 20s -- at this close range (2000u, well
+# within a Frigate's sensor reach) a real sensor correlation landing on the
+# SAME entry during a real wait would keep refreshing it and the decay
+# would never be observed; this is also a much faster/tighter proof of the
+# CONTACT_TIMEOUT prune path itself, already exercised generically by every
+# other decaying contact in the suite.
 func _tick_scenario_h() -> int:
 	var caller: Ship = ships["caller"]
 	var listener: Ship = ships["listener"]
+	var caller_trk: String = "TRK-%03d" % (abs(caller.get_instance_id()) % 1000)
 
 	match phase:
 		0:
@@ -396,24 +418,20 @@ func _tick_scenario_h() -> int:
 			step_frame += 1
 			if step_frame < 3:
 				return -1
-			var caller_iid: int = caller.get_instance_id()
-			if not listener.heard_sos.has(caller_iid):
-				printerr("  ASSERT FAILED: listener should hold an SOS entry from the caller, heard_sos=", listener.heard_sos)
+			if not listener.active_contacts.has(caller_trk):
+				printerr("  ASSERT FAILED: listener should hold a DISTRESS CALL contact from the caller, active_contacts=", listener.active_contacts)
 				return 0
-			var sos: Dictionary = listener.heard_sos[caller_iid]
-			if sos.get("nature", "") != Hail.NATURE_DISABLED or sos.get("name", "") != caller.ship_name:
-				printerr("  ASSERT FAILED: SOS should carry nature=DISABLED and the caller's name, got sos=", sos)
+			var sos: Dictionary = listener.active_contacts[caller_trk]
+			if sos.get("sos_nature", "") != Hail.NATURE_DISABLED or sos.get("sos_name", "") != caller.ship_name:
+				printerr("  ASSERT FAILED: SOS should carry sos_nature=DISABLED and the caller's name, got contact=", sos)
 				return 0
-			print("  [PASS] SOS reached listener.heard_sos (nature='", sos.get("nature", ""), "', name='", sos.get("name", ""), "') -- now ticking past the TTL for decay")
+			print("  [PASS] SOS reached listener.active_contacts as a DISTRESS CALL entry (sos_nature='", sos.get("sos_nature", ""), "', sos_name='", sos.get("sos_name", ""), "') -- forcing it stale to confirm normal CONTACT_TIMEOUT decay")
+			listener.active_contacts[caller_trk]["last_seen_timer"] = 9999.0
 			phase = 2
 			return -1
 		2:
-			# Tick past HEARD_SOS_TTL (delta-accumulated, same convention as
-			# Standing's aggression-event TTL) -- runs fast under --fixed-fps
-			# (no real-time throttling), just many physics frames.
-			var caller_iid2: int = caller.get_instance_id()
-			if not listener.heard_sos.has(caller_iid2):
-				print("  [PASS] SOS entry decayed and was pruned after its TTL")
+			if not listener.active_contacts.has(caller_trk):
+				print("  [PASS] SOS contact decayed and was pruned by the normal CONTACT_TIMEOUT sweep")
 				return 1
 			return -1
 	return -1

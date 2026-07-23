@@ -107,13 +107,10 @@ const CONTACT_TIMEOUT := 20.0          # seconds with no fresh detection before 
 # missile_controller.gd; PD is safe via its live-instance checks.
 const FIRE_STALENESS_MAX := 3.0
 
-# M49 -- hail protocol constants (design_ideas/comms_verbs.md). HEARD_SOS_TTL:
-# how long a heard SOS lingers on the nav layer before being pruned (delta-
-# accumulated seconds, not wall-clock, same convention as Standing's
-# AGGRESSION_EVENT_TTL). COMPLIED_STOP_SPEED_LIMIT: compliance is behavioral,
-# not a one-time declaration -- a contact we're crediting with complied_stop
-# loses it the moment its OBSERVED speed shows it bolted.
-const HEARD_SOS_TTL := 90.0
+# M49 -- hail protocol constants (design_ideas/comms_verbs.md).
+# COMPLIED_STOP_SPEED_LIMIT: compliance is behavioral, not a one-time
+# declaration -- a contact we're crediting with complied_stop loses it the
+# moment its OBSERVED speed shows it bolted.
 const COMPLIED_STOP_SPEED_LIMIT := 80.0
 # The behavioral check above only starts biting this many seconds after the
 # ACKNOWLEDGE was heard: the declaration arrives the instant compliance is
@@ -132,6 +129,13 @@ const COMPLIED_STOP_GRACE := 15.0
 # issuer death, out-of-comms, job abort, and lost interest for BOTH states --
 # no per-cause cleanup code, no verb whose only job is "stop the demand".
 const HAIL_HEARTBEAT_TIMEOUT := 6.0
+# M52 -- SOS heartbeat (implementation_plans/m52_sos_as_contact.md): a
+# distress call is now a normal active_contacts entry decaying on the same
+# CONTACT_TIMEOUT clock as everything else, so a one-shot SOS would vanish
+# in 20s -- too short for a multi-second robbery hold. Re-broadcast on this
+# cadence for as long as sos_active is set, same "timeout/3, ~3 missed
+# beats of slack" ratio HAIL_HEARTBEAT_TIMEOUT documents above.
+const SOS_HEARTBEAT_INTERVAL := CONTACT_TIMEOUT / 3.0
 
 const CONTACT_CORRELATION_RANGE := 2000.0 # max distance (no instance_id match) to fuse a new blip into an existing contact instead of starting a new one
 const CONTACT_RESOLUTION_STALE_TIME := 0.3 # seconds since the last position update before a coarser-resolution bin is allowed to override position anyway
@@ -488,28 +492,37 @@ var warrant_index: Dictionary = {}
 # M49 -- hail protocol runtime state (design_ideas/comms_verbs.md). comms_inbox:
 # hails delivered this tick by Hail.send/send_broadcast, processed and cleared
 # in _physics_process right after the M48 witness-consumption block.
-# heard_sos: sender_iid -> the latest SOS hail heard from them (plus "age"),
-# NAV-layer only -- never touches active_contacts/sensor fusion (the M41
-# rule, see scripts/story/contract_feed.gd's header). pending_demand: the
-# latest unresolved DEMAND addressed to me (rung STOP or IDENTIFY), heartbeat-
-# kept (see HAIL_HEARTBEAT_TIMEOUT) -- carries a "heartbeat_timer" scratch
-# field alongside the hail fields. compelled_stop: {} = not held; else
-# {issuer_iid, demand_seq, heartbeat_timer} -- the honored-stop hard state,
-# enforced at the ship level (throttle override + fire guard), not the AI
-# level, and heartbeat-kept the SAME way as pending_demand (M52d: RELEASE is
-# gone, channel-liveness replaces presence-checking for both). last_hails:
-# rolling log of the last ~8 hails heard, for the comms panel's HAILS
-# section (heartbeat REFRESHES are excluded -- only first-receipt hails log).
-# sent_hails (M52d): rolling log of directed hails WE sent ({verb, rung,
-# target_iid, seq} -- appended by send_demand), the sender-side memory the
-# comms panel's vessel-grouped list needs (a vessel we hailed stays listed
-# so the hail can be tracked); same 8-entry ring as last_hails.
+# pending_demand: the latest unresolved DEMAND addressed to me (rung STOP or
+# IDENTIFY), heartbeat-kept (see HAIL_HEARTBEAT_TIMEOUT) -- carries a
+# "heartbeat_timer" scratch field alongside the hail fields. compelled_stop:
+# {} = not held; else {issuer_iid, demand_seq, heartbeat_timer} -- the
+# honored-stop hard state, enforced at the ship level (throttle override +
+# fire guard), not the AI level, and heartbeat-kept the SAME way as
+# pending_demand (M52d: RELEASE is gone, channel-liveness replaces presence-
+# checking for both). last_hails: rolling log of the last ~8 hails heard, for
+# the comms panel's HAILS section (heartbeat REFRESHES are excluded -- only
+# first-receipt hails log). sent_hails (M52d): rolling log of directed hails
+# WE sent ({verb, rung, target_iid, seq} -- appended by send_demand), the
+# sender-side memory the comms panel's vessel-grouped list needs (a vessel we
+# hailed stays listed so the hail can be tracked); same 8-entry ring as
+# last_hails.
 var comms_inbox: Array = []
-var heard_sos: Dictionary = {}
 var pending_demand: Dictionary = {}
 var compelled_stop: Dictionary = {}
 var last_hails: Array = []
 var sent_hails: Array = []
+
+# M52 -- SOS heartbeat (implementation_plans/m52_sos_as_contact.md, replaces
+# the old heard_sos NAV-layer side-channel): while sos_active, send_sos(
+# sos_nature) is re-broadcast every SOS_HEARTBEAT_INTERVAL (see _physics_
+# process, near the other hail heartbeats) for as long as the emergency
+# continues -- toggled on/off by the player (comms_panel.gd/terminal_
+# display.gd's set_sos_active RPC) or the AI (threat_response_leaf.gd).
+# sos_heartbeat_timer is the delta-accumulated scratch clock for that cadence,
+# same convention as the other timers in this block.
+var sos_active: bool = false
+var sos_nature: String = ""
+var sos_heartbeat_timer: float = 0.0
 
 # M50 -- the job runner (design_ideas/jobs_and_itineraries.md, implementation_
 # plans/m50_pirate_tree_design.md). Two-slot model, NOT a stack: `assignment`
@@ -2744,8 +2757,8 @@ func _physics_process(delta: float) -> void:
 	# (comms_inbox is usually empty -- one pass over whatever Hail.send/
 	# send_broadcast delivered THIS tick), so this is O(inbox), not a scan.
 	# Every branch mutates THIS ship's own state (pending_demand/
-	# compelled_stop/active_contacts/heard_sos) -- hail.gd only owns the wire
-	# format + delivery, all interpretation lives here.
+	# compelled_stop/active_contacts) -- hail.gd only owns the wire format +
+	# delivery, all interpretation lives here.
 	PerfProbe.begin("comms_inbox")
 	var my_iid_hail := get_instance_id()
 	for hail in comms_inbox:
@@ -2863,33 +2876,80 @@ func _physics_process(delta: float) -> void:
 					active_contacts[sender_trk]["complied_stop"] = true
 					active_contacts[sender_trk]["complied_stop_grace"] = COMPLIED_STOP_GRACE
 			Hail.VERB_SOS:
-				# heard_sos stays the NAV/comms-layer channel for a sender we
-				# have NO real track on -- comms range >> sensor range is the
-				# whole point (M52 base's SOSResponseLeaf reads exactly this
-				# to close on a ship it can't yet see). Never MANUFACTURE a
-				# synthetic active_contacts entry from this alone -- that
-				# would be the exact M41 hazard (contract_feed.gd's header):
-				# a fabricated "detection" that decays/fuses like a real
-				# sensor blip when it isn't one.
-				var sos_copy: Dictionary = hail.duplicate(true)
-				sos_copy["age"] = 0.0
-				heard_sos[sender_iid] = sos_copy
-				# M52 -- generic contact attribute (calling session,
-				# 2026-07-23): "sos should be a contact attribute... let's
-				# make it more generic" -- but only ever ANNOTATING a track
-				# we already hold, the same eager-cache-stamp idiom
-				# ACKNOWLEDGE (complied_stop, just above) and take_damage()/
-				# post_warrant() (standing) already use. No new hazard: this
-				# never creates a contact, only tags a real one so any UI
-				# already reading active_contacts (weapons panel, contacts
-				# panel, targeting computer) picks up distress status for
-				# free instead of needing its own heard_sos-specific plumbing.
+				# M52 -- SOS is now a real (if low-information) active_
+				# contacts entry (implementation_plans/m52_sos_as_contact.md),
+				# decaying on the normal CONTACT_TIMEOUT clock like every
+				# other contact -- replaces the old heard_sos NAV-only side-
+				# channel. This is safe to do (see the doc's "why dropping
+				# the rule is safe here" section) BECAUSE Ship.send_sos()
+				# snapshots the sender's REAL position at send time (not
+				# fabricated) and the sender re-heartbeats it periodically
+				# (see sos_active/SOS_HEARTBEAT_INTERVAL) rather than one-
+				# shotting it, so decay behaves exactly like a real contact
+				# nobody's re-detected. If a real sensor/relay detection
+				# already backs this track, ONLY refresh the sos attributes
+				# -- a live detection's pos/vel/signature/classification is
+				# always more accurate than the SOS snapshot (the "prefer
+				# live contact" principle formerly enforced consumer-side in
+				# sos_response_leaf.gd, now expressed at this merge-in point
+				# instead: never overwrite real data). If no track exists,
+				# create one with an empty signature and the deliberately-
+				# unclassified-elsewhere "DISTRESS CALL" literal (see the
+				# doc's classification section for why this is a bare string,
+				# not Ship.classify_contact() -- an empty signature would
+				# misclassify).
+				#
+				# M52 follow-up -- explicit OFF broadcast (user addendum,
+				# 2026-07-23): a synthetic DISTRESS CALL contact clears on
+				# its own once the heartbeat stops (it just decays at
+				# CONTACT_TIMEOUT like anything else unrefreshed), but the
+				# STAMPED-onto-a-real-contact case does NOT self-clear -- a
+				# real contact keeps refreshing via actual sensor detections
+				# forever, so sos/sos_nature/sos_name would stay stuck once
+				# set unless something explicitly writes them back. Ship.
+				# set_sos_active's true->false transition sends ONE final
+				# send_sos(..., false) hail for exactly this; "active" false
+				# here means "the sender turned its distress signal off",
+				# not "hail delivery failed". Rides the SAME relay loop as
+				# every other contact mutation -- no new relay code.
 				var sender_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
-				if active_contacts.has(sender_trk):
+				var incoming_active: bool = hail.get("active", true)
+				if not incoming_active:
+					if active_contacts.has(sender_trk):
+						var off_c: Dictionary = active_contacts[sender_trk]
+						if off_c.get("classification", "") == "DISTRESS CALL":
+							# Nothing else backs this entry -- it only ever
+							# existed because of the SOS. Remove it outright.
+							active_contacts.erase(sender_trk)
+						elif off_c.get("sos", false):
+							# A real, independently-detected contact -- only
+							# clear the sos attributes, same non-clobber rule
+							# as the on-path merge below (never touch
+							# pos/vel/signature/classification/last_seen_timer).
+							off_c["sos"] = false
+							off_c["sos_nature"] = ""
+							off_c["sos_name"] = ""
+					# No matching entry -- nothing to clear, no-op.
+				elif active_contacts.has(sender_trk):
 					var sc: Dictionary = active_contacts[sender_trk]
 					sc["sos"] = true
 					sc["sos_nature"] = hail.get("nature", "")
-					sc["sos_name"] = sos_copy.get("name", "")
+					sc["sos_name"] = hail.get("name", "")
+					sc["last_seen_timer"] = 0.0
+				else:
+					active_contacts[sender_trk] = {
+						"instance_id": sender_iid,
+						"pos": hail.get("pos", position),
+						"vel": Vector2.ZERO,
+						"resolution": TAU,
+						"pos_timer": 0.0,
+						"last_seen_timer": 0.0,
+						"signature": {},
+						"classification": "DISTRESS CALL",
+						"sos": true,
+						"sos_nature": hail.get("nature", ""),
+						"sos_name": hail.get("name", ""),
+					}
 			Hail.VERB_MARK_HOSTILE:
 				# Broadcast form of the M48 datalink standing share -- only
 				# trusted from our own faction (crypto IFF-tag overlap,
@@ -2906,25 +2966,6 @@ func _physics_process(delta: float) -> void:
 							rep_c["standing"] = rep_standing
 							rep_c["standing_reason"] = report.get("reason", "")
 	comms_inbox.clear()
-
-	# heard_sos decay -- delta-accumulated age, same convention as Standing's
-	# aggression-event TTL, so it stays deterministic under --fixed-fps.
-	var stale_sos: Array = []
-	for s_iid in heard_sos:
-		var sos: Dictionary = heard_sos[s_iid]
-		sos["age"] = sos.get("age", 0.0) + delta
-		if sos["age"] > HEARD_SOS_TTL:
-			stale_sos.append(s_iid)
-	for s_iid in stale_sos:
-		heard_sos.erase(s_iid)
-		# Clear the mirrored contact attribute too, if we stamped one --
-		# otherwise an ordinary, still-fresh contact would carry a stale
-		# "sos" flag forever once the actual distress event has aged out.
-		var s_trk: String = "TRK-%03d" % (abs(s_iid) % 1000)
-		if active_contacts.has(s_trk):
-			active_contacts[s_trk].erase("sos")
-			active_contacts[s_trk].erase("sos_nature")
-			active_contacts[s_trk].erase("sos_name")
 
 	# complied_stop clears when a held contact's OBSERVED speed shows it
 	# bolted -- compliance is behavioral, not a one-time declaration. The
@@ -2974,6 +3015,22 @@ func _physics_process(delta: float) -> void:
 		pending_demand["heartbeat_timer"] = pending_demand.get("heartbeat_timer", 0.0) + delta
 		if pending_demand["heartbeat_timer"] > HAIL_HEARTBEAT_TIMEOUT:
 			pending_demand = {}
+
+	# M52 -- SOS heartbeat (implementation_plans/m52_sos_as_contact.md): a
+	# distress call is a CHANNEL the sender keeps asserting, not a one-shot
+	# datagram -- re-broadcast send_sos(sos_nature) every SOS_HEARTBEAT_
+	# INTERVAL for as long as sos_active is set (toggled by comms_panel.gd's
+	# CheckButton or threat_response_leaf.gd), same pattern as the demand/
+	# hold heartbeats above. Turning it off is NOT silent -- set_sos_active's
+	# true->false transition sends one final send_sos(..., false) itself
+	# (not here; this block only handles the ON/repeating case) so a
+	# receiver clears the distress flag/entry instead of it surviving
+	# forever on a real contact that keeps refreshing via its own sensors.
+	if sos_active:
+		sos_heartbeat_timer += delta
+		if sos_heartbeat_timer >= SOS_HEARTBEAT_INTERVAL:
+			sos_heartbeat_timer = 0.0
+			send_sos(sos_nature)
 	PerfProbe.end("comms_inbox")
 
 	# Datalink Relay: friendly ships in mutual comms range and line-of-sight
@@ -3660,9 +3717,15 @@ func _remember_sent_hail(entry: Dictionary) -> void:
 # from our own transponder data (a distress call identifies the caller --
 # SOS counts as reporting, per the spec) + our current position; UNDER_ATTACK
 # additionally carries the nearest fresh HOSTILE track's position as "threat"
-# when we hold one, so a responder knows where to intercept.
+# when we hold one, so a responder knows where to intercept. `active` rides
+# the same wire hail/range rules regardless of value -- true (default) is
+# every heartbeat re-send; false is the ONE final broadcast set_sos_active
+# sends on the true->false transition (implementation_plans/
+# m52_sos_as_contact.md's off-broadcast addendum) so a receiver clears the
+# distress flag/entry instead of it surviving forever on a real contact
+# that keeps refreshing via its own sensor detections.
 @rpc("any_peer", "call_local")
-func send_sos(nature: String) -> void:
+func send_sos(nature: String, active: bool = true) -> void:
 	if not is_multiplayer_authority() or is_dead: return
 	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
 	var t_data: Dictionary = get_active_transponder_data()
@@ -3672,12 +3735,44 @@ func send_sos(nature: String) -> void:
 		"pos": position,
 		"name": t_data.get("name", ship_name),
 		"flag": t_data.get("flag", ""),
+		"active": active,
 	}
 	if nature == Hail.NATURE_UNDER_ATTACK:
 		var threat_pos = _nearest_fresh_hostile_pos()
 		if threat_pos != null:
 			verb["threat"] = threat_pos
 	Hail.send_broadcast(self, verb)
+
+# M52 -- SOS heartbeat toggle (implementation_plans/m52_sos_as_contact.md).
+# Same RPC shape as the sibling transponder_* setters. Going active=true
+# primes sos_heartbeat_timer to fire on the VERY NEXT _physics_process tick
+# (instead of waiting a full SOS_HEARTBEAT_INTERVAL for the first broadcast)
+# -- a player/AI toggling SOS on expects the distress call to go out now,
+# not after a silent 6-7s gap.
+#
+# M52 follow-up -- explicit OFF broadcast (user addendum, 2026-07-23):
+# turning SOS off is NOT silent anymore. A synthetic DISTRESS CALL contact
+# would self-clear fine on its own (it just decays at CONTACT_TIMEOUT once
+# the heartbeat stops), but a real contact that got sos/sos_nature/sos_name
+# STAMPED onto it never would -- real contacts keep refreshing via actual
+# sensor detections forever, so those three fields would stay stuck once
+# set. On a genuine true->false transition (guarded by `sos_active` already
+# being true, so redundant/repeated false calls are harmless no-ops), send
+# ONE final send_sos(..., false) hail -- same wire/range rules as every
+# heartbeat send, just flagged "active: false" so the VERB_SOS receive
+# branch clears instead of merges. Rides the existing datalink relay for
+# free, same as every other contact mutation -- no new relay code.
+@rpc("any_peer", "call_local")
+func set_sos_active(active: bool, nature: String = "") -> void:
+	if not is_multiplayer_authority() or is_dead: return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0: return
+	if active:
+		sos_active = true
+		sos_nature = nature
+		sos_heartbeat_timer = SOS_HEARTBEAT_INTERVAL
+	elif sos_active:
+		sos_active = false
+		send_sos(sos_nature, false)
 
 func _nearest_fresh_hostile_pos():
 	var best = null

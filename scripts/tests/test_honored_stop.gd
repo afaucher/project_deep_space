@@ -349,7 +349,11 @@ func _test_comply_flow() -> void:
 			var ic2: Dictionary = _find_contact(issuer, shuttle)
 			issuer_saw_comply = ic2.get("complied_stop", false)
 		if not sos_heard:
-			sos_heard = listener.heard_sos.has(shuttle.get_instance_id())
+			# M52 follow-up (implementation_plans/m52_sos_as_contact.md): SOS
+			# is now a real "sos" attribute on an active_contacts entry
+			# (either a merged real detection or a fresh DISTRESS CALL
+			# entry), not the old heard_sos side-channel.
+			sos_heard = _find_contact(listener, shuttle).get("sos", false)
 		if issuer_saw_comply and sos_heard:
 			break
 	_assert(issuer_saw_comply, "issuer's own track on the shuttle shows complied_stop (COMPLY was heard)")
@@ -384,7 +388,7 @@ func _test_fast_ship_runs() -> void:
 		if not ran and shuttle.linear_velocity.length() > 250.0 and shuttle.compelled_stop.is_empty():
 			ran = true
 		if not sos_heard:
-			sos_heard = listener.heard_sos.has(shuttle.get_instance_id())
+			sos_heard = _find_contact(listener, shuttle).get("sos", false)
 		if ran and sos_heard:
 			break
 	_assert(ran, "fast shuttle RUNS instead of complying (speed=%.1f, compelled_stop=%s)" % [shuttle.linear_velocity.length(), str(shuttle.compelled_stop)])

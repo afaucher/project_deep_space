@@ -2,24 +2,22 @@ extends Node
 
 # M52 playtest fix -- SOS response prefers a live contact over a stale
 # snapshot (calling session, 2026-07-23). Ship.send_sos() snapshots the
-# sender's REAL position at send time ("pos": position); heard_sos ages
-# correctly (HEARD_SOS_TTL, and a future relay hop would age it further).
-# But SOSResponseLeaf used to navigate toward that snapshot UNCONDITIONALLY,
-# even when the responder ALREADY holds (or has since gained) a live sensor
-# contact on the same sender -- a continuously-updated track that's always
-# fresher than a fixed report, especially once the ship has actually moved
-# since sending. Fixed: prefer active_contacts' live position whenever a
-# fresh track exists, fall back to the SOS snapshot only when it doesn't
-# (comms range >> sensor range -- the whole reason heard_sos exists at all).
+# sender's REAL position at send time ("pos": position).
 #
-# Ticks the leaf DIRECTLY (leaf.tick(actor, blackboard)) against a real Ship
-# for its fields/methods -- no full behavior tree or physics loop needed,
-# same fast pattern test_threat_response.gd uses for ThreatResponseLeaf.
+# M52 follow-up (implementation_plans/m52_sos_as_contact.md item 1): the
+# underlying behavior (a real detection's position wins over the SOS
+# snapshot) still holds, but the MECHANISM moved from SOSResponseLeaf's old
+# consumer-side "prefer live contact if fresh" check to the merge-in point
+# itself -- ship.gd's VERB_SOS receive branch now NEVER touches
+# pos/vel/signature/classification on an EXISTING active_contacts entry,
+# only refreshing the sos/sos_nature/sos_name/last_seen_timer attributes.
+# So this now asserts directly on active_contacts rather than a leaf's
+# commanded heading -- there's no leaf-side logic left to exercise here.
 #
 # Run: ./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --run-test test_sos_prefers_live_contact
 
-const SOSResponseLeaf = preload("res://scripts/ai/leaves/sos_response_leaf.gd")
 const Frigate = preload("res://scripts/ships/frigate.gd")
+const Hail = preload("res://scripts/comms/hail.gd")
 
 var main_node: Node = null
 var failures: Array = []
@@ -40,78 +38,91 @@ func _make_ship(script, ship_name: String, owner: int, pos: Vector2, tags: Array
 	spawned.append(s)
 	return s
 
-func _make_blackboard() -> Blackboard:
-	var bb := Blackboard.new()
-	bb.blackboard = {}
-	return bb
+# A Frigate's active sensors reach 40000 units with NO distance falloff --
+# both tests below place patrol/sender well within that, and both tests
+# want to observe the SOS merge/create path in ISOLATION (a hand-set entry
+# staying exactly as set; a fresh snapshot landing exactly as sent). A real
+# sensor correlation landing on the same track mid-test would silently
+# overwrite pos/classification out from under the assertion, unrelated to
+# the SOS behavior actually under test. Strip sensors entirely
+# (test_comms_relay.gd's existing pattern) so active_contacts can only ever
+# be touched by the SOS wire path here.
+func _strip_sensors(ship) -> void:
+	ship.ship_components = ship.ship_components.filter(func(c): return c["type"] != "sensors")
 
 func setup(main) -> void:
 	main_node = main
 	print("Starting SOS-prefers-live-contact Tests")
 
-	_test_prefers_live_contact_over_stale_snapshot()
-	_test_falls_back_to_snapshot_without_a_contact()
+	await _test_merge_does_not_overwrite_live_contact()
+	await _test_new_contact_uses_the_sos_snapshot()
 
 	_finish()
 
 # ---------------------------------------------------------------------------
-# A stale SOS snapshot says the sender is at A; the responder ALSO holds a
-# live, fresh contact on the sender showing it's actually at B (it moved).
-# The commanded heading must point toward B, not A.
+# The receiver already holds a live contact on the sender at position B
+# (e.g. its own sensors, or a relay hop, more current than the SOS). The
+# sender's SOS snapshot says A (its real position at send time, deliberately
+# different here to prove the point). After the SOS arrives, the contact's
+# pos/classification must stay at the live values -- only the sos attributes
+# get refreshed.
 # ---------------------------------------------------------------------------
-func _test_prefers_live_contact_over_stale_snapshot() -> void:
-	print("\n--- stale SOS snapshot at A, live contact says B -- responds toward B ---")
+func _test_merge_does_not_overwrite_live_contact() -> void:
+	print("\n--- merge onto an EXISTING contact does not overwrite its live pos/classification ---")
 	var patrol = _make_ship(Frigate, "Patrol", 800, Vector2.ZERO, ["TEAM_PATROL"])
-	var sender_iid := 12345
-
-	var pos_a := Vector2(0, -20000)   # the stale, send-time snapshot position
-	var pos_b := Vector2(20000, 0)    # where the sender actually is now (live contact)
-
-	patrol.heard_sos[sender_iid] = {"verb": "SOS", "nature": "UNDER_ATTACK", "pos": pos_a, "name": "Distressed", "age": 45.0}
-
+	_strip_sensors(patrol)
+	var pos_a := Vector2(0, -20000) # sender's real position at send time (the SOS snapshot)
+	var sender = _make_ship(Frigate, "Sender", 850, pos_a, ["TEAM_SENDER"])
+	var sender_iid: int = sender.get_instance_id()
 	var sender_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+
+	var pos_b := Vector2(20000, 0) # a pre-existing "live" detection's position, deliberately different from A
 	patrol.active_contacts[sender_trk] = {
 		"instance_id": sender_iid, "pos": pos_b, "vel": Vector2.ZERO,
 		"last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL",
 	}
 
-	var leaf := SOSResponseLeaf.new()
-	var bb := _make_blackboard()
-	var result: int = leaf.tick(patrol, bb)
+	sender.send_sos(Hail.NATURE_UNDER_ATTACK)
+	var stamped := false
+	for i in range(120): # up to 2s
+		await main_node.get_tree().physics_frame
+		if patrol.active_contacts.get(sender_trk, {}).get("sos", false):
+			stamped = true
+			break
+	_assert(stamped, "setup: the SOS was heard and merged onto the existing contact")
 
-	_assert(result == leaf.SUCCESS, "leaf claims the tick, en route to respond")
-	_assert(bb.get_value("sos_responding_to", -1) == sender_iid, "committed to responding to the sender")
-
-	var dir_commanded: Vector2 = Vector2.RIGHT.rotated(patrol.target_heading)
-	var dir_to_a: Vector2 = (pos_a - patrol.position).normalized()
-	var dir_to_b: Vector2 = (pos_b - patrol.position).normalized()
-	_assert(dir_commanded.dot(dir_to_b) > dir_commanded.dot(dir_to_a),
-		"commanded heading points toward the LIVE contact position (B), not the stale SOS snapshot (A)")
-	_assert(dir_commanded.dot(dir_to_b) > 0.9, "commanded heading points essentially straight at the live contact")
+	var c: Dictionary = patrol.active_contacts.get(sender_trk, {})
+	_assert(c.get("pos", Vector2.ZERO) == pos_b, "the merge did NOT overwrite the live contact's position with the SOS snapshot (still B, not A)")
+	_assert(c.get("classification", "") == "UNIDENTIFIED VESSEL", "the merge did NOT overwrite the live contact's classification")
+	_assert(c.get("sos_nature", "") == Hail.NATURE_UNDER_ATTACK, "the sos attributes DID refresh")
 
 	_free_all()
 
 # ---------------------------------------------------------------------------
 # No live contact on the sender at all (comms range >> sensor range, the
-# whole reason heard_sos exists) -- falls back to the SOS snapshot, same as
-# before this fix.
+# whole reason a heartbeat SOS is useful) -- the new entry ship.gd creates
+# uses the SOS's own send-time snapshot position, same as before this fix
+# (there's simply nothing else to prefer).
 # ---------------------------------------------------------------------------
-func _test_falls_back_to_snapshot_without_a_contact() -> void:
-	print("\n--- no live contact on the sender -- falls back to the SOS snapshot ---")
+func _test_new_contact_uses_the_sos_snapshot() -> void:
+	print("\n--- no live contact on the sender -- the new entry uses the SOS snapshot position ---")
 	var patrol = _make_ship(Frigate, "Patrol2", 801, Vector2.ZERO, ["TEAM_PATROL2"])
-	var sender_iid := 54321
+	_strip_sensors(patrol)
 	var pos_a := Vector2(0, -20000)
-
-	patrol.heard_sos[sender_iid] = {"verb": "SOS", "nature": "UNDER_ATTACK", "pos": pos_a, "name": "Distressed2", "age": 5.0}
+	var sender = _make_ship(Frigate, "Sender2", 851, pos_a, ["TEAM_SENDER2"])
+	var sender_iid: int = sender.get_instance_id()
+	var sender_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
 	# Deliberately no active_contacts entry for sender_iid.
 
-	var leaf := SOSResponseLeaf.new()
-	var bb := _make_blackboard()
-	leaf.tick(patrol, bb)
-
-	var dir_commanded: Vector2 = Vector2.RIGHT.rotated(patrol.target_heading)
-	var dir_to_a: Vector2 = (pos_a - patrol.position).normalized()
-	_assert(dir_commanded.dot(dir_to_a) > 0.9, "commanded heading points at the SOS snapshot when no live contact exists")
+	sender.send_sos(Hail.NATURE_UNDER_ATTACK)
+	var created := false
+	for i in range(120): # up to 2s
+		await main_node.get_tree().physics_frame
+		if patrol.active_contacts.has(sender_trk):
+			created = true
+			break
+	_assert(created, "the SOS created a new entry")
+	_assert(patrol.active_contacts.get(sender_trk, {}).get("pos", Vector2.ZERO) == pos_a, "the new entry's position is the SOS snapshot (A) when no live contact exists")
 
 	_free_all()
 

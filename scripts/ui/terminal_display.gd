@@ -369,7 +369,7 @@ func _ready() -> void:
 	comms_panel.transponder_share_loc_toggled.connect(_on_transponder_share_loc_toggled)
 	comms_panel.acknowledge_requested.connect(_on_acknowledge_requested)
 	comms_panel.stop_requested.connect(_on_stop_requested)
-	comms_panel.sos_requested.connect(_on_sos_requested)
+	comms_panel.sos_toggled.connect(_on_sos_toggled)
 	# Post-M51 playtest -- the selected-contact action row lives on the comms
 	# panel now (see comms_panel.gd); same handlers as before, new emitter.
 	# (MARK HOSTILE/UNMARK moved to weapons_panel -- wired above. M52d removed
@@ -723,10 +723,13 @@ func _on_stop_requested() -> void:
 	if ship_node:
 		ship_node.rpc_id(1, "engage_dead_stop")
 
-func _on_sos_requested(nature: String) -> void:
+# M52 -- SOS toggle (implementation_plans/m52_sos_as_contact.md item 5):
+# replaces the old one-shot send_sos RPC with the heartbeat toggle -- the
+# actual periodic re-broadcast lives in ship.gd's _physics_process.
+func _on_sos_toggled(active: bool, nature: String) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
-		ship_node.rpc_id(1, "send_sos", nature)
+		ship_node.rpc_id(1, "set_sos_active", active, nature)
 
 func _on_contact_pin_toggled(c_id: String, is_pinned: bool) -> void:
 	if is_pinned and not pinned_contacts.has(c_id):

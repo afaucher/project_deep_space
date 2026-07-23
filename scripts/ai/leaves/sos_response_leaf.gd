@@ -7,21 +7,28 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # via Engage above it; SOS response is what gets the patrol close enough to
 # sense one in the first place.
 #
-# Reads actor.heard_sos (already populated end-to-end by the M49 wire
-# protocol -- Ship.send_sos / the VERB_SOS receive branch / TTL decay --
-# nothing else reads it). Commits to the freshest entry (blackboard-tracked
-# "sos_responding_to" so an already-committed response doesn't restart toward
-# a newer, farther call every tick -- resolves one at a time) and steers
-# toward its snapshot position (sos["pos"] -- a snapshot from send time, not a
-# live track; "fly to the marker" means the marker). Returns SUCCESS while en
-# route (claims the tick, pre-empting FollowRoute/Challenge below).
+# M52 follow-up (implementation_plans/m52_sos_as_contact.md item 3): SOS is
+# now a real active_contacts entry classified "DISTRESS CALL" (the bare
+# classification -- see that doc for why it's deliberately excluded from
+# Standing/JobSteps' vessel-classification allow-lists), decaying on the
+# SAME CONTACT_TIMEOUT clock as every other contact, relayed for free by the
+# existing datalink loop -- there is no more separate heard_sos side-channel.
+# Commits to the freshest "DISTRESS CALL" contact (blackboard-tracked
+# "sos_responding_to", keyed by track id, so an already-committed response
+# doesn't restart toward a newer, farther call every tick -- resolves one at
+# a time) and steers toward its position. The old "prefer live contact"
+# consumer-side check is gone -- the merge-in point (ship.gd's VERB_SOS
+# branch) never overwrites a real detection's pos with the SOS snapshot, so
+# whatever's on the contact IS already the freshest available position.
 #
 # Gives up (clears "sos_responding_to", returns FAILURE, resumes patrol) on
-# any of the three plan-doc conditions: arrived within a close radius, the
-# heard_sos entry for that sender goes stale (HEARD_SOS_TTL already expires
-# it out of heard_sos entirely -- ship.gd), or a HOSTILE contact is already
-# held (Engage above already wins the tick whenever that's true; this leaf
-# self-clears rather than fight it on the ticks it still runs).
+# any of the plan-doc conditions: arrived within a close radius, the contact
+# is no longer a fresh "DISTRESS CALL" entry (pruned by the normal
+# CONTACT_TIMEOUT sweep, or self-healed into a real classification by a
+# later correlated detection -- either way nothing left for this leaf to
+# chase), or a HOSTILE contact is already held (Engage above already wins
+# the tick whenever that's true; this leaf self-clears rather than fight it
+# on the ticks it still runs).
 const Steering = preload("res://scripts/ai/steering.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 
@@ -36,45 +43,36 @@ func tick(actor: Node, blackboard) -> int:
 		blackboard.erase_value("sos_responding_to")
 		return FAILURE
 
-	var responding_to: int = blackboard.get_value("sos_responding_to", -1)
+	var responding_to: String = blackboard.get_value("sos_responding_to", "")
 
-	if responding_to == -1:
-		# Not currently committed -- pick the freshest heard_sos entry (lowest
-		# age; "age" is delta-accumulated seconds since first heard/last
-		# relayed, ship.gd's decay loop).
-		var best_iid := -1
+	if responding_to == "":
+		# Not currently committed -- pick the freshest "DISTRESS CALL"
+		# contact (lowest last_seen_timer, the same clock every other
+		# contact decays on -- no separate age field anymore).
+		var best_trk := ""
 		var best_age := INF
-		for sender_iid in actor.heard_sos:
-			var age: float = actor.heard_sos[sender_iid].get("age", 0.0)
+		for c_id in actor.active_contacts:
+			var c: Dictionary = actor.active_contacts[c_id]
+			if c.get("classification", "") != "DISTRESS CALL":
+				continue
+			var age: float = c.get("last_seen_timer", 999.0)
 			if age < best_age:
 				best_age = age
-				best_iid = sender_iid
-		if best_iid == -1:
+				best_trk = c_id
+		if best_trk == "":
 			return FAILURE
-		responding_to = best_iid
+		responding_to = best_trk
 		blackboard.set_value("sos_responding_to", responding_to)
 
-	var sos: Dictionary = actor.heard_sos.get(responding_to, {})
-	if sos.is_empty():
-		# Gone stale -- HEARD_SOS_TTL already erased it out of heard_sos.
+	var sos: Dictionary = actor.active_contacts.get(responding_to, {})
+	if sos.is_empty() or sos.get("classification", "") != "DISTRESS CALL":
+		# Gone stale (pruned by CONTACT_TIMEOUT) or self-healed into a real
+		# classification via a later correlated detection -- either way,
+		# nothing left here for this leaf to chase.
 		blackboard.erase_value("sos_responding_to")
 		return FAILURE
 
-	# Prefer a live sensor/relay contact's position over the SOS's static
-	# send-time snapshot, if we happen to already hold (or have since
-	# gained) a fresh one -- a real, continuously-updated track is always
-	# more current than a fixed report, especially once relay hops start
-	# aging the snapshot further. This is the same "sos is a contact
-	# attribute, generic" idea applied to navigation: if we can actually see
-	# the ship, its own track IS the freshest source of truth for where it
-	# is, not the distress call that first told us to go looking.
 	var pos: Vector2 = sos.get("pos", actor.position)
-	var sender_trk: String = "TRK-%03d" % (abs(responding_to) % 1000)
-	if actor.active_contacts.has(sender_trk):
-		var c: Dictionary = actor.active_contacts[sender_trk]
-		if c.get("last_seen_timer", 999.0) <= actor.FIRE_STALENESS_MAX:
-			pos = c.get("pos", pos)
-
 	if actor.position.distance_to(pos) <= ARRIVAL_RADIUS:
 		blackboard.erase_value("sos_responding_to")
 		return FAILURE

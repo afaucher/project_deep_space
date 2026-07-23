@@ -21,15 +21,17 @@ const _STANDING_COLORS := {
 	"FRIENDLY": Color(0.2, 0.8, 0.2),
 }
 
-# M52 -- SOS as a generic contact attribute (calling session, 2026-07-23):
-# same RGB as navigation_panel.gd's SOS_COLOR (its own local const there too
-# -- this file doesn't import colors from other panels, matches the existing
-# "standing.gd is phase-1, not ours to touch" convention just above). A
-# contact carrying sos/sos_nature/sos_name (ship.gd's comms_inbox VERB_SOS
-# branch -- only ever stamped onto a REAL, already-existing track, never a
-# manufactured one, per the M41 rule) gets this instead of its usual
-# standing/classification color, so a friendly-standing ship in distress
-# still reads as urgent rather than blending into the ordinary green row.
+# M52 -- SOS as a generic contact attribute (calling session, 2026-07-23,
+# follow-up in implementation_plans/m52_sos_as_contact.md): same RGB as
+# utils.gd's classification_color("DISTRESS CALL") (its own local literal
+# there too -- this file doesn't import colors from other panels, matches
+# the existing "standing.gd is phase-1, not ours to touch" convention just
+# above). A contact carrying sos/sos_nature/sos_name (ship.gd's comms_inbox
+# VERB_SOS branch -- either stamped onto an existing real track, or, since
+# the M52 follow-up, a brand-new "DISTRESS CALL"-classified entry with no
+# real detection behind it at all) gets this instead of its usual
+# standing/classification color, so a distress call reads as unmistakably
+# urgent rather than blending into the ordinary row treatment.
 const _SOS_COLOR := Color(1.0, 0.25, 0.1, 0.95)
 
 var current_state: Dictionary = {}
@@ -341,7 +343,16 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		header.add_theme_color_override("font_color", color)
 
 		var t_name = c.get("transponder_name", "")
-		var base_name = t_name if t_name != "" else c_id
+		# M52 follow-up (implementation_plans/m52_sos_as_contact.md): an
+		# unresolved "DISTRESS CALL" contact (no real transponder/sensor
+		# data at all) has no transponder_name to merge -- fall back to the
+		# name the distress call itself claimed (sos_name, stamped by
+		# ship.gd from the caller's own transponder data at send time)
+		# before finally falling back to the bare track id, so the row
+		# shows a real name instead of "TRK-xxx" whenever the caller
+		# self-identified.
+		var sos_name: String = c.get("sos_name", "") if is_sos else ""
+		var base_name = t_name if t_name != "" else (sos_name if sos_name != "" else c_id)
 		header.text = ("[SOS] " + base_name + " [" + classification_str + "]") if is_sos else (base_name + " [" + classification_str + "]")
 
 		var dist = c["_dist"]

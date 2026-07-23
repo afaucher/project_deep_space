@@ -549,14 +549,14 @@ func _distribute_state() -> void:
 			# by indicators_visible -- that flag only mutes map/contacts-panel
 			# declutter, not "can I review what I accepted").
 			"missions": _missions_summary(ship.mission_log),
-			# M49 -- hail protocol (design_ideas/comms_verbs.md). "sos" rides
-			# the packet the same way "contracts" does -- NAV-layer data, never
-			# merged into "contacts" (the M41 rule: SOS never touches sensor
-			# fusion). "last_hails"/"pending_demand"/"compelled_stop" feed the
-			# comms panel's HAILS section + honored-stop banner. "sent_hails"
-			# (M52d) is the sender-side memory for the panel's vessel-grouped
-			# list -- vessels WE hailed stay listed for tracking/cancel.
-			"sos": ship.heard_sos.duplicate(true),
+			# M49 -- hail protocol (design_ideas/comms_verbs.md). "last_hails"/
+			# "pending_demand"/"compelled_stop" feed the comms panel's HAILS
+			# section + honored-stop banner. "sent_hails" (M52d) is the
+			# sender-side memory for the panel's vessel-grouped list --
+			# vessels WE hailed stay listed for tracking/cancel. (M52 follow-
+			# up: SOS is now a real "DISTRESS CALL"-classified entry inside
+			# "contacts" above -- implementation_plans/m52_sos_as_contact.md
+			# -- so there is no more separate "sos" packet field.)
 			"last_hails": ship.last_hails.duplicate(true),
 			"sent_hails": ship.sent_hails.duplicate(true),
 			"pending_demand": ship.pending_demand.duplicate(true),

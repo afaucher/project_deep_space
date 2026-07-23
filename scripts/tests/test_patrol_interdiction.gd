@@ -46,6 +46,18 @@ func _make_ship(script, ship_name: String, owner: int, pos: Vector2, tags: Array
 func _trk_for(ship: Node) -> String:
 	return "TRK-%03d" % (abs(ship.get_instance_id()) % 1000)
 
+# A Frigate's active sensors reach 40000 units with NO distance falloff --
+# Phase 6's cast all sit well within that of each other. Phase 6 is entirely
+# about the SOS/active_contacts mechanism (not real sensor detection), and
+# its stale-SOS sub-case forces last_seen_timer high then waits for the
+# CONTACT_TIMEOUT prune -- a real sensor correlation landing on the SAME
+# track in the meantime would keep refreshing last_seen_timer right back
+# down, making the prune never observable. Strip the patrol's sensors
+# entirely (test_comms_relay.gd's existing pattern) so its active_contacts
+# can only ever be populated by SOS/relay in this phase.
+func _strip_sensors(ship: Node) -> void:
+	ship.ship_components = ship.ship_components.filter(func(c): return c["type"] != "sensors")
+
 func _has_contact(observer: Node, target: Node) -> bool:
 	return observer.active_contacts.has(_trk_for(target))
 
@@ -429,6 +441,7 @@ func _phase_6_sos_response() -> void:
 	print("\n--- Phase 6: SOS response -- responds, stale doesn't, later different SOS after resolve ---")
 
 	var patrol = _make_ship(Frigate, "P6_Patrol", 840, Vector2.ZERO, ["TEAM_PATROL_6"])
+	_strip_sensors(patrol)
 	patrol.patrol_route = [Vector2(0, 25000), Vector2(25000, 25000)]
 	patrol.patrol_loop = true
 	var patrol_tree: Node = AITreeFactory.build_patrol()
@@ -441,39 +454,48 @@ func _phase_6_sos_response() -> void:
 	var bb = patrol_tree.blackboard
 
 	# --- sub-case: a stale SOS is never adopted. ---
-	var stale_iid: int = stale_sender.get_instance_id()
-	stale_sender.send_sos(Hail.NATURE_UNDER_ATTACK)
+	# M52 follow-up (implementation_plans/m52_sos_as_contact.md): SOS is now
+	# a heartbeat toggle (set_sos_active) creating/refreshing a real
+	# "DISTRESS CALL" active_contacts entry, decaying on the normal
+	# CONTACT_TIMEOUT clock -- no more separate heard_sos/HEARD_SOS_TTL
+	# side-channel. sos_responding_to is now keyed by track id (the
+	# active_contacts key), not instance id.
+	var stale_trk: String = _trk_for(stale_sender)
+	stale_sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 
 	var heard_stale := false
 	for i in range(300): # up to 5s for the broadcast to land
 		await main_node.get_tree().physics_frame
-		if patrol.heard_sos.has(stale_iid):
+		if patrol.active_contacts.has(stale_trk):
 			heard_stale = true
 			break
-	_assert(heard_stale, "patrol heard the stale-sender's SOS")
+	_assert(heard_stale, "patrol heard the stale-sender's SOS (a DISTRESS CALL contact)")
 
-	# Force it stale immediately -- skip the real 90s HEARD_SOS_TTL wait,
-	# mutating the same "age" field ship.gd's own decay loop already reads.
-	if patrol.heard_sos.has(stale_iid):
-		patrol.heard_sos[stale_iid]["age"] = 9999.0
+	# Stop the heartbeat (incident "resolved") and force the contact stale
+	# immediately -- skip the real 20s CONTACT_TIMEOUT wait, mutating the
+	# same last_seen_timer field ship.gd's own contact-decay loop reads.
+	stale_sender.set_sos_active(false, "")
+	if patrol.active_contacts.has(stale_trk):
+		patrol.active_contacts[stale_trk]["last_seen_timer"] = 9999.0
 
 	var stale_pruned := false
 	for i in range(60):
 		await main_node.get_tree().physics_frame
-		if not patrol.heard_sos.has(stale_iid):
+		if not patrol.active_contacts.has(stale_trk):
 			stale_pruned = true
 			break
-	_assert(stale_pruned, "the stale SOS was pruned out of heard_sos by its TTL")
-	_assert(bb.get_value("sos_responding_to", -1) != stale_iid, "the patrol never adopted the stale SOS as its response target")
+	_assert(stale_pruned, "the stale SOS contact was pruned by CONTACT_TIMEOUT")
+	_assert(bb.get_value("sos_responding_to", "") != stale_trk, "the patrol never adopted the stale SOS as its response target")
 
 	# --- sub-case: a fresh SOS breaks off the route. ---
+	var victim1_trk: String = _trk_for(victim1)
 	var start_dist: float = patrol.position.distance_to(victim1.position)
-	victim1.send_sos(Hail.NATURE_UNDER_ATTACK)
+	victim1.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 
 	var adopted := false
 	for i in range(300): # up to 5s
 		await main_node.get_tree().physics_frame
-		if bb.get_value("sos_responding_to", -1) == victim1.get_instance_id():
+		if bb.get_value("sos_responding_to", "") == victim1_trk:
 			adopted = true
 			break
 	_assert(adopted, "the patrol adopted victim1's SOS as its response target")
@@ -492,7 +514,8 @@ func _phase_6_sos_response() -> void:
 	# already exercised above and by the stale sub-case) so this sub-case
 	# stays focused on "the slot frees up and a later call still lands".
 	bb.erase_value("sos_responding_to")
-	patrol.heard_sos.erase(victim1.get_instance_id())
+	victim1.set_sos_active(false, "") # stop the heartbeat so it can't recreate the contact
+	patrol.active_contacts.erase(victim1_trk)
 
 	var settled := false
 	for i in range(60):
@@ -502,11 +525,12 @@ func _phase_6_sos_response() -> void:
 			break
 	_assert(settled, "the patrol's SOS-response slot cleared once the first incident resolved")
 
-	victim2.send_sos(Hail.NATURE_UNDER_ATTACK)
+	var victim2_trk: String = _trk_for(victim2)
+	victim2.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 	var adopted2 := false
 	for i in range(300): # up to 5s
 		await main_node.get_tree().physics_frame
-		if bb.get_value("sos_responding_to", -1) == victim2.get_instance_id():
+		if bb.get_value("sos_responding_to", "") == victim2_trk:
 			adopted2 = true
 			break
 	_assert(adopted2, "after the first SOS resolved, the patrol adopted a LATER, different SOS")

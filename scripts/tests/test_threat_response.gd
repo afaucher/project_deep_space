@@ -184,13 +184,22 @@ func _test_overtaken_mid_flight_gives_up() -> void:
 	_free_all()
 
 # ---------------------------------------------------------------------------
-# SOS is broadcast exactly once per incident (on the deciding tick), whether
-# the victim ends up running or complying -- verified via a nearby receiver's
-# heard_sos, the same mechanism SOSResponseLeaf reads (test_patrol_
-# interdiction.gd's Phase 6 uses the identical check).
+# M52 follow-up (implementation_plans/m52_sos_as_contact.md item 2): SOS is
+# no longer a one-shot broadcast -- the deciding tick turns the SOS
+# HEARTBEAT on exactly once per incident (whether the victim ends up
+# running or complying), and ship.gd's own _physics_process does the actual
+# periodic re-sending from there. Verified two ways: (a) a nearby receiver's
+# active_contacts entry for the victim picks up the sos attribute (proving
+# the wire path actually reaches something, same mechanism SOSResponseLeaf
+# reads, test_patrol_interdiction.gd's Phase 6 uses the identical shape),
+# and (b) re-ticking the SAME already-decided demand does NOT re-prime the
+# heartbeat -- checked directly on victim.sos_heartbeat_timer, race-free
+# (see test_demand_lifecycle.gd's S4 for why this is more reliable than
+# inferring from the receiver's data, whose last_seen_timer is also reset
+# by ordinary real sensor detections at close range).
 # ---------------------------------------------------------------------------
 func _test_sos_broadcast_once_per_incident() -> void:
-	print("\n--- SOS broadcast exactly once per incident, regardless of comply-or-run ---")
+	print("\n--- SOS heartbeat turns on exactly once per incident, regardless of comply-or-run ---")
 	var victim = _make_ship(CargoShuttle, "SosVictim", 810, Vector2.ZERO, ["TEAM_SOSV"])
 	var issuer = _make_ship(ArmedPinnace, "SosIssuer", 811, Vector2(2000, 0), ["TEAM_SOSI"])
 	issuer.linear_velocity = Vector2(900, 0) # victim complies (1000 < 1170)
@@ -201,17 +210,21 @@ func _test_sos_broadcast_once_per_incident() -> void:
 	var bb := _make_blackboard()
 	leaf.tick(victim, bb)
 
+	_assert(victim.sos_active, "the decision turned the SOS heartbeat on")
+	_assert(victim.sos_nature == Hail.NATURE_UNDER_ATTACK, "sos_nature is UNDER_ATTACK")
+	_assert(victim.sos_heartbeat_timer == victim.SOS_HEARTBEAT_INTERVAL, "heartbeat primed to fire on the very next physics tick")
+
+	var victim_trk: String = "TRK-%03d" % (abs(victim.get_instance_id()) % 1000)
 	var frame := 0
-	while frame < 60 and not receiver.heard_sos.has(victim.get_instance_id()):
+	while frame < 60 and not receiver.active_contacts.get(victim_trk, {}).get("sos", false):
 		await main_node.get_tree().physics_frame
 		frame += 1
-	_assert(receiver.heard_sos.has(victim.get_instance_id()), "a nearby ship heard the victim's SOS")
+	_assert(receiver.active_contacts.get(victim_trk, {}).get("sos", false), "a nearby ship's active_contacts entry for the victim picked up the sos attribute")
 
 	# Re-ticking the SAME already-decided demand (seq unchanged) must NOT
-	# spam another SOS -- decide-once-per-seq (last_decided_seq) gate.
-	var heard_before: int = receiver.heard_sos.size()
+	# re-trigger the decision -- decide-once-per-seq (last_decided_seq) gate.
 	leaf.tick(victim, bb)
-	_assert(receiver.heard_sos.size() == heard_before, "re-ticking the same pending_demand does not re-broadcast SOS")
+	_assert(victim.sos_heartbeat_timer != victim.SOS_HEARTBEAT_INTERVAL, "re-ticking the same pending_demand does not re-prime (re-broadcast) the SOS heartbeat")
 
 	_free_all()
 
