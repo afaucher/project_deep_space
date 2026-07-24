@@ -110,6 +110,66 @@ always enter the route in the same spot."
   also the fiction's answer to "how does a pirate hunt the ROAD at all"
   once mandatory IDs land (warrants.md's corridor future).
 
+## World build — execution slices (build order)
+
+The Foundation above is done. The rest of M53a builds in four
+independently-verifiable subagent passes; **A lands and is verified before
+anything else** (B/C/D all assume the enlarged geometry).
+
+### Pass 1 — Slice A: geography reshape (2x radius + wormhole move) [do alone]
+The widest blast radius. Rules:
+- **Scale 2x (positions):** all station/outpost/home/patrol-center coordinates,
+  patrol-loop radii, cargo-lane endpoints (via their stations), asteroid-field
+  CENTERS, and `def.bounds` (→ ±500k).
+- **Relocate (not scale):** the Nexus wormhole → near Ironhold (the center hub),
+  ~30–40k out, clear of the 25k station keep-away, validator-confirmed. It
+  becomes the cluster's front door so transient traffic transits the hub.
+- **Stay ABSOLUTE (do NOT scale):** comms/sensor ranges (`BEACON_RANGE` etc.),
+  asteroid-field RADII, the docking approach offset (6000), and the beacon
+  road's ~25k spacing — which means the now-2×-longer road gets MORE beacons
+  (~15 vs 7), recomputed from the new road length, with `beacon_edges` rechained.
+- **M43 Slag Bay search field:** center scales 2× with its station, but the
+  field RADIUS and the 5 homes' positions RELATIVE to the center are unchanged
+  (translate the homes by the same delta the center moved — Todd stays on the
+  far spinward edge). Do NOT scale the homes' absolute coords (that would spread
+  them across a 2×-wider span and break the elimination-search geometry).
+- **Test gate:** cluster validator passes at 2×; no overlapping keep-aways;
+  lanes clear. **The real cost is the position-assertion audit** — update
+  `test_static_landmarks` (beacon count/positions), `test_nav`/`test_nav_autopilot`,
+  `test_drift_residents` (field + homes), `test_cluster_loader`, campaign/docking
+  tests, and any pirate test referencing the old wormhole coords. Fix the
+  EXPECTATIONS to the new geometry; flag anything that looks like a real
+  regression rather than a moved coordinate.
+
+### Pass 2 — Slice B: the two Meridian colonies [additive, on A]
+`FLAG_MERIDIAN`/`TEAM_MERIDIAN` in `standing.gd`; two mining-colony small-stations
+under the peer flag (each on its own asteroid field), `warrant_authority =
+[FLAG_MERIDIAN]`; a cargo route from each colony back to center; peer haulers
+(`ore_shuttle`) flying `FLAG_MERIDIAN`, NEUTRAL to everyone reporting clean.
+Test: peer haulers run + dock (reuse cargo-run shape); peer-flag warrant is
+visible-but-unenforced by a home patrol (pure `warrant_enforceable_by` check).
+
+### Pass 3 — Slice C: transient wormhole freighters [additive, on A]
+A small traffic director (parallel to `PirateGuild`, NO demand ledger — that's
+M53c) that periodically spawns a freighter at the wormhole running a visitor
+itinerary: road end-to-end, dock at each terminus, `EXIT_AT` the wormhole.
+Reuses the M50 job runner (`test_visitor_itinerary` proves it runs non-pirate
+itineraries) — the roadmap's "second consumer" proving the shared arrival
+skeleton before M53b extracts it. Test: lifecycle (arrive → 2 stops → depart →
+record cleaned up).
+
+### Pass 4 — Slice D: pirate circulation [last, needs the enlarged route set]
+In `pirate_guild.gd`/`job_steps.gd`: randomize `_staging_point`'s offset along
+the lane (seeded), and add a `posture` job param (`dark_lurk | false_flag_cruise`)
+the guild rolls between, the false-flag cruise flying lit under the cover
+identity. Test: hunt points spread across ≥3 distinct routes over N sim runs
+(margin-based); false-flag cruise behaves.
+
+Sub-decision defaults (flag to change): center hub = Ironhold; peer hull =
+`ore_shuttle`; peer colonies placed in currently-empty quadrants clear of home
+keep-aways (subagent picks coords, validator confirms); Slag Bay field radius
+stays.
+
 ## Explicitly not this milestone
 
 - Demand ledgers / per-station demand scores — that's M53 proper.
