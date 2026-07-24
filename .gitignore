@@ -13,6 +13,10 @@ export_presets.cfg
 *.log
 test_logs/
 
+# Test-run artifact (test_dump_contacts writes this to the repo root; it was
+# removed from tracking in the scratchpad cleanup and keeps regenerating)
+contacts_dump.txt
+
 # Per-developer control remaps (InputBindings autoload writes this)
 input_bindings.cfg
 
