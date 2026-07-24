@@ -149,7 +149,20 @@ under the peer flag (each on its own asteroid field), `warrant_authority =
 Test: peer haulers run + dock (reuse cargo-run shape); peer-flag warrant is
 visible-but-unenforced by a home patrol (pure `warrant_enforceable_by` check).
 
-### Pass 3 — Slice C: transient wormhole freighters [additive, on A]
+### Pass 3 — Slice C: transient wormhole freighters [DEFERRED into the guild work]
+
+**Deferred on purpose (2026-07-24).** As scoped below, Slice C is "a small
+traffic director parallel to PirateGuild" — i.e. it is guild-shaped by
+definition, and it was always meant to be the SECOND CONSUMER that proves the
+shared arrival skeleton before M53b extracts it. Building it standalone now
+would either produce a throwaway or silently prejudge the skeleton's shape.
+So it moves into the M53b/M53c conversation (extract the director skeleton →
+traffic guild), where the freighter is designed as one arrival-table entry of
+the real traffic director rather than a bespoke one-off. Nothing else in M53a
+depends on it; Slice D is independently unblocked (4 cargo lanes exist after
+Slice B). Original scope kept below for when that conversation happens.
+
+
 A small traffic director (parallel to `PirateGuild`, NO demand ledger — that's
 M53c) that periodically spawns a freighter at the wormhole running a visitor
 itinerary: road end-to-end, dock at each terminus, `EXIT_AT` the wormhole.
