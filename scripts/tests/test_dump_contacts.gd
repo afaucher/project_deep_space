@@ -15,7 +15,9 @@ func _process(delta: float):
 		if main.players.has(1):
 			player = main.players[1]
 			
-		var out = FileAccess.open("res://contacts_dump.txt", FileAccess.WRITE)
+		# Scratch output goes under tmp/ (gitignored -- see CLAUDE.md temp-files policy).
+		DirAccess.make_dir_recursive_absolute("res://tmp")
+		var out = FileAccess.open("res://tmp/contacts_dump.txt", FileAccess.WRITE)
 		if player:
 			var contacts = player.active_contacts
 			out.store_line("--- DUMPING CONTACTS ---")

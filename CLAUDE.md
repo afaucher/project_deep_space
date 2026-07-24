@@ -145,3 +145,10 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
 - Commit messages use a `feat:`/`fix:` prefix (see `git log`).
 - Design decisions get a short doc in `design_ideas/`; milestones get a plan in
   `implementation_plans/`. Prefer adding to those over inline essays.
+- **Temporary files go in `tmp/`** (gitignored). Any throwaway output — a test
+  dump, a scratch CSV, a debug capture, a one-off script's result — writes
+  under `tmp/` (`res://tmp/...` from GDScript; `DirAccess.make_dir_recursive_absolute("res://tmp")`
+  first, it's idempotent) so a run never dirties the working tree. Do NOT write
+  scratch files to the repo root. Durable artifacts are the exception and are
+  named explicitly: test logs → `test_logs/` (also gitignored), tactical-sim
+  results → `tactical_analysis/data/*.csv` (tracked on purpose).
