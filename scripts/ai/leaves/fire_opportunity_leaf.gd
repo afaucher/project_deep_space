@@ -31,7 +31,7 @@ func tick(actor: Node, blackboard) -> int:
 	# Never spend a laser's heat, let alone a synchronized missile volley, on
 	# a dead-reckoned ghost.
 	var contact: Dictionary = actor.active_contacts.get(target_id, {})
-	if contact.is_empty() or contact.get("last_seen_timer", 0.0) > actor.FIRE_STALENESS_MAX:
+	if contact.is_empty() or Ship.contact_age(contact, 0.0) > actor.FIRE_STALENESS_MAX:
 		return SUCCESS
 	# Belt-and-suspenders to acquire_target_leaf's own wreck gate: never fire on
 	# a target that has since classified as WRECKAGE (a dead ship whose sticky

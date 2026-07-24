@@ -125,7 +125,7 @@ func _register_tests() -> void:
 			var missile = _spawn_target_missile(Vector2(10000, 0), Vector2(500, 0))
 			ship.active_contacts["TRK-TEST"] = {
 				"pos": missile.position, "vel": missile.linear_velocity, "pos_timer": 0.0,
-				"instance_id": missile.get_instance_id(), "classification": "INCOMING ORDNANCE", "last_seen_timer": 0.0
+				"instance_id": missile.get_instance_id(), "classification": "INCOMING ORDNANCE", "last_seen_at": Engine.get_physics_frames()
 			},
 		# Firing happens in "check" (not "setup") -- the missile's collision
 		# shape isn't registered with the physics server until its _ready()

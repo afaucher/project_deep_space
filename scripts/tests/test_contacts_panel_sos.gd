@@ -38,12 +38,12 @@ func setup(main) -> void:
 		"contacts": {
 			"TRK-100": {
 				"instance_id": 100, "classification": "FRIENDLY VESSEL", "standing": "FRIENDLY",
-				"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0,
+				"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(),
 				"sos": true, "sos_nature": "UNDER_ATTACK", "sos_name": "Hauler Joe",
 			},
 			"TRK-200": {
 				"instance_id": 200, "classification": "FRIENDLY VESSEL", "standing": "FRIENDLY",
-				"pos": Vector2(2000, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0,
+				"pos": Vector2(2000, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(),
 			},
 		},
 		"transponders": {
@@ -82,7 +82,7 @@ func setup(main) -> void:
 		"contacts": {
 			"TRK-300": {
 				"instance_id": 300, "classification": "DISTRESS CALL", "pos": Vector2(3000, 0),
-				"vel": Vector2.ZERO, "last_seen_timer": 0.0, "signature": {},
+				"vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(), "signature": {},
 				"sos": true, "sos_nature": "DISABLED", "sos_name": "Mystery Caller",
 			},
 		},
@@ -104,7 +104,7 @@ func setup(main) -> void:
 		"contacts": {
 			"TRK-100": {
 				"instance_id": 100, "classification": "FRIENDLY VESSEL", "standing": "FRIENDLY",
-				"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0,
+				"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(),
 			},
 		},
 		"transponders": {100: {"name": "Hauler Joe", "flag": "FEDERATION"}},

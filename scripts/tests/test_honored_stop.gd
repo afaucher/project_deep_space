@@ -86,7 +86,7 @@ func _test_peak_speed_comply() -> void:
 	var iid := 424242
 	var trk := "TRK-%03d" % (abs(iid) % 1000)
 	shuttle.active_contacts = {trk: {"instance_id": iid, "vel": Vector2(900, 0),
-		"pos": Vector2(401000, 0), "last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+		"pos": Vector2(401000, 0), "last_seen_at": Engine.get_physics_frames(), "classification": "UNIDENTIFIED VESSEL"}}
 	shuttle.pending_demand = {}
 	leaf.tick(shuttle, bb)  # no demand -> records peak 900 for this track
 	shuttle.active_contacts[trk]["vel"] = Vector2(15, 0)  # decelerated to hail range
@@ -104,7 +104,7 @@ func _test_peak_speed_comply() -> void:
 	var iid2 := 434343
 	var trk2 := "TRK-%03d" % (abs(iid2) % 1000)
 	shuttle.active_contacts = {trk2: {"instance_id": iid2, "vel": Vector2(50, 0),
-		"pos": Vector2(402000, 0), "last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+		"pos": Vector2(402000, 0), "last_seen_at": Engine.get_physics_frames(), "classification": "UNIDENTIFIED VESSEL"}}
 	shuttle.pending_demand = {}
 	leaf.tick(shuttle, bb2)  # records peak 50
 	shuttle.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 8, "sender_iid": iid2,
@@ -131,7 +131,7 @@ func _test_overtaken_mid_flight() -> void:
 	# shuttle's 1000 max_speed / 1.6 pirate-flag ratio breakeven of ~625) ->
 	# the shuttle RUNs, exactly like Case B above.
 	shuttle.active_contacts = {trk: {"instance_id": iid, "vel": Vector2(50, 0),
-		"pos": Vector2(401000, 40000), "last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+		"pos": Vector2(401000, 40000), "last_seen_at": Engine.get_physics_frames(), "classification": "UNIDENTIFIED VESSEL"}}
 	shuttle.pending_demand = {"rung": Hail.RUNG_STOP, "seq": 9, "sender_iid": iid,
 		"sender_pos": Vector2(401000, 40000), "sender_flag": Standing.FLAG_PIRATE, "target_iid": shuttle.get_instance_id()}
 	leaf.tick(shuttle, bb)
@@ -190,14 +190,14 @@ func _test_acquire_skip() -> void:
 	# in weapons range.
 	var actor_a = _make_ship(Frigate, "HeldHunter", 501, Vector2.ZERO)
 	actor_a.compelled_stop = {"issuer_iid": -1, "demand_seq": 1, "heartbeat_timer": 0.0}
-	actor_a.active_contacts["TGT"] = {"pos": Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	actor_a.active_contacts["TGT"] = {"pos": Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_at": Engine.get_physics_frames()}
 	var r_a = acquire.tick(actor_a, BlackboardScript.new())
 	_assert(r_a == acquire.FAILURE, "compelled actor: AcquireTarget returns FAILURE even with a fresh HOSTILE contact in range")
 
 	# (b) the actor is FREE, but the only hostile contact is a compliant
 	# stopped ship -- no leaf targets it (customs, arrest, or robbery alike).
 	var actor_b = _make_ship(Frigate, "FreeHunter", 502, Vector2.ZERO)
-	actor_b.active_contacts["TGT2"] = {"pos": Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_timer": 0.0, "complied_stop": true}
+	actor_b.active_contacts["TGT2"] = {"pos": Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_at": Engine.get_physics_frames(), "complied_stop": true}
 	var r_b = acquire.tick(actor_b, BlackboardScript.new())
 	_assert(r_b == acquire.FAILURE, "free actor: AcquireTarget skips a HOSTILE contact carrying complied_stop")
 
@@ -213,7 +213,7 @@ func _test_acquire_skip() -> void:
 	var bb3 = BlackboardScript.new()
 	bb3.set_value("target_id", "TGT3")
 	bb3.set_value("target_pos", Vector2(1000, 0))
-	actor_c.active_contacts["TGT3"] = {"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	actor_c.active_contacts["TGT3"] = {"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_at": Engine.get_physics_frames()}
 	var cooldown_before2: float = actor_c.get_component(laser_id2).get("cooldown", 0.0)
 	var r_c = fire_leaf.tick(actor_c, bb3)
 	_assert(r_c == fire_leaf.SUCCESS, "fire_opportunity_leaf returns SUCCESS (not RUNNING/FAILURE) while suspended")
@@ -234,12 +234,12 @@ func _test_wreck_gate() -> void:
 	# the later live-ship scenarios' spawn point and perturb their physics.
 	var wg_base := Vector2(200000, 200000)
 	var actor_wreck = _make_ship(Frigate, "WreckHunter", 504, wg_base)
-	actor_wreck.active_contacts["TGT4"] = {"pos": wg_base + Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "WRECKAGE", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	actor_wreck.active_contacts["TGT4"] = {"pos": wg_base + Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "WRECKAGE", "standing": "HOSTILE", "last_seen_at": Engine.get_physics_frames()}
 	var r_wreck = acquire.tick(actor_wreck, BlackboardScript.new())
 	_assert(r_wreck == acquire.FAILURE, "AcquireTarget skips a HOSTILE contact classified WRECKAGE")
 
 	var actor_live = _make_ship(Frigate, "LiveHunter", 505, wg_base + Vector2(0, 20000))
-	actor_live.active_contacts["TGT5"] = {"pos": actor_live.position + Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	actor_live.active_contacts["TGT5"] = {"pos": actor_live.position + Vector2(3000, 0), "vel": Vector2.ZERO, "classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE", "last_seen_at": Engine.get_physics_frames()}
 	var r_live = acquire.tick(actor_live, BlackboardScript.new())
 	_assert(r_live == acquire.SUCCESS, "AcquireTarget still acquires the same HOSTILE contact when classified UNIDENTIFIED VESSEL")
 
@@ -255,7 +255,7 @@ func _test_wreck_gate() -> void:
 	var bb4 = BlackboardScript.new()
 	bb4.set_value("target_id", "TGT6")
 	bb4.set_value("target_pos", actor_wreck2.position + Vector2(1000, 0))
-	actor_wreck2.active_contacts["TGT6"] = {"pos": actor_wreck2.position + Vector2(1000, 0), "vel": Vector2.ZERO, "classification": "WRECKAGE", "standing": "HOSTILE", "last_seen_timer": 0.0}
+	actor_wreck2.active_contacts["TGT6"] = {"pos": actor_wreck2.position + Vector2(1000, 0), "vel": Vector2.ZERO, "classification": "WRECKAGE", "standing": "HOSTILE", "last_seen_at": Engine.get_physics_frames()}
 	var cooldown_before3: float = actor_wreck2.get_component(laser_id3).get("cooldown", 0.0)
 	var r_wreck2 = fire_leaf.tick(actor_wreck2, bb4)
 	_assert(r_wreck2 == fire_leaf.SUCCESS, "fire_opportunity_leaf returns SUCCESS (not firing) on a WRECKAGE-classified target")
@@ -304,8 +304,8 @@ func _test_comply_flow() -> void:
 		await main_node.get_tree().physics_frame
 		var c: Dictionary = _find_contact(shuttle, issuer)
 		var ic: Dictionary = _find_contact(issuer, shuttle)
-		if (not c.is_empty() and c.get("last_seen_timer", 999.0) <= shuttle.FIRE_STALENESS_MAX
-			and not ic.is_empty() and ic.get("last_seen_timer", 999.0) <= issuer.FIRE_STALENESS_MAX):
+		if (not c.is_empty() and Ship.contact_age(c) <= shuttle.FIRE_STALENESS_MAX
+			and not ic.is_empty() and Ship.contact_age(ic) <= issuer.FIRE_STALENESS_MAX):
 			settled = true
 			break
 	_assert(settled, "setup sanity: shuttle and issuer hold mutual fresh tracks before the demand")
@@ -374,7 +374,7 @@ func _test_fast_ship_runs() -> void:
 	for i in range(360):
 		await main_node.get_tree().physics_frame
 		var c: Dictionary = _find_contact(shuttle, issuer)
-		if not c.is_empty() and c.get("last_seen_timer", 999.0) <= shuttle.FIRE_STALENESS_MAX:
+		if not c.is_empty() and Ship.contact_age(c) <= shuttle.FIRE_STALENESS_MAX:
 			settled = true
 			break
 	_assert(settled, "setup sanity: shuttle acquired a fresh track on the issuer before the demand")

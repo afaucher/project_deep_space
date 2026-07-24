@@ -306,7 +306,7 @@ static func _contact_for_instance(actor, iid: int) -> Dictionary:
 	return {}
 
 static func _is_fresh(actor, c: Dictionary) -> bool:
-	return not c.is_empty() and c.get("last_seen_timer", 999.0) <= actor.FIRE_STALENESS_MAX
+	return not c.is_empty() and Ship.contact_age(c) <= actor.FIRE_STALENESS_MAX
 
 static func _fresh_vessel_within(actor, r: float) -> bool:
 	for c_id in actor.active_contacts:

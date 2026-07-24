@@ -9,7 +9,7 @@ extends Node
 # consumer-side "prefer live contact if fresh" check to the merge-in point
 # itself -- ship.gd's SOS reconciliation NEVER touches pos/vel/signature/
 # classification on an EXISTING active_contacts entry, only refreshing the
-# sos/sos_nature/sos_name/last_seen_timer attributes. So this now asserts
+# sos/sos_nature/sos_name/last_seen_at attributes. So this now asserts
 # directly on active_contacts rather than a leaf's commanded heading --
 # there's no leaf-side logic left to exercise here.
 #
@@ -88,7 +88,7 @@ func _test_merge_does_not_overwrite_live_contact() -> void:
 	var pos_b := Vector2(20000, 0) # a pre-existing "live" detection's position, deliberately different from A
 	patrol.active_contacts[sender_trk] = {
 		"instance_id": sender_iid, "pos": pos_b, "vel": Vector2.ZERO,
-		"last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL",
+		"last_seen_at": Engine.get_physics_frames(), "classification": "UNIDENTIFIED VESSEL",
 	}
 
 	sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)

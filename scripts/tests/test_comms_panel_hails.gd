@@ -24,14 +24,14 @@ func _assert(condition: bool, msg: String) -> void:
 func _fixture_contacts() -> Dictionary:
 	return {
 		"TRK-001": {"instance_id": 201, "classification": "FRIENDLY VESSEL",
-			"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0},
+			"pos": Vector2(1000, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames()},
 		"TRK-002": {"instance_id": 202, "classification": "UNIDENTIFIED VESSEL",
-			"pos": Vector2(2000, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0,
+			"pos": Vector2(2000, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(),
 			"complied_stop": true},
 		# A tracked STRUCTURE-ish contact that never hailed and isn't
 		# selected -- must NOT appear in the list.
 		"TRK-009": {"instance_id": 209, "classification": "STATION",
-			"pos": Vector2(9000, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0},
+			"pos": Vector2(9000, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames()},
 	}
 
 func _fixture_transponders() -> Dictionary:

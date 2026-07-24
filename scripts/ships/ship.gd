@@ -96,9 +96,26 @@ const UNKNOWN_DENSITY_DEFAULT := 500.0 # density assumed when a signature omits 
 
 # Sensor fusion / contact tracking (_physics_process contact decay + correlate-tracks).
 const CONTACT_TIMEOUT := 20.0          # seconds with no fresh detection before a tracked contact is dropped
-# AI fire discipline: never open fire on a track older than this (last_seen_
-# timer -- own sensors or hop-aged relay data both count; see the datalink
-# relay's one-hop-old rule). Enforced at target ACQUISITION (acquire_target_
+
+# M56 -- contact freshness is an absolute Engine.get_physics_frames() stamp
+# (c["last_seen_at"]), not a per-frame-accumulated duration; staleness is
+# derived on demand via contact_age() below, never written every tick. See
+# implementation_plans/m56_contact_freshness_timestamps.md. Frame<->second
+# conversion reads the engine's actual physics rate (Engine.physics_ticks_
+# per_second, 60 here) rather than a hardcoded magic number, in case that
+# rate is ever tuned; can't be folded into a const since Engine's property
+# isn't a compile-time constant, so contact_age() reads it directly and this
+# helper computes CONTACT_TIMEOUT's frame equivalent once per prune pass
+# (contact_decay) instead of a file-level const.
+static func contact_age(c: Dictionary, missing_default: float = 999.0) -> float:
+	if not c.has("last_seen_at"):
+		return missing_default
+	var frames_elapsed: int = Engine.get_physics_frames() - int(c["last_seen_at"])
+	return float(frames_elapsed) / float(Engine.physics_ticks_per_second)
+
+# AI fire discipline: never open fire on a track older than this (Ship.
+# contact_age() -- own sensors or relayed data both count, staleness read the
+# same way for either). Enforced at target ACQUISITION (acquire_target_
 # leaf skips stale tracks entirely) AND at the trigger (fire_opportunity_leaf
 # holds fire if its blackboard target has gone stale since acquisition) --
 # a dead-reckoned ghost coasting toward CONTACT_TIMEOUT is a place a ship
@@ -157,7 +174,7 @@ const SENSOR_POS_NOISE := 0.005        # +/- fractional distance noise and bin f
 const OUTLINE_DOT_RANGE := 3000.0
 const MAX_OUTLINE_DOTS := 192           # ring-buffer cap per contact -- overwrite oldest
 const MAX_DOT_BINS_PER_SAMPLE := 64     # cap ray-samples per sensor/target/frame -- a close target can subtend thousands of fine-sensor bins; stride down to bound the cost (dots persist + accumulate over frames anyway)
-const OUTLINE_DOT_TTL := 1.5            # seconds (same delta-accumulated clock as last_seen_timer) before a dot prunes
+const OUTLINE_DOT_TTL := 1.5            # seconds, own delta-accumulated clock (M56: last_seen_at is now a frame stamp, not a duration -- see contact_age()) before a dot prunes
 
 
 # take_damage() raymarch / damage-soak constants.
@@ -2369,18 +2386,23 @@ func _physics_process(delta: float) -> void:
 	# Decay and dead-reckon contacts
 	PerfProbe.begin("contact_decay")
 	var to_remove = []
+	# M56: CONTACT_TIMEOUT's frame equivalent, computed once for this pass
+	# (not per contact) -- pruning now compares two ints (now vs the stamp)
+	# instead of accumulating a per-contact float every tick. last_seen_at
+	# itself needs no per-frame write at all anymore (see contact_age()).
+	var now_frame := Engine.get_physics_frames()
+	var contact_timeout_frames := int(CONTACT_TIMEOUT * Engine.physics_ticks_per_second)
 	for c_id in active_contacts:
 		var c = active_contacts[c_id]
-		c["last_seen_timer"] = c.get("last_seen_timer", 0.0) + delta
 		c["pos_timer"] = c.get("pos_timer", 0.0) + delta
 
-		# M26: age + prune outline dots on the SAME delta-accumulated clock as
-		# last_seen_timer above (not wall-clock) -- a dot's "stamp" counts UP
-		# from 0.0 at creation, same convention, so staleness reads the same
-		# way for both. No sensor refresh has to run for dots to age out here
-		# -- if sensors go dark (powered off), _sample_outline_dots simply
-		# stops being called and stamps keep aging until TTL prunes them, so
-		# there is no immortal-ghost-outline path.
+		# M26: age + prune outline dots on their own delta-accumulated clock
+		# (not wall-clock, not last_seen_at -- that's now an absolute stamp,
+		# not a duration) -- a dot's "stamp" counts UP from 0.0 at creation.
+		# No sensor refresh has to run for dots to age out here -- if sensors
+		# go dark (powered off), _sample_outline_dots simply stops being
+		# called and stamps keep aging until TTL prunes them, so there is no
+		# immortal-ghost-outline path.
 		if c.has("outline_dots"):
 			var dots: Array = c["outline_dots"]
 			var kept: Array = []
@@ -2395,7 +2417,7 @@ func _physics_process(delta: float) -> void:
 		if c.has("vel") and typeof(c["vel"]) == TYPE_VECTOR2:
 			c["pos"] += c["vel"] * delta
 
-		if c["last_seen_timer"] > CONTACT_TIMEOUT:
+		if now_frame - c.get("last_seen_at", 0) > contact_timeout_frames:
 			to_remove.append(c_id)
 	for c_id in to_remove:
 		active_contacts.erase(c_id)
@@ -2682,7 +2704,7 @@ func _physics_process(delta: float) -> void:
 				c["standing"] = std.get("standing", "")
 				c["standing_reason"] = std.get("reason", "")
 
-			c["last_seen_timer"] = 0.0
+			c["last_seen_at"] = Engine.get_physics_frames()
 		else:
 			# New contact
 			new_id = bin.get("contact_id", "")
@@ -2707,7 +2729,7 @@ func _physics_process(delta: float) -> void:
 					"owner_id": owner_id,
 					"iff_tags": bin.get("iff_tags", [])
 				},
-				"last_seen_timer": 0.0,
+				"last_seen_at": Engine.get_physics_frames(),
 				"classification": classification
 			}
 
@@ -2765,7 +2787,7 @@ func _physics_process(delta: float) -> void:
 		if not active_contacts.has(attacker_trk):
 			continue # no live track on the attacker -- can't witness what we can't see
 		var atk_c: Dictionary = active_contacts[attacker_trk]
-		if atk_c.get("last_seen_timer", 0.0) > FIRE_STALENESS_MAX:
+		if Ship.contact_age(atk_c, 0.0) > FIRE_STALENESS_MAX:
 			continue # need a FRESH track to "see" it, same fire-discipline staleness gate as weapons
 
 		# Assistance exemption: if the victim's track (if we hold one) is
@@ -2902,7 +2924,7 @@ func _physics_process(delta: float) -> void:
 							var issuer_c: Dictionary = active_contacts[issuer_trk2]
 							# (a) need a live fresh track on the sender -- can't
 							# mark what we can't see.
-							if issuer_c.get("last_seen_timer", 999.0) <= FIRE_STALENESS_MAX:
+							if Ship.contact_age(issuer_c) <= FIRE_STALENESS_MAX:
 								# (b) assistance exemption: if we hold a track
 								# on the demand's TARGET and it's already
 								# HOSTILE to us, this is lawful interdiction of
@@ -3131,7 +3153,12 @@ func _physics_process(delta: float) -> void:
 				"resolution": 0.0,
 				"pos_timer": 0.0,
 				"signature": s_sig,
-				"last_seen_timer": 0.0,
+				# M56: self-report is live, real-time ground truth for a
+				# directly-linked neighbor -- SYNTHESIZE a fresh stamp every
+				# tick (unlike relaying an EXISTING contact below, which must
+				# PRESERVE whatever stamp is already on it -- that's a past
+				# detection, not something happening right now).
+				"last_seen_at": Engine.get_physics_frames(),
 				"classification": Ship.classify_contact(s_sig, iff_tags),
 				# M52 passive sync -- live, never snapshotted, same as every
 				# other field in this self-report: a friendly link's ground
@@ -3151,25 +3178,26 @@ func _physics_process(delta: float) -> void:
 				if external_contact.get("instance_id", -1) == get_instance_id():
 					continue
 
-				# A relayed track is ONE HOP OLD: age it by delta on receipt.
-				# Without this, two linked ships holding the same stale track
-				# echo-lock each other -- each ship ages its own copy (+delta,
-				# decay loop above) then reads the peer's copy, which hasn't
-				# been aged yet this tick (or was itself just reset by reading
-				# OUR last-tick copy), so the peer's always looks one tick
-				# "fresher" and freshest-wins takes its frozen (age, pos)...
-				# on BOTH sides, every tick, forever. Symptoms (playtest):
-				# contacts never expire while comms-linked (last_seen_timer
-				# pinned near 0, CONTACT_TIMEOUT unreachable) and visibly
-				# stick where last really seen (the merge overwrites the
-				# dead-reckoned pos with the frozen echoed one) -- then all
-				# "start moving again" the moment the link drops. With the
-				# hop cost, a round-trip echo ages 2 ticks while the local
-				# copy aged only 1, so the echo can never win a STRICT
-				# freshest-wins compare; a genuinely fresher track (a real
-				# detection, age 0 at the sensing ship) still propagates at
-				# the documented one-tick-of-latency-per-hop.
-				var relayed_age: float = external_contact.get("last_seen_timer", 0.0) + delta
+				# M56: last_seen_at is now an absolute frame stamp, not a
+				# duration, so a relayed copy's stamp already IS the real
+				# moment of the underlying detection -- no hop-cost fudge
+				# needed. Old design (duration-based last_seen_timer) had to
+				# inflate a relayed reading by +delta on every hop specifically
+				# so a round-trip echo could never look fresher than the local
+				# copy (see git history / the M56 planning doc for the
+				# echo-lock bug this was guarding against) -- that inflation
+				# was itself fragile (silently assumed relay runs every
+				# physics frame). With absolute stamps, freshest-wins is just
+				# "bigger last_seen_at wins", full stop; the one remaining
+				# subtlety is the EXACT-TIE case (external stamp == local
+				# stamp), which the old scheme made structurally impossible
+				# (relayed_age was always at least one tick larger than a
+				# fresh local 0.0) but the new one doesn't. Rule: on an exact
+				# tie, KEEP LOCAL (do not import) -- the strict `>` comparison
+				# below already implements this (equal fails the condition),
+				# it's called out here so it isn't "fixed" back to `>=` by
+				# someone reading only the code. See test_relay_tie_break_keeps_local.
+				var relayed_last_seen_at: int = external_contact.get("last_seen_at", 0)
 
 				# Never import data already past the local expiry policy. The
 				# decay loop above erases a track at CONTACT_TIMEOUT, but two
@@ -3178,12 +3206,18 @@ func _physics_process(delta: float) -> void:
 				# erased track gets re-imported from the peer's not-yet-erased
 				# zombie copy, both resurrecting each other forever (observed:
 				# age climbing past 28s on a 20s timeout, entry never gone).
-				if relayed_age > CONTACT_TIMEOUT:
+				if Engine.get_physics_frames() - relayed_last_seen_at > int(CONTACT_TIMEOUT * Engine.physics_ticks_per_second):
 					continue
 
 				if not active_contacts.has(c_id):
 					var imported: Dictionary = external_contact.duplicate(true)
-					imported["last_seen_timer"] = relayed_age
+					# M56 multi-hop preservation: imported already carries the
+					# ORIGINAL detecting/reporting ship's last_seen_at
+					# unchanged (duplicate(true) is a deep copy) -- nothing to
+					# (re)stamp here. Re-stamping to "now" would make every
+					# relayed contact immortal (CONTACT_TIMEOUT pruning would
+					# never fire for anything relayed) -- see the M56 doc's
+					# "multi-hop timestamp question".
 					# M48 -- datalink standing share: an imported track already
 					# carries the peer's judgment; relabel the reason so it
 					# reads as relayed, not directly observed, and feed
@@ -3199,10 +3233,10 @@ func _physics_process(delta: float) -> void:
 					active_contacts[c_id] = imported
 				else:
 					var c = active_contacts[c_id]
-					if relayed_age < c.get("last_seen_timer", 0.0):
+					if relayed_last_seen_at > c.get("last_seen_at", 0):
 						c["pos"] = external_contact["pos"]
 						c["vel"] = external_contact["vel"]
-						c["last_seen_timer"] = relayed_age
+						c["last_seen_at"] = relayed_last_seen_at
 						c["resolution"] = min(c["resolution"], external_contact["resolution"])
 						# M52 passive sync (implementation_plans/
 						# m52_sos_passive_sync.md) -- the ONE actual behavioral
@@ -3261,15 +3295,16 @@ func _physics_process(delta: float) -> void:
 # sos_in_range true: create-if-absent (synthetic "DISTRESS CALL" entry) or
 # merge-onto-existing (stamp sos/sos_nature/sos_name only -- never touch
 # pos/vel/classification/signature on a real contact, same non-clobber rule
-# the old design used). last_seen_timer resets to 0 every tick s is in
-# range and broadcasting -- tighter than the old heartbeat gap, since there
-# is no periodic-resend latency at all now.
+# the old design used). last_seen_at (M56: an absolute frame stamp, not a
+# duration) is set to Engine.get_physics_frames() every tick s is in range
+# and broadcasting -- tighter than the old heartbeat gap, since there is no
+# periodic-resend latency at all now.
 #
 # sos_in_range false (s stopped broadcasting, or moved outside even the
 # floored range): a purely synthetic entry (classification=="DISTRESS
 # CALL") is erased outright; a real contact that got sos stamped onto it
 # has just those three fields cleared back to false/empty, pos/vel/
-# classification/signature/last_seen_timer untouched. Every tick, not just
+# classification/signature/last_seen_at untouched. Every tick, not just
 # at an explicit off moment -- this is what makes the "fly back into sensor
 # range with a stale badge" bug impossible: reconciliation re-derives from
 # current truth regardless of what sensor correlation did to
@@ -3290,7 +3325,7 @@ func _reconcile_sos_contact(s, sos_in_range: bool) -> void:
 			c["sos"] = true
 			c["sos_nature"] = s.sos_nature
 			c["sos_name"] = sos_name
-			c["last_seen_timer"] = 0.0
+			c["last_seen_at"] = Engine.get_physics_frames()
 		else:
 			active_contacts[sender_trk] = {
 				"instance_id": s.get_instance_id(),
@@ -3298,7 +3333,7 @@ func _reconcile_sos_contact(s, sos_in_range: bool) -> void:
 				"vel": Vector2.ZERO,
 				"resolution": TAU,
 				"pos_timer": 0.0,
-				"last_seen_timer": 0.0,
+				"last_seen_at": Engine.get_physics_frames(),
 				"signature": {},
 				"classification": "DISTRESS CALL",
 				"sos": true,
@@ -3327,7 +3362,7 @@ func _reconcile_sos_contact(s, sos_in_range: bool) -> void:
 		elif c.get("sos", false):
 			# A real, independently-detected contact -- only clear the sos
 			# attributes, same non-clobber rule as the merge-in path above
-			# (never touch pos/vel/signature/classification/last_seen_timer).
+			# (never touch pos/vel/signature/classification/last_seen_at).
 			c["sos"] = false
 			c["sos_nature"] = ""
 			c["sos_name"] = ""

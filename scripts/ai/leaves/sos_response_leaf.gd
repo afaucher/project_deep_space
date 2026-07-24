@@ -48,7 +48,7 @@ func tick(actor: Node, blackboard) -> int:
 
 	if responding_to == "":
 		# Not currently committed -- pick the freshest "DISTRESS CALL"
-		# contact (lowest last_seen_timer, the same clock every other
+		# contact (lowest contact_age(), the same clock every other
 		# contact decays on -- no separate age field anymore).
 		var best_trk := ""
 		var best_age := INF
@@ -56,7 +56,7 @@ func tick(actor: Node, blackboard) -> int:
 			var c: Dictionary = actor.active_contacts[c_id]
 			if c.get("classification", "") != "DISTRESS CALL":
 				continue
-			var age: float = c.get("last_seen_timer", 999.0)
+			var age: float = Ship.contact_age(c)
 			if age < best_age:
 				best_age = age
 				best_trk = c_id
@@ -88,7 +88,7 @@ func _has_fresh_hostile(actor: Node) -> bool:
 			continue
 		if c.get("classification", "") == "WRECKAGE":
 			continue
-		if c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
+		if Ship.contact_age(c) > actor.FIRE_STALENESS_MAX:
 			continue
 		return true
 	return false

@@ -70,7 +70,7 @@ func _has_fresh_track(observer: Ship, target: Node) -> bool:
 	var c: Dictionary = _find_contact(observer, target)
 	if c.is_empty():
 		return false
-	return c.get("last_seen_timer", 999.0) <= observer.FIRE_STALENESS_MAX
+	return Ship.contact_age(c) <= observer.FIRE_STALENESS_MAX
 
 func _start_scenario(idx: int) -> void:
 	scenario_idx = idx

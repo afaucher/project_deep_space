@@ -44,7 +44,7 @@ func tick(actor: Node, blackboard) -> int:
 		var c: Dictionary = actor.active_contacts[c_id]
 		if c.get("standing", "") != Standing.UNREPORTED:
 			continue
-		if c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
+		if Ship.contact_age(c) > actor.FIRE_STALENESS_MAX:
 			continue
 		if not _in_controlled_space(actor, c.get("pos", Vector2.ZERO)):
 			continue

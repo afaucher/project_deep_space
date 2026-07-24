@@ -75,7 +75,7 @@ func _settle_track(pirate, victim) -> bool:
 	for i in range(360): # up to 6s
 		await main_node.get_tree().physics_frame
 		var c: Dictionary = _find_contact(pirate, victim)
-		if not c.is_empty() and c.get("last_seen_timer", 999.0) <= pirate.FIRE_STALENESS_MAX:
+		if not c.is_empty() and Ship.contact_age(c) <= pirate.FIRE_STALENESS_MAX:
 			return true
 	return false
 

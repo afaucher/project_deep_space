@@ -47,7 +47,7 @@ func tick(actor: Node, blackboard) -> int:
 		# Without this gate the AI chased and volleyed at ghosts coasting
 		# toward CONTACT_TIMEOUT (and, before the relay echo-lock fix, at
 		# permanently-frozen ones).
-		if contact.get("last_seen_timer", 0.0) > actor.FIRE_STALENESS_MAX:
+		if Ship.contact_age(contact, 0.0) > actor.FIRE_STALENESS_MAX:
 			continue
 		var d = actor.position.distance_to(contact["pos"])
 		if d > engagement_radius:

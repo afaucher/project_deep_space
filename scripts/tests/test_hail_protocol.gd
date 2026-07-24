@@ -77,7 +77,7 @@ func _has_fresh_track(observer: Ship, target: Node) -> bool:
 	var c: Dictionary = _find_contact(observer, target)
 	if c.is_empty():
 		return false
-	return c.get("last_seen_timer", 999.0) <= observer.FIRE_STALENESS_MAX
+	return Ship.contact_age(c) <= observer.FIRE_STALENESS_MAX
 
 func _heard_demand_from(ship: Ship, sender: Node) -> bool:
 	for h in ship.last_hails:
@@ -140,8 +140,8 @@ func _start_scenario(idx: int) -> void:
 			var listener_h := _spawn("listener", ["TEAM_L8"], Vector2(2000, 0))
 			# A Frigate's active sensors reach 40000 units with no distance
 			# falloff -- at this close range a real correlation would land
-			# almost immediately and keep refreshing last_seen_timer right
-			# back down every sweep, defeating phase 2's forced-staleness
+			# almost immediately and keep refreshing last_seen_at right
+			# back to "now" every sweep, defeating phase 2's forced-staleness
 			# decay check below. Strip sensors so the listener's
 			# active_contacts entry can only ever come from the SOS itself
 			# (test_comms_relay.gd's existing pattern).
@@ -395,9 +395,9 @@ func _tick_scenario_g() -> int:
 # m52_sos_passive_sync.md): reconciliation now runs continuously, every
 # tick, straight off the caller's live sos_active field -- so a synthetic
 # entry no longer just decays on the ordinary CONTACT_TIMEOUT clock once
-# unrefreshed (forcing last_seen_timer stale would be pointless: at this
+# unrefreshed (forcing last_seen_at stale would be pointless: at this
 # close range the caller is continuously in the listener's SOS-reconciled
-# range, so last_seen_timer would just get reset back to 0 on the very next
+# range, so last_seen_at would just get reset back to "now" on the very next
 # tick regardless of what this test writes into it). Phase 2 instead turns
 # SOS off at the source and confirms the listener's entry is erased by
 # reconciliation within a couple of ticks -- CONTACT_TIMEOUT-based pruning

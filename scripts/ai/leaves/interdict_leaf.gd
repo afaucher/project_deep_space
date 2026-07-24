@@ -93,7 +93,7 @@ func tick(actor: Node, blackboard) -> int:
 		# for the same reason).
 		if c.get("complied_stop", false):
 			continue
-		if c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
+		if Ship.contact_age(c) > actor.FIRE_STALENESS_MAX:
 			continue
 		var iid: int = c.get("instance_id", -1)
 		if iid == -1 or refused.has(iid):

@@ -230,7 +230,7 @@ func _test_sos_off_erases_synthetic_contact() -> void:
 # M52 passive sync (implementation_plans/m52_sos_passive_sync.md): when the
 # matched entry is a REAL, independently-detected contact that got
 # sos/sos_nature/sos_name STAMPED onto it, reconciliation clears ONLY those
-# three fields -- pos/vel/signature/classification/last_seen_timer are
+# three fields -- pos/vel/signature/classification/last_seen_at are
 # untouched, same non-clobber rule as the on-path merge (a real contact
 # keeps refreshing via its own sensor detections regardless of SOS, and
 # must keep doing so after the distress call ends).

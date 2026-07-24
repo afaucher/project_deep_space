@@ -124,7 +124,7 @@ func _test_battery_floor_then_off_clears_within_ticks() -> void:
 # tug to find and tow the hulk (design_ideas/tugs.md: "the casualty can be
 # a live-but-dead-reactor ship... or a hulk"). Ran well past the ordinary
 # CONTACT_TIMEOUT to prove this isn't just "hasn't decayed yet" -- the
-# reconciled entry's own last_seen_timer reset (every tick sos_in_range is
+# reconciled entry's own last_seen_at reset to "now" (every tick sos_in_range is
 # true) means it never reaches that clock regardless, but running the sim
 # out this far is the honest way to demonstrate "stuck on", not infer it.
 # ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ func _test_fly_back_into_range_does_not_stick_stale_sos() -> void:
 
 	# Now actually reproduce the "flies back into SENSOR range" moment: the
 	# sender returns, real sensor correlation immediately re-fires (never
-	# lets last_seen_timer rest), and reconciliation must show sos:false on
+	# lets last_seen_at go stale), and reconciliation must show sos:false on
 	# that SAME return -- not just at the moment it left.
 	_teleport(sender, Vector2(3000, 0))
 	var settled := false

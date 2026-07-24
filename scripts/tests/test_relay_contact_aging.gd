@@ -8,18 +8,22 @@ extends Node
 # merge reads the TEAMMATE's copy -- which hasn't been aged yet this tick
 # (or was itself just reset by reading OUR last-tick copy). The relayed
 # timestamp always reads one tick "fresher", so both sides keep taking each
-# other's frozen (age, pos) forever: last_seen_timer never reaches
-# CONTACT_TIMEOUT (the ghost never expires) and the merge keeps overwriting
+# other's frozen (age, pos) forever: last_seen_at (M56: an absolute frame
+# stamp -- see Ship.contact_age()) never reaches CONTACT_TIMEOUT (the ghost
+# never expires) and the merge keeps overwriting
 # the dead-reckoned position with the frozen echoed one (the blip visibly
 # sticks where the target was last really seen). Leaving comms range broke
 # the echo, which is why everything "started moving again" -- the exact
 # playtest report.
 #
-# The fix (ship.gd, datalink relay): a relayed track is ONE HOP OLD -- its
-# age is external + delta on receipt, compared strictly. A round-trip echo
-# then costs 2 ticks while the local copy aged only 1, so the echo can
-# never win; genuinely fresher data (a real detection, age 0 at the sensing
-# ship) still propagates at the documented one-tick-per-hop latency.
+# The fix (ship.gd, datalink relay): last_seen_at is an absolute frame stamp,
+# not a duration (M56), so a relayed copy already carries the TRUE moment of
+# the underlying detection through every hop -- freshest-wins is just
+# "bigger last_seen_at wins", no hop-cost fudge needed. A round-trip echo of
+# OUR OWN stamp reads as an EXACT TIE against our local copy, and the merge's
+# documented tie-break (keep local) means it can never overwrite anything;
+# genuinely fresher data (a real detection, stamped strictly later) still
+# propagates at the documented one-tick-per-hop latency.
 #
 # Scenario: A and D (both full-sensor frigates, comms-linked the whole
 # time) both directly track hostile X. X then teleports far outside every
@@ -91,8 +95,8 @@ func _physics_process(_delta: float) -> void:
 		checked_aging = true
 		var ac: Dictionary = _contact_for(a, x)
 		var dc: Dictionary = _contact_for(d, x)
-		var a_age: float = ac.get("last_seen_timer", -1.0)
-		var d_age: float = dc.get("last_seen_timer", -1.0)
+		var a_age: float = Ship.contact_age(ac, -1.0)
+		var d_age: float = Ship.contact_age(dc, -1.0)
 		# ~8s since the last possible real detection. Pre-fix the echo lock
 		# pinned both near 0 forever; post-fix both age honestly. Generous
 		# floor (5s) so sweep cadence / hop latency can never flake it.
@@ -102,7 +106,7 @@ func _physics_process(_delta: float) -> void:
 	if t > EXPIRY_CHECK_AT:
 		var ac2: Dictionary = _contact_for(a, x)
 		var dc2: Dictionary = _contact_for(d, x)
-		_assert(ac2.is_empty(), "A's stale track expires at CONTACT_TIMEOUT despite the standing comms link (got %s)" % str(ac2.get("last_seen_timer", "gone")))
+		_assert(ac2.is_empty(), "A's stale track expires at CONTACT_TIMEOUT despite the standing comms link (got %s)" % ("gone" if ac2.is_empty() else str(Ship.contact_age(ac2))))
 		_assert(dc2.is_empty(), "D's stale track expires at CONTACT_TIMEOUT despite the standing comms link")
 
 		# The link itself must still be healthy -- the fix must starve the
@@ -111,8 +115,8 @@ func _physics_process(_delta: float) -> void:
 		var a_sees_d: Dictionary = _contact_for(a, d)
 		_assert(not a_sees_d.is_empty(), "the relay link itself is still alive (A carries D's self-report)")
 		if not a_sees_d.is_empty():
-			_assert(a_sees_d.get("last_seen_timer", 99.0) < 1.0,
-				"live self-reports stay fresh (age=%.3f -- hop latency, not echo-frozen staleness)" % a_sees_d.get("last_seen_timer", 99.0))
+			_assert(Ship.contact_age(a_sees_d, 99.0) < 1.0,
+				"live self-reports stay fresh (age=%.3f -- hop latency, not echo-frozen staleness)" % Ship.contact_age(a_sees_d, 99.0))
 
 		finished = true
 		if failures.is_empty():

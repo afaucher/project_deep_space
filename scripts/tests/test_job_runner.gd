@@ -65,7 +65,7 @@ func _test_beacon_still_witnesses() -> void:
 	actor.position = beacon_pos + Vector2(3000, 0)  # 3km from the beacon spot
 	actor.active_contacts = {"TRK-042": {
 		"instance_id": 42, "pos": beacon_pos, "vel": Vector2.ZERO,  # stationary, ON the beacon
-		"last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL"}}
+		"last_seen_at": Engine.get_physics_frames(), "classification": "UNIDENTIFIED VESSEL"}}
 	var job := {"victim_iid": 999}  # some other ship is the victim; the beacon contact is a THIRD party
 	var tripped: bool = JobSteps.check_abort(actor, job, {"cond": "third_party_in_range", "r": 6000.0})
 	_assert(tripped, "a stationary EM-loud contact at a charted beacon position STILL trips the witness check (no exemption)")

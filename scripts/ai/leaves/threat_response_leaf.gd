@@ -78,7 +78,7 @@ func tick(actor: Node, blackboard) -> int:
 		var issuer_iid: int = blackboard.get_value("threat_issuer_iid")
 		var issuer_trk: String = "TRK-%03d" % (abs(issuer_iid) % 1000)
 		var c: Dictionary = actor.active_contacts.get(issuer_trk, {})
-		if c.is_empty() or c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
+		if c.is_empty() or Ship.contact_age(c) > actor.FIRE_STALENESS_MAX:
 			blackboard.erase_value("threat_issuer_iid")
 			blackboard.erase_value("threat_ratio")
 			# M52 -- track lost, incident genuinely over. See the was_held
@@ -181,7 +181,7 @@ func _update_contact_peaks(actor: Node, blackboard) -> void:
 	var seen := {}
 	for c_id in actor.active_contacts:
 		var c: Dictionary = actor.active_contacts[c_id]
-		if c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
+		if Ship.contact_age(c) > actor.FIRE_STALENESS_MAX:
 			continue
 		var iid: int = c.get("instance_id", -1)
 		if iid == -1:

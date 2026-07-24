@@ -68,7 +68,10 @@ func setup(main) -> void:
 	ship.active_contacts["TGT_STALE"] = {
 		"pos": Vector2(3000, 0), "vel": Vector2.ZERO,
 		"classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE",
-		"last_seen_timer": 4.0, "pos_timer": 4.0,
+		# M56: last_seen_at is an absolute frame stamp -- back-date it 4.0s
+		# (past FIRE_STALENESS_MAX = 3.0) so Ship.contact_age() reads ~4.0
+		# the instant the tree ticks below (no frame advances in between).
+		"last_seen_at": Engine.get_physics_frames() - int(4.0 * Engine.physics_ticks_per_second), "pos_timer": 4.0,
 	}
 	var ammo_before: int = _total_ammo(ship)
 	tree.tick()
@@ -77,7 +80,7 @@ func setup(main) -> void:
 
 	# --- Scenario 2: the SAME contact, fresh, is engaged (the gate must not
 	# also starve legitimate combat) ---
-	ship.active_contacts["TGT_STALE"]["last_seen_timer"] = 0.5
+	ship.active_contacts["TGT_STALE"]["last_seen_at"] = Engine.get_physics_frames() - int(0.5 * Engine.physics_ticks_per_second)
 	tree.tick()
 	var fired_fresh: bool = _total_ammo(ship) < ammo_before or _lasers_on_cooldown(ship) > 0
 	_assert(fired_fresh, "fresh track: the same contact IS engaged once its age is under the gate")
@@ -95,14 +98,14 @@ func setup(main) -> void:
 	ship3.active_contacts["TGT_LATE"] = {
 		"pos": Vector2(3000, 0), "vel": Vector2.ZERO,
 		"classification": "UNIDENTIFIED VESSEL", "standing": "HOSTILE",
-		"last_seen_timer": 0.0, "pos_timer": 0.0,
+		"last_seen_at": Engine.get_physics_frames(), "pos_timer": 0.0,
 	}
 	var r = acquire.tick(ship3, blackboard)
 	_assert(r == acquire.SUCCESS, "trigger-side: fresh contact is acquired")
 	_assert(blackboard.get_value("target_id") == "TGT_LATE", "trigger-side: blackboard target published")
 
 	# The track goes stale between acquisition and the trigger pull.
-	ship3.active_contacts["TGT_LATE"]["last_seen_timer"] = 3.5
+	ship3.active_contacts["TGT_LATE"]["last_seen_at"] = Engine.get_physics_frames() - int(3.5 * Engine.physics_ticks_per_second)
 	var ammo3_before: int = _total_ammo(ship3)
 	fire.tick(ship3, blackboard)
 	_assert(_total_ammo(ship3) == ammo3_before, "trigger-side: stale-since-acquisition target gets no missiles")

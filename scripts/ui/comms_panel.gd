@@ -636,7 +636,7 @@ func _on_sos_toggled(pressed: bool) -> void:
 		var contacts: Dictionary = current_state.get("contacts", {})
 		for c_id in contacts:
 			var c: Dictionary = contacts[c_id]
-			if c.get("standing", "") == Standing.HOSTILE and c.get("last_seen_timer", 999.0) <= SOS_FRESH_STALENESS:
+			if c.get("standing", "") == Standing.HOSTILE and Ship.contact_age(c) <= SOS_FRESH_STALENESS:
 				nature = Hail.NATURE_UNDER_ATTACK
 				break
 	emit_signal("sos_toggled", pressed, nature)

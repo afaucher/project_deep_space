@@ -58,7 +58,7 @@ func _demand_stop(victim, issuer, sender_flag: String = "") -> void:
 	var issuer_trk: String = "TRK-%03d" % (abs(issuer.get_instance_id()) % 1000)
 	victim.active_contacts[issuer_trk] = {
 		"instance_id": issuer.get_instance_id(), "pos": issuer.position, "vel": issuer.linear_velocity,
-		"last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL",
+		"last_seen_at": Engine.get_physics_frames(), "classification": "UNIDENTIFIED VESSEL",
 	}
 	victim.pending_demand = {"rung": Hail.RUNG_STOP, "seq": victim.pending_demand.get("seq", 0) + 1,
 		"sender_iid": issuer.get_instance_id(), "sender_flag": sender_flag, "sender_pos": issuer.position}

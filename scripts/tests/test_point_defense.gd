@@ -123,7 +123,7 @@ func _add_incoming_contact(ship, c_id: String, body: Node2D, shots_fired: int = 
 		"vel": Vector2.ZERO,
 		"classification": "INCOMING ORDNANCE",
 		"instance_id": body.get_instance_id(),
-		"last_seen_timer": 0.0,
+		"last_seen_at": Engine.get_physics_frames(),
 		"pos_timer": 0.0,
 		"pd_shots_fired": shots_fired,
 	}

@@ -226,7 +226,7 @@ func _build_tests() -> void:
 			_reset_ship()
 			_set_component("hp_fwd_laser", 150.0, false) # full health, OFF
 			# Give it a fake contact to shoot at
-			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(), "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
 			# Lasers are reactor-powered, not ammo-fed (no "ammo" field at all --
 			# see ship.gd's normalization), so "did it fire" is read off cooldown
 			# instead: an untouched weapon's cooldown stays at 0.
@@ -247,7 +247,7 @@ func _build_tests() -> void:
 		"setup": func():
 			_reset_ship()
 			_set_component("hp_fwd_laser", 0.0, true) # destroyed, powered on
-			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(), "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
 			var cooldown_before = ship.get_component("hp_fwd_laser")["cooldown"]
 			ship.set_meta("cooldown_before", cooldown_before)
 			ship.fire_weapon("hp_fwd_laser", Vector2(500, 0), "FAKE_TGT"),
@@ -268,7 +268,7 @@ func _build_tests() -> void:
 		"name": "hp_fwd_laser: fire → waste heat added",
 		"setup": func():
 			_reset_ship()
-			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(), "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
 			ship.fire_weapon("hp_fwd_laser", Vector2(500, 0), "FAKE_TGT"),
 		"check": func():
 			var heat = _get_component("hp_fwd_laser").get("heat", 0.0)
@@ -280,7 +280,7 @@ func _build_tests() -> void:
 		"name": "hp_fwd_missile: fire → NO heat added (railgun launcher)",
 		"setup": func():
 			_reset_ship()
-			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(), "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
 			ship.fire_weapon("hp_fwd_missile", Vector2(500, 0), "FAKE_TGT"),
 		"check": func():
 			var heat = _get_component("hp_fwd_missile").get("heat", 0.0)
@@ -292,7 +292,7 @@ func _build_tests() -> void:
 		"name": "hp_fwd_missile: fire → EM pulse still present (railgun EM signature)",
 		"setup": func():
 			_reset_ship()
-			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_timer": 0.0, "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
+			ship.active_contacts["FAKE_TGT"] = {"pos": Vector2(500, 0), "vel": Vector2.ZERO, "last_seen_at": Engine.get_physics_frames(), "pos_timer": 0.0, "classification": "UNIDENTIFIED VESSEL", "signature": {"cross_section": 100.0}}
 			ship.fire_weapon("hp_fwd_missile", Vector2(500, 0), "FAKE_TGT"),
 		"check": func():
 			var em = _get_component("hp_fwd_missile").get("em_emission", 0.0)

@@ -275,8 +275,130 @@ frame number rather than the intended "far in the past" semantics).
 
 ## Findings (executed)
 
-_(to be filled in by whoever implements this — re-grep write/read sites
-fresh rather than trusting this doc's line numbers, which will have moved;
-pay special attention to the multi-hop timestamp question, since that's the
-one place this doc identifies real design risk rather than mechanical
-translation.)_
+Implemented as specced. Re-grepped `last_seen_timer` fresh rather than
+trusting this doc's line numbers (they had already moved) — found the same
+27 files the planning session found: 11 production, 16 test.
+
+**Helper.** `Ship.contact_age(c: Dictionary, missing_default: float = 999.0)
+-> float`, a `static func` in `ship.gd` right above `FIRE_STALENESS_MAX`.
+Every original `.get("last_seen_timer", X)` read site had its OWN default
+(`0.0` at some call sites, `999.0` at others, depending on whether "missing"
+should read as fresh or stale there) — the helper takes that default as a
+second arg so every converted call site keeps its exact original semantics
+instead of silently normalizing them to one convention. Callable as
+`Ship.contact_age(c)` from anywhere (`Ship` is already a registered
+`class_name`, and `Ship.classify_contact()` was already called this way
+cross-file before this milestone) — including from files that locally alias
+`const Ship = preload("res://scripts/ships/frigate.gd")` for convenience
+(several test files do this): the call resolves through inheritance to the
+same static method, no special-casing needed.
+
+**Frame<->second conversion.** `Engine.physics_ticks_per_second` (not a
+hardcoded `60.0`), read directly at each site that needs it — it can't be
+folded into a `const` because it's a runtime engine property, not a
+compile-time constant. Three sites read it: `contact_age()` itself, the
+`contact_decay` loop's once-per-frame `CONTACT_TIMEOUT` frame-equivalent
+(computed once before the per-contact loop, not per contact), and the relay
+merge's own `CONTACT_TIMEOUT` expiry gate (same reasoning, computed once per
+candidate ship's relay pass).
+
+**Write sites converted** (`ship.gd`): the decay loop's per-contact
+increment is GONE (nothing to accumulate — `pos_timer` and outline-dot aging
+still write every tick, per the non-goals; only `last_seen_timer`'s own
+accumulation disappeared); the prune check became
+`now_frame - c.get("last_seen_at", 0) > contact_timeout_frames`; both fresh-
+detection sites (correlate-update, new-contact-dict) now set
+`c["last_seen_at"] = Engine.get_physics_frames()`; the self-report synthesis
+block in `datalink_relay` and `_reconcile_sos_contact`'s two "live truth"
+write sites (existing-entry update, new-synthetic-entry create) all
+synthesize a fresh `Engine.get_physics_frames()` stamp every tick, same as
+they synthesized `0.0` before.
+
+**Relay preserve-vs-synthesize split** (`ship.gd`, `datalink_relay`, the
+per-candidate-ship loop around the `relayed_contacts` merge):
+- **Self-report** (ground truth for a directly-linked neighbor,
+  `relayed_contacts[self_report_id] = {...}`): SYNTHESIZES
+  `"last_seen_at": Engine.get_physics_frames()` fresh every tick — it's live
+  telemetry, not a past detection, so re-stamping to "now" every tick is
+  correct here (this is the ONE place a fresh stamp on a "relay-adjacent"
+  write is right, not a bug).
+- **Relaying an EXISTING contact** (`external_contact.duplicate(true)` for a
+  new-to-this-ship entry, or the freshest-wins compare-and-copy for an
+  already-known one): PRESERVES whatever `last_seen_at` is already on the
+  source dict. For a brand-new import this needs zero code — `duplicate(true)`
+  is already a deep copy, so the original stamp rides along unchanged; the
+  old code's `imported["last_seen_timer"] = relayed_age` line (which
+  overwrote the deep-copied value with a locally-computed one) is simply
+  DELETED, not translated — deleting it *is* the fix. For an existing entry,
+  the merge only overwrites `c["last_seen_at"]` with
+  `external_contact["last_seen_at"]` when the freshest-wins compare says the
+  external one is strictly newer (see tie-break below) — never with "now".
+  Verified via `test_relay_multihop_timestamp.gd` (new): a synthetic contact
+  injected on ship A with a stamp back-dated 2s propagates through B (1 hop)
+  and C (2 hops) carrying the IDENTICAL frame number throughout, including
+  after 2 more sim-seconds of continued relay traffic (rules out "gets
+  bumped toward now on every subsequent relay tick", not just "wrong on the
+  very first hop").
+
+**Tie-break.** `if relayed_last_seen_at > c.get("last_seen_at", 0):` — strict
+`>`. On an exact tie (both sides stamped the identical physics frame),
+`>` is false, so the branch that would overwrite `pos`/`vel`/`last_seen_at`/
+`sos`/`sos_nature` doesn't run — local is kept unconditionally, by
+construction, not by any special-cased tie-handling code. Commented in place
+(directly above the comparison) specifically warning against "fixing" it
+back to `>=`. Covered by the new
+`test_relay_tie_break_keeps_local.gd`: two comms-linked ships each hold their
+own entry for the same track id, identical `last_seen_at`, but different
+`pos` — asserted over 10 consecutive physics ticks that neither side's `pos`
+or `last_seen_at` ever changes (a `>=` regression would flip one side,
+possibly nondeterministically depending on which ship's `_physics_process`
+happens to run first that frame).
+
+**New tests.**
+- `scripts/tests/test_relay_multihop_timestamp.gd` — multi-hop preservation,
+  described above. 3-ship bridge (A-B-C, A-C beyond comms range so C can only
+  ever hear the contact via the B hop), sensors stripped on all three so
+  nothing can be explained by real re-detection, only the synthetic entry +
+  relay.
+- `scripts/tests/test_relay_tie_break_keeps_local.gd` — exact-tie merge,
+  described above.
+
+**Surprises / things worth flagging:**
+- The old `relayed_age` echo-lock comment block (the big one explaining why
+  a relayed track needed `+delta` inflation) was actively describing a
+  mechanism that no longer exists post-conversion — left it in place would
+  have been actively misleading to a future reader, not just stale, so it
+  was rewritten in place (still at the same call site) to explain why
+  absolute stamps make the old fudge unnecessary and what replaces it (the
+  tie-break), rather than just leaving a "see git history" pointer.
+- `test_relay_contact_aging.gd` and `test_standing_e2e.gd` both locally alias
+  `const Ship = preload("res://scripts/ships/frigate.gd")`, shadowing the
+  global `Ship` class name within those files. `Ship.contact_age(...)` still
+  resolves correctly through inheritance (Frigate extends the real Ship
+  script), confirmed by both tests passing — flagging only because it's the
+  kind of thing that looks wrong on a diff skim (calling a "Frigate" const as
+  if it were the base class) without this context.
+- `fire_opportunity_leaf.gd`'s original read used `contact.is_empty() or
+  contact.get("last_seen_timer", 0.0) > ...` — the `is_empty()` short-circuit
+  means the `0.0` default is actually unreachable dead logic (an empty dict
+  never reaches the `.get()` at all), but converted it faithfully anyway
+  (`Ship.contact_age(contact, 0.0)`) rather than "fixing" behavior this
+  milestone wasn't scoped to touch.
+- Did not add a `CONTACT_TIMEOUT_FRAMES` file-level constant (considered it,
+  per the doc's suggestion) — since `Engine.physics_ticks_per_second` can't
+  be read at const-evaluation time, the frame-equivalent is instead computed
+  once per relevant pass (once in `contact_decay`'s prune loop, once per
+  candidate ship in the relay's expiry gate) rather than cached at load time;
+  called out in a comment at `contact_age()`'s declaration so the "why not a
+  const" question doesn't need re-deriving later.
+
+**Test-suite result.** All 109 test files (`scripts/tests/*.gd` minus the
+excluded `test_asteroid.gd`) pass via `build.ps1`'s parallel gate — exit code
+0, `All tests passed successfully.`, zero `[TEST FAILED]` / `FAIL:` lines in
+the aggregate log, export step completed too (not required for this
+milestone's gate, but `build.ps1` doesn't stop there). Individually re-ran
+the 17 most directly affected tests (16 converted test files +
+`test_sos_relay_bridge.gd`, whose 2-frame/3-hop propagation timing this
+milestone could plausibly have disturbed even though it doesn't reference
+`last_seen_timer` directly) plus both new tests before the full sweep — all
+passed standalone too. No flakes observed across either run.
