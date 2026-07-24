@@ -17,6 +17,12 @@ test_logs/
 # Tests and dev scripts write throwaway files here so a run never dirties the tree.
 tmp/
 
+# Export-step temp artifacts: the Windows export writes tilde-prefixed copies
+# (and RF*.TMP restore files) next to the Steam DLLs in addons/ while it runs.
+# Transient, but a git status taken mid-export would otherwise show them.
+~*.dll
+~*.TMP
+
 # Per-developer control remaps (InputBindings autoload writes this)
 input_bindings.cfg
 

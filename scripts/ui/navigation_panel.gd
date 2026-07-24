@@ -3,9 +3,20 @@ extends Control
 signal contact_selected(c_id: String)
 
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
+const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
+const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
 
-const WORLD_HALF_EXTENT := 260000.0 # map clamps the camera/grid to +/- this on each axis -- matches the home cluster's +/-250k bounds with margin
-const FOAM_BOUNDARY := 250000.0
+# WORLD_HALF_EXTENT clamps the grid/camera to +/- this on each axis. It tracks
+# home_cluster.gd's `def.bounds` half-extent (+/-500000 as of M53a's 2x
+# reshape) with a +10k margin -- if the cluster is ever rescaled again, update
+# BOTH together (same coupling FoamPhysics.BOUNDARY documents for the physics
+# side; see FOAM_BOUNDARY below, which reads that value directly instead of
+# duplicating it, so this constant is the only literal left to keep in sync).
+const WORLD_HALF_EXTENT := 510000.0
+# Foam-current fade distance from the world edge -- reads FoamPhysics.BOUNDARY
+# directly (not a duplicated literal) so it can never drift out of sync with
+# the physics boundary again.
+const FOAM_BOUNDARY := FoamPhysics.BOUNDARY
 const FOAM_FADE_DIST := 10000.0
 
 # v1.1 outline revision (design_ideas/ship_outline_rendering.md "first-
@@ -54,6 +65,24 @@ const ExclusionHatch = preload("res://scripts/port/exclusion_hatch.gd")
 # NavCorridor.corridor().
 const LANE_LENGTH := 1500.0
 const LANE_HALF_WIDTH := 120.0
+
+# F9 omniscience debug overlay -- per-Kind color/size so STATION/WORMHOLE/
+# BEACON/ASTEROID read as distinct from the TRAFFIC/PLAYER ships the mode was
+# originally built for (those two keep the original magenta). Asteroids are
+# numerous (~69 in the home cluster) so they're drawn noticeably smaller and
+# dimmer -- see DEBUG_ENTITY_BACKGROUND_KINDS below, which also keeps them
+# (and beacons) drawn UNDER the ship/station/wormhole markers.
+const DEBUG_ENTITY_STYLE := {
+	ClusterEntity.Kind.PLAYER: {"color": Color.MAGENTA, "radius": 15.0, "border": Color.WHITE},
+	ClusterEntity.Kind.TRAFFIC: {"color": Color.MAGENTA, "radius": 15.0, "border": Color.WHITE},
+	ClusterEntity.Kind.STATION: {"color": Color(0.3, 0.7, 1.0, 1.0), "radius": 15.0, "border": Color.WHITE},
+	ClusterEntity.Kind.WORMHOLE: {"color": Color(0.7, 0.3, 1.0, 1.0), "radius": 15.0, "border": Color.WHITE},
+	ClusterEntity.Kind.BEACON: {"color": Color(1.0, 0.7, 0.1, 1.0), "radius": 10.0, "border": Color.WHITE},
+	ClusterEntity.Kind.ASTEROID: {"color": Color(0.55, 0.55, 0.55, 0.5), "radius": 4.0, "border": Color(0.75, 0.75, 0.75, 0.4)},
+}
+# Drawn in an earlier pass (before the rest) so numerous small markers never
+# sit on top of the ship/station/wormhole markers.
+const DEBUG_ENTITY_BACKGROUND_KINDS := [ClusterEntity.Kind.ASTEROID, ClusterEntity.Kind.BEACON]
 
 # Authority-colored highlight (distinct from any existing classification hue --
 # GREEN=friendly, RED=hostile, YELLOW=ordnance, GRAY=asteroid, CYAN=sensor --
@@ -715,14 +744,28 @@ func _draw() -> void:
 	var contracts: Array = current_state.get("contracts", [])
 	_draw_contract_rings(contracts)
 
-	var debug_ships: Array = current_state.get("debug_ships", [])
-	for d_pos in debug_ships:
-		# Draw a huge, highly-visible magenta circle with a thick white border.
-		# Note: We must divide by map_zoom because draw_circle operates in world space,
-		# and the camera transform scales everything down when zoomed out.
-		var r = 15.0 / map_zoom
-		draw_circle(d_pos, r, Color.MAGENTA)
-		draw_arc(d_pos, r, 0, TAU, 16, Color.WHITE, 2.0 / map_zoom)
+	# F9 omniscience overlay -- every cluster entity (all Kinds), styled per
+	# DEBUG_ENTITY_STYLE above. Two passes: background kinds (asteroids/
+	# beacons) first, then foreground kinds (stations/wormhole/traffic/
+	# player) -- keeps the numerous small asteroid markers from drawing over
+	# the more important ship/station ones. The whole overlay still draws
+	# here, before (under) the real contacts loop below, per the "a debug
+	# overlay must never occlude a real contact" rule.
+	var debug_entities: Array = current_state.get("debug_entities", [])
+	for want_background in [true, false]:
+		for entity in debug_entities:
+			var kind: int = entity.get("kind", ClusterEntity.Kind.TRAFFIC)
+			var is_background: bool = kind in DEBUG_ENTITY_BACKGROUND_KINDS
+			if is_background != want_background:
+				continue
+			var style: Dictionary = DEBUG_ENTITY_STYLE.get(kind, DEBUG_ENTITY_STYLE[ClusterEntity.Kind.TRAFFIC])
+			var e_pos: Vector2 = entity.get("pos", Vector2.ZERO)
+			# Note: We must divide by map_zoom because draw_circle operates in
+			# world space, and the camera transform scales everything down
+			# when zoomed out.
+			var r: float = style["radius"] / map_zoom
+			draw_circle(e_pos, r, style["color"])
+			draw_arc(e_pos, r, 0, TAU, 16, style["border"], 2.0 / map_zoom)
 
 	# Draw Contacts
 	var contacts = current_state.get("contacts", {})
