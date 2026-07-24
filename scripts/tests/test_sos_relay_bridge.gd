@@ -1,7 +1,8 @@
 extends Node
 
 # M52 -- the key relay test (implementation_plans/m52_sos_as_contact.md's
-# "The key test" section): a chain of beacons ("bridge"), each within
+# "The key test" section, re-verified after implementation_plans/
+# m52_sos_passive_sync.md): a chain of beacons ("bridge"), each within
 # comms-link range of its immediate neighbor, spanning a distance well
 # beyond any single beacon's own SOS/comms range. set_sos_active(true, ...)
 # fired from a ship near the MIDDLE of the chain. A patrol-equivalent ship
@@ -11,7 +12,13 @@ extends Node
 # make this pass. SOS becoming a normal active_contacts entry is the whole
 # point: it rides the relay for free the instant it's a normal dictionary
 # in active_contacts (ship.gd's peer-scan loop already relays active_
-# contacts wholesale, freshest-wins, multi-hop, LOS+IFF gated).
+# contacts wholesale, freshest-wins, multi-hop, LOS+IFF gated). Passive sync
+# makes this MORE direct, not less: Beacon1 (in the sender's own SOS-floored
+# range) now reconciles the DISTRESS CALL entry straight from the sender's
+# live sos_active field inside datalink_relay itself, no comms_inbox hop in
+# between; Beacon2/Patrol still only ever see it via the ordinary freshest-
+# wins relay merge (extended to carry sos/sos_nature), same one-tick-of-
+# latency-per-hop as every other relayed field.
 #
 # Chain layout (all same IFF tag, straight line, clear LOS):
 #   Sender (0,0) --20000-- Beacon1 (20000,0) --22000-- Beacon2 (42000,0)

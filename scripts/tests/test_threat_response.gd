@@ -184,22 +184,28 @@ func _test_overtaken_mid_flight_gives_up() -> void:
 	_free_all()
 
 # ---------------------------------------------------------------------------
-# M52 follow-up (implementation_plans/m52_sos_as_contact.md item 2): SOS is
-# no longer a one-shot broadcast -- the deciding tick turns the SOS
-# HEARTBEAT on exactly once per incident (whether the victim ends up
-# running or complying), and ship.gd's own _physics_process does the actual
-# periodic re-sending from there. Verified two ways: (a) a nearby receiver's
-# active_contacts entry for the victim picks up the sos attribute (proving
-# the wire path actually reaches something, same mechanism SOSResponseLeaf
-# reads, test_patrol_interdiction.gd's Phase 6 uses the identical shape),
-# and (b) re-ticking the SAME already-decided demand does NOT re-prime the
-# heartbeat -- checked directly on victim.sos_heartbeat_timer, race-free
-# (see test_demand_lifecycle.gd's S4 for why this is more reliable than
-# inferring from the receiver's data, whose last_seen_timer is also reset
-# by ordinary real sensor detections at close range).
+# M52 follow-up (implementation_plans/m52_sos_as_contact.md item 2): SOS
+# turns on exactly once per incident (whether the victim ends up running or
+# complying). M52 passive sync (implementation_plans/
+# m52_sos_passive_sync.md): there is no heartbeat to prime anymore --
+# sos_active/sos_nature are plain live fields, and datalink_relay reconciles
+# active_contacts from them continuously. Verified two ways: (a) a nearby
+# receiver's active_contacts entry for the victim picks up the sos
+# attribute (proving reconciliation actually reaches something, same
+# mechanism SOSResponseLeaf reads, test_patrol_interdiction.gd's Phase 6
+# uses the identical shape), and (b) re-ticking the leaf does NOT re-run the
+# decision body -- this scenario's victim COMPLIES (issuer speed forces
+# will_run == false), and complying calls engage_dead_stop() synchronously
+# within the FIRST tick, which sets compelled_stop and clears pending_demand
+# right there -- so a second leaf.tick() short-circuits at the leaf's very
+# top branch (compelled_stop no longer empty -> "was_held"/SUCCESS) without
+# ever reaching the demand-decision code (and its set_sos_active call) at
+# all. That's a substitute for the old heartbeat-priming check, which no
+# longer has any observable signature now that set_sos_active(true, ...) is
+# an idempotent field write.
 # ---------------------------------------------------------------------------
 func _test_sos_broadcast_once_per_incident() -> void:
-	print("\n--- SOS heartbeat turns on exactly once per incident, regardless of comply-or-run ---")
+	print("\n--- SOS turns on exactly once per incident, regardless of comply-or-run ---")
 	var victim = _make_ship(CargoShuttle, "SosVictim", 810, Vector2.ZERO, ["TEAM_SOSV"])
 	var issuer = _make_ship(ArmedPinnace, "SosIssuer", 811, Vector2(2000, 0), ["TEAM_SOSI"])
 	issuer.linear_velocity = Vector2(900, 0) # victim complies (1000 < 1170)
@@ -208,11 +214,12 @@ func _test_sos_broadcast_once_per_incident() -> void:
 	_demand_stop(victim, issuer)
 	var leaf := ThreatResponseLeaf.new()
 	var bb := _make_blackboard()
-	leaf.tick(victim, bb)
+	var first_tick: int = leaf.tick(victim, bb)
+	_assert(first_tick == leaf.SUCCESS, "first tick decides (SUCCESS) on the fresh demand")
 
-	_assert(victim.sos_active, "the decision turned the SOS heartbeat on")
+	_assert(victim.sos_active, "the decision turned SOS on")
 	_assert(victim.sos_nature == Hail.NATURE_UNDER_ATTACK, "sos_nature is UNDER_ATTACK")
-	_assert(victim.sos_heartbeat_timer == victim.SOS_HEARTBEAT_INTERVAL, "heartbeat primed to fire on the very next physics tick")
+	_assert(not bb.has_value("threat_issuer_iid"), "setup: victim complied, not ran (no active RUN incident)")
 
 	var victim_trk: String = "TRK-%03d" % (abs(victim.get_instance_id()) % 1000)
 	var frame := 0
@@ -221,10 +228,14 @@ func _test_sos_broadcast_once_per_incident() -> void:
 		frame += 1
 	_assert(receiver.active_contacts.get(victim_trk, {}).get("sos", false), "a nearby ship's active_contacts entry for the victim picked up the sos attribute")
 
-	# Re-ticking the SAME already-decided demand (seq unchanged) must NOT
-	# re-trigger the decision -- decide-once-per-seq (last_decided_seq) gate.
-	leaf.tick(victim, bb)
-	_assert(victim.sos_heartbeat_timer != victim.SOS_HEARTBEAT_INTERVAL, "re-ticking the same pending_demand does not re-prime (re-broadcast) the SOS heartbeat")
+	# Re-ticking the leaf does NOT re-run the decision -- the victim is
+	# already held (compelled_stop set by the first tick's engage_dead_stop),
+	# so this short-circuits at the leaf's top branch instead.
+	_assert(not victim.compelled_stop.is_empty(), "setup: complying set compelled_stop synchronously within the first tick")
+	var second_tick: int = leaf.tick(victim, bb)
+	_assert(second_tick == leaf.SUCCESS, "second tick claims the tick via the held branch, not a fresh decision")
+	_assert(bb.get_value("was_held", false), "second tick took the compelled_stop/held branch, never reaching the decision code")
+	_assert(victim.sos_active and victim.sos_nature == Hail.NATURE_UNDER_ATTACK, "SOS state unperturbed by the refresh")
 
 	_free_all()
 

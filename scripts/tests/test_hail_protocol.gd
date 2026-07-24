@@ -13,7 +13,7 @@ extends Node
 # addressed target's own STOP standing rule (+ police-stop exemption),
 # (c) the overheard witness rule (+ authority-flag and assistance
 # exemptions), (d) ACKNOWLEDGE's in_reply_to disambiguation (M52d renamed
-# the verb from COMPLY), (e) SOS delivery + nature/name + TTL decay.
+# the verb from COMPLY), (e) SOS delivery + nature/name + passive-sync clear.
 # Honored-stop mechanics (comply-or-run, the fire guard, the hold's
 # heartbeat lapse, auto-resume) live in test_honored_stop.gd; the patrol
 # IDENTIFY challenge flow lives in test_patrol_challenge.gd; the M52d demand
@@ -31,11 +31,10 @@ var ships: Dictionary = {}
 var scenario_idx: int = -1
 const NUM_SCENARIOS = 8
 # Per-scenario timeout (sim seconds) -- most scenarios settle in a couple of
-# sensor-fusion ticks. SOS decay (scenario 7) forces staleness directly
-# (implementation_plans/m52_sos_as_contact.md: SOS is now a real
-# active_contacts entry decaying on the normal CONTACT_TIMEOUT clock, no
-# separate TTL) rather than ticking out a real timer, so it needs no more
-# budget than the others.
+# sensor-fusion ticks. Scenario 7's SOS clear (implementation_plans/
+# m52_sos_passive_sync.md: reconciliation erases a synthetic DISTRESS CALL
+# entry within 1-2 ticks of sos_active going false) is just as fast as the
+# others, so it needs no more budget.
 const SCENARIO_TIMEOUTS := [8.0, 10.0, 10.0, 10.0, 10.0, 10.0, 8.0, 10.0]
 var scenario_timer: float = 0.0
 
@@ -389,17 +388,22 @@ func _tick_scenario_g() -> int:
 			return 1
 	return -1
 
-# --- Scenario H: SOS delivery + nature/name + CONTACT_TIMEOUT decay --------
+# --- Scenario H: SOS delivery + nature/name + passive-sync clear -----------
 # M52 follow-up (implementation_plans/m52_sos_as_contact.md): SOS is now a
 # real active_contacts entry classified "DISTRESS CALL" (no more heard_sos
-# side-channel), decaying on the SAME CONTACT_TIMEOUT clock as every other
-# contact. Phase 2 forces staleness directly (mutating last_seen_timer)
-# rather than ticking out the real 20s -- at this close range (2000u, well
-# within a Frigate's sensor reach) a real sensor correlation landing on the
-# SAME entry during a real wait would keep refreshing it and the decay
-# would never be observed; this is also a much faster/tighter proof of the
-# CONTACT_TIMEOUT prune path itself, already exercised generically by every
-# other decaying contact in the suite.
+# side-channel). M52 passive sync (implementation_plans/
+# m52_sos_passive_sync.md): reconciliation now runs continuously, every
+# tick, straight off the caller's live sos_active field -- so a synthetic
+# entry no longer just decays on the ordinary CONTACT_TIMEOUT clock once
+# unrefreshed (forcing last_seen_timer stale would be pointless: at this
+# close range the caller is continuously in the listener's SOS-reconciled
+# range, so last_seen_timer would just get reset back to 0 on the very next
+# tick regardless of what this test writes into it). Phase 2 instead turns
+# SOS off at the source and confirms the listener's entry is erased by
+# reconciliation within a couple of ticks -- CONTACT_TIMEOUT-based pruning
+# for an unrefreshed/out-of-range contact is already exercised generically
+# elsewhere in the suite; this scenario's job is proving the erase-on-off
+# path specifically.
 func _tick_scenario_h() -> int:
 	var caller: Ship = ships["caller"]
 	var listener: Ship = ships["listener"]
@@ -410,7 +414,7 @@ func _tick_scenario_h() -> int:
 			step_frame += 1
 			if step_frame < 3:
 				return -1
-			caller.send_sos(Hail.NATURE_DISABLED)
+			caller.set_sos_active(true, Hail.NATURE_DISABLED)
 			phase = 1
 			step_frame = 0
 			return -1
@@ -425,13 +429,18 @@ func _tick_scenario_h() -> int:
 			if sos.get("sos_nature", "") != Hail.NATURE_DISABLED or sos.get("sos_name", "") != caller.ship_name:
 				printerr("  ASSERT FAILED: SOS should carry sos_nature=DISABLED and the caller's name, got contact=", sos)
 				return 0
-			print("  [PASS] SOS reached listener.active_contacts as a DISTRESS CALL entry (sos_nature='", sos.get("sos_nature", ""), "', sos_name='", sos.get("sos_name", ""), "') -- forcing it stale to confirm normal CONTACT_TIMEOUT decay")
-			listener.active_contacts[caller_trk]["last_seen_timer"] = 9999.0
+			print("  [PASS] SOS reached listener.active_contacts as a DISTRESS CALL entry (sos_nature='", sos.get("sos_nature", ""), "', sos_name='", sos.get("sos_name", ""), "') -- turning SOS off to confirm reconciliation erases it")
+			caller.set_sos_active(false, "")
 			phase = 2
+			step_frame = 0
 			return -1
 		2:
+			step_frame += 1
 			if not listener.active_contacts.has(caller_trk):
-				print("  [PASS] SOS contact decayed and was pruned by the normal CONTACT_TIMEOUT sweep")
+				print("  [PASS] SOS contact erased by reconciliation within %d tick(s) of sos_active going false, no CONTACT_TIMEOUT wait needed" % step_frame)
 				return 1
+			if step_frame > 10: # generous margin -- should clear within 1-2 ticks
+				printerr("  ASSERT FAILED: listener still holds the DISTRESS CALL contact ", step_frame, " ticks after the caller's SOS went off, active_contacts=", listener.active_contacts)
+				return 0
 			return -1
 	return -1

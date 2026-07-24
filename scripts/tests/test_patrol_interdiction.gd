@@ -49,12 +49,12 @@ func _trk_for(ship: Node) -> String:
 # A Frigate's active sensors reach 40000 units with NO distance falloff --
 # Phase 6's cast all sit well within that of each other. Phase 6 is entirely
 # about the SOS/active_contacts mechanism (not real sensor detection), and
-# its stale-SOS sub-case forces last_seen_timer high then waits for the
-# CONTACT_TIMEOUT prune -- a real sensor correlation landing on the SAME
-# track in the meantime would keep refreshing last_seen_timer right back
-# down, making the prune never observable. Strip the patrol's sensors
-# entirely (test_comms_relay.gd's existing pattern) so its active_contacts
-# can only ever be populated by SOS/relay in this phase.
+# its stale-SOS sub-case relies on datalink_relay's continuous SOS
+# reconciliation erasing the synthetic entry once sos_active goes false --
+# a real sensor correlation landing on the SAME track would classify it as
+# something other than "DISTRESS CALL" and confuse the assertions. Strip the
+# patrol's sensors entirely (test_comms_relay.gd's existing pattern) so its
+# active_contacts can only ever be populated by SOS/relay in this phase.
 func _strip_sensors(ship: Node) -> void:
 	ship.ship_components = ship.ship_components.filter(func(c): return c["type"] != "sensors")
 
@@ -454,29 +454,29 @@ func _phase_6_sos_response() -> void:
 	var bb = patrol_tree.blackboard
 
 	# --- sub-case: a stale SOS is never adopted. ---
-	# M52 follow-up (implementation_plans/m52_sos_as_contact.md): SOS is now
-	# a heartbeat toggle (set_sos_active) creating/refreshing a real
-	# "DISTRESS CALL" active_contacts entry, decaying on the normal
-	# CONTACT_TIMEOUT clock -- no more separate heard_sos/HEARD_SOS_TTL
-	# side-channel. sos_responding_to is now keyed by track id (the
-	# active_contacts key), not instance id.
+	# M52 follow-up (implementation_plans/m52_sos_as_contact.md): SOS
+	# creates/refreshes a real "DISTRESS CALL" active_contacts entry.
+	# sos_responding_to is keyed by track id (the active_contacts key), not
+	# instance id. M52 passive sync (implementation_plans/
+	# m52_sos_passive_sync.md): "stale" no longer means "wait out
+	# CONTACT_TIMEOUT" -- datalink_relay's continuous reconciliation erases a
+	# purely synthetic DISTRESS CALL entry within 1-2 ticks of sos_active
+	# going false, since the patrol is in range every tick regardless (no
+	# heartbeat-gap staleness window exists to force anymore).
 	var stale_trk: String = _trk_for(stale_sender)
 	stale_sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 
 	var heard_stale := false
-	for i in range(300): # up to 5s for the broadcast to land
+	for i in range(300): # up to 5s for reconciliation to land
 		await main_node.get_tree().physics_frame
 		if patrol.active_contacts.has(stale_trk):
 			heard_stale = true
 			break
 	_assert(heard_stale, "patrol heard the stale-sender's SOS (a DISTRESS CALL contact)")
 
-	# Stop the heartbeat (incident "resolved") and force the contact stale
-	# immediately -- skip the real 20s CONTACT_TIMEOUT wait, mutating the
-	# same last_seen_timer field ship.gd's own contact-decay loop reads.
+	# "Incident resolved" -- reconciliation erases the synthetic entry on
+	# its own within a couple of ticks, no manual staleness forcing needed.
 	stale_sender.set_sos_active(false, "")
-	if patrol.active_contacts.has(stale_trk):
-		patrol.active_contacts[stale_trk]["last_seen_timer"] = 9999.0
 
 	var stale_pruned := false
 	for i in range(60):
@@ -484,7 +484,7 @@ func _phase_6_sos_response() -> void:
 		if not patrol.active_contacts.has(stale_trk):
 			stale_pruned = true
 			break
-	_assert(stale_pruned, "the stale SOS contact was pruned by CONTACT_TIMEOUT")
+	_assert(stale_pruned, "the stale SOS contact was cleared by reconciliation once sos_active went false")
 	_assert(bb.get_value("sos_responding_to", "") != stale_trk, "the patrol never adopted the stale SOS as its response target")
 
 	# --- sub-case: a fresh SOS breaks off the route. ---
@@ -514,7 +514,7 @@ func _phase_6_sos_response() -> void:
 	# already exercised above and by the stale sub-case) so this sub-case
 	# stays focused on "the slot frees up and a later call still lands".
 	bb.erase_value("sos_responding_to")
-	victim1.set_sos_active(false, "") # stop the heartbeat so it can't recreate the contact
+	victim1.set_sos_active(false, "") # so reconciliation can't recreate the contact
 	patrol.active_contacts.erase(victim1_trk)
 
 	var settled := false

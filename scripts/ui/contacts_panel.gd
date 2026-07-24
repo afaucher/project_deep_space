@@ -22,16 +22,19 @@ const _STANDING_COLORS := {
 }
 
 # M52 -- SOS as a generic contact attribute (calling session, 2026-07-23,
-# follow-up in implementation_plans/m52_sos_as_contact.md): same RGB as
-# utils.gd's classification_color("DISTRESS CALL") (its own local literal
-# there too -- this file doesn't import colors from other panels, matches
-# the existing "standing.gd is phase-1, not ours to touch" convention just
-# above). A contact carrying sos/sos_nature/sos_name (ship.gd's comms_inbox
-# VERB_SOS branch -- either stamped onto an existing real track, or, since
-# the M52 follow-up, a brand-new "DISTRESS CALL"-classified entry with no
-# real detection behind it at all) gets this instead of its usual
-# standing/classification color, so a distress call reads as unmistakably
-# urgent rather than blending into the ordinary row treatment.
+# follow-up in implementation_plans/m52_sos_as_contact.md, then
+# implementation_plans/m52_sos_passive_sync.md): same RGB as utils.gd's
+# classification_color("DISTRESS CALL") (its own local literal there too --
+# this file doesn't import colors from other panels, matches the existing
+# "standing.gd is phase-1, not ours to touch" convention just above). A
+# contact carrying sos/sos_nature/sos_name (ship.gd's datalink_relay
+# reconciliation -- either stamped onto an existing real track, or a
+# brand-new "DISTRESS CALL"-classified entry with no real detection behind
+# it at all) gets this instead of its usual standing/classification color,
+# so a distress call reads as unmistakably urgent rather than blending into
+# the ordinary row treatment. UI-side, this panel is unchanged by the M52
+# passive-sync redesign -- same fields, same place, just reconciled
+# continuously now instead of by a wire event.
 const _SOS_COLOR := Color(1.0, 0.25, 0.1, 0.95)
 
 var current_state: Dictionary = {}

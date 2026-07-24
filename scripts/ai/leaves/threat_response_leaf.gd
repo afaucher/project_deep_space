@@ -63,10 +63,10 @@ func tick(actor: Node, blackboard) -> int:
 		# aborted, or done, see ship.gd's HAIL_HEARTBEAT_TIMEOUT comment) --
 		# symmetric with the RUN incident's track-lost/overtaken cleanups
 		# below, this is the "immediate comply" path's only resolution point.
-		# Routed through set_sos_active (not a direct field write) so the
-		# true->false transition fires the one final "off" broadcast --
-		# see ship.gd's set_sos_active for why a stamped-onto-a-real-contact
-		# sos flag would otherwise never self-clear.
+		# set_sos_active(false, ...) just flips the live sos_active field now
+		# (implementation_plans/m52_sos_passive_sync.md) -- datalink_relay's
+		# continuous reconciliation clears the sos badge on anyone holding a
+		# track on us within a tick or two, no broadcast to send.
 		blackboard.erase_value("was_held")
 		if actor.has_method("set_sos_active"):
 			actor.set_sos_active(false, "")
@@ -81,9 +81,8 @@ func tick(actor: Node, blackboard) -> int:
 		if c.is_empty() or c.get("last_seen_timer", 999.0) > actor.FIRE_STALENESS_MAX:
 			blackboard.erase_value("threat_issuer_iid")
 			blackboard.erase_value("threat_ratio")
-			# M52 -- track lost, incident genuinely over. Routed through
-			# set_sos_active (not a direct field write) -- see the was_held
-			# branch above for why.
+			# M52 -- track lost, incident genuinely over. See the was_held
+			# branch above for why this is just a plain field write now.
 			if actor.has_method("set_sos_active"):
 				actor.set_sos_active(false, "")
 			return FAILURE
@@ -102,9 +101,8 @@ func tick(actor: Node, blackboard) -> int:
 					[actor.debug_label(), live_threat_capability, run_ratio, actor.max_speed])
 			blackboard.erase_value("threat_issuer_iid")
 			blackboard.erase_value("threat_ratio")
-			# M52 -- RUN incident resolved (overtaken -> comply). Routed
-			# through set_sos_active (not a direct field write) -- see the
-			# was_held branch above for why.
+			# M52 -- RUN incident resolved (overtaken -> comply). See the
+			# was_held branch above for why this is just a plain field write.
 			if actor.has_method("set_sos_active"):
 				actor.set_sos_active(false, "")
 			# M52d -- decoupled: AI's comply-or-run decision has no "buy time"
@@ -152,16 +150,14 @@ func tick(actor: Node, blackboard) -> int:
 		print("[Cargo] %s: %s (my max %.0f vs threat cap %.0f x%.1f = %.0f)" %
 			[actor.debug_label(), "RUN" if will_run else "STOP", actor.max_speed, threat_capability, ratio, threat_capability * ratio])
 
-	# M52 -- SOS becomes a heartbeat, not a one-shot (implementation_plans/
-	# m52_sos_as_contact.md item 2): under the old 90s HEARD_SOS_TTL a single
-	# broadcast was enough, but a "DISTRESS CALL" contact now decays at the
-	# normal CONTACT_TIMEOUT (20s) -- too short for a robbery hold that can
-	# itself run 12s+. Turn the heartbeat on at incident start, regardless of
-	# the comply-or-run call (ship.gd's _physics_process does the actual
-	# periodic re-sending, and primes the first send -- see set_sos_active);
-	# the track-lost/overtaken cleanups above and the was_held/compelled_
-	# stop-lapse check at the top of this function (on a LATER tick) turn it
-	# back off once the incident genuinely resolves.
+	# M52 -- turn SOS on at incident start, regardless of the comply-or-run
+	# call. M52 passive sync (implementation_plans/m52_sos_passive_sync.md):
+	# this just sets the live sos_active/sos_nature fields -- datalink_
+	# relay's continuous reconciliation keeps anyone in range showing the
+	# distress badge for as long as they stay set, no heartbeat/timer
+	# involved. The track-lost/overtaken cleanups above and the was_held/
+	# compelled_stop-lapse check at the top of this function (on a LATER
+	# tick) turn it back off once the incident genuinely resolves.
 	if actor.has_method("set_sos_active"):
 		actor.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 

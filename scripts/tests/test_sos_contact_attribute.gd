@@ -2,7 +2,11 @@ extends Node
 
 # M52 playtest fix -- SOS as battery-backup + generic contact attribute
 # (calling session, 2026-07-23), THEN M52 follow-up -- SOS becomes a real
-# contact (implementation_plans/m52_sos_as_contact.md). Changes covered here:
+# contact (implementation_plans/m52_sos_as_contact.md), THEN M52 passive
+# sync (implementation_plans/m52_sos_passive_sync.md) -- SOS is no longer a
+# heartbeat-resent wire event at all; sos_active/sos_nature are plain live
+# ship fields, and ship.gd's datalink_relay reconciles active_contacts from
+# them continuously, every tick, for anyone in range. Changes covered here:
 #
 # 1. SOS_BATTERY_RANGE (hail.gd) is now a FLOOR, not a fallback that only
 #    kicked in once get_comms_range() hit exactly 0. A comms component
@@ -11,24 +15,23 @@ extends Node
 #    help because of a damage roll is high, that breaks the fun." Now SOS
 #    always reaches at least the battery floor regardless of comms health,
 #    and a comms component still working for MORE than that lets SOS ride
-#    the larger number instead.
+#    the larger number instead. Ported into ship.gd's datalink_relay
+#    unchanged by the passive-sync redesign -- still evaluated separately
+#    from the ordinary their_comms_range<=0.0 early-out.
 # 2. A heard SOS stamps sos/sos_nature/sos_name onto the sender's OWN
 #    active_contacts entry -- "sos should be a contact attribute... let's
-#    make it more generic." M52 follow-up: this is no longer conditional on
-#    an existing track. If the receiver already holds a real track, the SOS
-#    ONLY annotates it (never overwrites pos/vel/signature/classification --
-#    see test_sos_prefers_live_contact.gd for that specifically). If no
-#    track exists, the SOS now CREATES one, classified the bare literal
-#    "DISTRESS CALL" -- the old heard_sos NAV-only side-channel and its
-#    "never manufacture a contact" rule are gone; see the doc for why this
-#    is safe (send_sos() snapshots a REAL position, and it's a heartbeat, so
-#    it decays exactly like a real contact nobody's re-detected).
-# 3. User addendum (2026-07-23): turning SOS off is not silent -- one final
-#    "active: false" broadcast either erases a synthetic DISTRESS CALL entry
-#    outright, or clears just the sos/sos_nature/sos_name fields on a real,
-#    independently-detected contact (never erasing the contact itself, and
-#    never touching pos/vel/signature/classification) -- see set_sos_active
-#    in ship.gd.
+#    make it more generic." If the receiver already holds a real track, the
+#    SOS ONLY annotates it (never overwrites pos/vel/signature/
+#    classification -- see test_sos_prefers_live_contact.gd for that
+#    specifically). If no track exists, the SOS creates one, classified the
+#    bare literal "DISTRESS CALL".
+# 3. Turning SOS off is not silent, but there is no longer an explicit "off"
+#    broadcast to make it so -- reconciliation re-derives the correct state
+#    from sos_active every tick, so within 1-2 ticks of set_sos_active(false)
+#    a purely synthetic DISTRESS CALL entry is erased outright, and a real,
+#    independently-detected contact has just its sos/sos_nature/sos_name
+#    fields cleared (never the contact itself, never pos/vel/signature/
+#    classification) -- see ship.gd's _reconcile_sos_contact.
 #
 # Run: ./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --run-test test_sos_contact_attribute
 
@@ -99,7 +102,7 @@ func _test_sos_reaches_battery_range_with_dead_comms() -> void:
 	var receiver = _make_ship(Frigate, "FarReceiver", 801, far_pos, ["TEAM_RECEIVER"])
 	_strip_sensors(receiver) # this test cares about the SOS-only path, not real detection
 
-	sender.send_sos(Hail.NATURE_DISABLED)
+	sender.set_sos_active(true, Hail.NATURE_DISABLED)
 	await main_node.get_tree().physics_frame
 	await main_node.get_tree().physics_frame
 	var sender_trk0: String = "TRK-%03d" % (abs(sender.get_instance_id()) % 1000)
@@ -135,7 +138,7 @@ func _test_sos_attribute_stamped_on_existing_contact() -> void:
 	_assert(have_track, "setup: receiver correlated a real sensor track on the sender")
 	_assert(real_classification != "DISTRESS CALL", "setup: the pre-existing track carries a REAL classification, not the SOS placeholder")
 
-	sender.send_sos(Hail.NATURE_UNDER_ATTACK)
+	sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 	var stamped := false
 	for i in range(120): # up to 2s
 		await main_node.get_tree().physics_frame
@@ -167,7 +170,7 @@ func _test_sos_creates_new_distress_contact() -> void:
 	var sender_trk: String = "TRK-%03d" % (abs(sender.get_instance_id()) % 1000)
 	_assert(not receiver.active_contacts.has(sender_trk), "setup: no pre-existing contact for the sender")
 
-	sender.send_sos(Hail.NATURE_UNDER_ATTACK)
+	sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 	var created := false
 	for i in range(120): # up to 2s
 		await main_node.get_tree().physics_frame
@@ -188,18 +191,19 @@ func _test_sos_creates_new_distress_contact() -> void:
 	_free_all()
 
 # ---------------------------------------------------------------------------
-# User addendum (2026-07-23), implementation_plans/m52_sos_as_contact.md's
-# off-broadcast section: turning SOS off is not silent -- set_sos_active's
-# true->false transition sends ONE final send_sos(..., false) hail. When the
-# matched entry is a SYNTHETIC "DISTRESS CALL" contact (nothing else backs
-# it -- no real detection), the off broadcast erases it outright instead of
-# leaving it to decay on its own over the next CONTACT_TIMEOUT.
+# M52 passive sync (implementation_plans/m52_sos_passive_sync.md): turning
+# SOS off is not silent, but there is no explicit "off" wire event anymore
+# -- datalink_relay's continuous reconciliation re-derives the correct
+# state from sos_active every tick. When the matched entry is a SYNTHETIC
+# "DISTRESS CALL" contact (nothing else backs it -- no real detection),
+# reconciliation erases it outright within 1-2 ticks instead of leaving it
+# to decay on its own over the next CONTACT_TIMEOUT.
 # ---------------------------------------------------------------------------
 func _test_sos_off_erases_synthetic_contact() -> void:
 	print("\n--- SOS off: a synthetic DISTRESS CALL contact is erased outright ---")
 	var sender = _make_ship(Frigate, "OffSender", 806, Vector2(500, 500), ["TEAM_OFF_SENDER"])
 	var receiver = _make_ship(Frigate, "OffReceiver", 807, Vector2(25000, 0), ["TEAM_OFF_RECEIVER"])
-	_strip_sensors(receiver) # this proves the off broadcast erases the SYNTHETIC entry, not a real one
+	_strip_sensors(receiver) # this proves reconciliation erases the SYNTHETIC entry, not a real one
 	var sender_trk: String = "TRK-%03d" % (abs(sender.get_instance_id()) % 1000)
 
 	sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
@@ -218,17 +222,18 @@ func _test_sos_off_erases_synthetic_contact() -> void:
 		if not receiver.active_contacts.has(sender_trk):
 			erased = true
 			break
-	_assert(erased, "the off broadcast erased the synthetic entry outright, no CONTACT_TIMEOUT wait needed")
+	_assert(erased, "reconciliation erased the synthetic entry outright, no CONTACT_TIMEOUT wait needed")
 
 	_free_all()
 
 # ---------------------------------------------------------------------------
-# User addendum (2026-07-23): when the matched entry is a REAL, independently
-# -detected contact that got sos/sos_nature/sos_name STAMPED onto it, the off
-# broadcast clears ONLY those three fields -- pos/vel/signature/classification/
-# last_seen_timer are untouched, same non-clobber rule as the on-path merge
-# (a real contact keeps refreshing via its own sensor detections regardless
-# of SOS, and must keep doing so after the distress call ends).
+# M52 passive sync (implementation_plans/m52_sos_passive_sync.md): when the
+# matched entry is a REAL, independently-detected contact that got
+# sos/sos_nature/sos_name STAMPED onto it, reconciliation clears ONLY those
+# three fields -- pos/vel/signature/classification/last_seen_timer are
+# untouched, same non-clobber rule as the on-path merge (a real contact
+# keeps refreshing via its own sensor detections regardless of SOS, and
+# must keep doing so after the distress call ends).
 # ---------------------------------------------------------------------------
 func _test_sos_off_clears_stamped_fields_only() -> void:
 	print("\n--- SOS off: a stamped-onto-a-real-contact entry clears only the sos fields ---")
@@ -264,10 +269,10 @@ func _test_sos_off_clears_stamped_fields_only() -> void:
 			cleared = true
 			_assert(c.get("sos_nature", "MISSING") == "", "sos_nature cleared to empty")
 			_assert(c.get("sos_name", "MISSING") == "", "sos_name cleared to empty")
-			_assert(c.get("classification", "") == real_classification, "classification untouched by the off broadcast")
+			_assert(c.get("classification", "") == real_classification, "classification untouched by reconciliation")
 			_assert(c.get("instance_id", -1) == sender.get_instance_id(), "instance_id untouched")
 			break
-	_assert(cleared, "the off broadcast cleared the sos fields without erasing the real contact")
+	_assert(cleared, "reconciliation cleared the sos fields without erasing the real contact")
 	_assert(receiver.active_contacts.has(sender_trk), "the real contact itself is still there -- only its sos attributes were cleared")
 
 	_free_all()

@@ -1,16 +1,19 @@
 extends Node
 
 # M52 -- pins ContactsPanel's SOS badge (scripts/ui/contacts_panel.gd): a
-# contact carrying sos/sos_nature/sos_name (ship.gd's comms_inbox VERB_SOS
-# branch -- either stamped onto a real, already-existing track, or, since
-# the M52 follow-up (implementation_plans/m52_sos_as_contact.md), a brand-
-# new "DISTRESS CALL"-classified entry with no real detection behind it at
-# all) now shows a "[SOS]" header prefix, a distinct row color (matching
-# utils.gd's classification_color("DISTRESS CALL")), and an "SOS: <nature>"
-# line in the detail text -- taking priority over the contact's ordinary
-# standing color, since a friendly ship in distress is more urgent than its
-# usual green row. Drives the actual widget (headless-safe: no scene/physics
-# dependency), same "instantiate the Control directly" pattern test_weapons_
+# contact carrying sos/sos_nature/sos_name (ship.gd's datalink_relay SOS
+# reconciliation, implementation_plans/m52_sos_as_contact.md then
+# m52_sos_passive_sync.md -- either stamped onto a real, already-existing
+# track, or a brand-new "DISTRESS CALL"-classified entry with no real
+# detection behind it at all) now shows a "[SOS]" header prefix, a distinct
+# row color (matching utils.gd's classification_color("DISTRESS CALL")),
+# and an "SOS: <nature>" line in the detail text -- taking priority over
+# the contact's ordinary standing color, since a friendly ship in distress
+# is more urgent than its usual green row. This test is purely fixture-
+# driven (hand-built `contacts` dicts, no live ship/hail machinery), so it
+# is unaffected by the passive-sync mechanism change -- unchanged here.
+# Drives the actual widget (headless-safe: no scene/physics dependency),
+# same "instantiate the Control directly" pattern test_weapons_
 # panel_standing.gd uses.
 #
 # Run: ./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --run-test test_contacts_panel_sos

@@ -17,8 +17,9 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # "sos_responding_to", keyed by track id, so an already-committed response
 # doesn't restart toward a newer, farther call every tick -- resolves one at
 # a time) and steers toward its position. The old "prefer live contact"
-# consumer-side check is gone -- the merge-in point (ship.gd's VERB_SOS
-# branch) never overwrites a real detection's pos with the SOS snapshot, so
+# consumer-side check is gone -- the merge-in point (ship.gd's
+# _reconcile_sos_contact, implementation_plans/m52_sos_passive_sync.md)
+# never overwrites a real detection's pos with the SOS snapshot, so
 # whatever's on the contact IS already the freshest available position.
 #
 # Gives up (clears "sos_responding_to", returns FAILURE, resumes patrol) on

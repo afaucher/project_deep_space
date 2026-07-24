@@ -621,12 +621,15 @@ func _rebuild_vessel_list(entries: Array) -> void:
 		_hosted_docking.visible = is_docked
 
 # M49 -- SOS nature pick: UNDER_ATTACK if we hold any fresh HOSTILE contact,
-# else DISABLED. Mirrors Ship._nearest_fresh_hostile_pos()'s freshness gate
-# (FIRE_STALENESS_MAX) against the same "contacts" the packet already carries.
-# M52 follow-up (implementation_plans/m52_sos_as_contact.md item 4):
-# re-evaluated on every toggle-ON press (not just once) -- a player toggling
-# SOS off and back on later might have a different nature by then. Toggling
-# OFF sends no nature pick at all (the RPC ignores it when active=false).
+# else DISABLED, using the same FIRE_STALENESS_MAX freshness gate against
+# the "contacts" the packet already carries. M52 follow-up
+# (implementation_plans/m52_sos_as_contact.md item 4): re-evaluated on
+# every toggle-ON press (not just once) -- a player toggling SOS off and
+# back on later might have a different nature by then. Toggling OFF picks
+# "DISABLED" here too, but it's inert -- set_sos_active (M52 passive sync,
+# implementation_plans/m52_sos_passive_sync.md) writes it to sos_nature
+# regardless, and datalink_relay's reconciliation only ever reads
+# sos_nature while sos_active is true.
 func _on_sos_toggled(pressed: bool) -> void:
 	var nature := Hail.NATURE_DISABLED
 	if pressed:

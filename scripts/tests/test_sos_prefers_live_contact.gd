@@ -1,18 +1,27 @@
 extends Node
 
 # M52 playtest fix -- SOS response prefers a live contact over a stale
-# snapshot (calling session, 2026-07-23). Ship.send_sos() snapshots the
-# sender's REAL position at send time ("pos": position).
+# snapshot (calling session, 2026-07-23).
 #
 # M52 follow-up (implementation_plans/m52_sos_as_contact.md item 1): the
 # underlying behavior (a real detection's position wins over the SOS
 # snapshot) still holds, but the MECHANISM moved from SOSResponseLeaf's old
 # consumer-side "prefer live contact if fresh" check to the merge-in point
-# itself -- ship.gd's VERB_SOS receive branch now NEVER touches
-# pos/vel/signature/classification on an EXISTING active_contacts entry,
-# only refreshing the sos/sos_nature/sos_name/last_seen_timer attributes.
-# So this now asserts directly on active_contacts rather than a leaf's
-# commanded heading -- there's no leaf-side logic left to exercise here.
+# itself -- ship.gd's SOS reconciliation NEVER touches pos/vel/signature/
+# classification on an EXISTING active_contacts entry, only refreshing the
+# sos/sos_nature/sos_name/last_seen_timer attributes. So this now asserts
+# directly on active_contacts rather than a leaf's commanded heading --
+# there's no leaf-side logic left to exercise here.
+#
+# M52 passive sync (implementation_plans/m52_sos_passive_sync.md): SOS is no
+# longer a wire hail carrying a send-time position snapshot -- reconciliation
+# (ship.gd's _reconcile_sos_contact, called from datalink_relay every tick)
+# reads the sender's LIVE position when it creates a brand-new "DISTRESS
+# CALL" entry, then (same as before) never touches pos again once the entry
+# exists, real or synthetic. Since the sender doesn't move during either
+# test below, that still lands on the same position either way -- the
+# "snapshot" framing in the test names/asserts below is now really "the
+# sender's position at first-creation time", not a wire-transmitted value.
 #
 # Run: ./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --run-test test_sos_prefers_live_contact
 
@@ -82,7 +91,7 @@ func _test_merge_does_not_overwrite_live_contact() -> void:
 		"last_seen_timer": 0.0, "classification": "UNIDENTIFIED VESSEL",
 	}
 
-	sender.send_sos(Hail.NATURE_UNDER_ATTACK)
+	sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 	var stamped := false
 	for i in range(120): # up to 2s
 		await main_node.get_tree().physics_frame
@@ -100,9 +109,11 @@ func _test_merge_does_not_overwrite_live_contact() -> void:
 
 # ---------------------------------------------------------------------------
 # No live contact on the sender at all (comms range >> sensor range, the
-# whole reason a heartbeat SOS is useful) -- the new entry ship.gd creates
-# uses the SOS's own send-time snapshot position, same as before this fix
-# (there's simply nothing else to prefer).
+# whole reason SOS is useful over sensors alone) -- the new entry ship.gd's
+# reconciliation creates uses the sender's own live position at the moment
+# of creation (there's simply nothing else to prefer); since the sender
+# never moves in this test that's indistinguishable from "the SOS
+# snapshot", same result as before this fix.
 # ---------------------------------------------------------------------------
 func _test_new_contact_uses_the_sos_snapshot() -> void:
 	print("\n--- no live contact on the sender -- the new entry uses the SOS snapshot position ---")
@@ -114,7 +125,7 @@ func _test_new_contact_uses_the_sos_snapshot() -> void:
 	var sender_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
 	# Deliberately no active_contacts entry for sender_iid.
 
-	sender.send_sos(Hail.NATURE_UNDER_ATTACK)
+	sender.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 	var created := false
 	for i in range(120): # up to 2s
 		await main_node.get_tree().physics_frame

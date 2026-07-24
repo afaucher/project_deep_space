@@ -261,34 +261,33 @@ func _test_refresh_dedup_and_new_demand() -> void:
 
 	# The victim's comply-or-run decision is made once, keyed on seq
 	# (threat_response_leaf's last_decided_seq) -- tick it to consume the
-	# decision (which also turns on the incident's SOS heartbeat -- M52
-	# follow-up, implementation_plans/m52_sos_as_contact.md item 2), then
-	# verify a refresh does NOT re-open it (no re-decision, no re-priming
-	# of the heartbeat). "No re-trigger" is observed directly on the
-	# victim's OWN sos_heartbeat_timer: a fresh decision primes it to
-	# EXACTLY SOS_HEARTBEAT_INTERVAL synchronously (see threat_response_
-	# leaf.gd), so checking it immediately after leaf.tick() (no awaited
-	# frame in between) is race-free -- unlike inferring from the pirate's
-	# received contact, whose last_seen_timer is ALSO reset by ordinary
-	# real sensor detections at this range, which would confound the check.
+	# decision (which also turns SOS on -- M52 follow-up, implementation_
+	# plans/m52_sos_as_contact.md item 2), then verify a refresh does NOT
+	# re-open it. M52 passive sync (implementation_plans/
+	# m52_sos_passive_sync.md): sos_active/sos_nature are now plain,
+	# idempotent live fields (no heartbeat timer to re-prime), so re-calling
+	# set_sos_active(true, SAME nature) on a would-be re-decision writes the
+	# exact same values -- there is no separate SOS-side signature left to
+	# distinguish "decided again" from "didn't decide again" the way the old
+	# heartbeat-priming check could. The real dedup proof is unchanged and
+	# unrelated to SOS: hail_events_before/last_hails_before/
+	# last_decided_seq below test ship.gd's own comms_inbox refresh
+	# detection and the leaf's seq gate directly. This block only confirms
+	# SOS state isn't perturbed by the refresh (stays exactly what the ONE
+	# real decision set).
 	var leaf = ThreatResponseLeaf.new()
 	var bb = BlackboardScript.new()
 	var first_tick: int = leaf.tick(victim, bb)
 	_assert(first_tick == leaf.SUCCESS, "S4: first tick decides (SUCCESS) on the fresh demand")
-	_assert(victim.sos_active, "S4 setup: the decision turned the SOS heartbeat on")
-	_assert(victim.sos_heartbeat_timer == victim.SOS_HEARTBEAT_INTERVAL, "S4 setup: heartbeat primed to fire on the very next physics tick")
-
-	for i in range(60): # let the heartbeat actually fire once and start accumulating again
-		await main_node.get_tree().physics_frame
-	var sos_timer_before_refresh: float = victim.sos_heartbeat_timer
-	_assert(sos_timer_before_refresh < victim.SOS_HEARTBEAT_INTERVAL, "S4 setup: the heartbeat fired once and is aging again, not still primed")
+	_assert(victim.sos_active, "S4 setup: the decision turned SOS on")
+	_assert(victim.sos_nature == Hail.NATURE_UNDER_ATTACK, "S4 setup: sos_nature is UNDER_ATTACK")
 
 	pirate.refresh_demand(victim.get_instance_id(), Hail.RUNG_STOP, seq)
 	await main_node.get_tree().physics_frame
 	await main_node.get_tree().physics_frame
 	leaf.tick(victim, bb) # tick again against the refreshed demand -- must NOT re-decide
-	var sos_timer_after_refresh: float = victim.sos_heartbeat_timer
-	_assert(sos_timer_after_refresh != victim.SOS_HEARTBEAT_INTERVAL, "S4: refresh did NOT re-prime the SOS heartbeat (no re-decision, no fresh broadcast)")
+	_assert(victim.sos_active, "S4: SOS stays on across the refresh (no flapping)")
+	_assert(victim.sos_nature == Hail.NATURE_UNDER_ATTACK, "S4: sos_nature unchanged across the refresh")
 	await main_node.get_tree().physics_frame
 	await main_node.get_tree().physics_frame
 

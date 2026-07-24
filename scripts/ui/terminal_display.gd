@@ -723,9 +723,10 @@ func _on_stop_requested() -> void:
 	if ship_node:
 		ship_node.rpc_id(1, "engage_dead_stop")
 
-# M52 -- SOS toggle (implementation_plans/m52_sos_as_contact.md item 5):
-# replaces the old one-shot send_sos RPC with the heartbeat toggle -- the
-# actual periodic re-broadcast lives in ship.gd's _physics_process.
+# M52 -- SOS toggle. set_sos_active (M52 passive sync, implementation_plans/
+# m52_sos_passive_sync.md) just writes sos_active/sos_nature as plain live
+# ship fields -- no broadcast, no timer; datalink_relay reconciles
+# active_contacts from them fresh every tick.
 func _on_sos_toggled(active: bool, nature: String) -> void:
 	var ship_node = _get_my_ship()
 	if ship_node:
