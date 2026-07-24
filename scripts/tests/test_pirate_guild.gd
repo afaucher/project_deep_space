@@ -259,18 +259,49 @@ func _test_bootstrap_floor() -> void:
 		for st in steps:
 			verbs.append(st.get("verb", ""))
 		_assert(verbs.has("SELECT_VICTIM"), "(a) the assigned job is a hunt (has SELECT_VICTIM)")
-		# Tradecraft: the hunt waits for CLEAR (nobody in own-sensor range)
-		# before its first GO_DARK -- a transponder vanishing in front of a
-		# watcher is a suspicion gift (playtest feedback).
-		var clear_idx: int = -1
-		var dark_idx: int = -1
-		for i in range(steps.size()):
-			if clear_idx == -1 and steps[i].get("verb", "") == "AWAIT" and steps[i].get("condition", "") == "clear":
-				clear_idx = i
-			if dark_idx == -1 and steps[i].get("verb", "") == "GO_DARK":
-				dark_idx = i
-		_assert(clear_idx != -1 and dark_idx != -1 and clear_idx < dark_idx,
-			"(a) the hunt waits for AWAIT{clear} before its first GO_DARK (clear@%d, dark@%d)" % [clear_idx, dark_idx])
+		# M53a Slice D: posture is job DATA now, rolled per arrival -- the
+		# job's own step shape depends on which posture landed, so branch on
+		# it rather than assuming dark_lurk's shape unconditionally (that was
+		# the stale pre-Slice-D assumption: every hunt used to be dark_lurk).
+		var posture: String = node.assignment.get("posture", "")
+		_assert(posture == "dark_lurk" or posture == "false_flag_cruise",
+			"(a) job carries a recognized posture (got '%s')" % posture)
+		var select_idx: int = verbs.find("SELECT_VICTIM")
+		if posture == "dark_lurk":
+			# Tradecraft: the hunt waits for CLEAR (nobody in own-sensor range)
+			# before its first GO_DARK -- a transponder vanishing in front of a
+			# watcher is a suspicion gift (playtest feedback).
+			var clear_idx: int = -1
+			var dark_idx: int = -1
+			for i in range(steps.size()):
+				if clear_idx == -1 and steps[i].get("verb", "") == "AWAIT" and steps[i].get("condition", "") == "clear":
+					clear_idx = i
+				if dark_idx == -1 and steps[i].get("verb", "") == "GO_DARK":
+					dark_idx = i
+			_assert(clear_idx != -1 and dark_idx != -1 and clear_idx < dark_idx,
+				"(a) dark_lurk waits for AWAIT{clear} before its first GO_DARK (clear@%d, dark@%d)" % [clear_idx, dark_idx])
+		else:
+			# false_flag_cruise: NO pre-hunt AWAIT{clear}/GO_DARK -- the
+			# transponder stays lit under the cover identity straight into
+			# SELECT_VICTIM (the "one more freighter" posture).
+			var pre_hunt_went_dark := false
+			for i in range(select_idx):
+				var v: String = steps[i].get("verb", "")
+				if v == "GO_DARK" or (v == "AWAIT" and steps[i].get("condition", "") == "clear"):
+					pre_hunt_went_dark = true
+			_assert(select_idx != -1 and not pre_hunt_went_dark,
+				"(a) false_flag_cruise has no pre-hunt AWAIT{clear}/GO_DARK before SELECT_VICTIM (select_idx=%d)" % select_idx)
+		# Both postures: the exfil tail still goes dark before laundering
+		# (see pirate_guild.gd's _build_hunt_job header) and the whole tail
+		# (RELIGHT/EXIT_AT) is present regardless of posture.
+		_assert(verbs.has("RELIGHT") and verbs.has("EXIT_AT"),
+			"(a) both postures keep the RELIGHT+EXIT_AT exfil tail (posture=%s)" % posture)
+		var dark_after_hunt := false
+		for i in range(select_idx, steps.size()):
+			if steps[i].get("verb", "") == "GO_DARK":
+				dark_after_hunt = true
+				break
+		_assert(dark_after_hunt, "(a) both postures go dark again before the exfil/launder leg (posture=%s)" % posture)
 		_assert(node.position.distance_to(WORMHOLE_POS) < 2000.0, "(a) pirate spawned near the wormhole")
 		# Station-avoidance (playtest bug): the staging GO_TO (steps[0]) and the
 		# exfil GO_TO (labeled "exfil") must both clear R_STATION_AVOID of the

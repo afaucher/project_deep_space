@@ -377,6 +377,20 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 # third_party_in_range NOT on SELECT_VICTIM (no victim exists yet -- it would
 # always false-flag the intended prey), a second GO_DARK after TAKE_ALONGSIDE
 # (show_colors re-lit the transponder; AWAIT{track_quiet} needs it off again).
+#
+# M53a Slice D -- posture: the guild rolls a `posture` per arrival ("dark_lurk"
+# | "false_flag_cruise", see _roll_posture) and assembles a DIFFERENT pre-hunt
+# step list per posture (jobs_and_itineraries.md's "missions are data" -- the
+# posture lives entirely in which steps get assembled, no branching inside any
+# step implementation). dark_lurk keeps today's AWAIT{clear}->GO_DARK before
+# the hunt; false_flag_cruise skips both and goes straight from staging into
+# SELECT_VICTIM/INTERCEPT with the transponder still lit under the cover
+# identity -- "one more freighter" closing to demand range. Both postures
+# share the identical hunt/take core and exfil tail: the post-TAKE_ALONGSIDE
+# GO_DARK is the FIRST dark moment for a false_flag_cruise pirate (never went
+# dark before) and the RE-achieved dark moment for a dark_lurk one (show_colors
+# relit it) -- either way, laundering still depends on the track dying before
+# RELIGHT, so the tail must and does stay identical.
 # ---------------------------------------------------------------------------
 
 const _R_THIRD_PARTY := 6000.0
@@ -398,16 +412,38 @@ const _R_STATION_AVOID := 25000.0
 # unbeaconed Coldreach lane / off-road stretches.
 const _R_BEACON_AVOID := 15000.0
 
+const POSTURE_DARK_LURK := "dark_lurk"
+const POSTURE_FALSE_FLAG_CRUISE := "false_flag_cruise"
+# Modestly favors dark_lurk: it's the proven, lower-risk tradecraft (today's
+# only mode before this slice); false_flag_cruise is the newer, bolder play
+# (closing to demand range still lit is a bigger gamble if the cover doesn't
+# hold). Not a hard 50/50 -- tune this constant to rebalance the split later.
+const FALSE_FLAG_CRUISE_CHANCE := 0.4
+
+# Seeded per-arrival roll (CLAUDE.md determinism rule -- plain randf() on the
+# global seeded RNG, no new RNG instance).
+func _roll_posture() -> String:
+	return POSTURE_FALSE_FLAG_CRUISE if randf() < FALSE_FLAG_CRUISE_CHANCE else POSTURE_DARK_LURK
+
 func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 	var stations: Array = _station_positions(cluster)
 	var beacons: Array = _beacon_positions(cluster)
-	var lane_pos: Vector2 = _pick_lane_point(cluster, wormhole_pos, stations, beacons)
-	var staging_pos: Vector2 = _away_from_hazards(func(): return _staging_point(wormhole_pos, lane_pos), stations, beacons)
+	var lane_info: Dictionary = _pick_lane_point(cluster, wormhole_pos, stations, beacons)
+	var lane_pos: Vector2 = lane_info.get("pos", wormhole_pos)
+	var seg_a: Vector2 = lane_info.get("seg_a", lane_pos)
+	var seg_b: Vector2 = lane_info.get("seg_b", lane_pos)
+	var staging_pos: Vector2 = _away_from_hazards(func(): return _staging_point(wormhole_pos, seg_a, seg_b), stations, beacons)
 	var exfil_pos: Vector2 = _away_from_hazards(func(): return _exfil_point(wormhole_pos, lane_pos), stations, beacons)
 
-	return {
-		"steps": [
-			{"verb": "GO_TO", "pos": staging_pos},
+	var posture: String = _roll_posture()
+
+	# Pre-hunt tradecraft: dark_lurk waits for CLEAR then goes dark before
+	# SELECT_VICTIM ever runs; false_flag_cruise skips both and arrives at
+	# SELECT_VICTIM still lit under its cover identity (the "one more
+	# freighter" posture -- see header).
+	var pre_hunt: Array = []
+	if posture == POSTURE_DARK_LURK:
+		pre_hunt = [
 			# Don't kill the transponder in front of witnesses -- a NEUTRAL
 			# trader vanishing off the board while watched is a suspicion
 			# gift. Wait until nobody's in plausible sensor range (own-sensor
@@ -415,31 +451,50 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 			# to the GO_DARK label -- an impatient pirate, not a broken job).
 			{"verb": "AWAIT", "condition": "clear", "clear_range": 8000.0, "timeout": 45.0, "on_abort": "go_dark"},
 			{"verb": "GO_DARK", "label": "go_dark"},
-			# See header: third_party_in_range deliberately NOT attached here.
-			# max_attempts (M52a): a bounded hunt budget -- after this many
-			# victim-engagement cycles with nothing taken, SELECT_VICTIM aborts
-			# to "exit" (withdraw alive via the wormhole -> RETURNED_EMPTY),
-			# rather than thrashing the same lane until a patrol kills it.
-			{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY, "max_attempts": 4, "max_hunt_seconds": 150.0, "on_abort": "exit"},
-			{"verb": "INTERCEPT", "on_abort": "hunt",
-				"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"}, {"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
-			{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0, "on_abort": "hunt",
-				"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
-			{"verb": "TAKE_ALONGSIDE", "hold_time": 12.0, "range": 200.0, "on_abort": "hunt",
-				"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
-			{"verb": "GO_DARK"}, # re-achieve dark after DEMAND_STOP's show_colors relit us
-			{"verb": "GO_TO", "label": "exfil", "pos": exfil_pos},
-			{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 60.0},
-			# The launder relight draws the next unused paper from the ship's
-			# pre-provisioned identity kit (job_steps.gd RELIGHT from_kit) --
-			# a convincing identity can't be fabricated on the spot. Kit
-			# exhausted -> ABORT to "exit": run for the wormhole DARK and
-			# hope nobody stops you (drawing patrol challenges in controlled
-			# space is exactly the squeeze the design wants).
-			{"verb": "RELIGHT", "from_kit": true, "flag": Standing.FLAG_CIVILIAN, "on_abort": "exit"},
-			{"verb": "EXIT_AT", "label": "exit", "pos": wormhole_pos},
-		],
+		]
+
+	var hunt_and_take: Array = [
+		# See header: third_party_in_range deliberately NOT attached here.
+		# max_attempts (M52a): a bounded hunt budget -- after this many
+		# victim-engagement cycles with nothing taken, SELECT_VICTIM aborts
+		# to "exit" (withdraw alive via the wormhole -> RETURNED_EMPTY),
+		# rather than thrashing the same lane until a patrol kills it.
+		{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY, "max_attempts": 4, "max_hunt_seconds": 150.0, "on_abort": "exit"},
+		{"verb": "INTERCEPT", "on_abort": "hunt",
+			"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"}, {"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
+		{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0, "on_abort": "hunt",
+			"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
+		{"verb": "TAKE_ALONGSIDE", "hold_time": 12.0, "range": 200.0, "on_abort": "hunt",
+			"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
+	]
+
+	# Exfil tail -- IDENTICAL for both postures (see header): laundering
+	# depends on the track dying before RELIGHT, so both a re-darkened
+	# dark_lurk pirate and a first-time-dark false_flag_cruise pirate must
+	# still go dark here before the launder wait.
+	var exfil_tail: Array = [
+		{"verb": "GO_DARK"}, # dark_lurk: re-achieve dark after DEMAND_STOP's show_colors relit us. false_flag_cruise: first time dark at all -- break the track before laundering.
+		{"verb": "GO_TO", "label": "exfil", "pos": exfil_pos},
+		{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 60.0},
+		# The launder relight draws the next unused paper from the ship's
+		# pre-provisioned identity kit (job_steps.gd RELIGHT from_kit) --
+		# a convincing identity can't be fabricated on the spot. Kit
+		# exhausted -> ABORT to "exit": run for the wormhole DARK and
+		# hope nobody stops you (drawing patrol challenges in controlled
+		# space is exactly the squeeze the design wants).
+		{"verb": "RELIGHT", "from_kit": true, "flag": Standing.FLAG_CIVILIAN, "on_abort": "exit"},
+		{"verb": "EXIT_AT", "label": "exit", "pos": wormhole_pos},
+	]
+
+	var steps: Array = [{"verb": "GO_TO", "pos": staging_pos}]
+	steps.append_array(pre_hunt)
+	steps.append_array(hunt_and_take)
+	steps.append_array(exfil_tail)
+
+	return {
+		"steps": steps,
 		"current": 0,
+		"posture": posture,
 	}
 
 func _station_positions(cluster) -> Array:
@@ -461,18 +516,30 @@ func _beacon_positions(cluster) -> Array:
 # with the greatest clearance (a cramped/all-hazard cluster degrades to
 # "least bad", never to a crash or an infinite loop). Deterministic: pure
 # seeded rolls, fixed retry count.
-func _away_from_hazards(roll: Callable, stations: Array, beacons: Array) -> Vector2:
-	var best: Vector2 = roll.call()
-	var best_c: float = _hazard_clearance(best, stations, beacons)
+#
+# `roll` may return a bare Vector2 (the staging/exfil point rolls) OR a
+# Dictionary carrying {"pos": Vector2, ...extra} (the lane-point roll, whose
+# EXTRA fields -- the winning segment's endpoints -- ride along so the caller
+# can see which segment the WINNING candidate actually came from, not just
+# whichever roll happened last; see _pick_lane_point). Hazard-checks only the
+# "pos"/Vector2 half; returns the whole winning candidate unchanged.
+func _away_from_hazards(roll: Callable, stations: Array, beacons: Array) -> Variant:
+	var best = roll.call()
+	var best_c: float = _hazard_clearance(_hazard_pos(best), stations, beacons)
 	for _i in range(7):
 		if best_c >= 0.0:
 			return best
-		var candidate: Vector2 = roll.call()
-		var c: float = _hazard_clearance(candidate, stations, beacons)
+		var candidate = roll.call()
+		var c: float = _hazard_clearance(_hazard_pos(candidate), stations, beacons)
 		if c > best_c:
 			best = candidate
 			best_c = c
 	return best
+
+func _hazard_pos(candidate) -> Vector2:
+	if candidate is Vector2:
+		return candidate
+	return candidate.get("pos", Vector2.ZERO)
 
 # Signed clearance: how far INSIDE (negative) or OUTSIDE (positive) all
 # keep-aways the point is. >= 0 means it clears every station and beacon.
@@ -493,7 +560,14 @@ func _hazard_clearance(p: Vector2, stations: Array, beacons: Array) -> float:
 # doorsteps (the playtest bug), and no sane pirate lurks under a hub's guns.
 # Falls back to the wormhole itself if the cluster somehow carries no cargo
 # lane (keeps the job assemblable rather than crashing).
-func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array, beacons: Array) -> Vector2:
+#
+# Returns {"pos": Vector2, "seg_a": Vector2, "seg_b": Vector2} -- the winning
+# segment's own endpoints ride along (M53a Slice D) so _staging_point can
+# re-roll an INDEPENDENT anchor point further along that SAME segment
+# (entry-point variance: two consecutive pirates on the same lane no longer
+# surface at the same spot), rather than every staging point anchoring
+# rigidly off lane_pos itself.
+func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array, beacons: Array) -> Dictionary:
 	var lanes: Array = []
 	for rec in cluster.records:
 		if rec.kind != ClusterEntity.Kind.TRAFFIC:
@@ -505,34 +579,47 @@ func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array, beacons: 
 		if route.size() >= 2:
 			lanes.append(route)
 	if lanes.is_empty():
-		return wormhole_pos
+		return {"pos": wormhole_pos, "seg_a": wormhole_pos, "seg_b": wormhole_pos}
 
 	# Reroll across the WHOLE lane set (lane + segment + fraction) each attempt,
 	# not just the fraction on one fixed lane -- so a lane that runs down the
 	# beacon road (the "Mule" lane, every point within a beacon keep-away) loses
 	# to the unbeaconed lane on clearance, and the guild self-selects the quiet
 	# route instead of degrading to the least-bad point on the road.
-	return _away_from_hazards(func():
+	var picked: Variant = _away_from_hazards(func():
 		var route: Array = lanes[randi() % lanes.size()]
 		var seg: int = randi() % (route.size() - 1)
-		return route[seg].lerp(route[seg + 1], randf_range(0.15, 0.85))
+		var a: Vector2 = route[seg]
+		var b: Vector2 = route[seg + 1]
+		return {"pos": a.lerp(b, randf_range(0.15, 0.85)), "seg_a": a, "seg_b": b}
 	, stations, beacons)
+	return picked
 
 # A dark staging spot near the HUNTING GROUND (the lane), not back at the
 # entry wormhole. M52a: anchoring staging at the wormhole meant a pirate went
 # dark by the wormhole and then had to cruise the whole way to a distant lane
 # under its hunt-time budget -- a slow hull never arrived and withdrew empty
 # every time (the viability sim's dead giveaway). Staging just short of and
-# off to one side of lane_pos lets the pirate transit LIT to its hunting area
+# off to one side of the lane lets the pirate transit LIT to its hunting area
 # (ordinary-looking traffic), go dark once AWAIT{clear} says nobody's near,
 # and hunt right there. Off-lane + hazard keep-away (the _away_from_hazards
 # wrapper) keep it out of witness/patrol sight.
-func _staging_point(wormhole_pos: Vector2, lane_pos: Vector2) -> Vector2:
-	var dir: Vector2 = (lane_pos - wormhole_pos)
+#
+# M53a Slice D -- entry-point variance: re-rolls its OWN anchor on the SAME
+# lane segment (a fresh [0.15, 0.85] fraction between seg_a/seg_b, mirroring
+# _pick_lane_point's own bound) instead of anchoring rigidly off the already-
+# chosen lane_pos. Two consecutive pirates hunting the same lane therefore
+# stage at genuinely different spots ALONG the lane's length, not just off to
+# a randomized side of the same point -- the playtest's "shouldn't always
+# enter the route in the same spot" ask. Off that fresh anchor, the same
+# back-along-the-approach + perpendicular-offset shape as before.
+func _staging_point(wormhole_pos: Vector2, seg_a: Vector2, seg_b: Vector2) -> Vector2:
+	var anchor: Vector2 = seg_a.lerp(seg_b, randf_range(0.15, 0.85))
+	var dir: Vector2 = (anchor - wormhole_pos)
 	dir = dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
 	var perp: Vector2 = dir.rotated(PI / 2.0)
 	var side: float = 1.0 if randf() < 0.5 else -1.0
-	return lane_pos - dir * randf_range(3000.0, 8000.0) + perp * side * randf_range(6000.0, 14000.0)
+	return anchor - dir * randf_range(3000.0, 8000.0) + perp * side * randf_range(6000.0, 14000.0)
 
 # Another off-road dark point, offset from the lane back toward/around the
 # wormhole side -- distinct from staging_point's roll.
