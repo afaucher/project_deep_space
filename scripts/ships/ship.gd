@@ -3037,22 +3037,24 @@ func _physics_process(delta: float) -> void:
 			var dist: float = position.distance_to(s.position)
 			if dist > self_comms_range: continue
 
-			# M52 passive SOS sync -- a dead ship can't be broadcasting
-			# anything (hulk() never itself clears sos_active, since a hulk
-			# isn't the thing that goes through set_sos_active), so without
-			# this a stale sos:true stamped before the sender died would only
-			# clear via the ordinary ~20s CONTACT_TIMEOUT decay once the dead
-			# skip below stops refreshing it -- reconcile it closed
-			# explicitly instead, same "within 1-2 ticks" guarantee an
-			# ordinary sos_active->false gets. Still gated by self_comms_range
-			# above, same as every other candidate; a wreck out of range
-			# decays the normal way, no different from anything else going
-			# quiet.
-			if s.is_dead:
-				_reconcile_sos_contact(s, false)
-				continue
-
 			var their_comms_range = s.get_comms_range()
+
+			# M52 passive SOS sync -- deliberately NO is_dead special case
+			# here. hulk() powers down every component (set_component_power
+			# is itself is_dead-gated, so nothing ever repowers one), which
+			# already drives their_comms_range to 0 -- and hulk() never
+			# touches sos_active/sos_nature, and set_sos_active bails on
+			# is_dead, so whatever those fields held at the moment of death
+			# is now frozen. Falling through to the ordinary floor logic
+			# below means a hulk that was crying for help when it died KEEPS
+			# reading as a DISTRESS CALL via the SOS_BATTERY_RANGE floor,
+			# indefinitely -- not a bug, the intended dispatch signal for a
+			# future rescue tug (design_ideas/tugs.md: "the casualty can be
+			# a live-but-dead-reactor ship... or a hulk"). A hulk that
+			# wasn't broadcasting SOS at death still reads sos_active==false
+			# forever, so it's correctly never treated as a distress call --
+			# just an ordinary (non-SOS) WRECKAGE contact via the ordinary
+			# sensor/classification path, untouched by any of this.
 
 			# M52 passive SOS sync (implementation_plans/
 			# m52_sos_passive_sync.md) -- ported from hail.gd's _dispatch,
@@ -3248,9 +3250,13 @@ func _physics_process(delta: float) -> void:
 # range regardless of IFF. This is the ENTIRE reconciliation: no event, no
 # snapshot, no timer -- just "does the live truth say s is in distress and
 # in range right now", re-derived fresh every tick, so a later change (s
-# turns SOS off, s dies, s leaves range, or a real sensor correlation
-# re-classifies the track) is reflected within 1-2 ticks with no dependency
-# on ever hearing an explicit off-message.
+# turns SOS off, s leaves range, or a real sensor correlation re-classifies
+# the track) is reflected within 1-2 ticks with no dependency on ever
+# hearing an explicit off-message. NOTE: s dying is deliberately NOT one of
+# those "turns it off" triggers -- see the is_dead comment at this
+# function's call site in datalink_relay -- a hulk that was broadcasting
+# SOS when it died keeps reading sos_in_range==true indefinitely (the
+# future rescue-tug dispatch signal, design_ideas/tugs.md).
 #
 # sos_in_range true: create-if-absent (synthetic "DISTRESS CALL" entry) or
 # merge-onto-existing (stamp sos/sos_nature/sos_name only -- never touch

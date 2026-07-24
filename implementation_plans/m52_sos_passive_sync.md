@@ -424,3 +424,39 @@ Covered by `test_sos_passive_reconciliation.gd`'s
   it false-positives on autoload identifiers; the full test run is the
   authoritative check regardless, and every test that loads `ship.gd` (all
   107, transitively) is a stronger validation than a parse-only pass.
+
+### Post-landing correction: dead senders should STICK, not clear
+
+The subagent's dead-sender fix above (`is_dead` -> explicit
+`_reconcile_sos_contact(s, false)`) was **wrong**, caught by the user in
+review immediately after commit `7d9198f`: `design_ideas/tugs.md` already
+establishes SOS as the future rescue-tug's dispatch signal, explicitly for
+*either* "a live-but-dead-reactor ship... **or a hulk**." Clearing a dead
+sender's distress badge on death defeats that on arrival -- a wreck that was
+crying for help when it died is exactly the case a tow needs to be able to
+find, and it needs to stay findable indefinitely (no tow mechanic exists yet
+to clear it).
+
+Fixed by **deleting** the `is_dead` special case entirely rather than
+inverting its condition -- no new code was needed. `hulk()` already powers
+down every component (`c["powered_on"] = false`), and `set_component_power`/
+`set_sos_active` both bail on `is_dead`, so nothing can ever repower a hulk
+or change its `sos_active`/`sos_nature` again. Falling through to the
+ordinary per-tick floor computation means `their_comms_range` reads 0
+(hulk, permanently) and `sos_active` is frozen at whatever it held at the
+moment of death -- the SAME `SOS_BATTERY_RANGE` floor logic built for a
+live dead-comms sender applies unchanged, and now never gets turned off
+by anything (the reconciled entry's own `last_seen_timer` reset every tick
+keeps it from ever reaching `CONTACT_TIMEOUT` either). A hulk that wasn't
+broadcasting SOS at death correctly stays a non-distress `sos_active==false`
+forever -- this only sticks ON what was already ON.
+
+`test_sos_passive_reconciliation.gd`'s
+`_test_battery_floor_then_death_clears_within_ticks` asserted the wrong
+(now-reverted) behavior; replaced with
+`_test_battery_floor_then_death_sticks_on`, which runs the sim ~25s past
+`CONTACT_TIMEOUT` after `hulk()` and asserts the entry is STILL there,
+still `sos: true`, still classified `"DISTRESS CALL"` -- proving "stuck on"
+by actually running past the clock it would otherwise decay on, not just by
+absence of an active clear. Full suite re-run after the fix: still
+107/107.

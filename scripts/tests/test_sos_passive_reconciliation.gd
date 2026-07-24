@@ -1,11 +1,13 @@
 extends Node
 
 # M52 passive sync (implementation_plans/m52_sos_passive_sync.md) -- the
-# doc's "Key new test": the battery-floor + dead-comms + passive-sync case
-# together, paired with a "kill it mid-broadcast" sub-case (sos_active
-# flips false, OR the sender itself dies), and the "fly back into sensor
-# range while a stale entry might still exist" scenario from the session
-# that motivated this redesign.
+# doc's "Key new test": the battery-floor + dead-comms + passive-sync case,
+# paired with an off-clears-fast sub-case (sos_active flips false) and a
+# death-STICKS-on sub-case (the opposite -- a hulk that was broadcasting SOS
+# when it died is the future rescue-tug dispatch signal, design_ideas/
+# tugs.md, and must NOT clear), plus the "fly back into sensor range while a
+# stale entry might still exist" scenario from the session that motivated
+# this redesign.
 #
 # Every other SOS test either predates this milestone (test_sos_contact_
 # attribute.gd, test_sos_prefers_live_contact.gd, test_sos_relay_bridge.gd)
@@ -66,7 +68,7 @@ func setup(main) -> void:
 	print("Starting SOS Passive Reconciliation Tests")
 
 	await _test_battery_floor_then_off_clears_within_ticks()
-	await _test_battery_floor_then_death_clears_within_ticks()
+	await _test_battery_floor_then_death_sticks_on()
 	await _test_fly_back_into_range_does_not_stick_stale_sos()
 	await _test_rising_edge_notification()
 
@@ -114,14 +116,20 @@ func _test_battery_floor_then_off_clears_within_ticks() -> void:
 
 # ---------------------------------------------------------------------------
 # Same battery-floor setup, but the sender dies outright instead of toggling
-# SOS off (hulk() sets is_dead, never itself touches sos_active). A dead
-# ship obviously isn't broadcasting -- reconciliation must treat that the
-# same as sos_active going false, not leave the entry to decay on the
-# ordinary ~20s CONTACT_TIMEOUT clock just because the dead-ship skip
-# stopped refreshing it.
+# SOS off (hulk() sets is_dead, never itself touches sos_active, and
+# set_sos_active bails on is_dead so nothing can ever change it again).
+# Deliberately the OPPOSITE of the sos_active->false case: a wreck that was
+# crying for help when it died must STAY a DISTRESS CALL contact,
+# indefinitely -- this is the intended dispatch signal for a future rescue
+# tug to find and tow the hulk (design_ideas/tugs.md: "the casualty can be
+# a live-but-dead-reactor ship... or a hulk"). Ran well past the ordinary
+# CONTACT_TIMEOUT to prove this isn't just "hasn't decayed yet" -- the
+# reconciled entry's own last_seen_timer reset (every tick sos_in_range is
+# true) means it never reaches that clock regardless, but running the sim
+# out this far is the honest way to demonstrate "stuck on", not infer it.
 # ---------------------------------------------------------------------------
-func _test_battery_floor_then_death_clears_within_ticks() -> void:
-	print("\n--- battery floor: dead-comms sender heard, then dying clears it fast ---")
+func _test_battery_floor_then_death_sticks_on() -> void:
+	print("\n--- battery floor: dead-comms sender heard, then dying leaves SOS stuck on (tow rescue signal) ---")
 	var sender = _make_ship("FloorDeathSender", 902, Vector2.ZERO, ["TEAM_FLOOR_DEATH"])
 	_kill_comms(sender)
 
@@ -140,15 +148,15 @@ func _test_battery_floor_then_death_clears_within_ticks() -> void:
 	_assert(heard, "setup: receiver heard the dead-comms sender's SOS")
 
 	sender.hulk() # dies mid-broadcast; sos_active is left true, same as a real kill would leave it
-	_assert(sender.sos_active, "setup: dying does not itself clear sos_active -- reconciliation must handle a dead-but-still-flagged sender")
-	var cleared_frame := -1
-	for i in range(10):
+	_assert(sender.sos_active, "setup: dying does not itself clear sos_active")
+	_assert(sender.is_dead, "setup: sender is now a hulk")
+
+	for i in range(1500): # ~25s sim -- comfortably past CONTACT_TIMEOUT (20s)
 		await main_node.get_tree().physics_frame
-		if not receiver.active_contacts.has(sender_trk):
-			cleared_frame = i + 1
-			break
-	_assert(cleared_frame != -1 and cleared_frame <= 3,
-		"reconciliation erased the entry within a couple of ticks of the sender dying (took %s)" % (str(cleared_frame) if cleared_frame != -1 else "never"))
+	_assert(receiver.active_contacts.has(sender_trk), "the DISTRESS CALL entry is still there long after the sender died and well past CONTACT_TIMEOUT")
+	var c: Dictionary = receiver.active_contacts.get(sender_trk, {})
+	_assert(c.get("sos", false) == true, "sos still reads true on the hulk's entry -- stuck on, not cleared")
+	_assert(c.get("classification", "") == "DISTRESS CALL", "still classified as a distress call, not decayed or pruned")
 
 	_free_all()
 
