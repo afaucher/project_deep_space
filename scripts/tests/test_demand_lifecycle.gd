@@ -25,12 +25,13 @@ extends Node
 # exact frames). Scenario casts spawn on a ~150k-radius ring around the
 # origin, one cardinal direction each (comms tops out ~60k, so pairwise
 # cluster separation of ~150k-300k is comfortably clear of cross-talk) --
-# NOT simply "far apart in a straight line": FoamPhysics.BOUNDARY is a
-# 250000-unit world edge that force-teleports anything beyond it back
-# toward a pole near (0, +-245000) on the very next physics tick, so
-# scenario casts must all stay INSIDE that radius or they get silently
-# relocated (and, worse, different scenarios' casts can collapse onto the
-# SAME pole point). The pirate job is driven by ticking JobRunnerLeaf
+# NOT simply "far apart in a straight line": FoamPhysics.BOUNDARY (M53a --
+# tracks home_cluster.gd's def.bounds, currently 500000) is a world edge that
+# force-teleports anything beyond it back toward a pole near (0, +-(BOUNDARY
+# - 5000)) on the very next physics tick, so scenario casts must all stay
+# INSIDE that radius or they get silently relocated (and, worse, different
+# scenarios' casts can collapse onto the SAME pole point). The pirate job is
+# driven by ticking JobRunnerLeaf
 # directly each frame, same "call the leaf directly" style as
 # test_job_runner.gd.
 #
@@ -189,10 +190,10 @@ func _test_out_of_range_clears() -> void:
 	# ship goes to sleep, and plain `.position=` alone is not reliable for a
 	# sleeping body -- body_set_state + explicit wake is the only reliable
 	# way (same idiom test_relay_contact_aging.gd uses). Stay INSIDE
-	# FoamPhysics.BOUNDARY (250000 from origin) -- past it the world-boundary
-	# current force-teleports the ship back toward the pole, which would
-	# fight this test's own teleport every tick.
-	var far_pos := Vector2(150000, 150000) # ~150k from the victim, well inside the 250k boundary, clear of the other clusters
+	# FoamPhysics.BOUNDARY (500000 from origin, M53a) -- past it the
+	# world-boundary current force-teleports the ship back toward the pole,
+	# which would fight this test's own teleport every tick.
+	var far_pos := Vector2(150000, 150000) # ~150k from the victim, well inside the 500k boundary, clear of the other clusters
 	var xform: Transform2D = pirate.global_transform
 	xform.origin = far_pos
 	PhysicsServer2D.body_set_state(pirate.get_rid(), PhysicsServer2D.BODY_STATE_TRANSFORM, xform)

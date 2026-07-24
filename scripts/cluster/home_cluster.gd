@@ -3,9 +3,18 @@ class_name HomeCluster
 
 # M15/M16 -- the authored home cluster: The Sovereign Drift. Three medium-station
 # hubs spread across the cluster, three small-station mining outposts each sitting
-# on an asteroid field, a seven-beacon road linking the two main hubs, and the
-# Nexus wormhole out in dark space away from the road. All coordinates sit well
-# inside the +/-500k float32 budget. See implementation_plans/m16_static_landmarks_design.md.
+# on an asteroid field, a beacon road linking the two main hubs, and the Nexus
+# wormhole near the central hub. All coordinates sit well inside the +/-500k
+# float32 budget. See implementation_plans/m16_static_landmarks_design.md.
+#
+# M53a -- Pass 1/Slice A: the cluster doubled in radius (more room for traffic
+# to be lonely in) and the Nexus wormhole moved from the periphery to near
+# Ironhold (now the cluster's front door). SCALE is applied to every authored
+# position below (stations/outposts/patrol centers/patrol radii/field centers);
+# comms/sensor ranges, asteroid-field radii, and the beacon road's ~25k spacing
+# stay ABSOLUTE on purpose -- the world gets bigger relative to your senses,
+# not your sensors. See implementation_plans/m53a_economic_expansion.md.
+const SCALE := 2.0
 
 const ClusterDef = preload("res://scripts/cluster/cluster_def.gd")
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
@@ -32,8 +41,8 @@ const BEACON_RANGE := 50000.0   # matches Buoy's comms range
 static func build() -> ClusterDef:
 	var def = ClusterDef.new()
 	def.name = "The Sovereign Drift (Home)"
-	def.bounds = Rect2(-250000, -250000, 500000, 500000)
-	def.player_start = Vector2(3000, 0)
+	def.bounds = Rect2(-500000, -500000, 1000000, 1000000)
+	def.player_start = Vector2(3000, 0)   # stays put -- Ironhold itself is still at (0,0)
 
 	# --- Hubs (medium stations) ---
 	# M42 -- sid is the story overlay's join key (story/home_cluster_overlay.gd,
@@ -41,22 +50,26 @@ static func build() -> ClusterDef:
 	# need one -- Ironhold (Aunt Stephanie) now, the five homes for M43's Todd
 	# + residents.
 	_station(def, 1, "Ironhold", MediumStation, Vector2(0, 0), "hub", "ironhold")
-	_station(def, 2, "Drift Market", MediumStation, Vector2(200000, 40000), "hub", "drift_market")
-	_station(def, 3, "Refinery Prime", MediumStation, Vector2(40000, -150000), "hub", "refinery_prime")
+	_station(def, 2, "Drift Market", MediumStation, Vector2(200000, 40000) * SCALE, "hub", "drift_market")
+	_station(def, 3, "Refinery Prime", MediumStation, Vector2(40000, -150000) * SCALE, "hub", "refinery_prime")
 
 	# --- Mining outposts (small stations), each parked on a field ---
-	_station(def, 10, "Slag Bay", SmallStation, Vector2(150000, 110000), "outpost")
-	_station(def, 11, "Coldreach", SmallStation, Vector2(-70000, 90000), "outpost")
-	_station(def, 12, "Deepcut", SmallStation, Vector2(90000, -170000), "outpost")
+	var slag_bay_pos: Vector2 = Vector2(150000, 110000) * SCALE
+	var coldreach_pos: Vector2 = Vector2(-70000, 90000) * SCALE
+	var deepcut_pos: Vector2 = Vector2(90000, -170000) * SCALE
+	_station(def, 10, "Slag Bay", SmallStation, slag_bay_pos, "outpost")
+	_station(def, 11, "Coldreach", SmallStation, coldreach_pos, "outpost")
+	_station(def, 12, "Deepcut", SmallStation, deepcut_pos, "outpost")
 
 	# --- Asteroid fields on the outposts (loader expands into individual rocks) ---
-	# Slag Bay's field is the M43 search field -- expanded (10k -> 16k, rocks
-	# scaled to keep density) so all five Drift homes fit inside it with real
-	# flying distance between them (the check_on_todd search is elimination
-	# across the whole field, see the roadmap's M43 section).
-	def.add_field({"center": Vector2(150000, 110000), "radius": 16000.0, "count": 32, "seed": 1})
-	def.add_field({"center": Vector2(-70000, 90000), "radius": 12000.0, "count": 22, "seed": 2})
-	def.add_field({"center": Vector2(90000, -170000), "radius": 9000.0, "count": 15, "seed": 3})
+	# Centers scale with their stations; RADII stay absolute (sized for
+	# mining/sensor scale, which doesn't change). Slag Bay's field is the M43
+	# search field -- its radius (16k) is unchanged so the check_on_todd search
+	# geometry (elimination across the whole field) is preserved; only its
+	# center moves with the station.
+	def.add_field({"center": slag_bay_pos, "radius": 16000.0, "count": 32, "seed": 1})
+	def.add_field({"center": coldreach_pos, "radius": 12000.0, "count": 22, "seed": 2})
+	def.add_field({"center": deepcut_pos, "radius": 9000.0, "count": 15, "seed": 3})
 
 	# --- Mobile Homes (civilian habitats), all parked in the Slag Bay field ---
 	# M43 -- one community, one search area ("ask the neighbors; those folks
@@ -65,18 +78,28 @@ static func build() -> ClusterDef:
 	# unnamed contacts takes real flying; Claim 42 (Todd) sits out on the far
 	# spinward edge, furthest from the field's mouth (and where Wex's rambling
 	# actually points, for a player who listens).
-	_home(def, 200, "Hermit's Rest", Vector2(145000, 115000), "hermits_rest")
-	_home(def, 201, "Claim 42", Vector2(159000, 99000), "claim_42")
-	_home(def, 202, "The Deep Freeze", Vector2(140000, 103000), "deep_freeze")
-	_home(def, 203, "Lucky Strike", Vector2(154000, 121000), "lucky_strike")
-	_home(def, 204, "Rock Bottom", Vector2(162000, 114000), "rock_bottom")
+	#
+	# M53a -- the field CENTER scaled 2x with its station, but the five homes'
+	# positions RELATIVE to the center must stay unchanged (scaling them too
+	# would spread them across a 2x-wider span and break the M43 elimination
+	# search). So translate each home by the same delta the center moved,
+	# rather than scaling its absolute coordinate.
+	var slag_bay_delta: Vector2 = slag_bay_pos - Vector2(150000, 110000)
+	_home(def, 200, "Hermit's Rest", Vector2(145000, 115000) + slag_bay_delta, "hermits_rest")
+	_home(def, 201, "Claim 42", Vector2(159000, 99000) + slag_bay_delta, "claim_42")
+	_home(def, 202, "The Deep Freeze", Vector2(140000, 103000) + slag_bay_delta, "deep_freeze")
+	_home(def, 203, "Lucky Strike", Vector2(154000, 121000) + slag_bay_delta, "lucky_strike")
+	_home(def, 204, "Rock Bottom", Vector2(162000, 114000) + slag_bay_delta, "rock_bottom")
 
-	# --- Beacon road: Ironhold (0,0) -> Drift Market (200000,40000) ---
-	# Seven interior beacons at ~25k spacing (well inside the 50k comms range, so
-	# their lit zones overlap the whole way). Chained into one routing path.
+	# --- Beacon road: Ironhold (0,0) -> Drift Market (400000,80000) ---
+	# M53a -- the road is now 2x longer (~408k vs ~204k), so it needs more
+	# interior beacons to hold the SAME ~25k absolute spacing (a surveilled
+	# corridor's spacing is its identity, not something that scales with the
+	# cluster). 15 interior beacons over 16 segments reproduces the original
+	# ~25.5k spacing exactly (same math, twice the road).
 	var a := Vector2(0, 0)
-	var b := Vector2(200000, 40000)
-	var beacon_count := 7
+	var b := Vector2(200000, 40000) * SCALE
+	var beacon_count := 15
 	for i in range(beacon_count):
 		var f: float = float(i + 1) / float(beacon_count + 1)   # interior fractions
 		_beacon(def, 100 + i, "Beacon " + str(i + 1), a.lerp(b, f))
@@ -85,20 +108,27 @@ static func build() -> ClusterDef:
 		edges.append([100 + i, 100 + i + 1])
 	def.beacon_edges = edges
 
-	# --- Nexus wormhole, out in dark space (no beacons out here) ---
+	# --- Nexus wormhole, the cluster's front door near Ironhold ---
+	# M53a -- relocated from the periphery to near the central hub: transient
+	# traffic (Pass 3's wormhole freighters) now flows past Ironhold naturally,
+	# and pirate arrivals/exfils have to transit real space instead of
+	# skulking on the edge. Placed opposite the beacon road's heading (the road
+	# runs +x/+y toward Drift Market, so the wormhole sits -x) at 35k out --
+	# clear of the 25k station keep-away and outside Ironhold's 24k patrol
+	# loop, confirmed by ClusterValidator.
 	def.add_entity({
 		"id": 500, "name": "Nexus Wormhole", "hull": Wormhole,
-		"kind": ClusterEntity.Kind.WORMHOLE, "pos": Vector2(-130000, -110000),
+		"kind": ClusterEntity.Kind.WORMHOLE, "pos": Vector2(-35000, 0),
 		"iff_tags": [], "is_static": true,
 	})
 
 	# --- Light-attack-craft patrols (loop a diamond around a hub) ---
-	_patrol(def, 600, "Patrol Alpha", LightAttackCraft, Vector2(0, 0), 12000.0)         # Ironhold
-	_patrol(def, 601, "Patrol Bravo", LightAttackCraft, Vector2(200000, 40000), 12000.0) # Drift Market
+	_patrol(def, 600, "Patrol Alpha", LightAttackCraft, Vector2(0, 0), 12000.0 * SCALE)         # Ironhold
+	_patrol(def, 601, "Patrol Bravo", LightAttackCraft, Vector2(200000, 40000) * SCALE, 12000.0 * SCALE) # Drift Market
 
 	# --- Cargo shuttles on fixed lanes (not a full mesh), starting at Ironhold ---
-	_cargo(def, 700, "Mule", Vector2(0, 0), Vector2(200000, 40000))    # hub <-> hub, down the road
-	_cargo(def, 701, "Ore Barge", Vector2(0, 0), Vector2(-70000, 90000)) # hub <-> Coldreach outpost
+	_cargo(def, 700, "Mule", Vector2(0, 0), Vector2(200000, 40000) * SCALE)    # hub <-> hub, down the road
+	_cargo(def, 701, "Ore Barge", Vector2(0, 0), coldreach_pos) # hub <-> Coldreach outpost
 
 	return def
 

@@ -1,9 +1,19 @@
 extends RefCounted
 class_name FoamPhysics
 
-const BOUNDARY := 250000.0
-const TELEPORT_DEPTH := 20000.0
-const FORCE_K := 1.0
+# BOUNDARY is the physics world's edge -- past it, a live RigidBody2D (ships,
+# stations, asteroids -- see apply_forces callers) gets pushed, then teleported
+# toward the poles at (0, +/-BOUNDARY). It's a WORLD EXTENT, not gameplay
+# tuning, so it must track the authored cluster's half-extent: home_cluster.gd's
+# `def.bounds` is +/-500000 (M53a's 2x reshape), and BOUNDARY matches that here.
+# If the cluster is ever rescaled again, update BOTH together -- the furthest
+# M53a station (Drift Market, ~407,922 out) needs real margin inside BOUNDARY
+# or it gets teleported to a pole every physics frame instead of sitting where
+# home_cluster.gd authored it (confirmed the hard way: pre-fix, BOUNDARY=250000
+# against the enlarged cluster pinned 4 of 6 home stations to the two poles).
+const BOUNDARY := 500000.0
+const TELEPORT_DEPTH := 20000.0   # behavior tuning (push-vs-teleport threshold), not world extent -- stays as-is
+const FORCE_K := 1.0              # behavior tuning (push force scale), not world extent -- stays as-is
 
 static func apply_forces(body: RigidBody2D) -> void:
 	var result = calculate_forces(body.global_position, body.mass)
