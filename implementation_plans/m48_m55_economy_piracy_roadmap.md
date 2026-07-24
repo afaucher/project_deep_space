@@ -325,14 +325,30 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 > (varied entry points; a false-flag "cruise lit as a freighter" hunting
 > posture alongside the existing dark lurk).
 
+- **Traffic is per-flag** (decided): one traffic guild owns all non-pirate
+  commerce (home + peer), and the jurisdiction seam comes from the `flag`
+  stamped on each spawned record, not from a director per sovereign. Same
+  ledger, per-flag arrival tables — matches how the pirate guild already
+  stamps a cover identity per arrival.
 - Traffic ledger: per-station demand scores fed by activity (docking
   events, mining ticks — start simple: dock count decay-averaged).
   Policy tick assigns runs per-trip instead of fixed loops: hub↔hub down
   the road, periodic off-road runs to whichever outpost demand favors
   (the ambush habitat the piracy loop needs).
-- Population floor + wormhole replenishment for lost haulers (same arrival
-  mechanism as M51 — extract the shared "guild" skeleton now, second
-  consumer proves the shape).
+  - **Read demand from a per-station docking-registry SHAPE from day one**,
+    even while that registry is still globally visible. The mail network
+    ([../design_ideas/mail_network.md](../design_ideas/mail_network.md)) will
+    later latency-gate the registry's *visibility* to retire director
+    omniscience; building the demand read against the registry shape now means
+    that change swaps visibility, not the director's structure — no god-object
+    to rip out later. This is the one mail-network decision that affects M53
+    itself; the rest is a later vertical.
+- Population floor + wormhole replenishment for lost haulers **first** — this
+  is what stops the world depleting once pirates work (authored static traffic
+  + working robbery thins killed haulers permanently; the floor is the fix, so
+  land it ahead of demand-scoring). Same arrival mechanism as M51 — extract the
+  shared "guild"/director skeleton now (M53a's transient freighter is the
+  second consumer that proves the shape before it's extracted).
 - Story-phase hook lands here as data: the arrival table the director draws
   from is keyed by StoryState flags (peacetime mix now; militia formations
   and the weapons dealer are later *content*, not new systems).
@@ -374,11 +390,29 @@ Upgrades the abstract take into stuff.
   outposts fill, haulers move it, hubs consume, pirates leak it.
 - Tests: manifest conservation across load/theft/unload; inspection reads.
 
+## The Mail Network (named vertical — its own design doc)
+
+[design_ideas/mail_network.md](../design_ideas/mail_network.md). The model that
+retires director omniscience for good: a director knows only what has physically
+reached its location, because information rides couriers (docking-registry news
+merged station-to-station on dock, newest-wins for current state + append-only
+union for history). Blast radius on the director model is M48-sized, so it's
+built deliberately and phased (registry → transport → relocate the director →
+contracts). It's the systemic home of the contract taxonomy — courier / locate /
+contract-haul / salvage / bounty — that turns missions from authored into
+emitted-by-blind-spots. Two hooks reach back into the milestones above:
+**M53c reads demand from the registry shape now** (so phase 3 latency-gates
+visibility, not structure), and **M56 is a dependency, not just a cleanup**
+(the multi-hop observation timestamp is the merge's primitive). Full ambition
+sits after M55; phase 1 (the registry) is cheap and seeded during M53.
+
 ## Later (designed for, not scoped)
 
 - Story-phase arrival content: armed militia formations (needs formation
   flying), weapons dealer + station shops (needs credits sink UI).
-- Off-bubble abstract encounter resolution via the ROUTE_TICK liveness tier.
+- Off-bubble abstract encounter resolution via the ROUTE_TICK liveness tier
+  (also the natural carrier for off-bubble mail-payload merges — see the mail
+  network's open questions).
 - Pirate SOS/reinforcements, ransom demands, player piracy.
 - Boarding depth (crew, capture-the-hull — ties into hulk revival contract,
   see design_ideas/hulk_revival_contract.md).
