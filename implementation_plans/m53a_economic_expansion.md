@@ -8,6 +8,47 @@ guild is the systemic answer; this sub-milestone is the WORLD the guild
 needs to exist in first — geography and baseline traffic, no demand ledger
 yet.
 
+## Foundation: faction model + player setup (do FIRST, before the world grows)
+
+Adding a peer sovereign exposes a degenerate hack that has to be fixed before
+the jurisdiction seams mean anything. These are the "mechanical shape"
+prerequisites; do them as the first slice.
+
+1. **Player is a NEUTRAL independent, not crypto-kin of home** (decided).
+   Today `home_cluster.gd`'s `HOME_IFF` is `["TEAM_PLAYER"]` — the whole home
+   faction shares the PLAYER's crypto tag, so `compute_standing` returns
+   FRIENDLY on the crypto handshake and the player can NEVER be marked HOSTILE
+   by home (crypto beats flag), which silently breaks the M52 contract ("shoot
+   a home station → Patrol Alpha turns, marks you… applies to the player").
+   Fix: home gets its OWN crypto tag (placeholder `TEAM_DRIFT`); the player
+   keeps `TEAM_PLAYER` (so their own drones/wingmen still read FRIENDLY) and
+   keeps flying `FLAG_DRIFT`. The player now reads **NEUTRAL** to home — left
+   alone (stations fire on HOSTILE only), dock grants still issued (NEUTRAL
+   qualifies), reporting-so-no-challenge — but flippable to HOSTILE on
+   aggression, so the whole warrant/interdiction system applies to the player
+   symmetrically. Scoped to the campaign (`home_cluster.gd`); the sandbox's
+   TEAM_PLAYER-vs-ENEMY setup is untouched. Cost: a combat-test audit for any
+   test that assumed player↔home share the tag (the M48-style price; likely
+   the campaign_* tests plus any home-friendly assertion).
+
+2. **Player starter ship = CargoShuttle** (decided). Campaign spawns the player
+   in the civilian hauler — slow, fragile, sensors + comms, UNARMED, on-theme
+   "vulnerable hauler" (the escort fantasy makes you *be* the shuttle). Scoped
+   to the campaign spawn path only; the sandbox ship-select keeps the full
+   catalog. NOTE: CargoShuttle has no explicit `cargo_bay` component yet (cargo
+   is abstract until M55), so "cargo capacity" is fiction-now / real-at-M55. A
+   bespoke lightly-armed starter hull is deferred (a ship-design + validator +
+   test task = its own fiction/design pass).
+
+3. **Peer state name — PLACEHOLDER, pending a real fiction-authoring pass**
+   (out of scope here; we only need the mechanical shape). Working default:
+   **Meridian Combine** (crypto tag `TEAM_MERIDIAN`, flag `FLAG_MERIDIAN :=
+   "MERIDIAN_COMBINE"`). Alternatives to swap in trivially: The Tarn Reach,
+   Karst Compact, Ostrend Union, The Halcyon Combine. The `FLAG_*`/crypto
+   constants land WITH the peer stations (task 3 of Scope below), not before —
+   no dead constants ahead of a consumer. Each peer station defaults
+   `warrant_authority` to its own flag (free from M52b) → the jurisdiction seam.
+
 ## Scope (the playtest's four asks)
 
 1. **2x the cluster radius.** More room between things: lanes long enough
