@@ -314,6 +314,15 @@ The loop itself, with an **abstract take** (no physical cargo yet).
 
 ## M53 — Traffic guild + demand-driven cargo
 
+> **M53a LANDED** (world + peer state + pirate circulation). **M53b/M53c are
+> scoped in [m53bc_traffic_guild.md](m53bc_traffic_guild.md)** — four passes:
+> (1) the docking registry in mail-network shape, (2) a CONCRETE traffic
+> director + the transient freighters absorbed from M53a Slice C, (3) extract
+> the shared director skeleton only once two consumers exist, (4) demand-driven
+> routing. Key sequencing call recorded there: extraction is NOT first, because
+> a skeleton factored from a single consumer bakes in that consumer's
+> assumptions.
+
 > **M53a — Economic expansion** (implementation_plans/
 > m53a_economic_expansion.md, from the 2026-07-20 playtest: "we don't have
 > enough traffic for pirates to have a good target selection") pulls the
