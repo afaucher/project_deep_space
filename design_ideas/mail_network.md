@@ -42,12 +42,15 @@ gameplay that falls out of it.
    is the cheapest part and it can land first with zero behavior change (see
    Phasing, phase 1).
 
-2. **News/mail bag.** A bundle of registry entries a ship carries as payload.
-   It merges into a recipient's worldview on contact. The merge is the *same
-   newest-wins reconciliation discipline the datalink already uses* — proven
-   twice now (contact fusion in `ship.gd`'s `_physics_process`, and the SOS
-   passive-sync reconcile) — but see "Two merge rules" below: current-state is
-   newest-wins, history is union.
+2. **News/mail bag = a source's log at a version.** Each *source* (a port's
+   docking registry, a pirate informant feed, a sport's results desk) owns ONE
+   monotonically-growing append-only log, with a per-source sequence counter it
+   alone increments on every new entry. A "mailbag" is that log identified by
+   source and version — *"Ironhold Port Control Docking Registry @ v412."* The
+   log content is global (one canonical sequence per source); a holder carries,
+   per source, only its high-water version and may read the log up to it. The
+   merge is then trivial (see "The merge is just a version compare" below): no
+   per-fact reconciliation, just "whose version is higher."
 
 3. **Courier transport.** Mail rides ships and merges station-to-station *on
    dock*. This is the load-bearing twist: **information has a position and a
@@ -65,26 +68,64 @@ gameplay that falls out of it.
    confirmed lost."* The state machine is right; only its **input** moves from
    direct node reads to delivered news.
 
-## Two merge rules (the "newest wins, but fuller history" nuance)
+## The merge is just a version compare (the sender owns a monotonic log)
 
-The merge is deliberately two rules over the same mailbag, because a courier
-carries both a *current picture* and a *ledger of what happened*:
+Simplification (decided): do NOT reconcile per fact. Each **source** keeps a
+single append-only log with a monotonic sequence counter it *alone* increments —
+single-writer, so the counter is trivially, unarguably ordered (no distributed
+clocks, no conflict resolution, ever). Crucially the log **content is global** —
+one canonical sequence per source, never privately-copied bundles — and a
+**holder** (any ship or station) carries, per source, nothing but the highest
+version delivered to it:
 
-- **Current state — newest-wins per `(subject, fact)`.** The latest known dock
-  supersedes the earlier one; a ship's most recent sighting wins. Identical in
-  spirit to the datalink's freshest-wins track merge. This wants real
-  timestamps to be unambiguous, which is exactly what M56 provides (see
-  Dependencies).
-- **History — append-only union of events.** You never *drop* "seen at
-  Coldreach an hour ago" just because a fresher fact exists. The accumulated
-  event log is the forensic substrate: it's what a locate-contract searches,
-  what a bounty's evidence is built from, and what makes "cross-reference three
-  burned identities against the wanted-names list" (economy_and_piracy.md's
-  identity-kit payoff) actually possible.
+    held = { "Ironhold Docking Registry": 412,
+             "Drift Market Registry":      88,
+             "Drift Circuit Results":      37, … }
 
-Getting this split right is the whole correctness story: merge current-state
-sloppily and directors thrash; drop history and the detective gameplay
-evaporates.
+The entire model then collapses to scalars:
+
+- **"Do I have mail for you?"** — for any source, *my version > your version*.
+  O(1) per source, and you never read contents to decide.
+- **"Merge."** — for each source, keep the higher version (and its log). `max`.
+  That's the whole operation. Because a source's log is append-only and
+  single-writer, a higher version is a strict superset of a lower one — newer
+  literally *is* better, with zero per-entry logic.
+- **Current state and history are the same object.** The log already IS the
+  append-only history (the forensic substrate a locate/bounty contract reads);
+  "current state" is just reading its tail. There is no second union rule — this
+  replaces the earlier "two merge rules" framing entirely.
+- **Content is global; reads are clamped to your delivered version.** There is
+  one canonical log per source; a reader may see entries only up to *its own*
+  delivered version and no further. **That clamp IS the fog** — no private
+  content copies to keep in sync, no way to peek past what's physically reached
+  you (the global store is engine storage, not a peek-hole). A holder's entire
+  tier-3 knowledge is therefore a cheap, serializable, deterministic per-source
+  **version vector of integers**; delivering mail = advancing the recipient's
+  integer, which unlocks reading the prefix it now points at.
+
+This **kills the multi-hop hazard outright**: the version is the *source's own*
+sequence number, carried unchanged through every hop, so an intermediate carrier
+can never re-stamp it fresher than it is (the exact bug M56 warns about for
+contacts simply cannot arise here). Two clocks, cleanly separated: the
+**sequence number** is a logical clock, used only for merge/ordering; each log
+*entry* still carries a real **wall/frame stamp**, used only for age display
+("this registry reads 40 min stale") — the fog-legibility UI, never the merge.
+
+Two consequences of content being global:
+
+- **Only an integer moves on delivery.** A hand-off just advances the
+  recipient's version pointer — "how much log body rides along" is a
+  non-question. Compaction (a registry grows forever) is therefore a single,
+  central concern for the one canonical log — a current-state snapshot plus a
+  bounded recent tail — not something every bag or holder duplicates.
+- **Opacity still holds, via *whose* pointer advances.** The read-clamp is the
+  same mechanism for both source classes; what differs is when your pointer
+  moves. A **public feed** (a port's docking registry, sport results) advances
+  *your own* read-version when you're present at the source — you read it, then
+  carry it onward. A **sealed dispatch** advances only the *addressee's*
+  pointer, on delivery — never the carrier's. So "Carrying is not reading"
+  (below) is exactly "hauling a sealed bag doesn't move *your* integer, only the
+  recipient's" — the global store never becomes a peek-hole.
 
 ## The player is a node, not an observer (decided: no player omniscience)
 
@@ -246,18 +287,51 @@ The missions layer stops being hand-authored (StoryState missions) and starts
 being *generated by the gap between what a director wants to be true and what
 its mail can confirm*.
 
+## World-building the model earns
+
+Two directions the mail model makes possible — captured now so they're designed
+*into* it, not bolted on:
+
+- **A sport, and news of it as social capital — the Drift Circuit.** Invent a
+  cluster sport: **drift-current racing**, pilots riding the natural currents
+  (`foam_currents`, already in the sim) between stations on a seasonal circuit,
+  each hub and outpost backing its own pilot/crew, with fierce parochial
+  loyalties (the existing hub/outpost rivalries — and the peer-state seam — map
+  straight onto fan lines). Race *results* are just another source log
+  (`"Drift Circuit Results @ vN"`) that has to travel: a race ran at Deepcut,
+  and fans at Ironhold haven't heard yet. **Being first to bring a station's
+  fans a fresh result — especially their crew winning — nudges their
+  disposition toward you**: warmer greetings, a small standing bump, maybe a
+  looser challenge or a friendlier dock. It's the low-stakes, high-charm proof
+  that *news is social capital*, wholly separate from the commercial/tactical
+  feeds, and it makes a courier's route a **social** choice, not only a
+  logistical one. Easily reflavored; the keeper is the mechanic — a cultural
+  feed whose freshness changes how fans treat the carrier.
+- **Whose mail, and whose enemy — the delivery *choice*.** Long-term, handing a
+  bag over carries allegiance weight: *"maybe I shouldn't give Ironhold Port
+  Control's docking registry to an enemy state."* This composes cleanly with
+  opacity — contents stay sealed, but a bag's **provenance label** (source +
+  owning flag) is visible, so the player makes an allegiance call on *who* the
+  mail serves without reading *what* it says. Delivering a faction's feed to its
+  rival helps the rival, can betray the source (a standing hit if it's traced),
+  and is exactly the grey choice the information economy wants. Needs a
+  provenance/sensitivity tag on a source and a consequence path through
+  warrants/standing — later content, but "label visible while contents opaque"
+  is a constraint to honor from the start.
+
 ## Dependencies (what this stands on)
 
 - **Newest-wins reconciliation** — the discipline is proven twice already
   (datalink contact fusion; SOS passive-sync). Third instance, same rules, new
   transport.
-- **M56 contact-freshness timestamps** — PROMOTED from "nice perf/robustness
-  cleanup" to a real dependency of this vertical. Generalized from
-  `last_seen_at` on a *contact* to a timestamp on any *observation*, it is the
-  primitive the entire mail merge stands on: a courier that hops N times must
-  carry the ORIGINAL observation's stamp unchanged (M56's "multi-hop timestamp
-  question" is exactly this problem, pre-solved for contacts). Do M56 with the
-  mail network in mind.
+- **M56 contact-freshness timestamps** — related, but NOT a merge dependency.
+  The monotonic-log simplification (see "The merge is just a version compare")
+  means the merge orders on each source's own sequence number, not on an
+  observation stamp, so the multi-hop hazard M56 addresses can't arise for mail
+  at all. M56 stays worth doing for *contacts*, and the mail network borrows its
+  frame-stamp idiom for the per-entry AGE display (how stale a delivered
+  registry reads), never for ordering. Position: shared idiom + still-worthwhile
+  contact cleanup, not a hard dependency of this vertical.
 - **Docking events** (M46/M47, `port_control.gd`) — the raw registry source.
   They fire already; they need to be recorded and stamped.
 - **Director honesty rule / OVERDUE state machine** (M51,

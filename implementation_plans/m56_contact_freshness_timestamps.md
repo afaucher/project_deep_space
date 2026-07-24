@@ -34,16 +34,18 @@ it is, regardless of how often anything gets checked) and gives category 1
 a real but smaller win than it might first appear — see "Scope, honestly"
 below before assuming this recovers most of `contact_decay`'s cost.
 
-**Promoted to a real dependency of the Mail Network vertical**
-([../design_ideas/mail_network.md](../design_ideas/mail_network.md)), not just
-a local perf/robustness cleanup. That model merges timestamped observations
-that hop across many carriers before reaching the mind that acts on them, and
-the merge is unambiguous only if each observation carries its ORIGINAL stamp,
-preserved unchanged through every hop — which is exactly "The multi-hop
-timestamp question" below, pre-solved here for contacts. Implement this pass
-with that generalization in mind (an observation timestamp, not merely a
-contact-freshness timer): the mail merge is the second consumer of the same
-primitive.
+**Relation to the Mail Network vertical**
+([../design_ideas/mail_network.md](../design_ideas/mail_network.md)): originally
+thought to be a hard dependency, but the mail model was since simplified to a
+**monotonic per-source log** — a mailbag is "source @ vN", the merge is just
+`max(version)` per source, and the version is the source's OWN sequence number
+carried unchanged through every hop. That design sidesteps "The multi-hop
+timestamp question" below entirely (there is no re-stampable observation stamp
+to get wrong), so the mail merge does NOT depend on this milestone. This stays a
+**contacts**-scoped cleanup; the mail network only borrows the frame-stamp idiom
+for age *display* (how stale a delivered registry reads), not for ordering.
+Solve the multi-hop question here for contacts regardless — it's still real for
+relayed sensor tracks.
 
 ## The design
 

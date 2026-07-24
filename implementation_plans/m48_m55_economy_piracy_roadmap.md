@@ -402,9 +402,11 @@ contracts). It's the systemic home of the contract taxonomy — courier / locate
 contract-haul / salvage / bounty — that turns missions from authored into
 emitted-by-blind-spots. Two hooks reach back into the milestones above:
 **M53c reads demand from the registry shape now** (so phase 3 latency-gates
-visibility, not structure), and **M56 is a dependency, not just a cleanup**
-(the multi-hop observation timestamp is the merge's primitive). Full ambition
-sits after M55; phase 1 (the registry) is cheap and seeded during M53.
+visibility, not structure). (M56 is NOT a merge dependency — the monotonic
+source-log design merges on a per-source sequence number, not an observation
+stamp; M56 stays a contact cleanup whose frame-stamp idiom the mail age-display
+borrows.) Full ambition sits after M55; phase 1 (the registry) is cheap and
+seeded during M53.
 
 ## Later (designed for, not scoped)
 
