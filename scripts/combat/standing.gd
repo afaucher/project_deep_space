@@ -33,6 +33,14 @@ const FLAG_PIRATE := "JOLLY_ROGER"
 const FLAG_DRIFT := "SOVEREIGN_DRIFT"     # home faction / militia
 const FLAG_CIVILIAN := "DRIFT_CIVILIAN"   # mobile homes, independents
 
+# M53a Pass 2 -- a peer sovereign sharing the home cluster: two mining
+# colonies with their own trade routes, jurisdiction-seam bait for the
+# pirate/warrant systems (design_ideas/m53a's "you killed someone in the
+# next country over and nobody here cares"). "Meridian Combine" is a
+# PLACEHOLDER name pending a real fiction-authoring pass -- do not treat it
+# as settled lore. Crypto tag is TEAM_MERIDIAN (see home_cluster.gd).
+const FLAG_MERIDIAN := "MERIDIAN_COMBINE"
+
 const STRAY_HITS_TO_HOSTILE := 3          # third-party attribution confidence gate
 
 # How long an aggression-bus event lingers before being pruned, in

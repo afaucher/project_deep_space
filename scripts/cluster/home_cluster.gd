@@ -24,6 +24,7 @@ const Buoy = preload("res://scripts/ships/buoy.gd")
 const Wormhole = preload("res://scripts/wormhole.gd")
 const LightAttackCraft = preload("res://scripts/ships/light_attack_craft.gd")
 const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
+const OreShuttle = preload("res://scripts/ships/ore_shuttle.gd")
 const MobileHome = preload("res://scripts/ships/mobile_home.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 
@@ -130,19 +131,52 @@ static func build() -> ClusterDef:
 	_cargo(def, 700, "Mule", Vector2(0, 0), Vector2(200000, 40000) * SCALE)    # hub <-> hub, down the road
 	_cargo(def, 701, "Ore Barge", Vector2(0, 0), coldreach_pos) # hub <-> Coldreach outpost
 
+	# --- M53a Pass 2 -- peer sovereign: the Meridian Combine ---
+	# A second, unrelated flag/crypto-tag sharing the cluster (NOT HOME_IFF,
+	# NOT FLAG_DRIFT): two mining colonies of their own, each with a cargo
+	# lane back to Ironhold. _station()/_cargo() default to the home identity
+	# above, so passing the Meridian iff_tags/flag explicitly is the only
+	# thing that makes these different from an ordinary outpost/hauler --
+	# which in turn means their warrant_authority defaults to FLAG_MERIDIAN
+	# (M52b's "stations default warrant_authority to their own flag"), the
+	# jurisdiction seam a home patrol's warrants can't reach and vice versa
+	# (test_jurisdiction_seam.gd pins this as the slice's payoff assertion).
+	# "Meridian Combine" is a placeholder name -- see the FLAG_MERIDIAN
+	# comment in standing.gd.
+	#
+	# Coordinates: Slice A's 2x geometry left the (-,-) and (-,+) quadrants
+	# empty (home stations cluster in +x and the wormhole sits just -x of
+	# Ironhold at (-35000,0)) -- both colonies sit there, each 200k+ from
+	# every existing station/field/patrol-loop/beacon-road point and inside
+	# the +/-450k margin the plan calls for.
+	var meridian_iff := ["TEAM_MERIDIAN"]
+	var halvorsen_pos: Vector2 = Vector2(-280000, -260000)   # (-,-) quadrant, empty
+	var corvus_pos: Vector2 = Vector2(-300000, 340000)        # (-,+) quadrant, clear of Coldreach
+	_station(def, 13, "Halvorsen Claim", SmallStation, halvorsen_pos, "outpost", "", meridian_iff, Standing.FLAG_MERIDIAN)
+	_station(def, 14, "Corvus Yards", SmallStation, corvus_pos, "outpost", "", meridian_iff, Standing.FLAG_MERIDIAN)
+	def.add_field({"center": halvorsen_pos, "radius": 10000.0, "count": 18, "seed": 4})
+	def.add_field({"center": corvus_pos, "radius": 10000.0, "count": 18, "seed": 5})
+	_cargo(def, 702, "Meridian Runner", Vector2(0, 0), halvorsen_pos, OreShuttle, meridian_iff, Standing.FLAG_MERIDIAN)
+	_cargo(def, 703, "Combine Hauler", Vector2(0, 0), corvus_pos, OreShuttle, meridian_iff, Standing.FLAG_MERIDIAN)
+
 	return def
 
-static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String, sid: String = "") -> void:
+## M53a -- iff_tags/flag are optional, defaulting to home's own identity so
+## every pre-Pass-2 call site (positional, 6 args) is behaviorally unchanged.
+## A peer-sovereign call site (e.g. the Meridian colonies below) passes its
+## own iff_tags + flag; warrant_authority always derives from `flag`, so a
+## peer station gets the jurisdiction-seam default for free (M52b).
+static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String, sid: String = "", iff_tags: Array = HOME_IFF, flag: String = Standing.FLAG_DRIFT) -> void:
 	def.add_entity({
 		"id": id, "sid": sid, "name": name, "hull": hull,
 		"kind": ClusterEntity.Kind.STATION, "pos": pos, "role": role,
-		"iff_tags": HOME_IFF, "is_static": true,
-		"transponder_flag": Standing.FLAG_DRIFT,
+		"iff_tags": iff_tags, "is_static": true,
+		"transponder_flag": flag,
 		# M52b -- stations ARE the authority: default warrant_authority to
 		# their own flag (design doc's "Stations and patrol/military ships
 		# default warrant_authority to their own flag" -- everyone else,
 		# including the player, stays empty).
-		"warrant_authority": [Standing.FLAG_DRIFT],
+		"warrant_authority": [flag],
 	})
 
 static func _beacon(def, id: int, name: String, pos: Vector2) -> void:
@@ -177,17 +211,22 @@ static func _patrol(def, id: int, name: String, hull: Script, center: Vector2, r
 # A cargo hauler shuttling between two stations (a fixed lane, looping). Starts at
 # station a. The bubble dead-reckons it while dormant; the CargoRun leaf is wired
 # from the behavior route+cargo flag on promote.
-static func _cargo(def, id: int, name: String, a: Vector2, b: Vector2) -> void:
+#
+## M53a -- hull/iff_tags/flag are optional, defaulting to home's own identity
+## (CargoShuttle/HOME_IFF/FLAG_DRIFT) so both pre-Pass-2 call sites (positional,
+## 4 args) are behaviorally unchanged. A peer lane (the Meridian runs below)
+## passes its own hull (OreShuttle) + iff_tags + flag.
+static func _cargo(def, id: int, name: String, a: Vector2, b: Vector2, hull: Script = CargoShuttle, iff_tags: Array = HOME_IFF, flag: String = Standing.FLAG_DRIFT) -> void:
 	# Start on the approach to a, NOT at a's center -- a is a station and spawning
 	# inside its hull would eject the shuttle. The route targets are the station
 	# centers; DOCK_REQUEST_RADIUS handles the approach.
 	var start: Vector2 = a + (b - a).normalized() * 6000.0
 	def.add_entity({
-		"id": id, "name": name, "hull": CargoShuttle,
+		"id": id, "name": name, "hull": hull,
 		"kind": ClusterEntity.Kind.TRAFFIC, "pos": start,
-		"iff_tags": HOME_IFF, "is_static": false,
+		"iff_tags": iff_tags, "is_static": false,
 		"behavior": {"route": [a, b], "loop": true, "cargo": true},
-		"transponder_flag": Standing.FLAG_DRIFT,
+		"transponder_flag": flag,
 	})
 
 # A mobile home holding station in a specific location.
