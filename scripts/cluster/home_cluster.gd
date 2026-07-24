@@ -18,9 +18,15 @@ const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const MobileHome = preload("res://scripts/ships/mobile_home.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 
-# Home faction shares the player's tag so hubs read friendly and their station AI
-# never targets the player. Faction modelling proper is a later concern.
-const HOME_IFF := ["TEAM_PLAYER"]
+# M53a -- home carries its OWN crypto tag; the player is NOT crypto-kin of
+# home (keeps TEAM_PLAYER, see main.gd's _spawn_player_ship). Flying
+# FLAG_DRIFT with the transponder on, the player reads NEUTRAL to home
+# (compute_standing's "reporting clean" tier): left alone (station/patrol AI
+# engages HOSTILE only) and still gets dock grants (NEUTRAL qualifies), but
+# is flippable to HOSTILE on aggression like anyone else -- the M52
+# warrant/interdiction contract now applies to the player symmetrically
+# instead of the old crypto handshake making them immune.
+const HOME_IFF := ["TEAM_DRIFT"]
 const BEACON_RANGE := 50000.0   # matches Buoy's comms range
 
 static func build() -> ClusterDef:

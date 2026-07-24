@@ -6,6 +6,7 @@ extends Node2D
 @onready var ship_select: OptionButton = $CanvasLayer/Menu/ShipSelect
 
 const Frigate = preload("res://scripts/ships/frigate.gd")
+const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const Buoy = preload("res://scripts/ships/buoy.gd")
 const SensorDrone = preload("res://scripts/ships/sensor_drone.gd")
 const Asteroid = preload("res://scripts/asteroid.gd")
@@ -236,11 +237,12 @@ func _on_peer_connected(id: int) -> void:
 	if is_host:
 		_spawn_player_ship(id)
 
-func _spawn_player_ship(id: int, at = null) -> void:
-	var selected_idx = ship_select.selected if is_instance_valid(ship_select) else 0
-	if selected_idx < 0 or selected_idx >= ShipCatalog.SPAWNABLE.size():
-		selected_idx = 0
-	var ship_script = ShipCatalog.SPAWNABLE[selected_idx]["script"]
+func _spawn_player_ship(id: int, at = null, ship_script: Script = null) -> void:
+	if ship_script == null:
+		var selected_idx = ship_select.selected if is_instance_valid(ship_select) else 0
+		if selected_idx < 0 or selected_idx >= ShipCatalog.SPAWNABLE.size():
+			selected_idx = 0
+		ship_script = ShipCatalog.SPAWNABLE[selected_idx]["script"]
 	var ship = ship_script.new()
 	ship.name = "Ship_" + str(id)
 	ship.owner_id = id
@@ -285,7 +287,12 @@ func _bootstrap_campaign() -> void:
 	manager.directors.append(PirateGuild.new())
 
 	var pid = multiplayer.get_unique_id()
-	_spawn_player_ship(pid, def.player_start)
+	# M53a -- campaign player starts in the civilian hauler (slow, fragile,
+	# unarmed; the escort fantasy makes you *be* the shuttle), not the
+	# ship-select catalog's Frigate default. Sandbox spawns are untouched --
+	# the other _spawn_player_ship call site (peer-connected / local-test)
+	# passes no override, so it keeps using the ship_select selection.
+	_spawn_player_ship(pid, def.player_start, CargoShuttle)
 
 	manager.viewpoint_node = players[pid]
 	manager.viewpoint = def.player_start
