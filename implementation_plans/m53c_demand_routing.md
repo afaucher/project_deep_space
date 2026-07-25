@@ -21,8 +21,12 @@ Recorded because the reasons generalize:
 - The scoring function was a **global optimizer** over cluster welfare. Nobody in
   the fiction wants cluster welfare, and a well-run economy designs the player
   out of a job. Replaced by per-party scoring over *heard* postings.
-- Demand therefore moved **onto stations** as stock + rates, and the coupling
-  between parties and the world became the **posting**.
+- Demand therefore moved **onto stations** as stock, and the coupling between
+  parties and the world became the **posting**.
+- A later pass caught the same error one level down: an authored per-station
+  **`rate`** was itself a fudge factor. Throughput is now **derived from converters**
+  (in → out, stalling on either), so running out of ore actually stops refined
+  production instead of a constant ticking on regardless.
 
 ## Phase 0 (a.k.a. M53b Pass 1b) — Move the docking registry onto the record
 
@@ -74,27 +78,103 @@ the fog matters.
 
 Pure substrate. Nothing reads it yet, which makes it independently verifiable.
 
-- `stock` / `capacity` / `target` / `surplus_line` / `rate` per commodity class —
-  **four classes: ORE / VOLATILES / REFINED / GOODS** — keyed by
-  **`(location, holder)`, NOT by station** (trap 5). A station is just the holder
-  that owns the port; a private company's warehouse at that same station is another
-  holder in the same shape. Dormant-safe and serializable. VOLATILES is locally
-  sourced (Coldreach only) and GOODS import-only (Ironhold only); that asymmetry is
-  the point, not an oversight.
-- **Urgency direction keys off STOCK, not `rate`**: `stock < target` → import,
-  `stock > surplus_line` → export, else satisfied. Rate says which way a holder
-  *drifts*; stock says which way it currently *wants*. This is what lets an
-  over-served station flip to wanting its surplus gone — and the secondary market
-  falls out of it with no extra mechanism.
-- Rates default from the already-authored, currently-unused `role`
-  ("hub"/"outpost"), with per-station overrides. **Ore production derives from
-  the authored asteroid-field rock counts** (32/22/18/18/15) — not a new number.
-- Ticks with the cluster, including while outside the sim bubble. Clamps to
-  `[0, capacity]`, **no failure states**.
-- `urgency(station, commodity)` as the single derived read.
-- Tests: rates integrate correctly across dormant/promoted transitions; clamps
-  hold at both ends; urgency is 0 at target and 1 at empty; the reference case
-  in the design doc reproduces (net flow balances to zero per commodity).
+### The record fields
+
+Two dicts on `ClusterEntity`, both empty on non-station records (same as
+`docking_registry`):
+
+```gdscript
+var stocks: Dictionary = {}   # holder_key -> commodity -> bin
+var market: Dictionary = {}   # holder_key -> commodity -> price/eligibility policy
+```
+
+`"self"` is the station's own bins; **any other key is a party's stockpile at this
+location** (trap 5 — do NOT key on the station record). Bin:
+`{stock, capacity, target, surplus_line}`. **No `rate` field** — see converters.
+
+- **Bins are FULLY POPULATED for all four classes at load**, even zeros. CLAUDE.md's
+  trap is that a missing `Dictionary[key]` aborts the rest of that frame's function;
+  a two-level nested lookup doubles that surface. Guaranteeing the inner level means
+  only the *holder* lookup needs a `.get()` guard.
+- Commodity keys as constants (`Standing.FLAG_*` convention), not bare strings.
+
+### Throughput is DERIVED — converters, not rates
+
+An authored per-station `rate` is the same fudge factor as `service_rate`: Refinery
+Prime consuming 3.3 ore/hr is *what happens when a converter runs*, not a property
+of the station. Authored as a constant, the causal chain cannot exist.
+
+The `"self"` entry authors industry instead:
+
+```gdscript
+"converters": [ { "in": {"ORE": 3.3}, "out": {"REFINED": 2.2}, "rate": 1.0 } ]
+"sinks":   {"VOLATILES": 0.45}   # population upkeep -- a genuine constant
+"sources": {"ORE": 1.5}          # SCAFFOLDING for mining traffic
+```
+
+- `achieved = min(rate, input_availability, output_headroom)` — **partial running
+  (decided)**, scaled to the scarcest input, but **zero below a floor fraction** so a
+  converter never trickles at 3%.
+- **Stalls both ways:** STARVED (no input) and BLOCKED (output bin full because
+  nobody is hauling). BLOCKED stops ore consumption too, so backpressure reaches the
+  mines.
+- **A stalled converter consumes NOTHING** (decided — no idle draw, no upkeep rule).
+- **Sinks are separate and never stop.** The population keeps requiring volatiles
+  whether or not any industry runs, so a cold refinery still drains volatiles —
+  because its people do, not because it does.
+- Expose the stall state per converter. STARVED and BLOCKED are **different
+  problems with different fixes**, both facts a station knows about itself, so both
+  become postable/mailable news later at different values.
+
+### Urgency
+
+`stock < target` → import; `stock > surplus_line` → export; else satisfied. Keys off
+**stock**, which is what lets an over-served station flip and gives the secondary
+market for free.
+
+### Authoring — do NOT default from `role`
+
+An earlier draft of this plan said rates default from `role`. **That is wrong**:
+`role` has only `"hub"` and `"outpost"`, which cannot distinguish Refinery Prime
+from Ironhold or ice-rich Coldreach from Slag Bay. The reference table has **eight
+distinct profiles**, so role-defaults would be overridden in all eight cases — a
+defaulting mechanism that never defaults. Author economy explicitly per station;
+derive **only** ore extraction from the field's authored rock count. `role` stays a
+port/UI concept.
+
+### The delivery seam
+
+```gdscript
+deliver(holder, commodity, amount)   # the ONLY way stock increases
+```
+
+The `sources` scaffolding calls it on the economy tick; mining ships later call it
+from the same `docking_bay` DOCKED hook haulers already use, so deleting the fake is
+one line.
+
+### The tick
+
+A `StationEconomy` RefCounted appended to `ClusterManager.directors` — that array is
+already "things ticked with the cluster", so period accumulation comes free. It must
+walk **all station records regardless of liveness**: `tick()`'s existing loop skips
+`is_static` records entirely, and most stations are dormant under BUBBLE. ~32 scalar
+updates per period. Clamps to `[0, capacity]`, **no failure states**.
+
+### Tests
+
+- The design doc's reference table reproduces as the **expected steady state**
+  (it is now an oracle, not an input): net flow per commodity settles to ~zero.
+- Converter STARVES when input is withheld and output stops; converter BLOCKS when
+  the output bin fills, and **ore consumption stops with it**.
+- Partial running scales to the scarcest input; below the floor it is zero.
+- A stalled converter consumes nothing, while the population sink keeps draining
+  volatiles.
+- Economy advances for a **dormant** station (this is the one that would silently
+  not work if the tick were hung off live nodes).
+- Clamps hold at both ends; urgency is 0 at target, 1 at empty, and flips direction
+  above `surplus_line`.
+- A party holder at the same location keeps its own separate bin (proves the
+  `(location, holder)` keying, so trap 5 can't regress).
 
 ## Phase B — Postings (stations publish)
 

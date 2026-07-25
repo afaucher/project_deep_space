@@ -189,13 +189,15 @@ same station is another holder in the same shape. Get this wrong and party-held
 stockpiles, hoarding, speculation, and competing prices at one port are all
 foreclosed (trap 5 below).
 
-Per holder, per location, per commodity:
+### The bin — per (holder, location, commodity)
 
-- `stock` — current abstract quantity (the only thing that varies)
+- `stock` — current abstract quantity (**the only thing that varies**)
 - `capacity` — bin size
 - `target` — the healthy level
 - `surplus_line` — above this, the holder wants the excess gone
-- `rate` — net production (positive) or consumption (negative) per hour
+
+Note what is **not** here: a `rate`. See "Converters" below — an authored net rate
+was the same smell as `service_rate`, a number standing in for a mechanism.
 
 Everything else derives. The one number the rest of the game reads:
 
@@ -207,11 +209,110 @@ urgency(holder, location, commodity) -> (direction, 0..1)
   otherwise             ->  satisfied; no posting
 ```
 
-**Direction keys off STOCK, not rate** (corrected). An earlier draft derived
-direction from the sign of `rate`, which made it impossible for a station to flip:
-Ironhold *normally* imports volatiles, but once **over-served** it wants the
-surplus gone — its rate hasn't changed sign, its stock has. Rate tells you which
-way a holder *drifts*; stock tells you which way it currently *wants*.
+**Direction keys off STOCK** (corrected twice). An earlier draft derived direction
+from the sign of an authored `rate`, which made it impossible for a station to
+flip: Ironhold *normally* imports volatiles, but once **over-served** it wants the
+surplus gone. Stock is what says which way a holder currently *wants*.
+
+## Converters: throughput is derived, not authored
+
+**An authored per-station `rate` is a fudge factor.** Refinery Prime consuming
+3.3 ore/hr is not a property of the station — it is *what happens when a converter
+runs*. Authoring it as a constant means the causal chain cannot exist: run out of
+ore and the number keeps ticking.
+
+So the station's `"self"` entry authors its **industry**, not its rates:
+
+```gdscript
+"converters": [
+    { "in": {"ORE": 3.3}, "out": {"REFINED": 2.2}, "rate": 1.0 },
+]
+"sinks":   {"VOLATILES": 0.45}   # population upkeep -- a genuine constant
+"sources": {"ORE": 1.5}          # SCAFFOLDING -- stands in for mining traffic
+```
+
+### Stalls propagate in BOTH directions
+
+Achieved throughput per tick is:
+
+```
+achieved = min(rate, input_availability, output_headroom)
+           ... running PARTIALLY, scaled to the scarcest input (decided),
+           but zero below a floor fraction so a converter never trickles at 3%
+```
+
+- **STARVED** — no ore; the refinery goes cold.
+- **BLOCKED** — the refined bin is full because nobody is hauling it away. The
+  refinery *also* goes cold, therefore stops consuming ore, therefore ore backs up
+  at the mines, therefore mining stops.
+
+Backpressure upstream and downstream, from one rule.
+
+### The two stall states are two different pieces of news
+
+*"Refinery Prime is cold — no ore"* and *"Refinery Prime is backed up — nobody is
+hauling refined"* are **different problems with different fixes**, and both are
+facts a station knows about itself. So both are postable and mailable, at different
+values to different buyers.
+
+A player who knows *which* stall is happening holds genuinely actionable
+information that a player who only knows "refined is scarce" does not. That exists
+only because a stall is a **state**, not a number quietly trending down.
+
+### A stalled converter consumes NOTHING (decided — keep it simple)
+
+A converter draws only its declared inputs, and only in proportion to what it
+actually achieved. Stalled means zero in, zero out. No idle draw, no upkeep rule,
+no second concept.
+
+**Sinks are a separate mechanism and never stop.** The station's *population* keeps
+requiring volatiles whether or not any industry is running. So a station with a
+cold refinery does keep draining volatiles — because its people do, not because the
+refinery does.
+
+That distinction matters: an earlier draft gave the *converter* an idle upkeep of
+volatiles, which conflated two unrelated mechanisms to produce an effect the
+population sink already produces on its own. Same outcome, one fewer rule.
+
+### `sources` is scaffolding — build the seam now
+
+Ore and volatiles will eventually be restocked by **mining ships**, so `sources` is
+explicitly temporary. What matters is that the fake uses the same entry point a
+real delivery will:
+
+```gdscript
+deliver(holder, commodity, amount)   # the ONLY way stock increases
+```
+
+The fake calls it on the economy tick; a mining ship later calls it from the same
+`docking_bay` DOCKED hook haulers already use. Deleting the fake is then a one-line
+change rather than a restructure.
+
+**Mining ships are a second traffic class** (later scope, flagged so the seam stays
+clean): field↔station short hops are nothing like station↔station hauls — short
+range, defenceless, clustered on the fields. And they are the **bottom** of the
+supply chain, so killing them is the deepest possible attack.
+
+### The cascade is wanted, and it self-heals
+
+> lose a mining ship → refinery stalls → haulers arrive to find no refined to ship → …
+
+That chain is the point, not a hazard. It terminates rather than spiralling into a
+dead world: a starved refinery's ore urgency climbs, raising the ore price, pulling
+haulers onto the ore lane, restarting it.
+
+**The one real deadlock is circular** — repair needs REFINED, REFINED needs ore
+hauled, hauling needs unbroken ships. If every hauler were damaged with no refined
+anywhere, nothing could recover **except that `TrafficGuild`'s population floor
+spawns fresh, undamaged hulls.** So the floor is the deadlock breaker. Recorded
+because nobody designed it for that, and it could be "optimised" away by someone
+who doesn't know it is load-bearing here.
+
+### What the reference table becomes
+
+The 8×4 rate matrix below stops being an *input* and becomes the **expected steady
+state** — a far better test oracle than a set of authored constants, since
+throughput is now bounded by real inputs and cannot be authored inconsistently.
 
 ### The secondary market falls out of that flip, for free
 
@@ -259,11 +360,18 @@ closes eats the loss (see planning risk, below).
 
 ## Worked reference case — the home cluster
 
-Rates in lots/hour. **Ore production is not invented** — `home_cluster.gd`
+**This is an ORACLE, not an input.** Under the converter model above, net flow per
+commodity is *derived* from industry, sinks and sources — so this table is the
+**expected steady state** the sim should settle to, and it is what Phase A's tests
+assert against. (It is a better oracle than authored constants precisely because
+throughput is bounded by real inputs and therefore cannot be authored
+inconsistently.)
+
+Net flows in lots/hour. **Ore extraction is not invented** — `home_cluster.gd`
 already authors 32 / 22 / 18 / 18 / 15 rocks per asteroid field, so Slag Bay
-out-produces Deepcut by 2× because its field genuinely is 2× bigger. Depth 2
-reading a fact the world already has is the difference between a model and a
-fudge factor.
+out-produces Deepcut by 2× because its field genuinely is 2× bigger. Reading a fact
+the world already has is the difference between a model and a fudge factor. Note the
+`sources` rows are **scaffolding** standing in for mining traffic.
 
 Coldreach's 22-rock field reads as ice-rich (mostly VOLATILES, little ORE);
 yield-per-rock stays consistent with Slag Bay's.
