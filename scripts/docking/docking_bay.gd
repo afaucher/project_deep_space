@@ -118,12 +118,24 @@ func _physics_process(delta: float) -> void:
 					# moment the clamps actually have the ship) -- the
 					# player-facing record that docking succeeded, alongside
 					# the repair/damage entries M40 already logs.
+					var host = get_parent()
 					if captured.has_method("log_event"):
 						var host_label: String = ""
-						var host = get_parent()
 						if host != null:
 							host_label = str(host.get("ship_name")) if host.get("ship_name") != null else host.name
 						captured.log_event("info", "Docked at %s berth %s" % [host_label, slip_id])
+					# M53b Pass 1 -- record the arrival in the STATION's own
+					# docking registry (Ship.record_docking_event). THIS
+					# transition, not grant issuance, is the convergence
+					# point both the player (port_control.request_docking)
+					# and NPC (Ship.issue_docking_grant called directly by
+					# AI) docking paths funnel through -- see docking_bay.gd
+					# file header / Ship.docking_registry doc comment.
+					if host != null and host.has_method("record_docking_event"):
+						var subject: Dictionary = {}
+						if captured.has_method("get_active_transponder_data"):
+							subject = captured.get_active_transponder_data()
+						host.record_docking_event(subject.get("name", ""), subject.get("flag", ""), "DOCKED")
 		State.DOCKED:
 			if not _valid(captured):
 				_release()
@@ -265,11 +277,22 @@ func berth_pos_for_bounding_radius(other_bounding_radius: float) -> Vector2:
 
 func _release() -> void:
 	if _valid(captured):
-		# Log only a release FROM DOCKED (a completed stay) -- an aborted
-		# capture never actually docked, and logging those would spam the
-		# engineering log on every timeout/retry cycle.
-		if state == State.DOCKED and captured.has_method("log_event"):
-			captured.log_event("info", "Released from berth " + slip_id)
+		# Log/record only a release FROM DOCKED (a completed stay) -- an
+		# aborted capture never actually docked, and logging those would spam
+		# the engineering log (and the station's docking registry) on every
+		# timeout/retry cycle.
+		if state == State.DOCKED:
+			if captured.has_method("log_event"):
+				captured.log_event("info", "Released from berth " + slip_id)
+			# M53b Pass 1 -- symmetric departure record alongside the
+			# DOCKED-transition arrival record above (Ship.docking_registry /
+			# record_docking_event) -- same convergence point, same station.
+			var release_host = get_parent()
+			if release_host != null and release_host.has_method("record_docking_event"):
+				var subject: Dictionary = {}
+				if captured.has_method("get_active_transponder_data"):
+					subject = captured.get_active_transponder_data()
+				release_host.record_docking_event(subject.get("name", ""), subject.get("flag", ""), "DEPARTED")
 		captured.wants_dock = false
 		captured.docking_bay = null
 		# The docking transaction with THIS station is over (completed hold,

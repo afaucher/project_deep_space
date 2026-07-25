@@ -828,6 +828,61 @@ var current_port_zone = null
 func get_port_zone() -> Dictionary:
 	return port_zone
 
+# M53b Pass 1 -- per-station docking registry (Mail phase 1 substrate; see
+# design_ideas/mail_network.md "Docking registry (per station)" and
+# implementation_plans/m53bc_traffic_guild.md "Pass 1"). An append-only log of
+# THIS station's own dock/undock events, ordered by a monotonic per-station
+# sequence counter this station ALONE increments -- the mail model's
+# single-writer source log ("<station> Docking Registry @ vN"). Meaningless on
+# a non-station ship, exactly like port_zone above -- nothing ever appends to
+# it there. Pure instrumentation for now: nothing reads this yet (Pass 4 adds
+# the demand-score consumer); it exists so that later read is registry-shaped
+# from day one instead of a retrofit.
+#
+# Entry shape (plain serializable data -- ints/strings only, no object refs,
+# so a later pass can merge/serialize this across ships): {"seq": int,
+# "subject_name": String, "flag": String, "event": "DOCKED"|"DEPARTED",
+# "stamp": int}. `seq` is the ordering clock (starts at 1, strictly
+# increasing, never reused/reset -- see record_docking_event below). `stamp`
+# is Engine.get_physics_frames() (the M56 frame-stamp idiom) and is for AGE
+# DISPLAY only, never for ordering -- two clocks, per the mail doc.
+var docking_registry: Array = []
+var registry_seq: int = 0
+
+# A long campaign would otherwise grow docking_registry forever -- keep only
+# the most recent DOCKING_REGISTRY_CAP entries, oldest dropped first.
+# registry_seq is NOT reset/reused on a trim: the sequence must stay
+# monotonic even once its early entries are gone, since that (not array
+# length) is what makes a future "do I have newer than you?" compare correct.
+const DOCKING_REGISTRY_CAP := 200
+
+# Appends one entry to THIS station's docking registry and returns it.
+# subject_name/flag are what the docking ship is PUBLICLY claiming (its
+# active transponder data -- see get_active_transponder_data()), never
+# omniscient truth: a dark/undercover ship yields "" for both, and that's
+# recorded as-is rather than invented. Called ONLY from the DockingBay
+# state-transition hook (docking_bay.gd's DOCKED-transition and the
+# DOCKED-release path in _release()) -- the honest "a dock/undock actually
+# happened" convergence point that both the player path
+# (port_control.request_docking -> issue_docking_grant) and the NPC path
+# (Ship.issue_docking_grant called directly by AI) funnel through regardless
+# of how permission was obtained. Deliberately NOT called from grant
+# issuance -- a grant can go unfulfilled, which is not the same event as a
+# dock.
+func record_docking_event(subject_name: String, flag: String, event: String) -> Dictionary:
+	registry_seq += 1
+	var entry: Dictionary = {
+		"seq": registry_seq,
+		"subject_name": subject_name,
+		"flag": flag,
+		"event": event,
+		"stamp": Engine.get_physics_frames(),
+	}
+	docking_registry.append(entry)
+	if docking_registry.size() > DOCKING_REGISTRY_CAP:
+		docking_registry.pop_front()
+	return entry
+
 # M31 -- per-tick zone membership + edge-event detection. Scans the "ships"
 # group (stations live in it too, see _ready() add_to_group("ships")) for
 # controlled stations -- non-empty get_port_zone() -- and finds the NEAREST
