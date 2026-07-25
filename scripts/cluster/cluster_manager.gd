@@ -107,6 +107,13 @@ func _promote(rec) -> void:
 		node.ship_name = rec.name
 		node.authority_flags = rec.authority_flags.duplicate(true)
 		node.warrant_authority = rec.warrant_authority.duplicate(true)
+		# M53b Pass 1b -- weak back-reference so the node's docking-registry
+		# read/write can redirect to the record (the canonical store across
+		# demote) instead of the node's own local fallback fields. weakref(),
+		# not a plain assignment: the record's live_node already points AT
+		# this node, so a plain back-reference would be a Node<->RefCounted
+		# reference cycle. See ship.gd's cluster_record_ref doc comment.
+		node.cluster_record_ref = weakref(rec)
 	# Transform before add_child (body not yet in the physics world -> no teleport
 	# warning); velocities after, once it is registered.
 	node.position = rec.pos

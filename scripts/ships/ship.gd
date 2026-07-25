@@ -846,8 +846,36 @@ func get_port_zone() -> Dictionary:
 # increasing, never reused/reset -- see record_docking_event below). `stamp`
 # is Engine.get_physics_frames() (the M56 frame-stamp idiom) and is for AGE
 # DISPLAY only, never for ordering -- two clocks, per the mail doc.
+#
+# M53b Pass 1b -- these two fields are the FALLBACK store only, used when this
+# Ship has no cluster record attached (sandbox play, and bare-Ship tests like
+# test_docking_registry.gd that construct a station with `.new()` and never
+# route it through ClusterManager). A promoted station's real, canonical
+# storage is ClusterEntity.docking_registry / .registry_seq (cluster_entity.gd)
+# -- the record survives demote, this node does not. record_docking_event()
+# and get_docking_registry()/get_registry_seq() below resolve to whichever one
+# applies via cluster_record_ref, and write/read exactly ONE of the two, never
+# both (a dual write would let the record go stale while the station is live).
 var docking_registry: Array = []
 var registry_seq: int = 0
+
+# M53b Pass 1b -- weak reference to this Ship's ClusterEntity record, set by
+# ClusterManager._promote() alongside the other record->node wiring. WeakRef
+# (not a plain reference) deliberately: Ship is a Node the record's `live_node`
+# already points AT, so a plain back-reference would form a Node<->RefCounted
+# cycle. Null for a Ship that was never promoted (sandbox, tests) -- see
+# _resolve_cluster_record() below, which treats a null ref and a *dead* ref
+# (get_ref() returns null after the record itself is freed) identically.
+var cluster_record_ref: WeakRef = null
+
+# Resolves cluster_record_ref to the live ClusterEntity, or null if this Ship
+# has no record attached (never promoted) or the record no longer exists.
+# Every docking-registry read/write funnels through this so the "record when
+# attached, else local" rule can't drift between the two call sites.
+func _resolve_cluster_record():
+	if cluster_record_ref == null:
+		return null
+	return cluster_record_ref.get_ref()
 
 # A long campaign would otherwise grow docking_registry forever -- keep only
 # the most recent DOCKING_REGISTRY_CAP entries, oldest dropped first.
@@ -870,18 +898,50 @@ const DOCKING_REGISTRY_CAP := 200
 # issuance -- a grant can go unfulfilled, which is not the same event as a
 # dock.
 func record_docking_event(subject_name: String, flag: String, event: String) -> Dictionary:
-	registry_seq += 1
-	var entry: Dictionary = {
-		"seq": registry_seq,
-		"subject_name": subject_name,
-		"flag": flag,
-		"event": event,
-		"stamp": Engine.get_physics_frames(),
-	}
-	docking_registry.append(entry)
-	if docking_registry.size() > DOCKING_REGISTRY_CAP:
-		docking_registry.pop_front()
+	var rec = _resolve_cluster_record()
+	var entry: Dictionary
+	if rec != null:
+		rec.registry_seq += 1
+		entry = {
+			"seq": rec.registry_seq,
+			"subject_name": subject_name,
+			"flag": flag,
+			"event": event,
+			"stamp": Engine.get_physics_frames(),
+		}
+		rec.docking_registry.append(entry)
+		if rec.docking_registry.size() > DOCKING_REGISTRY_CAP:
+			rec.docking_registry.pop_front()
+	else:
+		registry_seq += 1
+		entry = {
+			"seq": registry_seq,
+			"subject_name": subject_name,
+			"flag": flag,
+			"event": event,
+			"stamp": Engine.get_physics_frames(),
+		}
+		docking_registry.append(entry)
+		if docking_registry.size() > DOCKING_REGISTRY_CAP:
+			docking_registry.pop_front()
 	return entry
+
+# Read-side counterpart to record_docking_event() above -- resolves to the
+# attached record's registry when this Ship has one, else the local fallback
+# array, by the exact same rule. Use this (not the bare `docking_registry`
+# field) from anywhere that needs to read a possibly-promoted station's log;
+# the bare field is only guaranteed current for a Ship with no record.
+func get_docking_registry() -> Array:
+	var rec = _resolve_cluster_record()
+	if rec != null:
+		return rec.docking_registry
+	return docking_registry
+
+func get_registry_seq() -> int:
+	var rec = _resolve_cluster_record()
+	if rec != null:
+		return rec.registry_seq
+	return registry_seq
 
 # M31 -- per-tick zone membership + edge-event detection. Scans the "ships"
 # group (stations live in it too, see _ready() add_to_group("ships")) for

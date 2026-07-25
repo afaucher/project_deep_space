@@ -24,6 +24,52 @@ Recorded because the reasons generalize:
 - Demand therefore moved **onto stations** as stock + rates, and the coupling
   between parties and the world became the **posting**.
 
+## Phase 0 (a.k.a. M53b Pass 1b) — Move the docking registry onto the record
+
+Repairs a **latent correctness bug** in the committed Pass 1 work (`f6b15af`)
+before anything else is built on it. Do this first; it is small.
+
+**The bug.** `docking_registry` and `registry_seq` live on `Ship` (`ship.gd`), not
+on the `ClusterEntity` record. `ClusterManager._demote()` reads back **only**
+kinematics (pos/rot/vel/ang_vel) and frees the node, so on demote the registry is
+destroyed and on re-promote `registry_seq` restarts at **0**. Since the entire mail
+merge is `my version > your version`, a holder carrying `Ironhold@v412` would then
+hold a version *higher than the source's own* — poisoning that compare permanently.
+Pass 1's own doc comment states the invariant this breaks: *"registry_seq is NOT
+reset/reused... the sequence must stay monotonic."*
+
+**Severity: latent, not currently biting.** `cluster_manager.gd` defaults to
+`policy.configure_full_sim()` (with `configure_bubble(45000, 60000)` commented out
+directly above), so nothing demotes in normal play today. But BUBBLE is the
+documented intended default in `liveness_policy.gd`, and M53a's 2× cluster makes
+FULL_SIM progressively more expensive — so this bites the day BUBBLE is switched
+on, most likely during perf work, which is exactly when nobody is looking at mail.
+`test_docking_registry` cannot see it because it never demotes.
+
+**A second reason the record must be canonical:** under BUBBLE most stations are
+dormant, and parties/directors must be able to read a station's registry *without
+being there*. A copy that only exists on the live node is unreadable exactly when
+the fog matters.
+
+### Scope
+
+1. `ClusterEntity` gains `docking_registry: Array` and `registry_seq: int`.
+2. `Ship` gains a **weak** reference to its record (`WeakRef`, to avoid a
+   Node↔RefCounted cycle), set in `ClusterManager._promote()`.
+3. `Ship.record_docking_event()` writes to **the record when one is attached**,
+   else to its own local array; a read accessor resolves the same way. **One
+   canonical store at a time** — never both, or the record goes stale while live.
+   The local fallback is what keeps bare `Ship`s (sandbox, existing tests) working.
+4. Do **not** add an economy tick here — there is no stock to tick until Phase A.
+
+### Tests
+
+- **New:** a station's registry survives demote → promote, with `registry_seq`
+  strictly monotonic across the cycle and earlier entries intact. Must run under
+  **`configure_bubble`**, not FULL_SIM, or it proves nothing.
+- `test_docking_registry` stays green unchanged (the bare-`Ship` path).
+- Full gate green.
+
 ## Phase A — Station economy state (no behavior change)
 
 Pure substrate. Nothing reads it yet, which makes it independently verifiable.

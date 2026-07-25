@@ -74,6 +74,20 @@ var ang_vel: float = 0.0
 # The instantiated body while live, else null.
 var live_node: Node = null
 
+# M53b Pass 1b -- the per-station docking registry (design_ideas/mail_network.md
+# "Docking registry (per station)"). Lives HERE, not on the live Ship node,
+# because the RECORD is the source of truth across a demote/promote cycle
+# (same contract as pos/vel/rot above) and because under BUBBLE most stations
+# are dormant most of the time -- a copy that only existed on the live node
+# would be unreadable exactly when the mail fog needs it. Ship.record_docking_
+# event() / Ship.get_docking_registry() write/read here via a weak reference
+# when a record is attached (see Ship.cluster_record_ref), falling back to a
+# local array on bare Ships (sandbox, tests) that never get promoted at all.
+# Meaningless (never appended to) on a non-station record, same as the fields
+# above. See implementation_plans/m53c_demand_routing.md "Phase 0".
+var docking_registry: Array = []
+var registry_seq: int = 0
+
 # Opaque AI/behavior config handed to the hull on promote (route lists, etc.).
 # Unused by M14's straight-line movers; carried now so later milestones don't
 # have to reshape the record.
