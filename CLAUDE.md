@@ -114,6 +114,22 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   `cooldown`, so stations ran no physics at all.)
 - **`var x := arr.filter(...)`** fails to compile — inferred typing can't resolve
   an untyped `Array` return. Write `var x: Array = arr.filter(...)`.
+- **A mechanical multi-site rewrite (`sed`, replace-all) can't see SCOPE — and
+  the resulting parse error cascades into failures that look unrelated.**
+  Observed 2026-07-25 moving a field: `self_bins.get("sinks", {})` →
+  `rec.industry.get("sinks", {})` was correct at three call sites and broke the
+  fourth, whose enclosing function had no `rec` parameter. That is a *parse*
+  error, so the script never compiles, so **every script that depends on it
+  fails to load** — here `main.gd` — and the suite then reports damage nowhere
+  near the cause: `test_perf_baseline` "failed" (read as a perf regression, it
+  wasn't), and another test "TIMED OUT after 600s" when it had actually failed
+  to load instantly. The real message (`Parse Error: Identifier "rec" not
+  declared`) appears ONLY in `test_logs/<name>.err.log`, never in the summary.
+  You also can't pre-check cheaply — `--check-only` lies about autoloads (see
+  Headless gotchas above). **Practical rule: after any multi-site mechanical
+  rewrite, run ONE affected test directly and read its `.err.log` before
+  spending ten minutes on a full gate.** A compile failure surfaces there in
+  seconds, and a green single test means the cascade class is ruled out.
 
 ## Architecture orientation (pointers, not a re-doc)
 

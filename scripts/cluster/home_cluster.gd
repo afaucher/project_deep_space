@@ -60,6 +60,12 @@ const ORE_RATE_PER_ROCK := 0.1
 # warrant/interdiction contract now applies to the player symmetrically
 # instead of the old crypto handshake making them immune.
 const HOME_IFF := ["TEAM_DRIFT"]
+
+# M53d -- the peer sovereign's crypto tag. A module-level const (not the local
+# it used to be) because Coldreach is authored ~100 lines above the Meridian
+# colony block and needs it too. See the M53d note on Coldreach below.
+const MERIDIAN_IFF := ["TEAM_MERIDIAN"]
+
 const BEACON_RANGE := 50000.0   # matches Buoy's comms range
 
 static func build() -> ClusterDef:
@@ -82,7 +88,28 @@ static func build() -> ClusterDef:
 	var coldreach_pos: Vector2 = Vector2(-70000, 90000) * SCALE
 	var deepcut_pos: Vector2 = Vector2(90000, -170000) * SCALE
 	_station(def, 10, "Slag Bay", SmallStation, slag_bay_pos, "outpost", "", HOME_IFF, Standing.FLAG_DRIFT, _economy_slag_bay())
-	_station(def, 11, "Coldreach", SmallStation, coldreach_pos, "outpost", "", HOME_IFF, Standing.FLAG_DRIFT, _economy_coldreach())
+	# M53d -- Coldreach flies the MERIDIAN flag, not home's. It holds the
+	# cluster's only VOLATILES source (its field reads ice-rich -- see
+	# _economy_coldreach below), so this single flag is what stops Meridian
+	# being a client state: home breathes Meridian's air (existential, fast)
+	# while Meridian depends on home for REFINED, GOODS import and all export
+	# access (economic, slow). Mutual assured disruption -- which is what
+	# explains why they coexist despite the jurisdiction seam instead of one
+	# absorbing the other. See implementation_plans/m53d_meridian_sovereignty.md.
+	#
+	# It also makes the border CONTIGUOUS rather than scattered: every Meridian
+	# station now sits at x < 0 (Coldreach -140k, Halvorsen -280k, Corvus -300k)
+	# and every home station at x >= 0, with Ironhold a capital on the line. And
+	# Coldreach is Ironhold's NEAREST neighbour (228k, vs 310k to Refinery
+	# Prime), so the shortest, highest-volume lane in the cluster -- already
+	# authored as record 701 "Ore Barge" -- becomes the interstate artery.
+	#
+	# 701 deliberately stays a HOME hauler: home reaching across the border to
+	# fetch its own air is the dependency made visible, and it puts a home hull
+	# in foreign, UNPATROLLED space (no patrol loop reaches Coldreach -- Alpha
+	# and Bravo sit on Ironhold and Drift Market with 24k radii). That is the
+	# escort market's natural origin: overwhelming interest, zero jurisdiction.
+	_station(def, 11, "Coldreach", SmallStation, coldreach_pos, "outpost", "", MERIDIAN_IFF, Standing.FLAG_MERIDIAN, _economy_coldreach())
 	_station(def, 12, "Deepcut", SmallStation, deepcut_pos, "outpost", "", HOME_IFF, Standing.FLAG_DRIFT, _economy_deepcut())
 
 	# --- Asteroid fields on the outposts (loader expands into individual rocks) ---
@@ -172,7 +199,7 @@ static func build() -> ClusterDef:
 	# Ironhold at (-35000,0)) -- both colonies sit there, each 200k+ from
 	# every existing station/field/patrol-loop/beacon-road point and inside
 	# the +/-450k margin the plan calls for.
-	var meridian_iff := ["TEAM_MERIDIAN"]
+	var meridian_iff := MERIDIAN_IFF
 	var halvorsen_pos: Vector2 = Vector2(-280000, -260000)   # (-,-) quadrant, empty
 	var corvus_pos: Vector2 = Vector2(-300000, 340000)        # (-,+) quadrant, clear of Coldreach
 	_station(def, 13, "Halvorsen Claim", SmallStation, halvorsen_pos, "outpost", "", meridian_iff, Standing.FLAG_MERIDIAN, _economy_halvorsen())
