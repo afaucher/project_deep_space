@@ -77,6 +77,13 @@ enum JobLog { OFF, ON }
 # debug surface, not authoritative state.
 enum PirateOverdrive { OFF, ON }
 
+# M53b -- the traffic guild director's whole player-facing footprint (mirrors
+# pirate_guild_log below). Default ON; ON prints one line per policy pass
+# (population-floor haulers by state, transient freighters by state, pending
+# etas, losses/replenishments) -- see scripts/directors/traffic_guild.gd's
+# _log().
+enum TrafficGuildLog { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -193,6 +200,14 @@ const OPTIONS := {
 			"On (cap maxed, arrivals every 8-20s)",
 		],
 		"default": PirateOverdrive.OFF,
+	},
+	"traffic_guild_log": {
+		"label": "Traffic guild director log",
+		"choices": [
+			"Off",
+			"On (default -- one line per policy pass)",
+		],
+		"default": TrafficGuildLog.ON,
 	},
 }
 

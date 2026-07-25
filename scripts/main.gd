@@ -24,6 +24,7 @@ const NavComputer = preload("res://scripts/nav/nav_computer.gd")
 const NavAutopilot = preload("res://scripts/nav/nav_autopilot.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const PirateGuild = preload("res://scripts/directors/pirate_guild.gd")
+const TrafficGuild = preload("res://scripts/directors/traffic_guild.gd")
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 
 enum GameMode { SANDBOX, CAMPAIGN }
@@ -286,6 +287,12 @@ func _bootstrap_campaign() -> void:
 	# the sandbox): the guild is an invisible hand behind the home cluster's
 	# wormhole traffic, not a sandbox test fixture.
 	manager.directors.append(PirateGuild.new())
+
+	# M53b -- the traffic guild, a default-config director: population floor
+	# per flag (the depletion fix -- authored haulers plus working piracy
+	# otherwise thin the world permanently) plus transient wormhole freighters
+	# (through-traffic on the beacon road). Campaign only, same as PirateGuild.
+	manager.directors.append(TrafficGuild.new())
 
 	var pid = multiplayer.get_unique_id()
 	# M53a -- campaign player starts in the civilian hauler (slow, fragile,

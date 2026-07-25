@@ -245,6 +245,18 @@ func _attach_ai(rec, node) -> void:
 				docs.append({"name": kit[i], "flag": rec.transponder_flag, "used": i == 0})
 			node.identity_documents = docs
 		return
+	# M53b -- civilian job-runner (implementation_plans/m53bc_traffic_guild.md
+	# "Pass 2", structural gap #2): a non-pirate record whose behavior carries
+	# a `job` (traffic_guild.gd's transient wormhole freighters) gets a
+	# job-running tree too -- generalizes the pirate-only gate above rather
+	# than replacing it. Deliberately checked AFTER the pirate branch (which
+	# also carries "job" but returns above) and BEFORE the route/cargo check
+	# below (population-floor haulers still carry {"route", "cargo": true},
+	# no "job" key, and fall through to that branch completely untouched).
+	if typeof(rec.behavior) == TYPE_DICTIONARY and rec.behavior.has("job"):
+		node.add_child(AITreeFactory.build_civilian_job())
+		node.assign_job(rec.behavior.get("job", {}).duplicate(true))
+		return
 	# Mobile hull: patrol if it was handed a route (via behavior), else combat AI.
 	var route = _route_from(rec.behavior)
 	if route != null and route.size() > 0:

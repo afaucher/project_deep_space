@@ -319,3 +319,51 @@ static func build_cargo() -> Node:
 	root.add_child(idle)
 
 	return tree
+
+# M53b -- civilian job-runner tree (implementation_plans/m53bc_traffic_guild.md
+# "Pass 2", structural gap #2: a non-pirate ship carrying a `job` had no tree
+# at all -- cluster_manager.gd's _attach_ai only wired JobRunnerLeaf under the
+# pirate branch). Composed from build_cargo() above, NOT invented from
+# scratch: identical Disengage + ThreatResponse reaction subtree (a transient
+# wormhole freighter must still comply-or-run on a DEMAND_STOP and broadcast
+# SOS exactly like any hauler -- a freighter that ignored a pirate would be a
+# fiction bug), with CargoRun swapped for JobRunner so the itinerary (GO_TO ->
+# DOCK_AT -> ... -> EXIT_AT, traffic_guild.gd's freighter job) drives movement
+# instead of a looping patrol_route.
+#
+#   Selector
+#   |-- Disengage (flee when crippled/attacked)
+#   |-- ThreatResponse (comply-or-run on a STOP demand, always SOS; FAILURE when idle)
+#   |-- JobRunner (the assigned itinerary: dock at each terminus, then exit)
+#   +-- Idle (job complete/absent -> hold heading)
+static func build_civilian_job() -> Node:
+	var tree = BeehaveTreeScript.new()
+	tree.name = "AITree"
+
+	var root = SelectorScript.new()
+	root.name = "RootSelector"
+	tree.add_child(root)
+
+	var disengage = SequenceScript.new()
+	disengage.name = "Disengage"
+	root.add_child(disengage)
+	var should_disengage = ShouldDisengageLeaf.new()
+	should_disengage.name = "ShouldDisengage"
+	disengage.add_child(should_disengage)
+	var flee = FleeLeaf.new()
+	flee.name = "Flee"
+	disengage.add_child(flee)
+
+	var threat_response = ThreatResponseLeaf.new()
+	threat_response.name = "ThreatResponse"
+	root.add_child(threat_response)
+
+	var job_runner = JobRunnerLeaf.new()
+	job_runner.name = "JobRunner"
+	root.add_child(job_runner)
+
+	var idle = IdleLeaf.new()
+	idle.name = "Idle"
+	root.add_child(idle)
+
+	return tree
