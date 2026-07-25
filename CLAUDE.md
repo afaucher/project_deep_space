@@ -67,6 +67,19 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   the SAME run. Trust the monitor for "did a spike happen", never for
   averages; `perf_combat.gd` samples both side by side. `p95 == max` in a
   report is the tell that held values dominated the tail.
+- **A solo `test_perf_baseline` run right after a full `build.ps1` gate is NOT
+  trustworthy — use the in-gate figure.** Observed 2026-07-24: immediately
+  after a gate, running it alone reported avg 20.3ms / p95 54.4ms / max 203ms
+  (well over budget) while the same tree passed *inside* the gate at avg
+  12.0ms / p95 16.1ms. Counterintuitive — solo should have LESS contention —
+  and it is not the `TIME_PHYSICS_PROCESS` hold artifact below (p95 != max).
+  The likely cause is the gate's export step leaving a fresh ~95MB exe + ~35MB
+  zip for the OS/AV to scan, competing for CPU/IO for a while afterwards; the
+  mechanism is unconfirmed, the observation is repeatable. Practical rule: when
+  a perf number looks alarming, **A/B it** (stash the change, re-run the same
+  way) before believing the change caused it — that is what proved the traffic
+  director innocent (it reproduced WORSE without the change, identical 35-ship
+  census), and either wait for the machine to settle or trust the gate run.
 - **`FileAccess.store_line` buffers** — a CSV being written may read back 0 lines
   until the file is flushed/closed.
 - Long-running commands get auto-backgrounded by the harness; wait for the
