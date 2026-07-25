@@ -390,6 +390,16 @@ static func _economy_coldreach() -> Dictionary:
 		},
 		"sources": {Commodity.ORE: 0.6, Commodity.VOLATILES: 2.60},
 		"sinks": {Commodity.REFINED: 0.25, Commodity.GOODS: 0.20},
+		# M53c Phase B -- the design doc's "natural first real case" for
+		# eligibility (export control): Coldreach is Meridian territory
+		# (Standing.FLAG_MERIDIAN, see the M53d note above) and restricts its
+		# own VOLATILES posting to locally-flagged (Meridian) hulls -- the
+		# restriction stops AT THE SOURCE, so once volatiles reach a THIRD
+		# party's bins elsewhere (e.g. Ironhold's) they're that holder's to
+		# sell to anyone. No restriction on ORE/REFINED/GOODS here.
+		"market": {
+			Commodity.VOLATILES: {"eligible_flags": [Standing.FLAG_MERIDIAN]},
+		},
 	}
 
 # Deepcut -- 15-rock field, derived ORE source.

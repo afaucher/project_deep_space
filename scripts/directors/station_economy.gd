@@ -268,6 +268,183 @@ static func urgency(rec, holder: String, commodity: String) -> Dictionary:
 		return {"direction": "EXPORT", "value": v2}
 	return {"direction": "SATISFIED", "value": 0.0}
 
+# ---------------------------------------------------------------------------
+# withdraw() -- the general counterpart to deliver() (design doc's "the ONE
+# way stock increases" gets its mirror here: the one way it decreases other
+# than the tick's own sinks/converters). Any HOLDER, not just "self" -- an
+# EXPORT posting is served by a ship picking cargo UP from a holder's bin,
+# and Phase B2 repair draws down a station's own "self" bins the same way.
+# Returns the amount ACTUALLY withdrawn (<= amount, less if the bin doesn't
+# have enough), never negative, never below 0 stock -- a caller scales
+# whatever it was about to do down to what stock allows, exactly deliver()'s
+# clamp-not-fail discipline mirrored on the other side.
+# ---------------------------------------------------------------------------
+
+static func withdraw(rec, holder: String, commodity: String, amount: float) -> float:
+	if amount <= 0.0:
+		return 0.0
+	var holder_bins: Dictionary = rec.stocks.get(holder, {})
+	var bin: Dictionary = holder_bins.get(commodity, {})
+	if bin.is_empty():
+		return 0.0
+	var stock: float = bin.get("stock", 0.0)
+	var taken: float = min(amount, stock)
+	if taken <= 0.0:
+		return 0.0
+	bin["stock"] = clampf(stock - taken, 0.0, bin.get("capacity", 0.0))
+	return taken
+
+# ---------------------------------------------------------------------------
+# M53c Phase B -- postings (design_ideas/station_economy.md "Postings are the
+# universal coupling", "Pricing: urgency IS price discovery", principle 9).
+#
+# A posting is NOT a stored object -- it is DERIVED fresh from bin state every
+# time it's asked for, same discipline as urgency() above (principle 4: one
+# source of truth). That includes `quantity`: serving a posting moves STOCK
+# via deliver()/withdraw(), and quantity is simply read back off that same
+# stock, so "quantity depletes as served" needs no separate counter to drift
+# out of sync with it.
+#
+# The one piece of REAL, independently-authored state is the market POLICY --
+# eligibility (export control) and price multipliers (the political dial) --
+# in rec.market[holder][commodity]:
+#   { "eligible_flags": Array[String],   # [] = unrestricted (default)
+#     "home_flag": String,               # who counts as "own flag" for pricing;
+#                                         #   defaults to rec.transponder_flag
+#                                         #   when holder == "self", else ""
+#     "own_flag_multiplier": float,      # applied when asker == home_flag (default 1.0)
+#     "foreign_multiplier": float }      # applied otherwise (default 1.0)
+# Absent/empty market entry -> unrestricted eligibility, uniform (1.0) pricing
+# regardless of asker -- the sane default when a station authors no policy.
+# ---------------------------------------------------------------------------
+
+# Mildly convex price curve base (design doc "Pricing: urgency IS price
+# discovery" -- "Mildly convex in urgency": linear makes everything lukewarm,
+# strongly convex makes the world oscillate between neglect and stampede).
+# PRICE_BASE=100.0 matches the design doc's own worked "payout = 100 x
+# urgency" illustration; PRICE_CONVEX_EXP is this section's own explicit
+# correction on top of that (deliberately linear) illustration.
+const PRICE_BASE := 100.0
+const PRICE_CONVEX_EXP := 1.5
+
+# M53c Phase B2 -- repair's HP-per-lot conversion (design doc "Repair closes
+# the loop"): hull draws REFINED at 1 lot ~= 500 HP; every OTHER component
+# type draws GOODS at 1 lot ~= 150 HP (~3.3x dearer per HP -- GOODS is the
+# scarce import, so systems damage hurts more than structure). Lives here,
+# not on Ship, so the economy's own conversion table stays in ONE place.
+const HULL_HP_PER_LOT := 500.0
+const SYSTEM_HP_PER_LOT := 150.0
+
+static func _market_policy(rec, holder: String, commodity: String) -> Dictionary:
+	return rec.market.get(holder, {}).get(commodity, {})
+
+# Eligibility -- export control (design doc: "Coldreach restricting VOLATILES
+# to locally-flagged hulls... the restriction stops AT THE SOURCE"). Anyone
+# eligible when no policy is authored (or the list is empty).
+static func is_eligible(rec, holder: String, commodity: String, flag: String) -> bool:
+	var eligible_flags: Array = _market_policy(rec, holder, commodity).get("eligible_flags", [])
+	if eligible_flags.is_empty():
+		return true
+	return eligible_flags.has(flag)
+
+# Principle 9 -- EVERY political decision lives HERE, never in urgency() or
+# _price_curve() below. This is the ONLY function price() consults for "who's
+# asking"; calling it with two different asker_flag values must move price
+# and nothing else (see _price_curve, which never sees a flag at all).
+static func _policy_multiplier(rec, holder: String, commodity: String, asker_flag: String) -> float:
+	var policy: Dictionary = _market_policy(rec, holder, commodity)
+	var home_flag: String = policy.get("home_flag", rec.transponder_flag if holder == "self" else "")
+	if asker_flag != "" and home_flag != "" and asker_flag == home_flag:
+		return policy.get("own_flag_multiplier", 1.0)
+	return policy.get("foreign_multiplier", 1.0)
+
+# f(urgency) -- flag-BLIND by construction (no asker parameter at all, so it
+# is structurally impossible for politics to leak in here). Mildly convex.
+static func _price_curve(urgency_value: float) -> float:
+	return PRICE_BASE * pow(clampf(urgency_value, 0.0, 1.0), PRICE_CONVEX_EXP)
+
+# price() = f(urgency) x policy_multiplier(asker) (design doc, verbatim).
+# asker_flag == "" reads the board's own posted number with no per-flag
+# discount/surcharge applied -- the "globally readable" board Phase B builds,
+# no fog yet.
+static func price(rec, holder: String, commodity: String, asker_flag: String = "") -> float:
+	var u: Dictionary = urgency(rec, holder, commodity)
+	if u["direction"] == "SATISFIED":
+		return 0.0
+	return _price_curve(u["value"]) * _policy_multiplier(rec, holder, commodity, asker_flag)
+
+# The posting itself. {} when the holder is SATISFIED -- "a posting appears
+# when stock crosses the threshold and closes when satisfied" falls straight
+# out of urgency() flipping to SATISFIED, no separate open/close bookkeeping.
+# `eligible` reflects `asker_flag` (pass "" to read the board with no asker in
+# mind -- always eligible, since eligibility restricts a PARTY, not the
+# board). `urgency` is reported so callers/tests can assert it stays IDENTICAL
+# across two different asker_flag calls even as `price` moves (principle 9's
+# regression sentinel).
+static func get_posting(rec, holder: String, commodity: String, asker_flag: String = "") -> Dictionary:
+	var u: Dictionary = urgency(rec, holder, commodity)
+	if u["direction"] == "SATISFIED":
+		return {}
+	var bin: Dictionary = rec.stocks.get(holder, {}).get(commodity, {})
+	var quantity: float
+	if u["direction"] == "IMPORT":
+		quantity = max(0.0, bin.get("target", 0.0) - bin.get("stock", 0.0))
+	else:
+		quantity = max(0.0, bin.get("stock", 0.0) - bin.get("surplus_line", 0.0))
+	return {
+		"holder": holder,
+		"commodity": commodity,
+		"direction": u["direction"],
+		"urgency": u["value"],
+		"quantity": quantity,
+		"eligible_flags": _market_policy(rec, holder, commodity).get("eligible_flags", []),
+		"eligible": true if asker_flag == "" else is_eligible(rec, holder, commodity, asker_flag),
+		"price": price(rec, holder, commodity, asker_flag),
+	}
+
+# "Payout is fixed at acceptance, not recomputed on arrival" (explicit test
+# requirement) -- snapshots price/direction the MOMENT a server commits, so a
+# delivery landing after the bin state has since moved (someone else got
+# there first, or the station's own tick ran) is never a rules argument: the
+# server is paid what it was promised, for whatever actually transfers.
+# Returns {} for an ineligible asker or a posting that's already closed --
+# nothing to accept.
+static func accept_posting(rec, holder: String, commodity: String, asker_flag: String) -> Dictionary:
+	var posting: Dictionary = get_posting(rec, holder, commodity, asker_flag)
+	if posting.is_empty() or not posting["eligible"]:
+		return {}
+	return {
+		"holder": holder,
+		"commodity": commodity,
+		"direction": posting["direction"],
+		"price": posting["price"],
+		"asker_flag": asker_flag,
+	}
+
+# Spends an acceptance snapshot: moves up to `amount` of stock -- IMPORT means
+# the server delivers TO the holder (deliver()); EXPORT means the server picks
+# UP from the holder (withdraw()) -- clamped by whichever of those two clamps
+# to the live bin, so the actual transfer can land under `amount` (bin
+# filled/emptied since accept). Payout is `acceptance.price * transferred`,
+# the ACTUAL amount, never the requested one -- no free money for a delivery
+# that didn't fully land. Several servers spending acceptances against the
+# same (holder, commodity) is exactly "quantity depletes as served, not an
+# exclusive claim" -- each call reads/writes the live bin, no reservation
+# anywhere.
+static func fulfill(rec, acceptance: Dictionary, amount: float) -> Dictionary:
+	if acceptance.is_empty() or amount <= 0.0:
+		return {"transferred": 0.0, "payout": 0.0}
+	var holder: String = acceptance["holder"]
+	var commodity: String = acceptance["commodity"]
+	var before: float = rec.stocks.get(holder, {}).get(commodity, {}).get("stock", 0.0)
+	if acceptance["direction"] == "IMPORT":
+		deliver(rec, holder, commodity, amount)
+	else:
+		withdraw(rec, holder, commodity, amount)
+	var after: float = rec.stocks.get(holder, {}).get(commodity, {}).get("stock", 0.0)
+	var transferred: float = abs(after - before)
+	return {"transferred": transferred, "payout": transferred * float(acceptance["price"])}
+
 # Dev visibility only (same "console is omniscient by declaration" convention
 # as PirateGuild/TrafficGuild's own _event()/_log()) -- one line per station
 # whose converters aren't all RUNNING. Silent when nothing is stalled, which

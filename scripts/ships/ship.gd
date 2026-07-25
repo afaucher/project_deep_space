@@ -20,6 +20,8 @@ const PortControl = preload("res://scripts/port/port_control.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
 const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
+const StationEconomy = preload("res://scripts/directors/station_economy.gd")
+const Commodity = preload("res://scripts/economy/commodity.gd")
 
 # M31 -- port-zone membership hysteresis. A ship hovering right on a zone's
 # boundary would otherwise thrash zone_enter/zone_exit every tick (its position
@@ -770,11 +772,40 @@ func _unregister_repair(ship) -> void:
 	if ship != null:
 		active_repairs.erase(ship.get_instance_id())
 
-# M40 -- host-side repair tick. Only hosts with something in active_repairs pay
-# any cost (early-out below), so this doesn't add per-component work to every
-# ship's hot _physics_process. Called once per physics tick from THIS host's
-# own _physics_process (see the call site further down).
+# M40 -- host-side repair tick, M53c Phase B2 -- gated on the host's own
+# station economy (design_ideas/station_economy.md "Repair closes the loop:
+# damage becomes demand"). Only hosts with something in active_repairs pay
+# any per-DOCKED-ship cost (early-out below is now past the host's own
+# self-repair pass -- see the resolve-once comment there for why), so this
+# doesn't add per-component work to every ship's hot _physics_process. Called
+# once per physics tick from THIS host's own _physics_process (see the call
+# site further down).
 func _process_repairs(delta: float) -> void:
+	# M53c Phase B2 -- resolved ONCE per tick, not per component: every draw
+	# below -- whether for a docked guest or the host's OWN self-repair --
+	# comes from this SAME "self" bin, so a station healing three docked
+	# ships and itself at once genuinely competes for one shared pool (design
+	# doc: "stations ARE Ships... one mechanism, one ledger"). A host with no
+	# record attached (bare Ship -- sandbox play, and every pre-Phase-B2
+	# repair test/fixture, none of which authors an economy -- same "record
+	# when attached, else local" precedent as the docking registry) or a
+	# record with no authored economy (rec.stocks has no "self" key, e.g. a
+	# non-station or a mobile home) repairs UNGATED, exactly the
+	# pre-Phase-B2 behavior: "no stock tracked" is not the same claim as
+	# "no stock", and gating a host that was never given an economy would
+	# silently break every existing repair fixture.
+	var rec = _resolve_cluster_record()
+	var stock_gated: bool = rec != null and rec.stocks.has("self")
+
+	# Station self-repair (new in Phase B2): only for a LIVE host with an
+	# actual economy to draw from -- a hulk cannot fix itself (mirrors
+	# begin_repairs() refusing a hulk target below), and a host with no
+	# tracked stock has nothing to gate against, so self-repair would be
+	# "free" exactly like every other component-carrying non-station Ship
+	# today (unchanged, no new behavior for combat hulls).
+	if not is_dead and stock_gated:
+		_heal_components(ship_components, delta, rec, stock_gated)
+
 	if active_repairs.is_empty():
 		return
 
@@ -792,17 +823,7 @@ func _process_repairs(delta: float) -> void:
 			done.append(key)
 			continue
 
-		var all_at_max := true
-		for c in ship.ship_components:
-			var max_h: float = c.get("max_health", 0.0)
-			if c["health"] < max_h:
-				c["health"] = min(max_h, c["health"] + REPAIR_RATE * delta)
-				all_at_max = false
-			# Component crossing back to exactly full health, from below --
-			# ship._check_eng_log_crossings() (run in the ship's own
-			# _physics_process) is what actually emits "<id> repaired", since
-			# that's where the per-component crossing-state dict lives. This
-			# loop just applies the healing; the ship logs its own recovery.
+		var all_at_max: bool = _heal_components(ship.ship_components, delta, rec, stock_gated)
 
 		if all_at_max:
 			ship.log_event(ENG_LOG_SEVERITY_INFO, "Repairs complete")
@@ -810,6 +831,64 @@ func _process_repairs(delta: float) -> void:
 
 	for key in done:
 		active_repairs.erase(key)
+
+# M53c Phase B2 -- shared per-component healer for BOTH the host's own
+# self-repair and every docked guest's repair, above -- draws the SAME
+# station stock. Applies up to REPAIR_RATE*delta HP per component, clamped
+# (when stock_gated) to whatever the appropriate class's bin can actually
+# afford: `c["type"] == "hull"` draws REFINED, every other component type
+# draws GOODS (~3.3x dearer per HP -- design doc's split, no new component
+# fields, the taxonomy already carries `type`). "No stock means no repair"
+# (design doc, verbatim): a component stalled on empty stock simply doesn't
+# heal this tick, and is NOT reported as at-max, so a ship/station stays
+# registered rather than being wrongly declared "repairs complete".
+#
+# Returns true iff every component in `components` is already at max_health
+# -- the "repairs complete" signal _process_repairs's docked-ship loop needs.
+func _heal_components(components: Array, delta: float, rec, stock_gated: bool) -> bool:
+	var all_at_max := true
+	for c in components:
+		var max_h: float = c.get("max_health", 0.0)
+		if c["health"] >= max_h:
+			continue
+		all_at_max = false
+		var desired: float = min(max_h - c["health"], REPAIR_RATE * delta)
+		var healed: float = desired
+		if stock_gated:
+			var commodity: String = Commodity.REFINED if c.get("type", "") == "hull" else Commodity.GOODS
+			var hp_per_lot: float = StationEconomy.HULL_HP_PER_LOT if commodity == Commodity.REFINED else StationEconomy.SYSTEM_HP_PER_LOT
+			var lots_needed: float = desired / hp_per_lot
+			var lots_taken: float = StationEconomy.withdraw(rec, "self", commodity, lots_needed)
+			healed = lots_taken * hp_per_lot
+		if healed > 0.0:
+			c["health"] = min(max_h, c["health"] + healed)
+			# Component crossing back to exactly full health, from below --
+			# ship._check_eng_log_crossings() (run in the ship's own
+			# _physics_process) is what actually emits "<id> repaired", since
+			# that's where the per-component crossing-state dict lives. This
+			# loop just applies the healing; the ship logs its own recovery.
+	return all_at_max
+
+# M53c Phase B -- serves a posting: the actual stock transfer between a
+# DOCKED ship and THIS host's own economy record. Requires `ship` to be
+# actually DOCKED at this host's own bay -- the IDENTICAL admission gate
+# begin_repairs() uses just above. No new admission machinery: this IS the
+# composition the design doc means by "port control is already load-bearing
+# ... a HOSTILE ship gets no dock, so it cannot take that station's
+# postings" -- a ship that was denied a berth never satisfies this check, so
+# it can never reach fulfill() regardless of what it claims to be carrying.
+# `acceptance` is a StationEconomy.accept_posting() snapshot (price/direction
+# locked at accept time -- see that function's own comment for why).
+func serve_posting(ship, acceptance: Dictionary, amount: float) -> Dictionary:
+	if ship == null or not is_instance_valid(ship):
+		return {"transferred": 0.0, "payout": 0.0}
+	var bay = ship.get("docking_bay")
+	if bay == null or bay.state != DockingBay.State.DOCKED or bay.get_parent() != self:
+		return {"transferred": 0.0, "payout": 0.0}
+	var rec = _resolve_cluster_record()
+	if rec == null:
+		return {"transferred": 0.0, "payout": 0.0}
+	return StationEconomy.fulfill(rec, acceptance, amount)
 
 # M31 -- port authority zone substrate. Empty dict = uncontrolled/open station
 # (or a non-station ship, which never declares one) -- old permissionless

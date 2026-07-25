@@ -116,13 +116,16 @@ static func _merge_overlay(rec, overlay, characters) -> void:
 	rec.port_patch = entry.get("port", {}).duplicate(true)
 	rec.component_overrides = entry.get("component_overrides", {}).duplicate(true)
 
-# M53c Phase A -- authors a station's stocks["self"] from the entity dict's
-# optional "economy" key (design_ideas/station_economy.md "The state" +
-# "Converters"). `economy` shape:
+# M53c Phase A/B -- authors a station's stocks["self"] (+ market["self"]
+# policy, Phase B) from the entity dict's optional "economy" key
+# (design_ideas/station_economy.md "The state" + "Converters" +
+# "Postings are the universal coupling"). `economy` shape:
 #   { "bins": { <Commodity> -> {stock, capacity, target, surplus_line}, ... },
 #     "converters": [ {in: {...}, out: {...}, rate: 1.0}, ... ],
 #     "sinks": { <Commodity> -> rate_per_hour, ... },
-#     "sources": { <Commodity> -> rate_per_hour, ... } }
+#     "sources": { <Commodity> -> rate_per_hour, ... },
+#     "market": { <Commodity> -> {eligible_flags, home_flag,
+#                                  own_flag_multiplier, foreign_multiplier} } }
 # Every key is optional; an entity with no "economy" key at all (the common
 # case -- most stations author no industry, e.g. mobile homes) gets
 # StationEconomy.ensure_holder's inert zero bins and nothing else.
@@ -153,3 +156,18 @@ static func _init_economy(rec, economy: Dictionary) -> void:
 	for key in ["converters", "sinks", "sources"]:
 		if economy.has(key):
 			rec.industry[key] = economy[key].duplicate(true)
+
+	# M53c Phase B -- market POLICY (eligibility + price multipliers), same
+	# "only what's authored" discipline as bins above: an unmentioned
+	# commodity gets no market entry at all, which StationEconomy's
+	# _market_policy()/is_eligible()/price() all read as "unrestricted,
+	# uniform pricing" via their own .get() defaults -- no need to
+	# pre-populate an empty policy dict per commodity the way bins does.
+	var market: Dictionary = economy.get("market", {})
+	if not market.is_empty():
+		if not rec.market.has("self"):
+			rec.market["self"] = {}
+		for c in market.keys():
+			if not Commodity.ALL.has(c):
+				continue
+			rec.market["self"][c] = market[c].duplicate(true)

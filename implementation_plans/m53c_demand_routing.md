@@ -220,6 +220,39 @@ demand it creates has somewhere to go.
   station self-repair uses the same path; a large station repair produces a
   demand spike that raises its own postings.
 
+## The soak sims — long-run balance validation (OUT of the normal suite)
+
+Not tests: **`--run-tactical-sim`** runners (CLAUDE.md's established pattern for
+long balance runs), writing to `tactical_analysis/data/*.csv`.
+
+**The timescale trap.** Rates are lots/**hour** and bins carry ~24h of buffer, so
+"30 minutes of game time" drains ~0.3 lots against a ~14-lot buffer — nothing
+visible happens. And 30 game-minutes is not cheap either: at ~12ms/physics-step
+the sim runs ~83fps headless, so one game-hour costs ~43 real minutes.
+
+**But the economy needs no physics frames.** It is pure bookkeeping —
+`StationEconomy.tick(dt, cluster)` accumulates and runs its pass per period, so
+`tick(3600.0)` advances an hour instantly (`test_station_economy_reference`
+already does 4 simulated hours in ~11s). That inverts the cost problem: a
+bookkeeping soak can run **30 game-DAYS in seconds**.
+
+So two runners with different jobs:
+
+| Runner | Proves | Cost |
+| --- | --- | --- |
+| **`economy_soak`** — bookkeeping only, no ships | nothing starves; no converter stalls indefinitely; buffers are sized right; nothing pins to a clamp | seconds, for weeks of game time |
+| **`economy_traffic`** — real hulls flying and docking | haulers actually SERVE the demand | expensive; meaningless before Phase C |
+
+**Build `economy_soak` now, and expect it to report total collapse.** Coldreach
+accumulates VOLATILES to its cap and goes BLOCKED while every other station drains
+to zero on air — which is CORRECT: Phases A/B have production and consumption but
+**nothing that redistributes**. That run is the *"before"* picture, and it turns
+"stations stop starving" into a measurable pass/fail rather than a vibe.
+
+**`economy_soak` passing is therefore Phase C's acceptance criterion**, not Phase
+B's. Metrics worth emitting per station per commodity: time-at-zero, time BLOCKED,
+min/max stock, and converter uptime.
+
 ## Phase C — The ship-side planner (ONE planner, every ship)
 
 **Supersedes an earlier "fleet operator dispatch" phase.** There is no operator
