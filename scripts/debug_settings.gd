@@ -84,6 +84,12 @@ enum PirateOverdrive { OFF, ON }
 # _log().
 enum TrafficGuildLog { OFF, ON }
 
+# M53c Phase A -- the station economy director's log (mirrors TrafficGuildLog
+# above). Default ON; ON prints one line per station per economy pass whose
+# converters aren't all RUNNING (STARVED/BLOCKED is the interesting news --
+# see scripts/directors/station_economy.gd's _log()).
+enum StationEconomyLog { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -208,6 +214,14 @@ const OPTIONS := {
 			"On (default -- one line per policy pass)",
 		],
 		"default": TrafficGuildLog.ON,
+	},
+	"station_economy_log": {
+		"label": "Station economy director log",
+		"choices": [
+			"Off",
+			"On (default -- one line per STARVED/BLOCKED converter)",
+		],
+		"default": StationEconomyLog.ON,
 	},
 }
 

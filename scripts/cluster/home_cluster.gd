@@ -27,6 +27,29 @@ const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
 const OreShuttle = preload("res://scripts/ships/ore_shuttle.gd")
 const MobileHome = preload("res://scripts/ships/mobile_home.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
+const Commodity = preload("res://scripts/economy/commodity.gd")
+
+# M53c Phase A -- the home cluster's economy (design_ideas/station_economy.md
+# "Worked reference case"). Rock counts are the SAME numbers driving
+# def.add_field's `count` below -- named here so the ore-extraction sources
+# authored per outpost DERIVE from them (design doc: "ore extraction is not
+# invented... home_cluster.gd already authors 32/22/18/18/15 rocks per
+# asteroid field") instead of duplicating the number as a second hardcoded
+# constant (CLAUDE.md's "duplicated world constants" warning).
+const SLAG_BAY_ROCKS := 32
+const COLDREACH_ROCKS := 22
+const DEEPCUT_ROCKS := 15
+const HALVORSEN_ROCKS := 18
+const CORVUS_ROCKS := 18
+# lots/hour of ORE extracted per rock -- reproduces the reference table's
+# Slag Bay/Halvorsen/Corvus/Deepcut ORE sources exactly (32/18/18/15 * 0.1 =
+# 3.2/1.8/1.8/1.5). Deliberately NOT applied to Coldreach's rock count: its
+# field is ice-rich (mostly VOLATILES), so its small ORE byproduct (0.6) and
+# its VOLATILES source (2.60) are both authored directly below rather than
+# derived -- the plan doc calls for deriving ORE extraction specifically, and
+# Coldreach's ore yield isn't the same mechanism as a dedicated mining
+# outpost's.
+const ORE_RATE_PER_ROCK := 0.1
 
 # M53a -- home carries its OWN crypto tag; the player is NOT crypto-kin of
 # home (keeps TEAM_PLAYER, see main.gd's _spawn_player_ship). Flying
@@ -50,17 +73,17 @@ static func build() -> ClusterDef:
 	# story/characters.gd); only entities story content actually references
 	# need one -- Ironhold (Aunt Stephanie) now, the five homes for M43's Todd
 	# + residents.
-	_station(def, 1, "Ironhold", MediumStation, Vector2(0, 0), "hub", "ironhold")
-	_station(def, 2, "Drift Market", MediumStation, Vector2(200000, 40000) * SCALE, "hub", "drift_market")
-	_station(def, 3, "Refinery Prime", MediumStation, Vector2(40000, -150000) * SCALE, "hub", "refinery_prime")
+	_station(def, 1, "Ironhold", MediumStation, Vector2(0, 0), "hub", "ironhold", HOME_IFF, Standing.FLAG_DRIFT, _economy_ironhold())
+	_station(def, 2, "Drift Market", MediumStation, Vector2(200000, 40000) * SCALE, "hub", "drift_market", HOME_IFF, Standing.FLAG_DRIFT, _economy_drift_market())
+	_station(def, 3, "Refinery Prime", MediumStation, Vector2(40000, -150000) * SCALE, "hub", "refinery_prime", HOME_IFF, Standing.FLAG_DRIFT, _economy_refinery_prime())
 
 	# --- Mining outposts (small stations), each parked on a field ---
 	var slag_bay_pos: Vector2 = Vector2(150000, 110000) * SCALE
 	var coldreach_pos: Vector2 = Vector2(-70000, 90000) * SCALE
 	var deepcut_pos: Vector2 = Vector2(90000, -170000) * SCALE
-	_station(def, 10, "Slag Bay", SmallStation, slag_bay_pos, "outpost")
-	_station(def, 11, "Coldreach", SmallStation, coldreach_pos, "outpost")
-	_station(def, 12, "Deepcut", SmallStation, deepcut_pos, "outpost")
+	_station(def, 10, "Slag Bay", SmallStation, slag_bay_pos, "outpost", "", HOME_IFF, Standing.FLAG_DRIFT, _economy_slag_bay())
+	_station(def, 11, "Coldreach", SmallStation, coldreach_pos, "outpost", "", HOME_IFF, Standing.FLAG_DRIFT, _economy_coldreach())
+	_station(def, 12, "Deepcut", SmallStation, deepcut_pos, "outpost", "", HOME_IFF, Standing.FLAG_DRIFT, _economy_deepcut())
 
 	# --- Asteroid fields on the outposts (loader expands into individual rocks) ---
 	# Centers scale with their stations; RADII stay absolute (sized for
@@ -68,9 +91,9 @@ static func build() -> ClusterDef:
 	# search field -- its radius (16k) is unchanged so the check_on_todd search
 	# geometry (elimination across the whole field) is preserved; only its
 	# center moves with the station.
-	def.add_field({"center": slag_bay_pos, "radius": 16000.0, "count": 32, "seed": 1})
-	def.add_field({"center": coldreach_pos, "radius": 12000.0, "count": 22, "seed": 2})
-	def.add_field({"center": deepcut_pos, "radius": 9000.0, "count": 15, "seed": 3})
+	def.add_field({"center": slag_bay_pos, "radius": 16000.0, "count": SLAG_BAY_ROCKS, "seed": 1})
+	def.add_field({"center": coldreach_pos, "radius": 12000.0, "count": COLDREACH_ROCKS, "seed": 2})
+	def.add_field({"center": deepcut_pos, "radius": 9000.0, "count": DEEPCUT_ROCKS, "seed": 3})
 
 	# --- Mobile Homes (civilian habitats), all parked in the Slag Bay field ---
 	# M43 -- one community, one search area ("ask the neighbors; those folks
@@ -152,10 +175,10 @@ static func build() -> ClusterDef:
 	var meridian_iff := ["TEAM_MERIDIAN"]
 	var halvorsen_pos: Vector2 = Vector2(-280000, -260000)   # (-,-) quadrant, empty
 	var corvus_pos: Vector2 = Vector2(-300000, 340000)        # (-,+) quadrant, clear of Coldreach
-	_station(def, 13, "Halvorsen Claim", SmallStation, halvorsen_pos, "outpost", "", meridian_iff, Standing.FLAG_MERIDIAN)
-	_station(def, 14, "Corvus Yards", SmallStation, corvus_pos, "outpost", "", meridian_iff, Standing.FLAG_MERIDIAN)
-	def.add_field({"center": halvorsen_pos, "radius": 10000.0, "count": 18, "seed": 4})
-	def.add_field({"center": corvus_pos, "radius": 10000.0, "count": 18, "seed": 5})
+	_station(def, 13, "Halvorsen Claim", SmallStation, halvorsen_pos, "outpost", "", meridian_iff, Standing.FLAG_MERIDIAN, _economy_halvorsen())
+	_station(def, 14, "Corvus Yards", SmallStation, corvus_pos, "outpost", "", meridian_iff, Standing.FLAG_MERIDIAN, _economy_corvus())
+	def.add_field({"center": halvorsen_pos, "radius": 10000.0, "count": HALVORSEN_ROCKS, "seed": 4})
+	def.add_field({"center": corvus_pos, "radius": 10000.0, "count": CORVUS_ROCKS, "seed": 5})
 	_cargo(def, 702, "Meridian Runner", Vector2(0, 0), halvorsen_pos, OreShuttle, meridian_iff, Standing.FLAG_MERIDIAN)
 	_cargo(def, 703, "Combine Hauler", Vector2(0, 0), corvus_pos, OreShuttle, meridian_iff, Standing.FLAG_MERIDIAN)
 
@@ -166,7 +189,12 @@ static func build() -> ClusterDef:
 ## A peer-sovereign call site (e.g. the Meridian colonies below) passes its
 ## own iff_tags + flag; warrant_authority always derives from `flag`, so a
 ## peer station gets the jurisdiction-seam default for free (M52b).
-static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String, sid: String = "", iff_tags: Array = HOME_IFF, flag: String = Standing.FLAG_DRIFT) -> void:
+## M53c Phase A -- `economy` is optional and defaults to {} (no industry, inert
+## zero bins via ClusterLoader's _init_economy) so every pre-Phase-A call site
+## stays behaviorally unchanged. See the design doc's "Worked reference case"
+## and the _economy_*() authoring functions below for the home cluster's own
+## values.
+static func _station(def, id: int, name: String, hull: Script, pos: Vector2, role: String, sid: String = "", iff_tags: Array = HOME_IFF, flag: String = Standing.FLAG_DRIFT, economy: Dictionary = {}) -> void:
 	def.add_entity({
 		"id": id, "sid": sid, "name": name, "hull": hull,
 		"kind": ClusterEntity.Kind.STATION, "pos": pos, "role": role,
@@ -177,6 +205,7 @@ static func _station(def, id: int, name: String, hull: Script, pos: Vector2, rol
 		# default warrant_authority to their own flag" -- everyone else,
 		# including the player, stays empty).
 		"warrant_authority": [flag],
+		"economy": economy,
 	})
 
 static func _beacon(def, id: int, name: String, pos: Vector2) -> void:
@@ -237,4 +266,138 @@ static func _home(def, id: int, name: String, pos: Vector2, sid: String = "") ->
 		"iff_tags": ["TEAM_CIVILIAN"], "is_static": true,
 		"transponder_flag": Standing.FLAG_CIVILIAN,
 	})
+
+# ---------------------------------------------------------------------------
+# M53c Phase A -- the home cluster's economy (design_ideas/station_economy.md
+# "Worked reference case", the reference table oracle test_station_economy_
+# reference.gd asserts against). Explicitly authored PER STATION, never
+# defaulted from `role` (the plan doc's "role has only hub/outpost, which
+# cannot distinguish Refinery Prime from Ironhold" -- eight distinct profiles
+# would override a role-default in all eight cases). Rates are lots/hour, the
+# same unit the reference table uses; StationEconomy converts using dt_hours.
+# ---------------------------------------------------------------------------
+
+# Generic bin auto-sizing from a station's own throughput magnitude (the
+# absolute rate of whatever mechanism touches this commodity there). Neither
+# the design doc nor the reference table specifies bin sizes -- only RATES --
+# so one formula, driven by the rate itself, keeps every station's bin
+# consistently proportioned: ~24h of buffer at target, comfortable headroom
+# both directions, starting stock AT target (so nothing starts pre-urgent).
+# That is generous enough that a modest test window never spuriously STARVES
+# or BLOCKS an authored converter/sink/source pair, which is what lets the
+# reference-table test read the tick's OUTPUT as the authored rate.
+static func _bin(rate_hint: float) -> Dictionary:
+	var capacity: float = maxf(50.0, absf(rate_hint) * 24.0)
+	var target: float = capacity * 0.5
+	return {"stock": target, "capacity": capacity, "target": target, "surplus_line": capacity * 0.85}
+
+# Ironhold -- port of export/import (design doc: "why every authored lane
+# terminates there"). ORE is a pure SINK (5.6/hr leaving through the
+# wormhole -- an export, not a converter, since nothing is transformed);
+# GOODS is a pure SOURCE (1.5/hr landing -- the cluster's only external
+# supply). VOLATILES/REFINED sinks are ordinary population upkeep.
+static func _economy_ironhold() -> Dictionary:
+	return {
+		"bins": {
+			Commodity.ORE: _bin(5.6), Commodity.VOLATILES: _bin(0.60),
+			Commodity.REFINED: _bin(0.50), Commodity.GOODS: _bin(1.50),
+		},
+		"sinks": {Commodity.ORE: 5.6, Commodity.VOLATILES: 0.60, Commodity.REFINED: 0.50},
+		"sources": {Commodity.GOODS: 1.50},
+	}
+
+# Drift Market -- eastern depot. No ORE mechanism at all (the reference
+# table's "--"), so its ORE bin stays the inert zero default from
+# ClusterLoader's ensure_holder -- omitted from "bins" on purpose.
+static func _economy_drift_market() -> Dictionary:
+	return {
+		"bins": {
+			Commodity.VOLATILES: _bin(0.50), Commodity.REFINED: _bin(0.50), Commodity.GOODS: _bin(0.30),
+		},
+		"sinks": {Commodity.VOLATILES: 0.50, Commodity.REFINED: 0.50, Commodity.GOODS: 0.30},
+	}
+
+# Refinery Prime -- the cluster's only REFINED source, via a converter (NOT a
+# rate): the ORE -3.3/hr the reference table shows is the converter's own
+# input consumption, not a separate sink. REFINED nets exactly the
+# converter's +2.2/hr output (no additional population sink on REFINED here --
+# the refinery's own people draw VOLATILES/GOODS like everyone else, not the
+# thing it makes).
+static func _economy_refinery_prime() -> Dictionary:
+	return {
+		"bins": {
+			Commodity.ORE: _bin(3.3), Commodity.REFINED: _bin(2.20),
+			Commodity.VOLATILES: _bin(0.45), Commodity.GOODS: _bin(0.40),
+		},
+		"converters": [
+			{"in": {Commodity.ORE: 3.3}, "out": {Commodity.REFINED: 2.2}, "rate": 1.0},
+		],
+		"sinks": {Commodity.VOLATILES: 0.45, Commodity.GOODS: 0.40},
+	}
+
+# Slag Bay -- 32-rock field, ORE source DERIVED from the rock count (see
+# ORE_RATE_PER_ROCK above), not a second hardcoded number.
+static func _economy_slag_bay() -> Dictionary:
+	var ore_rate: float = SLAG_BAY_ROCKS * ORE_RATE_PER_ROCK
+	return {
+		"bins": {
+			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.40),
+			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.20),
+		},
+		"sources": {Commodity.ORE: ore_rate},
+		"sinks": {Commodity.VOLATILES: 0.40, Commodity.REFINED: 0.25, Commodity.GOODS: 0.20},
+	}
+
+# Coldreach -- 22-rock field, ice-rich: the cluster's ONLY VOLATILES source,
+# authored directly (not derived -- it isn't a mining-outpost ORE yield, it's
+# a byproduct of an ice field, a different mechanism than Slag Bay/Halvorsen/
+# Corvus/Deepcut's dedicated ore mining). Its small ORE trickle (0.6) is
+# likewise authored directly for the same reason -- the plan doc's "derive
+# ONLY ore extraction from rock counts" targets the four dedicated ore
+# outposts below, not Coldreach's incidental byproduct.
+static func _economy_coldreach() -> Dictionary:
+	return {
+		"bins": {
+			Commodity.ORE: _bin(0.6), Commodity.VOLATILES: _bin(2.60),
+			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.20),
+		},
+		"sources": {Commodity.ORE: 0.6, Commodity.VOLATILES: 2.60},
+		"sinks": {Commodity.REFINED: 0.25, Commodity.GOODS: 0.20},
+	}
+
+# Deepcut -- 15-rock field, derived ORE source.
+static func _economy_deepcut() -> Dictionary:
+	var ore_rate: float = DEEPCUT_ROCKS * ORE_RATE_PER_ROCK
+	return {
+		"bins": {
+			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.22),
+			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.15),
+		},
+		"sources": {Commodity.ORE: ore_rate},
+		"sinks": {Commodity.VOLATILES: 0.22, Commodity.REFINED: 0.25, Commodity.GOODS: 0.15},
+	}
+
+# Halvorsen Claim (Meridian) -- 18-rock field, derived ORE source.
+static func _economy_halvorsen() -> Dictionary:
+	var ore_rate: float = HALVORSEN_ROCKS * ORE_RATE_PER_ROCK
+	return {
+		"bins": {
+			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.22),
+			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.15),
+		},
+		"sources": {Commodity.ORE: ore_rate},
+		"sinks": {Commodity.VOLATILES: 0.22, Commodity.REFINED: 0.25, Commodity.GOODS: 0.15},
+	}
+
+# Corvus Yards (Meridian) -- 18-rock field, derived ORE source.
+static func _economy_corvus() -> Dictionary:
+	var ore_rate: float = CORVUS_ROCKS * ORE_RATE_PER_ROCK
+	return {
+		"bins": {
+			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.21),
+			Commodity.REFINED: _bin(0.20), Commodity.GOODS: _bin(0.10),
+		},
+		"sources": {Commodity.ORE: ore_rate},
+		"sinks": {Commodity.VOLATILES: 0.21, Commodity.REFINED: 0.20, Commodity.GOODS: 0.10},
+	}
 

@@ -8,6 +8,8 @@ class_name ClusterLoader
 
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 const _Asteroid = preload("res://scripts/asteroid.gd")
+const StationEconomy = preload("res://scripts/directors/station_economy.gd")
+const Commodity = preload("res://scripts/economy/commodity.gd")
 
 # Field-asteroid ids live in a high range so they never collide with authored
 # entity ids: base = FIELD_ID_BASE + field_index*FIELD_ID_STRIDE + i.
@@ -48,6 +50,15 @@ static func load_into(def, manager, overlay = null, characters = null) -> void:
 		var warr_authority: Array = e.get("warrant_authority", [])
 		rec.warrant_authority = warr_authority.duplicate(true)
 		_merge_overlay(rec, overlay, characters)
+		# M53c Phase A -- every STATION record gets a fully-populated
+		# stocks["self"] (all four Commodity.ALL classes, zeros where not
+		# authored), same as docking_registry defaults to an empty array on
+		# the record: substrate that exists whether or not this station's
+		# entity dict carries an "economy" key at all (a mobile home is
+		# Kind.STATION but authors no economy -- it gets inert zero bins and
+		# no industry, never a missing-key error later).
+		if rec.kind == ClusterEntity.Kind.STATION:
+			_init_economy(rec, e.get("economy", {}))
 		manager.add_record(rec)
 
 	# Expand asteroid fields into individual records. Seeded RNG -> deterministic
@@ -104,3 +115,41 @@ static func _merge_overlay(rec, overlay, characters) -> void:
 
 	rec.port_patch = entry.get("port", {}).duplicate(true)
 	rec.component_overrides = entry.get("component_overrides", {}).duplicate(true)
+
+# M53c Phase A -- authors a station's stocks["self"] from the entity dict's
+# optional "economy" key (design_ideas/station_economy.md "The state" +
+# "Converters"). `economy` shape:
+#   { "bins": { <Commodity> -> {stock, capacity, target, surplus_line}, ... },
+#     "converters": [ {in: {...}, out: {...}, rate: 1.0}, ... ],
+#     "sinks": { <Commodity> -> rate_per_hour, ... },
+#     "sources": { <Commodity> -> rate_per_hour, ... } }
+# Every key is optional; an entity with no "economy" key at all (the common
+# case -- most stations author no industry, e.g. mobile homes) gets
+# StationEconomy.ensure_holder's inert zero bins and nothing else.
+# ensure_holder() runs FIRST so every one of Commodity.ALL exists before any
+# override is applied -- ClusterEntity's "fully populated, zeros included"
+# requirement holds even for a station whose economy dict only mentions one
+# or two commodities (Drift Market's ORE bin, e.g., never appears in its
+# "bins" override and stays the zero default -- correct, since Drift Market
+# runs no ORE mechanism at all).
+static func _init_economy(rec, economy: Dictionary) -> void:
+	StationEconomy.ensure_holder(rec, "self")
+	var self_bins: Dictionary = rec.stocks["self"]
+
+	var bins: Dictionary = economy.get("bins", {})
+	for c in bins.keys():
+		if not Commodity.ALL.has(c):
+			continue   # unknown commodity key -- ignore rather than half-populate a 5th bin
+		var overrides: Dictionary = bins[c]
+		var bin: Dictionary = self_bins[c]
+		for field in ["stock", "capacity", "target", "surplus_line"]:
+			if overrides.has(field):
+				bin[field] = float(overrides[field])
+
+	# Industry lands on rec.industry, NOT as extra keys inside stocks["self"] --
+	# that keeps `stocks` type-homogeneous (holder -> commodity -> bin, always)
+	# and puts industry at the station level where it belongs, since a party's
+	# stockpile at this location never runs converters. See ClusterEntity.
+	for key in ["converters", "sinks", "sources"]:
+		if economy.has(key):
+			rec.industry[key] = economy[key].duplicate(true)

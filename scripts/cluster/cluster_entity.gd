@@ -88,6 +88,48 @@ var live_node: Node = null
 var docking_registry: Array = []
 var registry_seq: int = 0
 
+# M53c Phase A -- the station economy (design_ideas/station_economy.md "The
+# state"). Lives HERE for the same reason docking_registry does: the RECORD is
+# canonical across demote/promote, and under BUBBLE most stations are dormant
+# most of the time, so a copy that only existed on a live node would be
+# unreadable exactly when a director needs to tick it or a party needs to read
+# it. Both empty on every non-station record (asteroids, beacons, traffic --
+# same as docking_registry above).
+#
+#   stocks: holder_key -> commodity -> bin {stock, capacity, target, surplus_line}
+#   market: holder_key -> commodity -> policy (Phase B fills this; declared
+#     now so the shape exists and nothing has to reshape the record later)
+#
+# "self" is the station's own bins. ANY OTHER KEY is a party's stockpile AT
+# THIS LOCATION -- the keying is (location, holder), never per-station-only
+# (design doc's trap 5: get this wrong and party-held stockpiles, hoarding,
+# and competing prices at one port are all foreclosed).
+#
+# INDUSTRY IS A SEPARATE FIELD (`industry` below), deliberately NOT extra keys
+# inside stocks["self"]. Two reasons: it keeps `stocks` type-HOMOGENEOUS
+# (holder -> commodity -> bin, always, so `for c in stocks[h]` can never hand a
+# caller an Array where it expected a bin), and industry belongs to the STATION,
+# not to a holder -- a party's stockpile at this location never runs converters.
+#
+# Bins are FULLY POPULATED for all four Commodity.ALL classes at load, zeros
+# included, for every holder key that exists at all -- CLAUDE.md's trap is
+# that a missing Dictionary[key] access aborts the rest of that frame's
+# function, and this is a two-level nested lookup. Guaranteeing the inner
+# (commodity) level means callers only ever need a .get() guard on the OUTER
+# (holder) level. See implementation_plans/m53c_demand_routing.md "Phase A".
+var stocks: Dictionary = {}
+var market: Dictionary = {}
+
+# M53c Phase A -- this station's INDUSTRY, station-level (not per-holder):
+#   {"converters": [ {in: {...}, out: {...}, rate: float, state: int, achieved: float}, ... ],
+#    "sinks":      { <Commodity> -> lots_per_hour },   # population upkeep; NEVER stops
+#    "sources":    { <Commodity> -> lots_per_hour } }  # SCAFFOLDING for mining traffic
+# Throughput is DERIVED from this plus bin state, never authored as a net rate
+# (design_ideas/station_economy.md "Converters: throughput is derived, not
+# authored"). Empty on a station with no authored industry, and on every
+# non-station record.
+var industry: Dictionary = {}
+
 # Opaque AI/behavior config handed to the hull on promote (route lists, etc.).
 # Unused by M14's straight-line movers; carried now so later milestones don't
 # have to reshape the record.

@@ -59,6 +59,26 @@ gameplay that falls out of it.
    mail shares registry facts at the speed of a hull. That latency is not a
    defect to minimize — it is the entire source of value (see Gameplay).
 
+   **The merge is NOT symmetric — a constraint to honor when this phase lands,
+   not something to build now.** "Merges on dock" reads as an automatic two-way
+   merge, which would hand a port your fresher picture for free and destroy the
+   information economy this doc builds later. The rule is **you receive freely,
+   you give deliberately**: reading a public board is something you cannot
+   un-see, but contributing what *you* know is a transaction. So docking gets a
+   ship the port's own logs and prices (current, free) **plus everything that
+   port has heard from elsewhere** (free, but only as fresh as its last
+   courier) — that second part is required, or information never travels more
+   than one hop from its source and no station ever relays. **The market is in
+   the delta, not in access**: you hold `Coldreach @ v58`, the port holds `v40`,
+   and that gap is the sale. Only bites once information has a price (phase 4 /
+   M53c Phase E), so today's globally-readable registry is unaffected.
+
+   Why the world does not seize up if everyone hoards: the **state fleet reports
+   as duty**, not for payment ("Ironhold does not pay its own hulls for local
+   mail, it expects it" — station_economy.md's ownership duties). The domestic
+   circuit propagates by obligation; independents sell into the gaps. A second,
+   load-bearing reason duty exists.
+
 4. **The director as a *located subscriber*.** A guild reads the news that has
    reached *its* node(s), never a global view. Its existing decision machinery
    is unchanged — it's the same OVERDUE→(LOST | CASHED_OUT | RETURNED_EMPTY)

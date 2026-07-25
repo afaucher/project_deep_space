@@ -25,6 +25,7 @@ const NavAutopilot = preload("res://scripts/nav/nav_autopilot.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const PirateGuild = preload("res://scripts/directors/pirate_guild.gd")
 const TrafficGuild = preload("res://scripts/directors/traffic_guild.gd")
+const StationEconomy = preload("res://scripts/directors/station_economy.gd")
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 
 enum GameMode { SANDBOX, CAMPAIGN }
@@ -293,6 +294,13 @@ func _bootstrap_campaign() -> void:
 	# otherwise thin the world permanently) plus transient wormhole freighters
 	# (through-traffic on the beacon road). Campaign only, same as PirateGuild.
 	manager.directors.append(TrafficGuild.new())
+
+	# M53c Phase A -- the station economy: derives converter/sink/source
+	# throughput for every STATION record each policy pass (design_ideas/
+	# station_economy.md). Pure substrate -- nothing else reads stocks/market
+	# yet -- but it must tick from campaign start so a played session's numbers
+	# aren't frozen at their authored initial values.
+	manager.directors.append(StationEconomy.new())
 
 	var pid = multiplayer.get_unique_id()
 	# M53a -- campaign player starts in the civilian hauler (slow, fragile,
