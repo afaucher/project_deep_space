@@ -23,6 +23,13 @@ assumptions into a "generic" base. Instead:
 extract.** Some deliberate duplication in Pass 2 is the price of a correct
 abstraction in Pass 3, and both directors' test suites protect that refactor.
 
+**Outcome (2026-07-24): the sequencing worked, and its answer was "don't."**
+With Pass 2 landed the commonality could be measured rather than guessed, and
+it came to ~25 identical lines — so Pass 3 is deferred to a third consumer
+(see below). Worth noting the process succeeded even though the refactor
+didn't happen: building concretely first is what turned an architectural
+guess into a cheap measurement.
+
 ## Pass 1 — The docking registry (Mail phase 1)
 
 Cheap, no behavior change, and it unblocks everything downstream reading the
@@ -76,10 +83,34 @@ already exists from M51). Deliberately allows duplication with pirate_guild.
   (arrives → two stops → departs → record retired); population cap respected;
   per-flag targets honored.
 
-## Pass 3 — Extract the shared director skeleton (pure refactor)
+## Pass 3 — Extract the shared director skeleton [DEFERRED — measured, not deferred on vibes]
 
-Only now, with two real consumers. **No behavior change**; `test_pirate_guild`
-and `test_pirate_circulation` plus Pass 2's tests are the regression net.
+**Deferred 2026-07-24, after Pass 2 landed and the duplication could be
+measured instead of predicted.** Two consumers is the MINIMUM needed to see
+commonality, not enough to be confident of its shape. The measurement:
+
+- **Byte-identical duplication is ~25 lines total** — `_find_record`,
+  `_erase_record`, `_wormhole_pos`, and the `tick(dt)` → `_policy_pass`
+  accumulator. That is the entire real cost of NOT extracting.
+- **The rest diverged.** The check-in → OVERDUE state machines are only
+  superficially similar: the pirate resolves takes / cash-in / profitless
+  backoff, the traffic director resolves losses / per-flag replenishment.
+  Arrival scheduling differs (lane-point + posture vs. flag template + road
+  termini). Debug logging is a per-director `DebugSettings` key by design.
+  Ledger shapes rhyme; they are not the same shape.
+
+So the base class this pass envisioned would carry ~25 genuine lines plus a
+set of hooks invented to paper over differences that are load-bearing — which
+is precisely the failure mode the original Watch item named ("a hook with one
+implementation is not a hook").
+
+**Revisit trigger, not a calendar date:** extract when a THIRD director exists
+(a peer-state navy, a salvage/insurer director, or the Mail-phase-3 relocation
+turning directors into located subscribers — the last of which will rewrite the
+check-in machinery anyway, so extracting before it would be wasted work). Until
+then the 25 lines stay duplicated on purpose.
+
+Original scope kept below for that conversation.
 
 Extract (genuinely shared):
 - ledger shape (members / arrivals / counters) and its serializable discipline
