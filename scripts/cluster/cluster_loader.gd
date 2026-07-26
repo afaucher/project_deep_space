@@ -16,6 +16,26 @@ const Commodity = preload("res://scripts/economy/commodity.gd")
 const FIELD_ID_BASE := 1000000
 const FIELD_ID_STRIDE := 10000
 
+# M53d -- CLEARED APPROACH. Asteroid fields are authored CENTRED ON their
+# station (home_cluster.gd's add_field calls for Slag Bay, Coldreach, Deepcut),
+# and the expansion below scatters uniform-in-disc -- so rocks landed against
+# the hull and straight across the docking approach. A working mining station
+# would have cleared that; the fiction was never "the berth is inside the
+# rubble".
+#
+# The cost was measured, not assumed. scripts/tests/test_dock_approach.gd, same
+# SmallStation and same 8 hulls, with and without Coldreach's real 22-rock
+# field: 0.033 damaging station contacts per dock cycle becomes 7.600, and
+# station HP loss 0.01% becomes 3.30%. That is a 230x difference, and it is why
+# economy_traffic kept reporting its worst station self-repair drain at exactly
+# the stations that sit inside fields (Coldreach, Halvorsen) while a rock-free
+# dock test passed cleanly.
+#
+# 5000 is sized to cover the whole final approach rather than just the hull:
+# Steering's DOCK_APPROACH ramp and job_steps' DOCK_STATION_SEARCH_RADIUS
+# (6000) both operate in that band, so a rock inside it is a rock in the lane.
+const STATION_CLEAR_RADIUS := 5000.0
+
 # M42 -- `overlay`/`characters` are optional story-data hooks (default null,
 # so every pre-M42 call site -- test_cluster_loader, test_campaign_bootstrap --
 # keeps working unchanged). When supplied they must expose the same static
@@ -73,16 +93,52 @@ static func load_into(def, manager, overlay = null, characters = null) -> void:
 		var radius: float = f["radius"]
 		var count: int = f["count"]
 		var base_id: int = FIELD_ID_BASE + fi * FIELD_ID_STRIDE
+		# Station positions this field must keep clear (see STATION_CLEAR_RADIUS).
+		# Read off def.entities rather than the manager so it does not depend on
+		# record insertion order.
+		# Kind.STATION alone is the WRONG filter: the five M43 mobile homes are
+		# STATION-kind too and are parked INSIDE the Slag Bay field, so keying on
+		# kind carved a 5000u bubble around each and dropped 14 of that field's 32
+		# rocks -- thinning it badly and, worse, making the M43 search trivial by
+		# leaving the homes sitting in cleared space. The homes are Level-1 open
+		# berths (design_ideas/port_zones_and_channels.md: "Mobile homes stay
+		# Level 1"); a cleared approach belongs to a station that has real traffic
+		# to keep clear of. `role` ("hub"/"outpost") is exactly that line --
+		# home_cluster's _station() sets it, _home() does not.
+		var keep_clear: Array[Vector2] = []
+		for e in def.entities:
+			if e.get("kind", ClusterEntity.Kind.TRAFFIC) != ClusterEntity.Kind.STATION:
+				continue
+			if str(e.get("role", "")) == "":
+				continue
+			keep_clear.append(e["pos"])
+		var skipped: int = 0
 		for i in range(count):
 			var rr: float = radius * sqrt(rng.randf())
 			var aa: float = rng.randf() * TAU
+			var rock_pos: Vector2 = center + Vector2(cos(aa), sin(aa)) * rr
+			# Drop rocks that landed in a station's approach. Deliberately DROPPED,
+			# not relocated: nudging one outward would bias density at the clear
+			# boundary and, worse, would break the seeded-layout determinism the
+			# M43 search mission depends on for every OTHER rock in the field.
+			# A slightly thinner field is the honest trade.
+			var blocked: bool = false
+			for sp in keep_clear:
+				if rock_pos.distance_to(sp) < STATION_CLEAR_RADIUS:
+					blocked = true
+					break
+			if blocked:
+				skipped += 1
+				continue
 			var rec = ClusterEntity.new()
 			rec.id = base_id + i
 			rec.hull_script = _Asteroid
 			rec.kind = ClusterEntity.Kind.ASTEROID
-			rec.pos = center + Vector2(cos(aa), sin(aa)) * rr
+			rec.pos = rock_pos
 			rec.is_static = true
 			manager.add_record(rec)
+		if skipped > 0:
+			print("[ClusterLoader] field %d: dropped %d rock(s) inside a station approach (%.0fu)" % [fi, skipped, STATION_CLEAR_RADIUS])
 
 # M42 -- folds one overlay entry (keyed by rec.sid) onto the record's plain
 # generic fields. No-ops when overlay is null or the record has no sid or the

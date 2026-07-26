@@ -45,8 +45,11 @@ func setup(main) -> void:
 		var exp_total: int = def.entities.size()
 		for f in def.asteroid_fields:
 			exp_total += int(f["count"])
-		_assert(mgr.records.size() == exp_total,
-			"bootstrap: manager should hold the whole home cluster (%d vs %d)" % [mgr.records.size(), exp_total])
+		# M53d: field counts are a ceiling -- ClusterLoader drops rocks inside a
+		# station's docking approach. See test_cluster_loader.gd for the positive
+		# invariant that replaced the old equality.
+		_assert(mgr.records.size() <= exp_total and mgr.records.size() > exp_total - 40,
+			"bootstrap: manager should hold the whole home cluster minus cleared rocks (%d vs %d)" % [mgr.records.size(), exp_total])
 		_assert(main.players.has(1) and mgr.viewpoint_node == main.players[1],
 			"bootstrap: manager viewpoint should track the player ship (self-tick)")
 

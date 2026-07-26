@@ -100,11 +100,40 @@ func _test_loader_populates() -> void:
 		exp_field_asteroids += int(f["count"])
 	var exp_total: int = def.entities.size() + exp_field_asteroids
 
-	_assert(m.records.size() == exp_total,
-		"loader: records should be entities + field asteroids (%d vs %d)" % [m.records.size(), exp_total])
+	# M53d cleared approach: the loader DROPS rocks that land inside a
+	# role-bearing station's docking approach (ClusterLoader.
+	# STATION_CLEAR_RADIUS), so the authored field count is now a CEILING, not an
+	# equality. These two used to assert exact equality, which encoded the old
+	# "rocks may sit on top of the berth" behaviour as an invariant.
+	_assert(m.records.size() <= exp_total,
+		"loader: records should be at most entities + field asteroids (%d vs %d)" % [m.records.size(), exp_total])
 	_assert(_count_kind(m, ClusterEntity.Kind.STATION) == exp_stations, "loader: station count mismatch")
 	_assert(_count_kind(m, ClusterEntity.Kind.BEACON) == exp_beacons, "loader: beacon count mismatch")
-	_assert(_count_kind(m, ClusterEntity.Kind.ASTEROID) == exp_field_asteroids, "loader: asteroid count should equal sum of field counts")
+	var actual_rocks: int = _count_kind(m, ClusterEntity.Kind.ASTEROID)
+	_assert(actual_rocks <= exp_field_asteroids,
+		"loader: asteroid count should not exceed sum of field counts (%d vs %d)" % [actual_rocks, exp_field_asteroids])
+	# The invariant that actually matters, and a stronger statement than the
+	# count ever was: NOTHING is parked in a station's docking approach. This is
+	# what stops haulers grinding stations down on arrival -- measured at 230x
+	# the damaging-contact rate without it (see test_dock_approach.gd's rock
+	# field scenario and ClusterLoader.STATION_CLEAR_RADIUS).
+	var station_positions: Array[Vector2] = []
+	for rec in m.records:
+		if rec.kind == ClusterEntity.Kind.STATION and str(rec.name) != "":
+			for e in def.entities:
+				if e.get("id", -1) == rec.id and str(e.get("role", "")) != "":
+					station_positions.append(rec.pos)
+					break
+	var intruders: int = 0
+	for rec in m.records:
+		if rec.kind != ClusterEntity.Kind.ASTEROID:
+			continue
+		for sp in station_positions:
+			if rec.pos.distance_to(sp) < ClusterLoader.STATION_CLEAR_RADIUS:
+				intruders += 1
+				break
+	_assert(intruders == 0,
+		"loader: no asteroid should sit inside a station's %.0fu docking approach (found %d)" % [ClusterLoader.STATION_CLEAR_RADIUS, intruders])
 	m.queue_free()
 
 func _count_def_kind(def, kind: int) -> int:

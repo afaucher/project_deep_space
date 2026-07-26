@@ -51,6 +51,8 @@ const SmallStation = preload("res://scripts/ships/small_station.gd")
 const MediumStation = preload("res://scripts/ships/medium_station.gd")
 const Freighter = preload("res://scripts/ships/freighter.gd")
 const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
+const Asteroid = preload("res://scripts/asteroid.gd")
+const ClusterLoader = preload("res://scripts/cluster/cluster_loader.gd")
 
 const SCENARIOS := [
 	{"name": "solo control / SmallStation", "medium": false, "ships": 1, "cycles": 4},
@@ -73,6 +75,17 @@ const SCENARIOS := [
 	# ...and the same hull arriving into live shuttle traffic, which is the
 	# realistic case and the dangerous one.
 	{"name": "Nexus hauler + shuttles / MediumStation", "medium": true, "ships": 5, "cycles": 10, "hull": "mixed"},
+	# ROCK FIELD. Closes the coverage gap this file's own header creates: every
+	# other scenario excludes asteroids so that a field-avoidance regression
+	# cannot masquerade as a docking-discipline one. But economy_traffic keeps
+	# reporting its heaviest station self-repair at exactly the two stations that
+	# sit INSIDE fields (Coldreach, Halvorsen), and the combination -- converging
+	# traffic AND rocks on the approach -- is the one case nothing tested.
+	# Geometry is Coldreach's real field, copied from home_cluster.gd's
+	# def.add_field() call (22 rocks, 12000 radius, seed 2) so this is the actual
+	# game layout rather than an invented one.
+	{"name": "traffic + rock field / SmallStation (Coldreach layout)", "medium": false, "ships": 8, "cycles": 20,
+		"rocks": 22, "field_radius": 12000.0, "field_seed": 2},
 ]
 
 # Ships fly out to this radius and come back, over and over. Long enough that a
@@ -156,6 +169,33 @@ var ship_hits: int = 0
 var arrival_hits: int = 0
 var departure_hits: int = 0
 var worst_hit: Dictionary = {}
+var rocks: Array = []
+
+# Reproduces cluster_loader.gd's field expansion exactly (seeded RNG,
+# uniform-in-disk via r = R*sqrt(u)) so local rock density matches the real
+# game's fields rather than an invented approximation. Same helper as
+# test_nav_gauntlet.gd.
+func _spawn_field(center: Vector2, radius: float, count: int, field_seed: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = field_seed
+	var out: Array = []
+	for i in range(count):
+		var rr: float = radius * sqrt(rng.randf())
+		var aa: float = rng.randf() * TAU
+		var rock_pos: Vector2 = center + Vector2(cos(aa), sin(aa)) * rr
+		# Mirrors ClusterLoader's cleared-approach rule, reading its own constant
+		# so the two can never drift. The station sits at `center` here, so this
+		# is the same test the loader applies in the real world -- which is the
+		# point: this scenario must reflect the field a hauler ACTUALLY meets, or
+		# it guards a hazard the game no longer generates.
+		if rock_pos.distance_to(center) < ClusterLoader.STATION_CLEAR_RADIUS:
+			continue
+		var rock = Asteroid.new()
+		rock.name = "Rock_S%d_%d" % [s_index, i]
+		rock.position = rock_pos
+		main_node.add_child(rock)
+		out.append(rock)
+	return out
 
 func _assert(condition: bool, msg: String) -> void:
 	if not condition:
@@ -230,6 +270,12 @@ func _start_scenario(i: int) -> void:
 	station.position = center
 	main_node.add_child(station)
 	station_start_hp = _max_health(station)
+
+	rocks = []
+	var rock_count: int = int(sc.get("rocks", 0))
+	if rock_count > 0:
+		rocks = _spawn_field(center, float(sc.get("field_radius", 12000.0)), rock_count, int(sc.get("field_seed", 1)))
+		print("    (%d asteroids, field radius %.0f)" % [rock_count, sc.get("field_radius", 12000.0)])
 
 	var n: int = int(sc["ships"])
 	ships_start_hp = 0.0
@@ -364,6 +410,9 @@ func _finish_scenario() -> void:
 	for ship in ships:
 		_free_if_valid(ship)
 	ships = []
+	for r in rocks:
+		_free_if_valid(r)
+	rocks = []
 	_free_if_valid(station)
 	station = null
 

@@ -98,8 +98,13 @@ func _test_fields_expand() -> void:
 	var exp: int = 0
 	for f in def.asteroid_fields:
 		exp += int(f["count"])
-	_assert(_count_kind(m, ClusterEntity.Kind.ASTEROID) == exp,
-		"fields: asteroid records should equal sum of field counts")
+	# M53d: ClusterLoader DROPS rocks landing inside a role-bearing station's
+	# docking approach (STATION_CLEAR_RADIUS), so the authored field count is a
+	# CEILING now, not an equality. test_cluster_loader.gd carries the positive
+	# invariant (nothing parked in any approach); this one just must not assert
+	# the old "rocks may sit on the berth" behaviour.
+	_assert(_count_kind(m, ClusterEntity.Kind.ASTEROID) <= exp,
+		"fields: asteroid records should not exceed sum of field counts (%d vs %d)" % [_count_kind(m, ClusterEntity.Kind.ASTEROID), exp])
 
 	var bad: int = 0
 	for rec in m.records:
