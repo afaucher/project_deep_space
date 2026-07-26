@@ -141,26 +141,46 @@ func _job_staging_pos(job: Dictionary) -> Vector2:
 # ---------------------------------------------------------------------------
 
 const ROUTE_SPREAD_SAMPLES := 200
-const ROUTE_SPREAD_MIN_DISTINCT_LANES := 3
+const ROUTE_SPREAD_MIN_DISTINCT_CELLS := 8
+const ROUTE_SPREAD_GRID := 60000.0
 
+# 2026-07-26 -- REWRITTEN against map geometry instead of authored lanes.
+#
+# This assertion used to count how many distinct authored cargo LANES the hunt
+# points landed on, and it broke for a real reason: M53d made haulers
+# planner-driven, so `_cargo()` stopped emitting a "route" and the cluster
+# carries zero authored lanes. The old version reported "0 cargo lanes" and
+# "1 distinct lane: {-1: 200}" -- every hunt point on the wormhole fallback,
+# pirates no longer distributing at all. That was a genuine gameplay
+# regression hiding behind a stale test, not a test-only problem.
+#
+# There is no lane to classify against any more, so the property worth
+# holding is the one that actually matters: hunt points must SPREAD across the
+# cluster rather than collapsing onto one place. Coarse spatial cells measure
+# that directly and stay meaningful whatever targeting strategy ships.
+# Strategy-by-strategy comparison (spread vs hazard clearance vs plausible-
+# traffic proxy) lives in test_pirate_targeting.gd.
 func _test_route_spread() -> void:
 	var cluster = _make_home_cluster()
 	var guild = PirateGuild.new()
 	var wh_pos: Vector2 = _wormhole_pos(cluster)
-	var lane_routes: Dictionary = _lane_routes(cluster)
-	_assert(lane_routes.size() >= 4, "setup sanity: home cluster carries >= 4 cargo lanes (got %d)" % lane_routes.size())
 
 	var buckets: Dictionary = {}
+	var at_wormhole: int = 0
 	for i in range(ROUTE_SPREAD_SAMPLES):
 		var job: Dictionary = guild._build_hunt_job(cluster, wh_pos)
 		var lane_pos: Vector2 = _job_lane_pos(job)
-		var lane_id: int = _classify_lane(lane_routes, lane_pos)
-		buckets[lane_id] = buckets.get(lane_id, 0) + 1
+		buckets[Vector2i(int(floor(lane_pos.x / ROUTE_SPREAD_GRID)), int(floor(lane_pos.y / ROUTE_SPREAD_GRID)))] = true
+		if lane_pos.distance_to(wh_pos) < 1.0:
+			at_wormhole += 1
 
-	print("  lane buckets over %d assemblies: %s" % [ROUTE_SPREAD_SAMPLES, str(buckets)])
-	_assert(buckets.keys().size() >= ROUTE_SPREAD_MIN_DISTINCT_LANES,
-		"route spread: hunt points land on >= %d distinct lanes over %d assemblies (got %d: %s)" %
-			[ROUTE_SPREAD_MIN_DISTINCT_LANES, ROUTE_SPREAD_SAMPLES, buckets.keys().size(), str(buckets)])
+	print("  hunt-point cells over %d assemblies: %d" % [ROUTE_SPREAD_SAMPLES, buckets.size()])
+	_assert(buckets.size() >= ROUTE_SPREAD_MIN_DISTINCT_CELLS,
+		"route spread: hunt points land in >= %d distinct %.0fk cells over %d assemblies (got %d)" %
+			[ROUTE_SPREAD_MIN_DISTINCT_CELLS, ROUTE_SPREAD_GRID / 1000.0, ROUTE_SPREAD_SAMPLES, buckets.size()])
+	_assert(at_wormhole == 0,
+		"route spread: no hunt point degrades to the wormhole fallback (got %d/%d) -- that fallback firing IS the collapse" %
+			[at_wormhole, ROUTE_SPREAD_SAMPLES])
 
 # ---------------------------------------------------------------------------
 # (b) Entry-point variance -- repeated assemblies against a SINGLE-lane
@@ -196,6 +216,16 @@ func _make_single_lane_cluster() -> Node:
 	wh.pos = Vector2(-20000, -60000)
 	cluster.add_record(wh)
 
+	# 2026-07-26 -- the fixture's job is to force ONE hunt segment every
+	# assembly, so the staging spread being measured can only come from the
+	# re-roll under test and not from a different lane being picked.
+	#
+	# It used to do that with a single authored cargo lane. Targeting no longer
+	# reads authored routes (M53d made haulers planner-driven; see
+	# PirateGuild._pick_lane_point), so the faithful translation is EXACTLY TWO
+	# TRADE HUBS: with two hubs there is exactly one chord, and every strategy
+	# returns a point on it. The authored lane below stays only so the LEGACY_
+	# LANE_ROUTES path remains exercisable from this fixture.
 	var lane := ClusterEntity.new()
 	lane.id = 700
 	lane.name = "Test Lane"
@@ -206,15 +236,33 @@ func _make_single_lane_cluster() -> Node:
 	lane.behavior = {"route": [Vector2(20000, 0), Vector2(220000, 40000)], "cargo": true, "loop": true}
 	cluster.add_record(lane)
 
+	for spec in [[701, "Hub A", Vector2(20000, 0)], [702, "Hub B", Vector2(220000, 40000)]]:
+		var hub := ClusterEntity.new()
+		hub.id = spec[0]
+		hub.name = spec[1]
+		hub.kind = ClusterEntity.Kind.STATION
+		hub.is_static = true
+		hub.pos = spec[2]
+		# Non-empty `industry` is what marks a station as a TRADE hub for
+		# targeting (PirateGuild._trade_station_positions). The contents do not
+		# matter here -- only that this reads as somewhere cargo goes.
+		hub.industry = {"sinks": {}}
+		cluster.add_record(hub)
+
 	spawned_clusters.append(cluster)
 	return cluster
+
+# The one chord the fixture above forces, as [a, b].
+func _fixture_chord() -> Array:
+	return [Vector2(20000, 0), Vector2(220000, 40000)]
 
 func _test_entry_point_variance() -> void:
 	var cluster = _make_single_lane_cluster()
 	var guild = PirateGuild.new()
 	var wh_pos: Vector2 = _wormhole_pos(cluster)
-	var lane_routes: Dictionary = _lane_routes(cluster)
-	var route: Array = lane_routes.values()[0]
+	# The axis comes from the fixture's forced chord rather than from an
+	# authored route -- targeting stopped reading routes (see the fixture note).
+	var route: Array = _fixture_chord()
 	var lane_dir: Vector2 = (route[1] - route[0]).normalized()
 
 	# (b1) End-to-end: N full assemblies against the one-lane cluster.

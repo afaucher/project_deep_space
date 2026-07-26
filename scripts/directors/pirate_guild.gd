@@ -497,11 +497,176 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 		"posture": posture,
 	}
 
+# ---------------------------------------------------------------------------
+# HUNT-POINT TARGETING (2026-07-26)
+#
+# What these strategies use: PUBLIC GEOMETRY, and only that. Where the
+# stations are, which ones are trade hubs, where the charted beacons and the
+# wormhole sit.
+#
+# That is a scope statement, NOT a design constraint. The POSTING BOARD is a
+# legitimate information source for a pirate -- knowing that Refinery Prime is
+# desperate for ore tells you which lane is worth sitting on, and a guild that
+# can read the market is exactly the kind of emergent behaviour worth having.
+# What has not been worked out yet is the INFORMATION ECONOMY around it: who
+# can see which postings, at what latency, at what cost, and how that visibility
+# is earned or bought. That question belongs with the mail network
+# (design_ideas/mail_network.md), which is already headed for "information
+# rides couriers" rather than ambient global truth -- and settling it for
+# pirates settles it for everyone.
+#
+# So: geometry-only is where these three START, because the map needs no new
+# plumbing. A market-aware strategy is the expected successor, not a rejected
+# option. Live hauler positions stay out regardless -- that is omniscience, not
+# information anyone could have acquired.
+#
+# All three share the existing hazard keep-away and the {"pos", "seg_a",
+# "seg_b"} return contract, so _staging_point's entry-point variance (re-roll
+# an independent anchor along the SAME segment) keeps working unchanged.
+enum HuntStrategy {
+	LEGACY_LANE_ROUTES, # authored {"route": [...]} lanes -- DEAD, see _pick_lane_point
+	STATION_CHORD,      # a point along a random trade-hub pair's straight line
+	APPROACH_RING,      # a point on the funnel annulus around one trade hub
+	CROSSROADS,         # a point where MANY hub-pair chords converge
+}
+
+# Static so a test/sim can sweep strategies without re-plumbing the director.
+static var hunt_strategy: int = HuntStrategy.CROSSROADS
+
+# APPROACH_RING: how far out the funnel band sits, as multiples of the station
+# keep-away. Inside 1.0 would be under the hub's guns (and would fail the
+# hazard check anyway); past ~2.5 the traffic has dispersed and it stops being
+# a funnel.
+const _APPROACH_RING_INNER := 1.15
+const _APPROACH_RING_OUTER := 2.5
+
+# CROSSROADS: how many chord points to sample, how near a chord counts as
+# "carried by" it, and how many of the best-scoring candidates to pick among.
+# The top-K pick (rather than a plain argmax) is what stops every pirate in
+# the cluster converging on the single densest crossroads.
+const _CROSSROADS_SAMPLES := 24
+const _CROSSROADS_CHORD_R := 30000.0
+const _CROSSROADS_TOP_K := 4
+
+func _pick_hunt_point(cluster, wormhole_pos: Vector2, stations: Array, beacons: Array) -> Dictionary:
+	var hubs: Array = _trade_station_positions(cluster)
+	if hubs.size() < 2:
+		return {"pos": wormhole_pos, "seg_a": wormhole_pos, "seg_b": wormhole_pos}
+	match hunt_strategy:
+		HuntStrategy.APPROACH_RING:
+			return _hunt_approach_ring(hubs, stations, beacons)
+		HuntStrategy.CROSSROADS:
+			return _hunt_crossroads(hubs, stations, beacons)
+		_:
+			return _hunt_station_chord(hubs, stations, beacons)
+
+# A random pair of trade hubs, a point along the straight line between them.
+# The premise: cargo between two hubs has to cross the space between them, and
+# absent a reason to detour it crosses roughly straight. Same [0.15, 0.85]
+# bound the authored-lane roll used -- the endpoints are station doorsteps.
+func _hunt_station_chord(hubs: Array, stations: Array, beacons: Array) -> Dictionary:
+	return _away_from_hazards(func():
+		var pair: Array = _random_hub_pair(hubs)
+		var a: Vector2 = pair[0]
+		var b: Vector2 = pair[1]
+		return {"pos": a.lerp(b, randf_range(0.15, 0.85)), "seg_a": a, "seg_b": b}
+	, stations, beacons)
+
+# A point on the annulus around ONE hub. The premise is different and in some
+# ways stronger than the chord's: whatever route a hauler picks, it must
+# arrive somewhere and leave somewhere, so traffic density is highest near a
+# hub regardless of what the lanes look like. The cost is that hubs are also
+# where the defences are -- patrol loops sit on Ironhold and Drift Market --
+# so this trades catch rate against survival.
+#
+# seg_a/seg_b run RADIALLY outward from the hub through the point, so
+# _staging_point's re-roll walks the approach line rather than sliding around
+# the ring (staging should sit further out on the same approach, not on the
+# far side of the station).
+func _hunt_approach_ring(hubs: Array, stations: Array, beacons: Array) -> Dictionary:
+	return _away_from_hazards(func():
+		var hub: Vector2 = hubs[randi() % hubs.size()]
+		var bearing: float = randf_range(0.0, TAU)
+		var dir: Vector2 = Vector2.RIGHT.rotated(bearing)
+		var r: float = _R_STATION_AVOID * randf_range(_APPROACH_RING_INNER, _APPROACH_RING_OUTER)
+		var p: Vector2 = hub + dir * r
+		return {"pos": p, "seg_a": p, "seg_b": hub + dir * (_R_STATION_AVOID * _APPROACH_RING_OUTER * 1.6)}
+	, stations, beacons)
+
+# Where many hub-pair chords pass close together -- the cluster's geometric
+# chokepoints. The premise is the most defensible of the three: a guild does
+# not need to know the ACTUAL routes if it can see that, whatever they are,
+# traffic between one side of the cluster and the other has to funnel through
+# here. It is also self-tuning -- move a station and the crossroads move.
+#
+# Deliberately picks randomly among the TOP_K scorers instead of the single
+# best. A pure argmax is a map-wide constant: every pirate, forever, in one
+# spot, which is worse than the bug this replaces.
+func _hunt_crossroads(hubs: Array, stations: Array, beacons: Array) -> Dictionary:
+	var scored: Array = []
+	for _i in range(_CROSSROADS_SAMPLES):
+		var pair: Array = _random_hub_pair(hubs)
+		var a: Vector2 = pair[0]
+		var b: Vector2 = pair[1]
+		var p: Vector2 = a.lerp(b, randf_range(0.15, 0.85))
+		scored.append({"pos": p, "seg_a": a, "seg_b": b, "score": _chord_carriers(p, hubs)})
+	scored.sort_custom(func(x, y): return x["score"] > y["score"])
+	var top: Array = scored.slice(0, mini(_CROSSROADS_TOP_K, scored.size()))
+	return _away_from_hazards(func():
+		return top[randi() % top.size()]
+	, stations, beacons)
+
+# How many distinct hub-pair chords pass within _CROSSROADS_CHORD_R of p.
+# A crude betweenness measure, and crude is right: this is a pirate's guess at
+# where traffic concentrates, not a routing solver.
+func _chord_carriers(p: Vector2, hubs: Array) -> int:
+	var n: int = 0
+	for i in range(hubs.size()):
+		for j in range(i + 1, hubs.size()):
+			if _dist_to_segment(p, hubs[i], hubs[j]) <= _CROSSROADS_CHORD_R:
+				n += 1
+	return n
+
+func _dist_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab: Vector2 = b - a
+	var len_sq: float = ab.length_squared()
+	if len_sq <= 0.0:
+		return p.distance_to(a)
+	var t: float = clampf((p - a).dot(ab) / len_sq, 0.0, 1.0)
+	return p.distance_to(a + ab * t)
+
+func _random_hub_pair(hubs: Array) -> Array:
+	var i: int = randi() % hubs.size()
+	var j: int = randi() % hubs.size()
+	while j == i:
+		j = randi() % hubs.size()
+	return [hubs[i], hubs[j]]
+
 func _station_positions(cluster) -> Array:
 	var out: Array = []
 	for rec in cluster.records:
 		if rec.kind == ClusterEntity.Kind.STATION:
 			out.append(rec.pos)
+	return out
+
+# TRADE stations only -- the subset a hunt point should be reasoned FROM,
+# as opposed to _station_positions above which is every STATION-kind record
+# and is what we AVOID (you keep clear of a parked mobile home too).
+#
+# The filter is `industry` non-empty, not `kind`, for the reason CLAUDE.md
+# already records against this exact trap: mobile homes are STATION-kind, so
+# keying on kind alone silently folds the five Slag Bay trailers into the
+# "hubs traffic flows between" set and drags hunt geometry into a residential
+# field nobody ships cargo to. Which stations are trade hubs is public
+# knowledge in the strong sense -- you can see the freighters dock.
+func _trade_station_positions(cluster) -> Array:
+	var out: Array = []
+	for rec in cluster.records:
+		if rec.kind != ClusterEntity.Kind.STATION:
+			continue
+		if typeof(rec.industry) != TYPE_DICTIONARY or rec.industry.is_empty():
+			continue
+		out.append(rec.pos)
 	return out
 
 func _beacon_positions(cluster) -> Array:
@@ -568,6 +733,21 @@ func _hazard_clearance(p: Vector2, stations: Array, beacons: Array) -> float:
 # surface at the same spot), rather than every staging point anchoring
 # rigidly off lane_pos itself.
 func _pick_lane_point(cluster, wormhole_pos: Vector2, stations: Array, beacons: Array) -> Dictionary:
+	# M53d follow-up -- AUTHORED LANES NO LONGER EXIST. `_cargo()` stopped
+	# emitting a "route" when haulers became planner-driven (they now decide
+	# their own circuits from the posting board), so this scan returns an empty
+	# set on the real home cluster and every hunt point collapsed onto the
+	# wormhole fallback. test_pirate_circulation caught it: 200 assemblies, one
+	# location. Pirates stopped distributing across the cluster entirely.
+	#
+	# The strategies below replace authored routes with MAP REASONING, which is
+	# the honest premise anyway: a guild watching the cluster knows where the
+	# hubs are and can infer where cargo must pass. It never gets to read the
+	# posting board (that is private economic information) or live hauler
+	# positions (that is omniscience) -- only public geometry.
+	if hunt_strategy != HuntStrategy.LEGACY_LANE_ROUTES:
+		return _pick_hunt_point(cluster, wormhole_pos, stations, beacons)
+
 	var lanes: Array = []
 	for rec in cluster.records:
 		if rec.kind != ClusterEntity.Kind.TRAFFIC:
