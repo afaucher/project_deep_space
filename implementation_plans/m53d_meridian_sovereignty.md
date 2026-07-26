@@ -128,3 +128,127 @@ decision, not an accident of a rate table.
   mechanism, and work under any balance.
 - The dispatch score's `flag_affinity` weighting — already parameterized, so a
   changed balance is a config change.
+
+---
+
+# RESOLUTION (2026-07-25) — RARE, margins, and refined-as-export
+
+Settled in the calling session after the first `economy_traffic` runs made the
+real problem measurable. Two decisions, taken together.
+
+## The finding that forced it: the cluster is balanced to EXACTLY zero margin
+
+Tallying the authored rates cluster-wide:
+
+| Class | Supply/hr | Demand/hr | Margin |
+| --- | --- | --- | --- |
+| ORE | 8.9 | 8.9 (Ironhold export 5.6 + Refinery Prime 3.3) | **0.0** |
+| VOLATILES | 2.60 (Coldreach) | 2.60 (seven stations) | **0.0** |
+| REFINED | 2.20 (Refinery Prime) | 2.20 (seven stations) | **0.0** |
+| GOODS | 1.50 (Ironhold import) | 1.50 (seven stations) | **0.0** |
+
+Supply equals demand to the decimal on all four. That is the reference table
+made real, and it is the equilibrium of a system with **no losses** — which
+this system is not. Three consequences, all observed:
+
+1. **It makes trade structurally impossible, which is the same finding as "no
+   EXPORT posting ever opens."** A producer running at exactly 100% of demand
+   never accumulates a surplus; `surplus_line` gates exports on surplus;
+   therefore no export posting can ever open for REFINED or GOODS. These were
+   logged as two separate problems. They are one.
+2. **Cargo in flight is a permanent deficit.** A lot in a hold is at neither
+   source nor sink, and a zero-margin system has no spare production to refill
+   the pipeline.
+3. **ORE contention is unresolved.** Ironhold's export (5.6) and Refinery
+   Prime (3.3) need *precisely* all 8.9, and urgency-priced bidding hands ore
+   to whoever is nearest zero. Ironhold sits at zero, so it outbids — starving
+   the converter that makes ALL the cluster's REFINED. Measured: Refinery Prime
+   producing 1.112/hr against 2.2 authored, exactly 50%. An ore shortfall does
+   not stay an ore shortfall; it becomes a refined famine for seven stations.
+   The designed cascade, arriving uninvited as the resting state.
+
+**Scarcity has to be an event before it can be a story.** Every rate below is
+chosen to make the cluster solvent at rest, so that losing a mining ship
+*means* something.
+
+## Decision 1 — RARE, a fifth class
+
+A pure export good: produced only in Meridian space, consumed by nobody in the
+cluster, leaving through Ironhold's wormhole gate like ORE does today.
+
+- **Balance and pricing are ORDINARY.** Same urgency scale, no intrinsic
+  per-commodity value, no special multiplier. It is hard currency in the
+  fiction, not in the code — and it should stay that way until something
+  actually needs it to be otherwise.
+- **Anyone may carry it.** Meridian controls the SALE, not the carriage — a
+  purchase monopoly, deliberately weaker than Coldreach's carriage restriction
+  on VOLATILES.
+- **Halvorsen Claim and Corvus Yards produce it, Coldreach does not.** Splits
+  the two kinds of leverage across different stations instead of stacking every
+  card at one.
+
+### Why this is the right shape: the two monopolies are ASYMMETRIC
+
+- **Coldreach's air is existential and fast.** Home stops breathing. Meridian's
+  lever is lethal, which makes it a nuclear option rather than an everyday one.
+- **Meridian's RARE is economic and slow, and home can block it for free.**
+  Ironhold does not consume rare — outside buyers do — so home can close the
+  gate at no cost to itself while Meridian loses its entire income.
+
+So home is structurally the stronger party in a standoff, and Meridian's only
+counter is escalation. That is *why they coexist* instead of one absorbing the
+other, and it falls out of the commodity graph — no diplomacy system, no
+scripted relationship, no new mechanism. It also self-enforces: with no
+domestic consumer, a closed gate fills Meridian's RARE bins to capacity and
+BLOCKS production through the backpressure that already exists.
+
+## Decision 2 — export REFINED, not raw ORE
+
+The cluster currently ships out more unprocessed rock (5.6/hr) than it adds
+value to (3.3/hr). That is a colony, not an industrial base, and it is the
+direct cause of the contention in finding 3 above.
+
+**Destination:** the next cluster's shipyard. The export is not into a void —
+home refines ore into structure and Meridian sells exotics, and both feed hull
+construction beyond the Nexus. That is what makes the outside want both goods,
+and it is a content hook, not just a sink.
+
+## The new numbers
+
+| Class | Supply/hr | Demand/hr | Margin |
+| --- | --- | --- | --- |
+| ORE | 8.9 (unchanged) | 7.4 = Refinery Prime **6.6** + Ironhold raw export **0.8** | +1.5 (20%) |
+| REFINED | **4.4** (Refinery Prime, same 2:3 conversion) | 3.8 = upkeep 2.2 + Ironhold export **1.6** | +0.6 (16%) |
+| VOLATILES | **3.20** (Coldreach, was 2.60) | 2.60 | +0.6 (23%) |
+| GOODS | **1.85** (Ironhold import, was 1.50) | 1.50 | +0.35 (23%) |
+| RARE | **0.80** (Halvorsen 0.40 + Corvus 0.40) | 0.65 (Ironhold export) | +0.15 (23%) |
+
+Per-station changes:
+
+- **Refinery Prime** — converter `{in: ORE 6.6, out: REFINED 4.4}` (was 3.3/2.2).
+  Ratio unchanged; it simply runs at the scale the cluster's ore supports.
+- **Ironhold** — ORE sink 5.6 → **0.8**; REFINED sink 0.50 → **2.10** (0.50
+  population upkeep + 1.60 export); GOODS source 1.50 → **1.85**; new RARE sink
+  **0.65**. Still the only gate.
+- **Coldreach** — VOLATILES source 2.60 → **3.20**.
+- **Halvorsen Claim / Corvus Yards** — new RARE source **0.40** each.
+
+Refined leaves at 2:1 against raw ore, so "mostly refined" is true by volume as
+well as by value — which matters while price carries no per-commodity term.
+
+## Verification
+
+`economy_soak` (30 game-days, seconds, no physics) answers whether the margins
+hold at rest. `economy_traffic` answers whether the fleet realises them. The
+acceptance bar is the one the sim already reports: no station net-negative on a
+commodity it cannot produce, with `UNSERVED` rows going to zero — and now with
+a real expectation that EXPORT postings actually open, which no run to date has
+seen for REFINED or GOODS.
+
+## Blast radius
+
+`Commodity.ALL` is data-driven and `ensure_holder` auto-populates bins, so a
+fifth class mostly propagates itself. The churn is the 8×4 reference table in
+[../design_ideas/station_economy.md](../design_ideas/station_economy.md)
+becoming 8×5, `test_station_economy_reference`'s expectations, and one more row
+per station in both sim CSVs.

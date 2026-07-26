@@ -314,6 +314,46 @@ These are from `component_spec.gd`. Values outside bands produce warnings:
 | MEDIUM | 600–1400 | 1.2–3.0 |
 | HEAVY | 300–900 | 0.6–1.8 |
 
+### Braking Distance (Derived — NOT band-checked, but navigation depends on it)
+
+`HANDLING_BANDS` constrains `max_speed` and `max_omega`. It says **nothing
+about acceleration**, so a hull can be authored legally and still be
+*physically unable to stop*. That is not a cosmetic problem: `Steering.
+approach_speed_limit()` slows every AI hull on approach to a dockable using a
+braking curve derived from that hull's own thrust and mass, and a ship that
+cannot brake will overrun the curve and hit the station.
+
+Two numbers matter:
+
+```
+accel        = total engines thrust_rating / mass          (u/s^2)
+brake_dist   = (max_speed^2 - 120^2) / (2 * accel * 0.65)  (world units)
+```
+
+The `0.65` is the fraction of rated thrust actually usable for braking — the
+hull must rotate to point retrograde first, and low `max_omega` on heavy tiers
+means that rotation is not free. `120` is `Steering.DOCK_APPROACH_SPEED`, the
+speed a hull must be at or under when it reaches a berth (comfortably below
+`Ship.COLLISION_DAMAGE_MIN_SPEED` of 150, above which contact does damage).
+
+**Rule of thumb: keep `brake_dist` under ~15000 units.** Reference hulls:
+
+| Hull | Tier | max_speed | brake_dist |
+|------|------|-----------|------------|
+| Cargo Shuttle | MEDIUM | ~700 | ~8000 |
+| Freighter | HEAVY | ~400 | ~7000 |
+
+A hull needing much more than that will be visibly stupid around stations: it
+starts decelerating from a long way out (slow, and it looks indecisive), or it
+arrives too hot and damages what it was trying to dock with. **A high
+`max_speed` is a liability without the thrust to match it** — pushing speed to
+the top of the band while leaving engines at the bottom is the specific
+combination to avoid.
+
+Symptoms in `scripts/tests/test_dock_approach.gd`: rising `station_hits` per
+cycle, or a peak contact speed well above the commanded limit (which means the
+clamp asked for a speed the hull could not physically reach).
+
 ### Laser Weapon Stats
 | Tier | Damage Min–Max | Range Min–Max |
 |------|---------------|---------------|
