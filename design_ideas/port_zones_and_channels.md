@@ -162,11 +162,54 @@ they'd spam the ring buffer on every timeout/retry cycle.
   three color states (under / approaching / over) while inside a zone; the
   gauge tick makes the limit actionable when SETTING a target velocity, not
   just when already speeding.
-- **NPCs treat the advisory as mandatory.** Traffic AI clamps its in-zone
-  cruise speed to the zone's limit and decelerates down the channel — this,
-  not despin, is the real fix for shuttles tapping the station hard enough
-  to set it spinning. (STRUCTURE despin, capture timeout, and nearest-bay
-  assignment remain as the recovery net.)
+- **Two speed rules, not one — self-imposed and externally imposed.** An
+  earlier version of this bullet said only "NPCs treat the advisory as
+  mandatory: traffic AI clamps its in-zone cruise speed to the zone's limit."
+  That conflates two different things, and the gap showed up as measured
+  damage (2026-07-25, `economy_traffic` — see below). Only `MediumStation`
+  authors a `port_zone` at all, so **five of the home cluster's eight
+  stations — every outpost — publish no limit to respect.** A rule that only
+  exists inside an authored zone cannot govern most of the cluster's traffic.
+
+  1. **Approach discipline (self-imposed, universal).** Every hull decelerates
+     on final approach to *any* dockable, zone or no zone, authority or none.
+     This is competence, not compliance — you slow down because you do not
+     want to hit the thing, and physics does not care about jurisdiction. This
+     is the rule that actually fixes shuttles tapping stations hard enough to
+     set them spinning.
+  2. **Published limit (externally imposed, where there is an authority).**
+     The zone's `speed_advisory`, obeyed inside the zone whether or not you
+     are docking — a ship merely transiting Ironhold's zone slows too. NPCs
+     treat this as mandatory.
+
+  **Small ports publish nothing because they cannot enforce anything.** No
+  port control, no patrol, no ability to sanction a hull that ignores them.
+  That is the fiction and it is also the mechanism: a limit exists where
+  someone can make it stick. Rule 1 is what keeps behavior sane at the other
+  five.
+
+  **This asymmetry is worth keeping for its own sake.** At an enforced port
+  everyone conforms, so approach speed says nothing about who you are. At an
+  unenforced outpost, only a ship with self-preservation slows down — so how
+  something comes in at a place with no authority becomes a readable tell.
+  Violating a *published* limit is an offence (warrants/standing); being a
+  menace at an outpost is just a warning sign about the pilot.
+
+  (STRUCTURE despin, capture timeout, and nearest-bay assignment remain as
+  the recovery net.)
+
+  **Status: rule 2 is specified and unbuilt; rule 1 was never specified.**
+  `speed_advisory` is authored (`medium_station.gd`) and read in exactly three
+  places — `port_rules.gd` for banner text, `helm_panel.gd` for the player's
+  amber gauge, and `test_port_rules.gd`. Nothing under `scripts/ai/` reads it;
+  the AI's three `get_port_zone()` call sites are all about docking
+  permission. The cost is measurable: in `economy_traffic`, station
+  self-repair drain tracks docking count and ignores the zone entirely
+  (Refinery Prime, which publishes a 200 u/s limit, took the worst damage in
+  the cluster at 9 dockings; Slag Bay, which publishes nothing, took none at
+  2). Stations pay for the dents out of their own REFINED/GOODS bins, which
+  is why this first surfaced as an *economy* anomaly rather than a collision
+  report.
 - Player no-fly violation: warn-only for now (banner + a port-control comms
   scold). Escalation — reputation, denied future grants, patrol response —
   is real gameplay and DEFERRED to its own milestone; nothing in the model

@@ -249,9 +249,96 @@ to zero on air — which is CORRECT: Phases A/B have production and consumption 
 **nothing that redistributes**. That run is the *"before"* picture, and it turns
 "stations stop starving" into a measurable pass/fail rather than a vibe.
 
-**`economy_soak` passing is therefore Phase C's acceptance criterion**, not Phase
-B's. Metrics worth emitting per station per commodity: time-at-zero, time BLOCKED,
-min/max stock, and converter uptime.
+**CORRECTION (2026-07-25), twice over.** An earlier draft said "economy_soak
+passing is Phase C's acceptance criterion", and justified skipping a
+ships-in-the-loop sim on a timescale argument. Both were wrong:
+
+1. **`economy_soak` cannot validate Phase C.** It runs everything DORMANT with no
+   ships, so a ship-side planner moves zero lots in it and it would report
+   identical collapse afterwards. It proves only that removing all redistribution
+   kills the cluster — which was never in doubt. Keep it as the *baseline*; it is
+   not a validation.
+2. **The timescale objection was bogus.** "30 game-minutes shows nothing because
+   buffers are ~24h" only holds if the measurable is STARVATION. The right
+   measurable is **net flow**: a hauler round trip is 12–24 game-minutes and
+   delivers a lot, so 30 game-minutes gives 2–3 trips per hull — enough to see
+   whether each station's stock trends UP or DOWN. **A station net-negative on a
+   commodity it cannot produce will starve; you do not need to watch it happen.**
+   At ~83fps headless that is ~21 real minutes. Entirely viable.
+
+So **`economy_traffic` is the real validation and is a REQUIRED Phase C
+deliverable**, not a follow-up.
+
+| Runner | Question | Cost |
+| --- | --- | --- |
+| `economy_soak` (built) | baseline: how fast does it die with no redistribution? | seconds |
+| **`economy_traffic` (Phase C)** | **do real hulls actually keep every station net-positive?** | ~21 real min |
+
+Metrics: per station per commodity, net flow (lots/hr, so it is comparable to the
+reference table), delivery count, min stock, and time-at-zero. **Verdict = any
+station net-negative on a commodity it cannot produce itself.**
+
+### What the first real runs taught (2026-07-25)
+
+Three methodology corrections, all found by running it. Recorded because each
+one produced a confident, wrong answer first.
+
+**1. Net flow must be ATTRIBUTED, or repair defames the economy.** Four
+independent things move a station's stock: the economy proper
+(sinks/converters/sources), repair of docked guests, the station repairing
+ITSELF, and trade. `_heal_components` is stock-gated for stations, drawing
+REFINED for hull and GOODS for systems — so a station taking collision damage
+bleeds exactly the two commodities an economy failure would, and reads
+identically in a single net-flow column. The runner now measures all four
+separately (repair reconstructed from per-component health deltas run back
+through `HULL_HP_PER_LOT`/`SYSTEM_HP_PER_LOT` — the exact inverse of the
+forward conversion, so it is not an estimate) and reports economy as the
+residual.
+
+**2. The verdict cannot key on the economy residual.** The first attributed
+version moved the verdict off net flow onto the economy column, to stop repair
+noise causing false failures. That is wrong in a way that is obvious in
+hindsight: **the economy rate is negative by definition for any station that
+consumes a commodity** — that is what a consumer *is*. Every consumer reported
+FAIL regardless of how well it was served, including Ironhold/ORE and Refinery
+Prime/ORE while both ran net POSITIVE on healthy trade. Net flow is the honest
+measure of "is this station being kept alive"; attribution then explains *why*
+it is negative. The verdict now names a cause — `UNSERVED`, `UNDERSUPPLIED`,
+`OVER_EXPORTED`, `REPAIR_DRAIN` — because each has a different owner
+(routing, fleet size, pricing, navigation).
+
+**3. Sampling from frame zero measures the spawn transient, not the economy.**
+Promoting the cluster produces a burst of component damage as bodies resolve
+overlap, and the self-repair that pays for it drains REFINED/GOODS hard for
+~2 minutes. Averaged across 30 minutes this reported Deepcut GOODS at
+**−35.6/hr against an authored sink of −0.15**, and Ironhold GOODS at
+**−74/hr against a +1.50 SOURCE**. The per-minute trace is what exposed it:
+steep drop for two minutes, then dead flat at *exactly* the authored rate. The
+economy was correct the entire time. The runner now flies a 3-minute **settle
+window** and re-baselines every counter before measuring.
+
+**Two real findings survived those corrections**, and both are keepers:
+
+- **Hauler repair draw is now ~0.000/hr cluster-wide**, confirming the
+  `steering.gd` avoidance fix (single most-urgent threat instead of summed
+  perpendiculars) holds at cluster scale, not just in `test_nav_gauntlet`.
+- **An all-`FLAG_DRIFT` fleet moves ZERO volatiles**, because Coldreach is the
+  cluster's only VOLATILES source and restricts its EXPORT to
+  `FLAG_MERIDIAN`. Eligibility working exactly as designed — and a fleet
+  categorically unable to lift the one commodity everyone consumes cannot
+  answer this sim's question. Haulers now inherit their home station's flag,
+  which makes the fleet match the world rather than restate it. This is the
+  M53d sovereignty question arriving as a measurement.
+
+**General rule this reinforces:** a sim that reports a number is making a
+claim about a mechanism. Check the number against the *authored* rate before
+believing it — three times running, the alarming figure was an artifact of how
+it was measured, and the trace (not the summary) is what settled it each time.
+
+Note the prerequisite: today **nothing transfers on dock**. Phase B built
+`fulfill()`, but the authored haulers still run fixed `CargoRunLeaf` loops with no
+delivery wiring — a traffic sim right now would show ships flying and docking
+while moving zero lots. Wiring delivery into the dock event is part of Phase C.
 
 ## Phase C — The ship-side planner (ONE planner, every ship)
 
