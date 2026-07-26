@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://crsj0keu8cndw"
+
+[deps]
+
+files=["res://tactical_analysis/data/economy_soak.station.translation", "res://tactical_analysis/data/economy_soak.flag.translation", "res://tactical_analysis/data/economy_soak.commodity.translation", "res://tactical_analysis/data/economy_soak.hours.translation", "res://tactical_analysis/data/economy_soak.hours.translation", "res://tactical_analysis/data/economy_soak.min.translation", "res://tactical_analysis/data/economy_soak.max.translation", "res://tactical_analysis/data/economy_soak.conv.translation", "res://tactical_analysis/data/economy_soak.conv.translation", "res://tactical_analysis/data/economy_soak.conv.translation"]
+
+source_file="res://tactical_analysis/data/economy_soak.csv"
+dest_files=["res://tactical_analysis/data/economy_soak.station.translation", "res://tactical_analysis/data/economy_soak.flag.translation", "res://tactical_analysis/data/economy_soak.commodity.translation", "res://tactical_analysis/data/economy_soak.hours.translation", "res://tactical_analysis/data/economy_soak.hours.translation", "res://tactical_analysis/data/economy_soak.min.translation", "res://tactical_analysis/data/economy_soak.max.translation", "res://tactical_analysis/data/economy_soak.conv.translation", "res://tactical_analysis/data/economy_soak.conv.translation", "res://tactical_analysis/data/economy_soak.conv.translation"]
+
+[params]
+
+compress=true
+delimiter=0
