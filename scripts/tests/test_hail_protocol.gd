@@ -23,6 +23,9 @@ extends Node
 const Ship = preload("res://scripts/ships/frigate.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
+# `Ship` above is actually Frigate; this is the real base, needed for
+# DATALINK_RELAY_HZ (see _relay_settle_frames below).
+const ShipBase = preload("res://scripts/ships/ship.gd")
 
 var main_node: Node = null
 var spawned: Array[Node] = []
@@ -404,6 +407,14 @@ func _tick_scenario_g() -> int:
 # for an unrefreshed/out-of-range contact is already exercised generically
 # elsewhere in the suite; this scenario's job is proving the erase-on-off
 # path specifically.
+# SOS reconciliation runs on the datalink relay's cadence, not every physics
+# frame. This scenario used to wait a hardcoded 3 ticks, which was only ever
+# enough because those were the same thing -- see the note on
+# Ship._reconcile_sos_contact about stating the contract in TIME. Derived from
+# the constant so it cannot rot if the cadence is retuned.
+func _relay_settle_frames() -> int:
+	return int(ceil(2.0 * Engine.physics_ticks_per_second / ShipBase.DATALINK_RELAY_HZ))
+
 func _tick_scenario_h() -> int:
 	var caller: Ship = ships["caller"]
 	var listener: Ship = ships["listener"]
@@ -412,7 +423,7 @@ func _tick_scenario_h() -> int:
 	match phase:
 		0:
 			step_frame += 1
-			if step_frame < 3:
+			if step_frame < _relay_settle_frames():
 				return -1
 			caller.set_sos_active(true, Hail.NATURE_DISABLED)
 			phase = 1
@@ -420,7 +431,7 @@ func _tick_scenario_h() -> int:
 			return -1
 		1:
 			step_frame += 1
-			if step_frame < 3:
+			if step_frame < _relay_settle_frames():
 				return -1
 			if not listener.active_contacts.has(caller_trk):
 				printerr("  ASSERT FAILED: listener should hold a DISTRESS CALL contact from the caller, active_contacts=", listener.active_contacts)
@@ -439,7 +450,7 @@ func _tick_scenario_h() -> int:
 			if not listener.active_contacts.has(caller_trk):
 				print("  [PASS] SOS contact erased by reconciliation within %d tick(s) of sos_active going false, no CONTACT_TIMEOUT wait needed" % step_frame)
 				return 1
-			if step_frame > 10: # generous margin -- should clear within 1-2 ticks
+			if step_frame > _relay_settle_frames() * 2: # generous margin over one relay interval
 				printerr("  ASSERT FAILED: listener still holds the DISTRESS CALL contact ", step_frame, " ticks after the caller's SOS went off, active_contacts=", listener.active_contacts)
 				return 0
 			return -1

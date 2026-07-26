@@ -20,6 +20,10 @@ extends Node
 
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
+# Preload-const convention (CLAUDE.md): needed for DATALINK_RELAY_HZ, which
+# the timing budgets below derive from so they cannot rot if the cadence is
+# retuned. See the "state the contract in TIME" note on _reconcile_sos_contact.
+const Ship = preload("res://scripts/ships/ship.gd")
 
 var main_node: Node = null
 var failures: Array = []
@@ -103,14 +107,21 @@ func _test_battery_floor_then_off_clears_within_ticks() -> void:
 	_assert(heard, "the floor survived the redesign -- receiver heard the dead-comms sender's SOS")
 
 	sender.set_sos_active(false, "")
+	# Budget stated in TIME, not ticks. Reconciliation runs on the datalink
+	# relay's cadence (Ship.DATALINK_RELAY_HZ), so the honest contract is "one
+	# relay interval plus slack", and pinning it to "<= 3 frames" only ever
+	# passed because the relay happened to run every physics frame. Derived
+	# from the constant rather than hardcoded so this cannot rot again if the
+	# cadence is retuned.
+	var clear_budget_frames: int = int(ceil(2.0 * Engine.physics_ticks_per_second / Ship.DATALINK_RELAY_HZ))
 	var cleared_frame := -1
-	for i in range(10): # generous -- should clear within 1-2 ticks
+	for i in range(clear_budget_frames * 4): # generous headroom over the budget
 		await main_node.get_tree().physics_frame
 		if not receiver.active_contacts.has(sender_trk):
 			cleared_frame = i + 1
 			break
-	_assert(cleared_frame != -1 and cleared_frame <= 3,
-		"reconciliation erased the entry within a couple of ticks of sos_active going false (took %s), no off-message involved" % (str(cleared_frame) if cleared_frame != -1 else "never"))
+	_assert(cleared_frame != -1 and cleared_frame <= clear_budget_frames,
+		"reconciliation erased the entry within %d frames (~2 relay intervals) of sos_active going false (took %s), no off-message involved" % [clear_budget_frames, (str(cleared_frame) if cleared_frame != -1 else "never")])
 
 	_free_all()
 
@@ -213,17 +224,43 @@ func _test_fly_back_into_range_does_not_stick_stale_sos() -> void:
 	# lets last_seen_at go stale), and reconciliation must show sos:false on
 	# that SAME return -- not just at the moment it left.
 	_teleport(sender, Vector2(3000, 0))
+	# TWO CLOCKS, and this is the assertion that exposed it. Sensor correlation
+	# re-classifies the contact EVERY physics frame; reconciliation clears the
+	# stale sos badge on the datalink relay's cadence. The original version
+	# asserted sos==false on the very first frame the classification settled,
+	# which only ever held because the relay also ran every frame -- the moment
+	# it did not, the sensor won the race by up to a full relay interval and
+	# read a badge that was correct but not yet cleared.
+	#
+	# The real invariant is "the stale badge is gone within a bounded TIME of
+	# the sender re-entering range", so wait for the classification to settle,
+	# then give reconciliation its interval before judging. Budget derived from
+	# the constant so it tracks any future retune.
+	var clear_budget: int = int(ceil(2.0 * Engine.physics_ticks_per_second / Ship.DATALINK_RELAY_HZ))
 	var settled := false
-	for i in range(120): # up to 2s
+	var settled_at := -1
+	var sos_cleared := false
+	var final_c: Dictionary = {}
+	for i in range(120 + clear_budget * 4):
 		await main_node.get_tree().physics_frame
 		var c: Dictionary = receiver.active_contacts.get(sender_trk, {})
-		if not c.is_empty() and c.get("classification", "") == real_classification:
+		if c.is_empty():
+			continue
+		final_c = c
+		if not settled and c.get("classification", "") == real_classification:
 			settled = true
-			_assert(c.get("sos", true) == false, "sos did NOT stick true on return -- reconciliation cleared it despite continuous real re-detection")
-			_assert(c.get("sos_nature", "MISSING") == "", "sos_nature cleared too")
-			_assert(c.get("sos_name", "MISSING") == "", "sos_name cleared too")
-			break
+			settled_at = i
+		if settled:
+			if c.get("sos", true) == false:
+				sos_cleared = true
+				break
+			if i - settled_at > clear_budget:
+				break # over budget -- fall through and let the assert report it
 	_assert(settled, "setup: the contact re-settled to its real classification after the sender flew back into range")
+	_assert(sos_cleared,
+		"the stale sos badge cleared within %d frames (~2 relay intervals) of the sender flying back into range, despite continuous real re-detection" % clear_budget)
+	_assert(final_c.get("sos_nature", "MISSING") == "", "sos_nature cleared too")
+	_assert(final_c.get("sos_name", "MISSING") == "", "sos_name cleared too")
 
 	_free_all()
 

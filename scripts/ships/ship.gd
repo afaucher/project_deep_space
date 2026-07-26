@@ -1,4 +1,4 @@
-extends RigidBody2D
+﻿extends RigidBody2D
 class_name Ship
 
 const WeaponBehaviorRegistry = preload("res://scripts/components/weapon_behavior_registry.gd")
@@ -1692,8 +1692,9 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 			# contact["standing"] already had before M52b.
 			atk_c["standing"] = Standing.HOSTILE
 			atk_c["standing_reason"] = "fired on us"
-			if claimed_name != "":
-				Standing.add_wanted(iff_tags, claimed_name)
+			# (An add_wanted() call sat here. The global wanted-names registry
+			# was deleted 2026-07-26 -- three writers, zero readers. The
+			# ASSAULT warrant posted just above is the record now.)
 		Standing.post_aggression(attacker_id, get_instance_id(), global_pos, iff_tags, ship_name)
 
 	# Player-feedback hook: surface "we got hit" to this ship's own terminal (impact
@@ -1983,6 +1984,11 @@ func _ready() -> void:
 		
 	add_to_group("ships")
 
+	# Stagger this hull's datalink relay tick -- see DATALINK_RELAY_HZ. Stored
+	# raw (not pre-modded) so the interval can change without invalidating it;
+	# the modulo happens at the use site.
+	_datalink_phase = absi(int(get_instance_id()))
+
 	# M46 -- derive exclusion_radius once for a controlled station that didn't
 	# author an explicit value (absent/0.0). See PortZone.derive_exclusion_radius
 	# for the factor/reasoning. Runs here (Ship._ready(), triggered synchronously
@@ -2176,6 +2182,66 @@ var active_sensor_sweeps = {} # Map of id -> bins
 var active_contacts = {}
 var active_transponders = {}
 var next_contact_id: int = 1
+
+# ---------------------------------------------------------------------------
+# Datalink relay cadence (2026-07-26). The relay was the single most expensive
+# block in the ship tick (18.1% of frame time by PerfProbe attribution), and
+# it ran at the full physics rate for no reason: comms is not a physics
+# quantity. 10Hz costs up to 100ms of freshness and returns ~5/6 of that
+# budget.
+#
+# WHY THIS IS SAFE, which is not obvious and was not always true: the relay is
+# a pure RECOMPUTE, not an accumulator. active_transponders is cleared and
+# rebuilt, contacts merge freshest-wins on an absolute frame stamp, warrants
+# merge monotonically (Standing.merge_warrant). Nothing integrates delta, so
+# running it less often loses freshness, never state.
+#
+# M56 is what made that true. The old duration-based staleness inflated a
+# relayed reading by +delta per hop to stop round-trip echoes reading fresher
+# than the local copy, and that scheme -- as its own comment at the merge site
+# says -- "silently assumed relay runs every physics frame". Decimating under
+# THAT design would have quietly broken echo-lock. Absolute frame stamps
+# (Engine.get_physics_frames()) removed the assumption; the CONTACT_TIMEOUT
+# gate and the exact-tie "keep local" rule are both frame-stamp comparisons
+# and are cadence-independent by construction.
+#
+# STAGGERED per ship, deliberately. Firing every hull's relay on the same
+# frame would trade a flat 18% for a 6x spike every 6th frame -- same total
+# work, worse frame pacing, and it would read terribly in p95/max given that
+# Performance.TIME_PHYSICS_PROCESS holds stale values (see CLAUDE.md). The
+# phase is derived from the instance id, so it is stable for a hull's lifetime
+# and uncorrelated across hulls without needing any RNG.
+#
+# Known consequences, both pre-existing staleness that merely widens:
+#   - Multi-hop propagation is one hop per relay tick, so ~100ms per hop
+#     instead of ~17ms.
+#   - The sensor correlate-update path reads active_transponders EARLIER in
+#     the same tick than the relay rebuilds it, so it already saw a one-tick-
+#     old record by design (see the comment at that call site). It now sees up
+#     to one relay-interval-old. Still "fine and realistic per the design doc".
+#
+# WHY 15 AND NOT 10. 10Hz was the first choice and it failed exactly one test
+# in the whole suite: test_multi_pirate_thermal, where Pirate0 survived an
+# encounter it normally does not. Isolated by A/B -- the relay change alone
+# caused it, the standing.gd warrant-keying fix was innocent -- and then swept:
+# FAILS at 10Hz, PASSES at 15, 20 and 30. A clean threshold between 10 and 15,
+# not noise.
+#
+# The mechanism is real and worth understanding rather than tuning around:
+# slowing the relay slows how fast a GROUP converges on a target, because
+# every contact one defender holds reaches the others a relay interval later.
+# Coordination degrades before anything else does. That is arguably correct
+# fiction -- comms latency SHOULD cost you -- but it is a combat-balance
+# change, and it has no business riding along inside a perf change unnoticed.
+#
+# 15Hz skips 3 frames in 4 (75% of the relay's cost) against 10Hz's 5 in 6
+# (83%), so it keeps ~90% of the saving and buys back the margin. Treat that
+# test as the canary for this constant: it asserts a specific hull dies, which
+# is the brittle style CLAUDE.md warns about for combat outcomes, and that is
+# precisely what makes it sensitive enough to notice. If it ever fails again
+# after touching this value, the fleet's coordination is what changed.
+const DATALINK_RELAY_HZ := 15.0
+var _datalink_phase: int = 0
 
 # M48 -- highest Standing.aggression_events seq this ship has already
 # consumed (witness consumption, fusion tick). Starts at 0; the bus's seq
@@ -3259,8 +3325,51 @@ func _physics_process(delta: float) -> void:
 	# is available to relay onward to a third ship next frame, one tick of
 	# latency per hop instead of needing an explicitly modeled delay.
 	PerfProbe.begin("datalink_relay")
-	active_transponders.clear()
-	var self_comms_range = get_comms_range()
+	# Cadence gate -- see DATALINK_RELAY_HZ. The WHOLE block decimates, SOS
+	# reconciliation included.
+	#
+	# An intermediate version of this kept _reconcile_sos_contact at full rate,
+	# on the theory that a distress call is an emergency signal and must not be
+	# delayed. That reasoning was wrong twice over, and both corrections are
+	# worth recording because the instinct will recur:
+	#
+	#   1. LOSING THE SIGNAL ALREADY DECAYS, at any cadence. _reconcile_sos_
+	#      contact is only reached for peers inside self_comms_range; drop the
+	#      link entirely and it is never called, so nothing erases anything --
+	#      the entry simply stops being refreshed and ages out on
+	#      CONTACT_TIMEOUT (20s) like any other track. Refreshing every 100ms
+	#      against a 20s timeout is nowhere near the edge, so the hulk/rescue-
+	#      tug case (a dead-comms wreck heard on SOS_BATTERY_RANGE) is
+	#      refresh-driven and completely indifferent to this constant.
+	#   2. The case the erase branch DOES cover -- peer inside comms range,
+	#      not broadcasting -- is a positive observation, and clearing it
+	#      100ms later instead of 17ms later is a difference of degree on a
+	#      threshold that has to land inside SOME observation gap either way.
+	#      A 6-frame gap is just a longer 1-frame gap.
+	#
+	# The three SOS tests that failed the first attempt were all asserting in
+	# TICKS, inherited from this block's own "reflected within 1-2 ticks"
+	# comment -- a contract phrased in ticks only because the relay happened to
+	# be per-frame. The sharpest was test_sos_passive_reconciliation's
+	# fly-back-into-range case: it asserts on the first frame the SENSOR
+	# re-classifies the contact (per-frame pipeline) while the clear comes from
+	# reconciliation, so the two subsystems raced as soon as they stopped
+	# sharing a clock. Those assertions are now expressed in TIME. Do not
+	# re-tighten them to tick counts.
+	var relay_interval: int = maxi(1, int(round(float(Engine.physics_ticks_per_second) / DATALINK_RELAY_HZ)))
+	var relay_due: bool = (Engine.get_physics_frames() + _datalink_phase) % relay_interval == 0
+	# The clear() must stay inside the gate with the rebuild, or every hull's
+	# transponder list would read empty on 5 frames out of 6. Skipped ticks
+	# deliberately RETAIN the last relay tick's results.
+	if relay_due:
+		active_transponders.clear()
+	# Forcing this to 0.0 is how the skip is expressed: the existing
+	# `if self_comms_range > 0.0` guard below already means "no radio, nothing
+	# to do", so this skips the block AND the get_comms_range() component walk
+	# without re-indenting 230 lines (CLAUDE.md has a scar from exactly that
+	# kind of mechanical rewrite). Do NOT "fix" this to call get_comms_range()
+	# unconditionally -- that walk is part of the cost being saved.
+	var self_comms_range = get_comms_range() if relay_due else 0.0
 	# M52b -- shared with the warrant merge folded into this loop below: both
 	# ride the exact same peer/range/LOS/IFF link this loop establishes, so
 	# warrants merge inside this SAME iteration rather than a second O(n)
@@ -3442,16 +3551,14 @@ func _physics_process(delta: float) -> void:
 					# "multi-hop timestamp question".
 					# M48 -- datalink standing share: an imported track already
 					# carries the peer's judgment; relabel the reason so it
-					# reads as relayed, not directly observed, and feed
-					# wanted_names on a HOSTILE import same as the update path
-					# below.
+					# reads as relayed, not directly observed. (This also used
+					# to feed the global wanted-names registry on a HOSTILE
+					# import; that registry was deleted 2026-07-26 -- three
+					# writers, zero readers. Warrants relay on their own via
+					# the merge loop above, which is the supported path.)
 					var imported_standing: String = imported.get("standing", "")
 					if imported_standing != "":
 						imported["standing_reason"] = "datalink " + s.ship_name + ": " + imported.get("standing_reason", "")
-						if imported_standing == Standing.HOSTILE:
-							var imported_name: String = active_transponders.get(imported.get("instance_id", -1), {}).get("name", "")
-							if imported_name != "":
-								Standing.add_wanted(iff_tags, imported_name)
 					active_contacts[c_id] = imported
 				else:
 					var c = active_contacts[c_id]
@@ -3481,10 +3588,9 @@ func _physics_process(delta: float) -> void:
 					if peer_standing != "" and Standing.is_more_severe(peer_standing, c.get("standing", "")):
 						c["standing"] = peer_standing
 						c["standing_reason"] = "datalink " + s.ship_name + ": " + external_contact.get("standing_reason", "")
-						if peer_standing == Standing.HOSTILE:
-							var peer_name: String = active_transponders.get(c.get("instance_id", -1), {}).get("name", "")
-							if peer_name != "":
-								Standing.add_wanted(iff_tags, peer_name)
+						# (An add_wanted() call sat here, mirroring the import
+						# path above. Global wanted-names registry deleted
+						# 2026-07-26 -- three writers, zero readers.)
 	# Rebuild the warrant subject-key index only if the merge above actually
 	# changed something -- most ticks are a no-op (same records re-seen).
 	if warrant_index_dirty:
@@ -3507,8 +3613,13 @@ func _physics_process(delta: float) -> void:
 # snapshot, no timer -- just "does the live truth say s is in distress and
 # in range right now", re-derived fresh every tick, so a later change (s
 # turns SOS off, s leaves range, or a real sensor correlation re-classifies
-# the track) is reflected within 1-2 ticks with no dependency on ever
-# hearing an explicit off-message. NOTE: s dying is deliberately NOT one of
+# the track) is reflected within ONE DATALINK RELAY INTERVAL (see Ship.
+# DATALINK_RELAY_HZ -- ~100ms, NOT "1-2 ticks", which is what this comment
+# used to claim back when the relay ran every physics frame) with no
+# dependency on ever hearing an explicit off-message. State the contract in
+# TIME: three tests pinned it to tick counts and all three broke the moment
+# the relay stopped sharing a clock with the sensor pipeline.
+# NOTE: s dying is deliberately NOT one of
 # those "turns it off" triggers -- see the is_dead comment at this
 # function's call site in datalink_relay -- a hulk that was broadcasting
 # SOS when it died keeps reading sos_in_range==true indefinitely (the

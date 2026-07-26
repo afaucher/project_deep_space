@@ -37,6 +37,9 @@ extends Node
 
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
+# Preload-const convention (CLAUDE.md): needed for DATALINK_RELAY_HZ, which
+# the SOS timing budgets below derive from rather than hardcoding tick counts.
+const Ship = preload("res://scripts/ships/ship.gd")
 
 var main_node: Node = null
 var failures: Array = []
@@ -103,9 +106,15 @@ func _test_sos_reaches_battery_range_with_dead_comms() -> void:
 	_strip_sensors(receiver) # this test cares about the SOS-only path, not real detection
 
 	sender.set_sos_active(true, Hail.NATURE_DISABLED)
-	await main_node.get_tree().physics_frame
-	await main_node.get_tree().physics_frame
 	var sender_trk0: String = "TRK-%03d" % (abs(sender.get_instance_id()) % 1000)
+	# SOS reconciliation runs on the datalink relay's cadence, not every
+	# physics frame -- two bare awaits sufficed only while those were the same
+	# thing. Wait in TIME (see the note on Ship._reconcile_sos_contact),
+	# derived from the constant so it tracks a retune.
+	for _i in range(int(ceil(2.0 * Engine.physics_ticks_per_second / Ship.DATALINK_RELAY_HZ))):
+		await main_node.get_tree().physics_frame
+		if receiver.active_contacts.has(sender_trk0):
+			break
 	_assert(receiver.active_contacts.has(sender_trk0), "receiver within battery range heard the SOS despite the sender's dead comms")
 	_assert(receiver.active_contacts.get(sender_trk0, {}).get("classification", "") == "DISTRESS CALL", "no real track existed, so the SOS created a DISTRESS CALL contact")
 
