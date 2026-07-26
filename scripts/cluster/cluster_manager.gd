@@ -114,6 +114,12 @@ func _promote(rec) -> void:
 		# this node, so a plain back-reference would be a Node<->RefCounted
 		# reference cycle. See ship.gd's cluster_record_ref doc comment.
 		node.cluster_record_ref = weakref(rec)
+		# M53c Phase C -- plain back-reference to THIS manager (see
+		# ship.gd's cluster_manager_ref doc comment for why a plain ref, not
+		# a WeakRef, is correct here) so the ship-side route planner can read
+		# the globally-readable posting board off cluster.records without a
+		# scene-tree name lookup.
+		node.cluster_manager_ref = self
 	# Transform before add_child (body not yet in the physics world -> no teleport
 	# warning); velocities after, once it is registered.
 	node.position = rec.pos
@@ -264,6 +270,28 @@ func _attach_ai(rec, node) -> void:
 		node.add_child(AITreeFactory.build_civilian_job())
 		node.assign_job(rec.behavior.get("job", {}).duplicate(true))
 		return
+	# M53c Phase C -- planner-driven civilian hauler: cargo=true with NO
+	# authored route. Every EXISTING authored cargo lane carries "route"
+	# (home_cluster.gd's _cargo() helper always sets it, TrafficGuild's own
+	# replenishments clone it), so this branch only ever catches a record
+	# deliberately left route-less for the ship-side planner to fill in
+	# itself -- additive, nothing already authored changes behavior. Gets the
+	# SAME tree the transient wormhole freighters use (build_civilian_job():
+	# Disengage + ThreatResponse + RoutePlanner + JobRunner), but nothing is
+	# pre-assigned to either job slot -- RoutePlannerLeaf (ordered ahead of
+	# JobRunner in that tree) fills default_job on its own first tick, from
+	# whatever the globally-readable posting board shows it right now (design_
+	# ideas/station_economy.md "The independent's plan": "Mule and Ore Barge
+	# are simply circuits an independent would converge on anyway... The move
+	# from authored to emergent traffic is a smooth transition"). TrafficGuild
+	# itself is deliberately UNTOUCHED (design doc: "population stays
+	# TrafficGuild's job") -- this is a second, independent way for a TRAFFIC
+	# record to reach build_civilian_job(), not a change to how TrafficGuild's
+	# own fixed-lane population is spawned or replenished.
+	if typeof(rec.behavior) == TYPE_DICTIONARY and rec.behavior.get("cargo", false) and not rec.behavior.has("route"):
+		node.add_child(AITreeFactory.build_civilian_job())
+		return
+
 	# Mobile hull: patrol if it was handed a route (via behavior), else combat AI.
 	var route = _route_from(rec.behavior)
 	if route != null and route.size() > 0:

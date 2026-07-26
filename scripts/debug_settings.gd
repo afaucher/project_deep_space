@@ -90,6 +90,20 @@ enum TrafficGuildLog { OFF, ON }
 # see scripts/directors/station_economy.gd's _log()).
 enum StationEconomyLog { OFF, ON }
 
+# M53c Phase C -- the ship-side route planner's search diagnostic (route_
+# planner.gd's best_route()). Default OFF, unlike the two director logs
+# above: this fires from EVERY ship's re-plan leaf, every REPLAN_CHECK_
+# INTERVAL, so ON would spam any gate run with real traffic -- it exists for
+# exactly one job, diagnosing "why did the planner find nothing," and gets
+# flipped on for a short targeted sim/test run, never left on. Prints one
+# line per best_route() call: how many EXPORT/IMPORT postings existed at all
+# (open, before eligibility), how many of those this ship was ELIGIBLE for,
+# how many pickup/dropoff pairs scored at all, and the winning candidate (or
+# NONE) -- the four questions "is anything open," "am I locked out of it,"
+# "did anything pair up," and "was the pair even worth it" collapsed into one
+# line instead of four separate greps.
+enum RoutePlannerLog { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -222,6 +236,14 @@ const OPTIONS := {
 			"On (default -- one line per STARVED/BLOCKED converter)",
 		],
 		"default": StationEconomyLog.ON,
+	},
+	"route_planner_log": {
+		"label": "Route planner search diagnostic",
+		"choices": [
+			"Off (default -- fires from every ship, spams a real run)",
+			"On (one line per best_route() call: postings/eligibility/best candidate)",
+		],
+		"default": RoutePlannerLog.OFF,
 	},
 }
 

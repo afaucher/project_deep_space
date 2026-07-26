@@ -270,6 +270,21 @@ var docking_bay = null   # the DockingBay currently claiming this hull, else nul
 # future "authority handed off to a relay" wrinkle without a struct change).
 var docking_grant = null
 
+# M53c Phase C -- staged cargo transaction, settled the moment DockingBay
+# actually transitions this ship to DOCKED (docking_bay.gd's DOCKED-transition
+# block, the same honest "a dock happened" convergence point record_docking_
+# event() uses -- see that hook's own comment). {} = nothing to settle (the
+# common case: a player docking for repairs, a through-traffic freighter, a
+# station being docked at). Shape: {"acceptance": Dictionary (a StationEconomy.
+# accept_posting() snapshot -- price/direction locked already), "amount":
+# float}. Set by whoever staged the trip (JobSteps.step_dock_at's optional
+# "delivery" param, for the M53c ship-side planner) BEFORE capture completes;
+# read-and-cleared by docking_bay.gd so a stale acceptance can never fire
+# twice. Deliberately a plain Ship field, not itinerary/job-step state -- the
+# player uses this exact hook too (design doc: "the player uses this hook
+# too"), and the player has no job/steps at all.
+var pending_delivery: Dictionary = {}
+
 # M46 follow-up -- departure corridor grace state, DELIBERATELY separate from
 # docking_grant. The grant is consumed IMMEDIATELY on bay release (see
 # DockingBay._release()) so the slip returns to the pool for a new arrival
@@ -946,6 +961,19 @@ var registry_seq: int = 0
 # _resolve_cluster_record() below, which treats a null ref and a *dead* ref
 # (get_ref() returns null after the record itself is freed) identically.
 var cluster_record_ref: WeakRef = null
+
+# M53c Phase C -- plain reference to the ClusterManager that promoted this
+# ship, set by ClusterManager._promote() alongside cluster_record_ref above.
+# Not a WeakRef: ClusterManager is a Node (not RefCounted), and unlike
+# cluster_record_ref there's no Node<->RefCounted cycle risk in one Node
+# pointing at another -- Node lifetime is scene-tree/queue_free driven, not
+# refcounting. Lets a live ship's own AI (the ship-side route planner) read
+# the GLOBALLY READABLE posting board (design doc: "the board is globally
+# readable for now") -- every station's stocks/postings, live or dormant --
+# without a scene-tree name lookup. Null for a Ship that was never promoted
+# (sandbox, bare-Ship tests); callers must is_instance_valid() before use,
+# same discipline as every other live-node reference in this file.
+var cluster_manager_ref = null
 
 # Resolves cluster_record_ref to the live ClusterEntity, or null if this Ship
 # has no record attached (never promoted) or the record no longer exists.

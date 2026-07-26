@@ -495,14 +495,28 @@ static func _track_quiet_holds(actor, step: Dictionary, scratch: Dictionary) -> 
 	return quiet_elapsed >= seconds
 
 # ---------------------------------------------------------------------------
-# DOCK_AT {station_pos} -- find the station near station_pos ("ships" group +
-# get_berths(), cargo_run_leaf's _find_station_at pattern), request a grant at
-# a controlled bay / raise wants_dock at an open one, DONE once captured.
+# DOCK_AT {station_pos, delivery={acceptance, amount} (opt)} -- find the
+# station near station_pos ("ships" group + get_berths(), cargo_run_leaf's
+# _find_station_at pattern), request a grant at a controlled bay / raise
+# wants_dock at an open one, DONE once captured.
+#
+# M53c Phase C -- optional `delivery` stages a cargo transaction on the actor
+# (Ship.pending_delivery) the FIRST tick this step is entered, well before
+# capture completes: docking_bay.gd's own DOCKED-transition hook is what
+# actually settles it later (Part 1's delivery seam), this step only needs to
+# hand it off once. Guarded by scratch (cleared on entry, per job_runner_
+# leaf.gd) so a multi-tick TRANSIT phase doesn't re-stage every frame.
 # ---------------------------------------------------------------------------
 
 const DOCK_STATION_SEARCH_RADIUS := 6000.0
 
 static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
+	var scratch: Dictionary = step.get("scratch", {})
+	var delivery: Dictionary = step.get("delivery", {})
+	if not delivery.is_empty() and not scratch.get("delivery_staged", false):
+		actor.pending_delivery = delivery.duplicate(true)
+		scratch["delivery_staged"] = true
+
 	if actor.get("docking_bay") != null:
 		return DONE
 

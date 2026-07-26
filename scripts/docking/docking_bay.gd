@@ -136,6 +136,22 @@ func _physics_process(delta: float) -> void:
 						if captured.has_method("get_active_transponder_data"):
 							subject = captured.get_active_transponder_data()
 						host.record_docking_event(subject.get("name", ""), subject.get("flag", ""), "DOCKED")
+					# M53c Phase C -- the delivery seam: settle whatever cargo
+					# transaction the ship staged for THIS stop (design doc:
+					# "a delivery is an EVENT (a dock), not a cargo transfer").
+					# Read-and-clear so a stale/mis-timed acceptance can never
+					# settle twice against a later, unrelated dock. Reuses
+					# Ship.serve_posting() -- the SAME admission-gated seam
+					# Phase B built (DOCKED-at-this-host-bay is exactly what
+					# just became true above), so there is no second gate to
+					# get wrong. captured.get()/host.has_method() (not a direct
+					# field read) because a non-Ship dockable or a host with no
+					# serve_posting method must no-op cleanly rather than error.
+					if host != null and host.has_method("serve_posting"):
+						var pending = captured.get("pending_delivery")
+						if pending is Dictionary and not pending.is_empty():
+							captured.pending_delivery = {}
+							host.serve_posting(captured, pending.get("acceptance", {}), pending.get("amount", 0.0))
 		State.DOCKED:
 			if not _valid(captured):
 				_release()

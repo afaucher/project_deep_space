@@ -35,6 +35,7 @@ const CargoRunLeaf = preload("res://scripts/ai/leaves/cargo_run_leaf.gd")
 const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
 const ChallengeLeaf = preload("res://scripts/ai/leaves/challenge_leaf.gd")
 const JobRunnerLeaf = preload("res://scripts/ai/jobs/job_runner_leaf.gd")
+const RoutePlannerLeaf = preload("res://scripts/ai/leaves/route_planner_leaf.gd")
 const InterdictLeaf = preload("res://scripts/ai/leaves/interdict_leaf.gd")
 const SOSResponseLeaf = preload("res://scripts/ai/leaves/sos_response_leaf.gd")
 
@@ -331,11 +332,22 @@ static func build_cargo() -> Node:
 # DOCK_AT -> ... -> EXIT_AT, traffic_guild.gd's freighter job) drives movement
 # instead of a looping patrol_route.
 #
+# M53c Phase C -- RoutePlanner sits AHEAD of JobRunner (design_ideas/
+# station_economy.md "Routing: EVERY ship plans for itself"; implementation_
+# plans/m53c_demand_routing.md "Phase C"): a side-effect leaf (always
+# FAILURE, never claims the tick) that fills/refreshes actor.default_job with
+# the best route it can see, same "assign this tick, JobRunner picks it up
+# THIS tick" idiom Interdict/JobRunner use elsewhere in this file. It only
+# ever touches the STANDING-DUTY slot -- a transient freighter's fixed
+# itinerary (assign_job()/`assignment`, traffic_guild.gd) is untouched by it,
+# same tree, same JobRunner, two different jobs by construction.
+#
 #   Selector
 #   |-- Disengage (flee when crippled/attacked)
 #   |-- ThreatResponse (comply-or-run on a STOP demand, always SOS; FAILURE when idle)
-#   |-- JobRunner (the assigned itinerary: dock at each terminus, then exit)
-#   +-- Idle (job complete/absent -> hold heading)
+#   |-- RoutePlanner (fills/refreshes default_job with the best route seen; always FAILURE)
+#   |-- JobRunner (the active itinerary: assignment first, else default_job)
+#   +-- Idle (nothing to do -> hold heading)
 static func build_civilian_job() -> Node:
 	var tree = BeehaveTreeScript.new()
 	tree.name = "AITree"
@@ -357,6 +369,10 @@ static func build_civilian_job() -> Node:
 	var threat_response = ThreatResponseLeaf.new()
 	threat_response.name = "ThreatResponse"
 	root.add_child(threat_response)
+
+	var route_planner = RoutePlannerLeaf.new()
+	route_planner.name = "RoutePlanner"
+	root.add_child(route_planner)
 
 	var job_runner = JobRunnerLeaf.new()
 	job_runner.name = "JobRunner"
