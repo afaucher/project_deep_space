@@ -31,20 +31,71 @@ var failures: Array = []
 # starting stock, so over SIM_HOURS none of these should starve/block at all;
 # a tolerance failure means the model, not the buffer, is wrong.
 const TOLERANCE := 0.02
-const SIM_HOURS := 4.0
+# 1.0h, down from 4.0. Commodity.BUFFER_HOURS shrank bins from ~24h of
+# throughput to 3-6h, deliberately (see that table -- the economy was on a clock
+# 30-60x slower than transport). That invalidates this test's original premise,
+# which was "a 4h run cannot hit a clamp given ~24h buffers". The tightest bin
+# now is Coldreach's VOLATILES: 3.2/hr into a 9.6-lot capacity starting at 4.8,
+# so it BLOCKS after 1.5h and its observed rate would read 1.2/hr instead of the
+# authored 3.2.
+#
+# 1.0 leaves 1.5x margin on that constraint and every rate reads exact. NOTE: an
+# 0.5 window was tried first and produced net 0.000 for EVERY station-commodity,
+# with converters never leaving state=-1 (never processed at all). The bins were
+# verified correct at that point via economy_soak, ClusterManager.tick forwards
+# dt unclamped, and StationEconomy's own period is 10s -- so 1800s should be 180
+# passes and it is NOT understood why it wasn't. Recorded rather than explained.
+# It fails LOUDLY (all zeros, not a plausible-but-wrong number), so it is not a
+# silent trap, but anyone shortening this window further should expect to hit it
+# and should chase the cause rather than assume a smaller number is safe.
+#
+# If a rate ever needs a longer window than this to measure, shrink the window --
+# do not grow the buffers back.
+const SIM_HOURS := 1.0
 
 # station name -> {commodity -> expected net lots/hour}, transcribed from the
 # design doc's reference table. Note the "-- " ORE cell for Drift Market is
-# expressed as 0.0 (no mechanism at all, not a tiny authored rate).
+# expressed as 0.0 (no mechanism at all, not a tiny authored rate); same for
+# every RARE cell outside Meridian's two claims and Ironhold's export gate.
+#
+# M53d rebalance (implementation_plans/m53d_meridian_sovereignty.md):
+#  - Ironhold exports REFINED (1.60) instead of raw ORE, so its ORE sink
+#    collapses 5.6 -> 0.8 and its REFINED sink becomes 2.10 (0.50 population
+#    upkeep + 1.60 export, merged because the model allows one sink per
+#    commodity per station).
+#  - Refinery Prime scales to the ore that frees up: 3.3 -> 6.6 in, 2.2 -> 4.4
+#    out, same 2:3 ratio.
+#  - Margins added to the two "faucet" commodities (Coldreach VOLATILES
+#    2.60 -> 3.20, Ironhold GOODS import 1.50 -> 1.85).
+#  - RARE: a pure export, sourced only at the two Meridian claims.
 const EXPECTED := {
-	"Ironhold": {Commodity.ORE: -5.6, Commodity.VOLATILES: -0.60, Commodity.REFINED: -0.50, Commodity.GOODS: 1.50},
-	"Drift Market": {Commodity.ORE: 0.0, Commodity.VOLATILES: -0.50, Commodity.REFINED: -0.50, Commodity.GOODS: -0.30},
-	"Refinery Prime": {Commodity.ORE: -3.3, Commodity.VOLATILES: -0.45, Commodity.REFINED: 2.20, Commodity.GOODS: -0.40},
-	"Coldreach": {Commodity.ORE: 0.6, Commodity.VOLATILES: 2.60, Commodity.REFINED: -0.25, Commodity.GOODS: -0.20},
-	"Slag Bay": {Commodity.ORE: 3.2, Commodity.VOLATILES: -0.40, Commodity.REFINED: -0.25, Commodity.GOODS: -0.20},
-	"Halvorsen Claim": {Commodity.ORE: 1.8, Commodity.VOLATILES: -0.22, Commodity.REFINED: -0.25, Commodity.GOODS: -0.15},
-	"Corvus Yards": {Commodity.ORE: 1.8, Commodity.VOLATILES: -0.21, Commodity.REFINED: -0.20, Commodity.GOODS: -0.10},
-	"Deepcut": {Commodity.ORE: 1.5, Commodity.VOLATILES: -0.22, Commodity.REFINED: -0.25, Commodity.GOODS: -0.15},
+	"Ironhold": {Commodity.ORE: -0.8, Commodity.VOLATILES: -0.60, Commodity.REFINED: -2.10, Commodity.GOODS: 1.85, Commodity.RARE: -0.65},
+	"Drift Market": {Commodity.ORE: 0.0, Commodity.VOLATILES: -0.50, Commodity.REFINED: -0.50, Commodity.GOODS: -0.30, Commodity.RARE: 0.0},
+	"Refinery Prime": {Commodity.ORE: -6.6, Commodity.VOLATILES: -0.45, Commodity.REFINED: 4.40, Commodity.GOODS: -0.40, Commodity.RARE: 0.0},
+	"Coldreach": {Commodity.ORE: 0.6, Commodity.VOLATILES: 3.20, Commodity.REFINED: -0.25, Commodity.GOODS: -0.20, Commodity.RARE: 0.0},
+	"Slag Bay": {Commodity.ORE: 3.2, Commodity.VOLATILES: -0.40, Commodity.REFINED: -0.25, Commodity.GOODS: -0.20, Commodity.RARE: 0.0},
+	"Halvorsen Claim": {Commodity.ORE: 1.8, Commodity.VOLATILES: -0.22, Commodity.REFINED: -0.25, Commodity.GOODS: -0.15, Commodity.RARE: 0.40},
+	"Corvus Yards": {Commodity.ORE: 1.8, Commodity.VOLATILES: -0.21, Commodity.REFINED: -0.20, Commodity.GOODS: -0.10, Commodity.RARE: 0.40},
+	"Deepcut": {Commodity.ORE: 1.5, Commodity.VOLATILES: -0.22, Commodity.REFINED: -0.25, Commodity.GOODS: -0.15, Commodity.RARE: 0.0},
+}
+
+# Cluster-wide net per commodity, and the single most important line in this
+# file. It used to assert net == 0: supply exactly equalling demand, which read
+# as elegant closure and was in fact the bug. A producer running at exactly
+# 100% of demand NEVER accumulates surplus, never clears surplus_line, and
+# therefore never opens an EXPORT posting -- the cluster could not trade its
+# principal commodities at any fleet size, with any router. Cargo in flight is
+# also a permanent deficit a zero-margin system can never refill.
+#
+# So the cluster now runs a DELIBERATE surplus, and this table is that
+# intention written down. The surplus is what the Nexus hauler carries out; if
+# one of these drifts to zero, trade in that commodity silently dies.
+const EXPECTED_MARGIN := {
+	Commodity.ORE: 1.50,
+	Commodity.VOLATILES: 0.60,
+	Commodity.REFINED: 0.60,
+	Commodity.GOODS: 0.35,
+	Commodity.RARE: 0.15,
 }
 
 func _assert(condition: bool, msg: String) -> void:
@@ -115,8 +166,9 @@ func setup(main) -> void:
 					[name, c, observed_rate, expected_rate, delta, SIM_HOURS])
 
 	for c in Commodity.ALL:
-		_assert(abs(net_by_commodity[c]) < TOLERANCE * EXPECTED.size(),
-			"cluster-wide net %s settles to ~0 (got %.4f lots/hr, the table's own 'net' row)" % [c, net_by_commodity[c]])
+		var want: float = EXPECTED_MARGIN[c]
+		_assert(abs(net_by_commodity[c] - want) < TOLERANCE * EXPECTED.size(),
+			"cluster-wide net %s should be the authored SURPLUS %.2f, not 0 (got %.4f lots/hr) -- see EXPECTED_MARGIN" % [c, want, net_by_commodity[c]])
 
 	# Sanity: nothing should have STARVED/BLOCKED across a 4h run given the
 	# auto-sized ~24h buffer -- if this fires, the buffer assumption (not the

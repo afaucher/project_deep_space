@@ -50,6 +50,12 @@ const CORVUS_ROCKS := 18
 # Coldreach's ore yield isn't the same mechanism as a dedicated mining
 # outpost's.
 const ORE_RATE_PER_ROCK := 0.1
+# M53d -- per-station RARE yield at the two Meridian ore outposts. Authored
+# directly rather than derived from rock count: exotics are not a function of
+# how much rock is present, they are a property of THIS ground, which is also
+# why home's four outposts have none. 0.40 x 2 = 0.80/hr against Ironhold's
+# 0.65/hr export draw, leaving the ~23% margin every commodity now carries.
+const RARE_RATE := 0.40
 
 # M53a -- home carries its OWN crypto tag; the player is NOT crypto-kin of
 # home (keeps TEAM_PLAYER, see main.gd's _spawn_player_ship). Flying
@@ -313,8 +319,12 @@ static func _home(def, id: int, name: String, pos: Vector2, sid: String = "") ->
 # That is generous enough that a modest test window never spuriously STARVES
 # or BLOCKS an authored converter/sink/source pair, which is what lets the
 # reference-table test read the tick's OUTPUT as the authored rate.
-static func _bin(rate_hint: float) -> Dictionary:
-	var capacity: float = maxf(50.0, absf(rate_hint) * 24.0)
+# `commodity` selects the buffer depth from Commodity.BUFFER_HOURS -- see that
+# table for WHY this is per-class and why it, not the rates, sets how fast the
+# economy moves. `rate_hint` is this bin's own throughput at this station.
+static func _bin(commodity: String, rate_hint: float) -> Dictionary:
+	var hours: float = Commodity.BUFFER_HOURS.get(commodity, 6.0)
+	var capacity: float = maxf(Commodity.MIN_BIN_LOTS, absf(rate_hint) * hours)
 	var target: float = capacity * 0.5
 	return {"stock": target, "capacity": capacity, "target": target, "surplus_line": capacity * 0.85}
 
@@ -326,11 +336,27 @@ static func _bin(rate_hint: float) -> Dictionary:
 static func _economy_ironhold() -> Dictionary:
 	return {
 		"bins": {
-			Commodity.ORE: _bin(5.6), Commodity.VOLATILES: _bin(0.60),
-			Commodity.REFINED: _bin(0.50), Commodity.GOODS: _bin(1.50),
+			Commodity.ORE: _bin(Commodity.ORE, 0.8), Commodity.VOLATILES: _bin(Commodity.VOLATILES, 0.60),
+			Commodity.REFINED: _bin(Commodity.REFINED, 2.10), Commodity.GOODS: _bin(Commodity.GOODS, 1.85),
+			Commodity.RARE: _bin(Commodity.RARE, 0.65),
 		},
-		"sinks": {Commodity.ORE: 5.6, Commodity.VOLATILES: 0.60, Commodity.REFINED: 0.50},
-		"sources": {Commodity.GOODS: 1.50},
+		# M53d -- ORE export collapses 5.6 -> 0.8 and REFINED becomes the export
+		# instead. The old split shipped out more unprocessed rock (5.6/hr) than
+		# the cluster refined (3.3/hr) -- a colony, not an industrial base -- and
+		# because an export sink bids at full urgency like any consumer, it beat
+		# Refinery Prime to a supply that exactly covered both and starved the
+		# converter to 50% output (measured: 1.112/hr against 2.2 authored).
+		# REFINED's 2.10 is TWO things merged, because the model allows one sink
+		# per commodity: 0.50 population upkeep + 1.60 export. Noted as a known
+		# limitation -- once the Nexus hauler carries export for real, the export
+		# half stops being a sink at all and the two become independently
+		# disruptable ("the shipyard cancelled its order" should not starve
+		# Ironhold's own people).
+		"sinks": {
+			Commodity.ORE: 0.8, Commodity.VOLATILES: 0.60,
+			Commodity.REFINED: 2.10, Commodity.RARE: 0.65,
+		},
+		"sources": {Commodity.GOODS: 1.85},
 	}
 
 # Drift Market -- eastern depot. No ORE mechanism at all (the reference
@@ -339,7 +365,7 @@ static func _economy_ironhold() -> Dictionary:
 static func _economy_drift_market() -> Dictionary:
 	return {
 		"bins": {
-			Commodity.VOLATILES: _bin(0.50), Commodity.REFINED: _bin(0.50), Commodity.GOODS: _bin(0.30),
+			Commodity.VOLATILES: _bin(Commodity.VOLATILES, 0.50), Commodity.REFINED: _bin(Commodity.REFINED, 0.50), Commodity.GOODS: _bin(Commodity.GOODS, 0.30),
 		},
 		"sinks": {Commodity.VOLATILES: 0.50, Commodity.REFINED: 0.50, Commodity.GOODS: 0.30},
 	}
@@ -353,11 +379,14 @@ static func _economy_drift_market() -> Dictionary:
 static func _economy_refinery_prime() -> Dictionary:
 	return {
 		"bins": {
-			Commodity.ORE: _bin(3.3), Commodity.REFINED: _bin(2.20),
-			Commodity.VOLATILES: _bin(0.45), Commodity.GOODS: _bin(0.40),
+			Commodity.ORE: _bin(Commodity.ORE, 6.6), Commodity.REFINED: _bin(Commodity.REFINED, 4.40),
+			Commodity.VOLATILES: _bin(Commodity.VOLATILES, 0.45), Commodity.GOODS: _bin(Commodity.GOODS, 0.40),
 		},
+		# M53d -- doubled, same 2:3 conversion ratio. Not a buff: this is simply
+		# the scale the cluster's 8.9/hr of ore actually supports once Ironhold
+		# stops exporting raw rock, and it is what makes REFINED the main export.
 		"converters": [
-			{"in": {Commodity.ORE: 3.3}, "out": {Commodity.REFINED: 2.2}, "rate": 1.0},
+			{"in": {Commodity.ORE: 6.6}, "out": {Commodity.REFINED: 4.4}, "rate": 1.0},
 		],
 		"sinks": {Commodity.VOLATILES: 0.45, Commodity.GOODS: 0.40},
 	}
@@ -368,8 +397,8 @@ static func _economy_slag_bay() -> Dictionary:
 	var ore_rate: float = SLAG_BAY_ROCKS * ORE_RATE_PER_ROCK
 	return {
 		"bins": {
-			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.40),
-			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.20),
+			Commodity.ORE: _bin(Commodity.ORE, ore_rate), Commodity.VOLATILES: _bin(Commodity.VOLATILES, 0.40),
+			Commodity.REFINED: _bin(Commodity.REFINED, 0.25), Commodity.GOODS: _bin(Commodity.GOODS, 0.20),
 		},
 		"sources": {Commodity.ORE: ore_rate},
 		"sinks": {Commodity.VOLATILES: 0.40, Commodity.REFINED: 0.25, Commodity.GOODS: 0.20},
@@ -385,10 +414,14 @@ static func _economy_slag_bay() -> Dictionary:
 static func _economy_coldreach() -> Dictionary:
 	return {
 		"bins": {
-			Commodity.ORE: _bin(0.6), Commodity.VOLATILES: _bin(2.60),
-			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.20),
+			Commodity.ORE: _bin(Commodity.ORE, 0.6), Commodity.VOLATILES: _bin(Commodity.VOLATILES, 3.20),
+			Commodity.REFINED: _bin(Commodity.REFINED, 0.25), Commodity.GOODS: _bin(Commodity.GOODS, 0.20),
 		},
-		"sources": {Commodity.ORE: 0.6, Commodity.VOLATILES: 2.60},
+		# M53d -- 2.60 -> 3.20. Demand is exactly 2.60, and a source running at
+		# exactly 100% of demand never accumulates surplus, never clears
+		# surplus_line, and therefore never opens an EXPORT posting: the cluster
+		# could not have traded air at any fleet size. The margin IS the trade.
+		"sources": {Commodity.ORE: 0.6, Commodity.VOLATILES: 3.20},
 		"sinks": {Commodity.REFINED: 0.25, Commodity.GOODS: 0.20},
 		# M53c Phase B -- the design doc's "natural first real case" for
 		# eligibility (export control): Coldreach is Meridian territory
@@ -407,8 +440,8 @@ static func _economy_deepcut() -> Dictionary:
 	var ore_rate: float = DEEPCUT_ROCKS * ORE_RATE_PER_ROCK
 	return {
 		"bins": {
-			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.22),
-			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.15),
+			Commodity.ORE: _bin(Commodity.ORE, ore_rate), Commodity.VOLATILES: _bin(Commodity.VOLATILES, 0.22),
+			Commodity.REFINED: _bin(Commodity.REFINED, 0.25), Commodity.GOODS: _bin(Commodity.GOODS, 0.15),
 		},
 		"sources": {Commodity.ORE: ore_rate},
 		"sinks": {Commodity.VOLATILES: 0.22, Commodity.REFINED: 0.25, Commodity.GOODS: 0.15},
@@ -419,10 +452,11 @@ static func _economy_halvorsen() -> Dictionary:
 	var ore_rate: float = HALVORSEN_ROCKS * ORE_RATE_PER_ROCK
 	return {
 		"bins": {
-			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.22),
-			Commodity.REFINED: _bin(0.25), Commodity.GOODS: _bin(0.15),
+			Commodity.RARE: _bin(Commodity.RARE, RARE_RATE),
+			Commodity.ORE: _bin(Commodity.ORE, ore_rate), Commodity.VOLATILES: _bin(Commodity.VOLATILES, 0.22),
+			Commodity.REFINED: _bin(Commodity.REFINED, 0.25), Commodity.GOODS: _bin(Commodity.GOODS, 0.15),
 		},
-		"sources": {Commodity.ORE: ore_rate},
+		"sources": {Commodity.ORE: ore_rate, Commodity.RARE: RARE_RATE},
 		"sinks": {Commodity.VOLATILES: 0.22, Commodity.REFINED: 0.25, Commodity.GOODS: 0.15},
 	}
 
@@ -431,10 +465,11 @@ static func _economy_corvus() -> Dictionary:
 	var ore_rate: float = CORVUS_ROCKS * ORE_RATE_PER_ROCK
 	return {
 		"bins": {
-			Commodity.ORE: _bin(ore_rate), Commodity.VOLATILES: _bin(0.21),
-			Commodity.REFINED: _bin(0.20), Commodity.GOODS: _bin(0.10),
+			Commodity.RARE: _bin(Commodity.RARE, RARE_RATE),
+			Commodity.ORE: _bin(Commodity.ORE, ore_rate), Commodity.VOLATILES: _bin(Commodity.VOLATILES, 0.21),
+			Commodity.REFINED: _bin(Commodity.REFINED, 0.20), Commodity.GOODS: _bin(Commodity.GOODS, 0.10),
 		},
-		"sources": {Commodity.ORE: ore_rate},
+		"sources": {Commodity.ORE: ore_rate, Commodity.RARE: RARE_RATE},
 		"sinks": {Commodity.VOLATILES: 0.21, Commodity.REFINED: 0.20, Commodity.GOODS: 0.10},
 	}
 
