@@ -371,7 +371,15 @@ func _spawn_hauler(cluster, arrival: Dictionary, wormhole_pos: Vector2) -> void:
 	# route/cargo branch in cluster_manager.gd's _attach_ai handles this
 	# unchanged (build_cargo(), CargoRunLeaf); replenishment needs no new
 	# machinery, just a fresh record.
-	rec.behavior = {"route": route.duplicate(true), "loop": true, "cargo": true}
+	# Omit "route" entirely when there is none, rather than writing an empty
+	# array. cluster_manager.gd's Phase C branch keys on `cargo AND NOT
+	# has("route")`, so an empty-but-PRESENT key would fail that test, then fail
+	# the patrol branch's `route.size() > 0` too, and the hull would fall through
+	# to combat AI. A replenishment for a planner-driven lane must itself be
+	# planner-driven.
+	rec.behavior = {"loop": true, "cargo": true}
+	if not route.is_empty():
+		rec.behavior["route"] = route.duplicate(true)
 	cluster.records.append(rec)
 
 	members[record_id] = {

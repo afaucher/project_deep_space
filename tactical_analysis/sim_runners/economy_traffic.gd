@@ -50,15 +50,22 @@ const Standing = preload("res://scripts/combat/standing.gd")
 const StationEconomy = preload("res://scripts/directors/station_economy.gd")
 const Commodity = preload("res://scripts/economy/commodity.gd")
 
-# 30 game-minutes (a const so it can be raised, per the plan doc). A hauler
-# round trip is 12-24 game-minutes, so this gives every hull 1-2 completed
-# trips -- enough to read NET FLOW direction, the plan doc's explicit
-# measurable (buffers are ~24h, so starvation itself would show nothing in a
-# window this short).
-const SIM_MINUTES := 30.0
+# 180 game-minutes (3 hours). Raised from 30 because 30 could not observe the
+# question being asked of it: Commodity.BUFFER_HOURS puts buffers at 3-6 hours,
+# so half an hour sees under 10% of a single buffer cycle and measures
+# INSTANTANEOUS RATES rather than whether the cluster holds. 3 hours spans a
+# full cycle on VOLATILES and most of one elsewhere, so a station that is
+# genuinely drifting toward empty has time to show it.
+#
+# Cost: ~2 real hours (648k physics frames at ~90fps effective under
+# --fixed-fps). That is a deliberate background run, not something to put in
+# the gate -- and it is why the cheap rungs of the ladder exist above it (see
+# .agents/skills/economy-balance: stage-0 arithmetic, then economy_soak for
+# mechanism). Anything a shorter window CAN answer should be answered there.
+const SIM_MINUTES := 180.0
 const DT := 1.0 / 60.0
 const NUM_HAULERS := 8
-const SNAPSHOT_PERIOD := 30.0 # sim-seconds between min-stock/trace samples
+const SNAPSHOT_PERIOD := 120.0 # sim-seconds between min-stock/trace samples (2 game-min: a 3h run would otherwise write ~21k trace rows per station)
 
 # SEEDED STEADY STATE, replacing a 48-hour unattended warmup.
 #

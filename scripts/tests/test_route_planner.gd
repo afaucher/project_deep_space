@@ -149,11 +149,23 @@ func _test_deadhead_leg_costed() -> void:
 	# position changed.
 	var far_pos := Vector2(2000000, 0)
 	var route_far: Dictionary = RoutePlanner.best_route(cluster, far_pos, "")
-	_assert(not route_far.is_empty(), "B: a route still exists (nothing else competes in this 2-station fixture)")
-	if not route_far.is_empty():
-		_assert(route_far["score"] < 0.0, "B: the IDENTICAL posting pair, scored from far away, is UNPROFITABLE (score %.1f)" % route_far["score"])
-		_assert(route_near["score"] > route_far["score"],
-			"B: being already where the cargo is dominates (near %.1f > far %.1f)" % [route_near["score"], route_far["score"]])
+	# This used to assert a route STILL came back from 2,000,000 units out, with a
+	# negative score -- which encoded best_route()'s old argmax-even-when-losing
+	# behaviour. RoutePlanner.MIN_VIABLE_SCORE now rejects it, and that rejection
+	# is a STRONGER demonstration of the same point: the deadhead alone flipped an
+	# identical posting pair from worth flying to not worth flying. Nothing about
+	# the two stations changed -- only where the ship was standing.
+	_assert(route_far.is_empty(),
+		"B: the IDENTICAL posting pair is REJECTED from far away -- deadhead alone makes it unprofitable")
+
+	# And a mid-range position still returns a route, but a worse-scoring one, so
+	# the cost is graded rather than a cliff at the viability floor.
+	var mid_pos := Vector2(120000, 0)
+	var route_mid: Dictionary = RoutePlanner.best_route(cluster, mid_pos, "")
+	_assert(not route_mid.is_empty(), "B: a mid-range route is still viable")
+	if not route_mid.is_empty():
+		_assert(route_near["score"] > route_mid["score"],
+			"B: being already where the cargo is dominates (near %.1f > mid %.1f)" % [route_near["score"], route_mid["score"]])
 
 # ---------------------------------------------------------------------------
 # C. Two ships with different flags make different choices from IDENTICAL

@@ -287,7 +287,19 @@ static func _cargo(def, id: int, name: String, a: Vector2, b: Vector2, hull: Scr
 		"id": id, "name": name, "hull": hull,
 		"kind": ClusterEntity.Kind.TRAFFIC, "pos": start,
 		"iff_tags": iff_tags, "is_static": false,
-		"behavior": {"route": [a, b], "loop": true, "cargo": true},
+		# M53d -- NO "route": planner-driven, not a fixed lane. cluster_manager's
+		# Phase C branch (cargo AND NOT has("route")) attaches RoutePlannerLeaf,
+		# so these hulls decide their own runs from the posting board.
+		#
+		# The design doc called this the endgame -- "Mule and Ore Barge are simply
+		# circuits an independent would converge on anyway... the move from
+		# authored to emergent traffic is a smooth transition" -- and the traffic
+		# sim made it urgent: with fixed lanes these four flew Ironhold and
+		# Coldreach carrying ZERO cargo (CargoRunLeaf transfers nothing), so they
+		# were pure collision load on exactly the two stations already bleeding
+		# most to self-repair. Damage generators with no economic contribution.
+		# `a`/`b` now only set where the hull starts; the circuit is emergent.
+		"behavior": {"cargo": true},
 		"transponder_flag": flag,
 	})
 

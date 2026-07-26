@@ -54,7 +54,44 @@ const Commodity = preload("res://scripts/economy/commodity.gd")
 # several ships can work the same run"). Refinery Prime's ORE deficit alone
 # runs into double digits of lots against this, matching the doc's own
 # "16-lot deficit vs a 1-lot hull" illustration.
-const LOT_SIZE := 1.0
+#
+# 2026-07-26 -- 1.0 -> 4.0. This is a THROUGHPUT constant, and at 1.0 it was
+# the binding constraint on the entire cluster economy, which is not what it
+# was meant to express.
+#
+# Measured over 180 sim-minutes: Refinery Prime consumes 6.6 ORE/hr and
+# received 2.56/hr across 9 deliveries, while its five ORE suppliers sat
+# BACKED UP against their own bin capacities (Corvus authored at 1.8/hr,
+# producing 0.475 with its bin pinned at 10.03 of 10.8; Slag Bay 3.2 authored,
+# 1.53 produced, above its surplus line). A full bin blocks its source, so the
+# cluster read as an ore SHORTAGE while ore was piling up unsold at every mine.
+# The authored tally is healthy -- 8.9/hr supply against 7.4/hr demand, a 20%
+# margin -- and the same shape held for VOLATILES (3.2 vs 2.6). Nothing was
+# short; nothing could MOVE. Eight haulers lifting <=1 lot per round trip
+# between stations 200-400k apart cannot feed a 6.6/hr converter at any
+# authored rate.
+#
+# 4.0 clears that with headroom (~3x the measured shortfall on the binding
+# ORE lane) without collapsing the design property this const exists for:
+# Refinery Prime's ORE bin holds 39.6 lots, so a drawdown to empty is still
+# ~5 hulls' worth and several ships still work the same run. The `min()`
+# against posting quantity in _score_pair() means thin lanes never see the
+# full 4.0 anyway -- the measured average was 0.85 against a 1.0 cap, so
+# postings were already binding ~15% of the time.
+#
+# INTERIM, deliberately. A lot size that ignores the hull is wrong on its face
+# -- a CargoShuttle and an Ore Barge carry identical loads today. The real
+# model is per-hull capacity derived from `cargo_bay` components, which the
+# codebase is already most of the way to: ComponentSpec.CARGO_AREA_PER_UNIT
+# exists and ship_design_validator.gd:162 already computes
+# `capacity = area / CARGO_AREA_PER_UNIT` -- for VALIDATION only, with nothing
+# reading it at runtime. Two things block the swap, and both are real work:
+# CargoShuttle authors no `cargo_bay` component at all (only Freighter and the
+# stations do), and area-units need calibrating into lots. See
+# design_ideas/station_economy.md's "Haul capacity" section for the plan,
+# including the freight-hauler class that has to exist between the shuttle and
+# the Freighter once capacity actually varies by hull.
+const LOT_SIZE := 4.0
 
 # Cost per world-unit of travel, calibrated against design_ideas/
 # station_economy.md's own worked "Geography becomes economically real, for
@@ -67,15 +104,58 @@ const LOT_SIZE := 1.0
 # mildly CONVEX (PRICE_CONVEX_EXP=1.5) -- see that file's own comment on the
 # same discrepancy -- so exact payout figures are not bit-reproducible against
 # the doc's table; the distance-to-cost ratio is what carries over.
+#
+# 2026-07-26 -- this constant is PER LOT PER UNIT, and callers must multiply
+# by the amount carried. They did not, and that made the LOT_SIZE bump change
+# something it was never meant to touch.
+#
+# Payout is linear in amount; travel cost was flat. So raising LOT_SIZE alone
+# multiplied every route's payout by 4 and left its cost untouched --
+# quadrupling the distance a route can profitably cover. test_route_planner's
+# section B caught it on the first run: a pair rejected from 2,000,000 units
+# out became viable, and the arithmetic says nothing inside the cluster could
+# be rejected on distance any more (the ~1.41M-unit diagonal costs 212 against
+# an 800 payout). "Geography becomes economically real, for free" would have
+# quietly stopped being true, and the next sim would have had two variables in
+# it instead of one.
+#
+# Scaling cost by `amount` restores proportionality exactly: score becomes
+# amount x [(p_pickup + p_dropoff) - cost_per_lot x distance]. The bracket is
+# what decides viability, and it does not contain `amount` at all -- so which
+# lanes are worth flying is IDENTICAL to LOT_SIZE 1.0, and only throughput
+# moved. Comparisons across candidates now favour a bigger load over a smaller
+# one at equal per-lot value, which is just the total value of the trip and is
+# what you want.
+#
+# Cost-per-LOT is also the honest fiction for an interim. Nothing bigger than
+# a CargoShuttle is authored, so "4 lots" today means four shuttle-loads, and
+# four shuttle-loads genuinely do cost four shuttles' worth of travel. The
+# moment capacity comes from `cargo_bay` components this linearity must BREAK
+# in two ways: cost becomes per-TRIP (you fly the same distance with a half-
+# empty hold, so a long haul for a quarter load should read as the bad
+# business it is), and one large hull moving 4 lots should cost less than four
+# small ones. That economy of scale is what makes a mid-tier freight hauler
+# worth owning rather than merely bigger. Deferred deliberately -- per-trip
+# cost only becomes meaningful once hulls actually differ. See
+# design_ideas/station_economy.md's "Haul capacity is a property of the HULL".
 const TRAVEL_COST_PER_UNIT := 0.00015
 
 # Hysteresis margin (design doc: "a competing route must beat the current
 # plan's remaining value by a margin, or haulers thrash between near-equal
 # routes"). Absolute score units (same units as price(), 0..~100 per leg) --
-# 15 is a legible ~15% of one leg's max possible price, big enough to absorb
-# ordinary urgency drift between two ordinary postings but small enough that a
-# genuinely better route (a station gone newly desperate) still wins.
-const HYSTERESIS_MARGIN := 15.0
+# 15 PER LOT is a legible ~15% of one leg's max possible price, big enough to
+# absorb ordinary urgency drift between two ordinary postings but small enough
+# that a genuinely better route (a station gone newly desperate) still wins.
+#
+# 2026-07-26 -- derived from LOT_SIZE rather than hardcoded. Scores are
+# amount-proportional (see TRAVEL_COST_PER_UNIT), so a flat 15 against 4-lot
+# scores would be ~3.75% of a leg, not 15% -- the band would have silently
+# narrowed to a quarter of its intended width and haulers would thrash on
+# noise. This is the second constant the LOT_SIZE bump would have quietly
+# mis-scaled; anything else expressed in absolute score units needs the same
+# treatment.
+const HYSTERESIS_MARGIN_PER_LOT := 15.0
+const HYSTERESIS_MARGIN := HYSTERESIS_MARGIN_PER_LOT * LOT_SIZE
 
 # Itinerary step index at which the pickup leg is behind us (see
 # route_itinerary() below for the 6-step shape): 0=GO_TO pickup, 1=DOCK_AT
@@ -93,6 +173,30 @@ const DROPOFF_LEG_START := 3
 # posting pair this ship is eligible for) -- the caller's job is to leave
 # whatever plan (or lack of one) already stands.
 # ---------------------------------------------------------------------------
+
+# A route must at least pay for itself. best_route() takes the ARGMAX, which
+# happily returns the least-bad option when every candidate loses money -- and
+# the traffic sim caught exactly that: "PLAN GOODS Ironhold->Coldreach (score
+# -35.5)", "RE-PLAN REFINED ... (score -58.6 beat remaining -77.7 by margin)".
+# A hauler was committing to runs costing more in travel than both ends pay,
+# and the hysteresis was then picking between two losses.
+#
+# That is not just untidy, it is expensive: a hull on a loss-making run is
+# capacity the cluster does not get back. Idling until something is worth
+# flying is strictly better -- and it is what an independent operator would
+# actually do.
+#
+# (This paragraph used to justify itself with "fleet capacity is only ~1.5x
+# total haul demand". That figure was computed at LOT_SIZE 1.0 and the
+# 2026-07-26 bump to 4.0 invalidates it. The floor does not depend on capacity
+# being scarce -- flying a loss is wrong at any fleet size -- so the argument
+# stands without the number, and a stale number is worse than none.)
+#
+# 0.0 is the honest floor ("don't fly a loss") rather than a tuned number. A
+# ship already mid-route is NOT affected: this gates new plans only, so a hull
+# that has already made its pickup still completes the drop rather than
+# stranding the cargo.
+const MIN_VIABLE_SCORE := 0.0
 
 static func best_route(cluster, from_pos: Vector2, ship_flag: String) -> Dictionary:
 	var best: Dictionary = {}
@@ -112,6 +216,8 @@ static func best_route(cluster, from_pos: Vector2, ship_flag: String) -> Diction
 				if route["score"] > best_score:
 					best_score = route["score"]
 					best = route
+	if not best.is_empty() and best_score <= MIN_VIABLE_SCORE:
+		best = {}   # nothing worth flying -- idle rather than burn a hull on a loss
 	if _diag_enabled():
 		_diag_report(cluster, from_pos, ship_flag, pairs_scored, best)
 	return best
@@ -182,7 +288,10 @@ static func _score_pair(pickup_rec, dropoff_rec, commodity: String, from_pos: Ve
 	# amounts depending on where the ship already is.
 	var deadhead: float = from_pos.distance_to(pickup_rec.pos)
 	var haul: float = pickup_rec.pos.distance_to(dropoff_rec.pos)
-	var travel_cost: float = TRAVEL_COST_PER_UNIT * (deadhead + haul)
+	# Cost is per LOT per unit -- multiply by what we are actually carrying, or
+	# payout scales with the load while cost does not. See the constant's own
+	# comment for what that broke.
+	var travel_cost: float = TRAVEL_COST_PER_UNIT * amount * (deadhead + haul)
 	var risk: float = _risk_estimate(pickup_rec, dropoff_rec)
 	var score: float = payout - travel_cost - risk
 
@@ -265,9 +374,9 @@ static func remaining_value(actor_pos: Vector2, job: Dictionary) -> float:
 		var pickup_pos: Vector2 = job.get("pickup_pos", actor_pos)
 		var pickup_payout: float = job.get("pickup_accept", {}).get("price", 0.0) * amount
 		var dist: float = actor_pos.distance_to(pickup_pos) + pickup_pos.distance_to(dropoff_pos)
-		return pickup_payout + dropoff_payout - TRAVEL_COST_PER_UNIT * dist
+		return pickup_payout + dropoff_payout - TRAVEL_COST_PER_UNIT * amount * dist
 	var dist2: float = actor_pos.distance_to(dropoff_pos)
-	return dropoff_payout - TRAVEL_COST_PER_UNIT * dist2
+	return dropoff_payout - TRAVEL_COST_PER_UNIT * amount * dist2
 
 # Hysteresis gate: a candidate only replaces the standing plan if it clears
 # the remaining value by MARGIN, not merely exceeds it (design doc: "without a

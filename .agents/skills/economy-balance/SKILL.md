@@ -44,6 +44,21 @@ Watch for the two entries that are easy to miss:
 - **An export sink is demand too**, and it competes at full urgency with
   domestic consumers. Ironhold's ORE sink was export-through-the-wormhole and
   outbid the refinery for the same ore.
+- **Repair is an UNAUTHORED sink of REFINED and GOODS that the tally cannot
+  see.** Stations pay for collision damage out of their own bins (REFINED for
+  hull, GOODS for systems), so a cluster can pass this tally on paper and still
+  be insolvent. Measured 2026-07-26 over 180 sim-minutes: cluster-wide REFINED
+  ran a **+0.98/hr** authored margin and GOODS **+0.35/hr**, while self-repair
+  burned **~7.6/hr** of the two combined — roughly **6× the entire surplus**.
+  Ironhold is the sharpest case: it is the cluster's only GOODS producer, makes
+  1.85/hr against 1.50/hr of demand (a healthy 23% margin), and spends 2.23/hr
+  patching itself, so it never accumulates an exportable surplus and GOODS
+  reads UNSERVED everywhere else in the cluster.
+
+  **So run the tally, then subtract the measured repair column before believing
+  the margin.** If repair exceeds the surplus, no rate change fixes it — the
+  finding is a navigation one and belongs to approach discipline
+  (`design_ideas/port_zones_and_channels.md`), not to `home_cluster.gd`.
 
 ## 2. Margin is a PRECONDITION for trade, not a balance preference
 
@@ -138,6 +153,28 @@ correct every time; the measurement was not.
 - **The per-hour trace, not the summary, is what settles an argument.** In every
   case above the trace showed a short transient then dead-flat at exactly the
   authored rate.
+- **A short run inflates every RATE derived from a DISCRETE event.** Repair is
+  the worst offender: damage arrives as occasional lumps, so one docking dent
+  amortized over 30 sim-minutes reads as a catastrophic per-hour drain.
+  Measured 2026-07-26, identical code, 30 min vs 180 min: Refinery Prime's
+  REFINED self-repair fell **−28.00 → −1.74 lots/hr** and its GOODS
+  **−7.75 → −0.05**; three of that run's four worst verdicts (two STARVED, one
+  REPAIR_DRAIN) simply evaporated. Nothing was fixed in between — the clock got
+  longer. The same applies to `delivery_count`, which is a raw count over the
+  window and must be divided before it is compared across runs.
+
+  **Rule: 180 sim-minutes is the shortest run whose rates are worth quoting**,
+  and never compare a verdict table against one taken over a different horizon
+  without saying so. The tell is a repair or trade magnitude an order of
+  magnitude larger than any authored rate in `home_cluster.gd` — no authored
+  rate exceeds ~6.6/hr, so a −28/hr column is arithmetic, not economics.
+
+  The converse trap: a longer run makes *slow* failures appear that a short one
+  cannot see, because `COVER_HOURS_OK` (12h of runway) suppresses a verdict
+  until the bin actually draws down. Outposts that looked clean at 30 minutes
+  showed real repair drain at 180. Short runs over-report acute failures and
+  under-report chronic ones — they are wrong in both directions, not merely
+  noisy.
 
 ## 6. Eligibility can silently zero out a whole commodity
 

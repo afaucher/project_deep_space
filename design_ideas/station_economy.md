@@ -362,6 +362,53 @@ So a posting carries a **quantity that depletes as it's served**, not an
 exclusive claim. Convergence self-limits; the ship arriving after the need
 closes eats the loss (see planning risk, below).
 
+### Haul capacity is a property of the HULL — and today it isn't
+
+`RoutePlanner.LOT_SIZE` is a single flat constant: a CargoShuttle and an Ore
+Barge lift exactly the same load. That is wrong on its face, and it also made
+the constant load-bearing in a way it was never meant to be — at 1.0 it was
+the binding constraint on the whole cluster economy.
+
+**What that looked like, measured over 180 sim-minutes (2026-07-26).** Refinery
+Prime consumes 6.6 ORE/hr and received 2.56/hr, while its five suppliers sat
+backed up against their own bin ceilings — Corvus authored at 1.8/hr producing
+0.475 with its bin pinned near capacity, Slag Bay 3.2 authored producing 1.53.
+A full bin blocks its source, so the cluster reported an ore *shortage* while
+ore piled up unsold at every mine. The authored tally was healthy the whole
+time (8.9/hr supply against 7.4/hr demand, a 20% margin), and VOLATILES had the
+same shape. Nothing was short; nothing could move.
+
+**This is the general lesson, not an ore anecdote.** In a posting economy,
+supply, distribution and throughput fail in ways that look identical from a
+single station's stock curve. A starving consumer and a backed-up producer are
+the same event seen from two ends of a lane that isn't running, so *always
+check the producer side before adding supply* — and check authored rates, never
+measured ones, because backpressure makes a healthy source read as a weak one.
+
+**The real model is capacity derived from `cargo_bay` components**, consistent
+with "a ship *is* its parts". The codebase is most of the way there already:
+`ComponentSpec.CARGO_AREA_PER_UNIT` exists and `ship_design_validator.gd`
+already computes `capacity = total_cargo_area / CARGO_AREA_PER_UNIT` — for
+validation only, with nothing reading it at runtime. Two things block the swap:
+
+- **CargoShuttle authors no `cargo_bay` component at all.** Only Freighter and
+  the stations do. So the primary hauler needs a design change and
+  `test_ship_designs` revalidation before it can have a capacity to derive.
+- **Area-units need calibrating into lots**, against the "small relative to a
+  need" ratio above rather than against whatever number falls out of the
+  existing rects.
+
+**And the fleet needs a class between the shuttle and the Freighter.** Once
+capacity varies by hull, the current roster is a cliff — a small shuttle and
+the largest hull in the fleet, nothing in between. A mid-tier freight hauler is
+what makes the choice of hull an economic decision instead of a formality, and
+it is the hull that should actually run the long mine-to-refinery lanes. That
+is the point of deriving capacity at all: not bigger numbers, but a reason to
+own a *particular* ship.
+
+Until then `LOT_SIZE` is an interim constant, bumped to 4.0 to unblock
+measurement, and any conclusion that leans on it should say so.
+
 ## Worked reference case — the home cluster
 
 **This is an ORACLE, not an input.** Under the converter model above, net flow per
