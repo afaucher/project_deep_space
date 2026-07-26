@@ -316,3 +316,40 @@ Docking works; the ferry-out alternative is not needed.
 replace them. Changing rates and moving export onto ships in one step makes an
 unstable result uninterpretable — which is the same confound that produced three
 false findings in the session that authored this plan.
+
+### Blocker found while scoping the hauler (2026-07-26)
+
+**The delivery seam is single-transaction, and the Nexus hauler needs it not to
+be.** `Ship.pending_delivery` is one `{acceptance, amount}` dict, and
+`docking_bay.gd` settles exactly one per DOCKED transition. That is correct for
+the ship-side planner, whose whole route is one commodity by construction.
+
+But "takes whatever Ironhold is willing to give up" spans commodities — REFINED
+and RARE both post exports there — so one visit must settle several
+transactions. Options considered:
+
+- **One dock per commodity.** No seam change, but the hauler would dock, undock
+  and re-dock at the same station N times, which is silly to watch and defeats
+  the "one big pulse" rhythm the model is for.
+- **Generalize to an array** (chosen). `pending_deliveries: Array` alongside the
+  existing field, settled in order by the same DOCKED hook. Small, and it is the
+  honest shape for "one visit, several transactions."
+
+**And the acceptance must be taken at DOCK TIME, not at spawn.** The planner
+accepts at plan time, which is fine for a route it committed to. The hauler's
+entire premise is that it takes what is posted *when it arrives*, so a
+spawn-time snapshot would be exactly the wrong semantics — it would fix the
+manifest hours before the visit. That wants a `take_exports: true` mode on
+`DOCK_AT` which scans the host's open EXPORT postings on entry and stages them
+all, rather than an authored `delivery`.
+
+So the full piece is: generalize the seam -> add `take_exports` to `DOCK_AT` ->
+add the periodic hauler (TrafficGuild already has the spawn/EXIT_AT machinery)
+-> strip Ironhold's REFINED export half (2.10 -> 0.50) and RARE sink (0.65 -> 0)
+-> validate.
+
+**Deliberately NOT bundled with the M53d rate work.** The rates and the export
+mechanism landing together would make an unstable result uninterpretable --
+which is the same confound that cost two runs during the session that authored
+this plan. Rates are validated and committed; the mechanism is its own change
+against a known-good baseline.

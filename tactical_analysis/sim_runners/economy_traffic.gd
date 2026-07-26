@@ -89,6 +89,20 @@ const SNAPSHOT_PERIOD := 30.0 # sim-seconds between min-stock/trace samples
 const SEED_PRODUCER_FRACTION := 0.92   # of capacity -- above surplus_line (0.85), so EXPORT is open
 const SEED_CONSUMER_AT_TARGET := true  # a normal working reserve, neither desperate nor full
 
+# HOURS OF COVER is what "unserved" should mean, not the sign of net flow.
+#
+# A station draining at 0.25/hr with 8 lots in the bin has 32 hours of stock. It
+# is not in trouble; it is simply less urgent than a station at zero, and the
+# urgency-priced planner is CORRECT to serve the desperate one first. Reporting
+# both as failures made 20 rows scream about stations with a day and a half of
+# reserve, which buries the two that were actually empty.
+#
+# So a negative rate is only a failure if the station runs out inside this
+# horizon. 12h is comfortably longer than any plausible round trip (12-24
+# game-MINUTES) plus replanning slack, so anything above it is a station the
+# fleet has ample time to reach.
+const COVER_HOURS_OK := 12.0
+
 # SETTLE, distinct from the seed above and solving a different problem. The
 # seed states the ECONOMY's starting configuration; this one runs REAL PHYSICS
 # with the fleet already flying, and throws the results away.
@@ -511,7 +525,7 @@ func _finish() -> void:
 	print("\n=== Net flow (lots/hour, %d haulers over %.0f game-min, after a %.0f-min settle) ===" % [NUM_HAULERS, SIM_MINUTES, SETTLE_MINUTES])
 	print("net_flow = economy (sinks/converters/sources) + repair (haulers healing while docked)")
 	print("           + self_repair (the station patching its own hull) + trade (cargo actually moved)")
-	print("station              flag         commodity    net/hr    economy/hr  repair/hr  self_rep/hr  trade/hr  deliveries  min_stock  verdict")
+	print("station              flag         commodity    net/hr    economy/hr  repair/hr  self_rep/hr  trade/hr  deliveries  min_stock  cover_h  verdict")
 	for rec in stations:
 		for c in Commodity.ALL:
 			var final_stock: float = rec.stocks["self"][c]["stock"]
@@ -534,15 +548,19 @@ func _finish() -> void:
 			# target is functionally out, and an exact-zero test under-reports.
 			var bin_target: float = rec.stocks["self"][c].get("target", 0.0)
 			var starved: bool = bin_target > 0.0 and min_stock[rec.name][c] <= bin_target * 0.02
-			var verdict: String = _verdict_for(net_rate, economy_rate, repair_rate + self_repair_rate, trade_rate, can_produce, starved, has_demand)
+			# Hours until empty at the observed net rate. INF when not draining.
+			var cover_hours: float = INF
+			if net_rate < 0.0:
+				cover_hours = rec.stocks["self"][c].get("stock", 0.0) / absf(net_rate)
+			var verdict: String = _verdict_for(net_rate, economy_rate, repair_rate + self_repair_rate, trade_rate, can_produce, starved, has_demand, cover_hours)
 			if verdict != "ok":
 				if not by_cause.has(verdict):
 					by_cause[verdict] = []
-				by_cause[verdict].append("%s/%s (net %.3f/hr; economy %.3f, repair %.3f, trade %.3f, %d deliveries)" % [
-					rec.name, c, net_rate, economy_rate, repair_rate + self_repair_rate, trade_rate, delivery_counts[rec.name][c]])
-			print("%-20s %-12s %-12s %-9.3f %-11.3f %-10.3f %-12.3f %-9.3f %-11d %-10.2f %s" % [
+				by_cause[verdict].append("%s/%s (net %.3f/hr, %.1fh cover; economy %.3f, repair %.3f, trade %.3f, %d deliveries)" % [
+					rec.name, c, net_rate, cover_hours, economy_rate, repair_rate + self_repair_rate, trade_rate, delivery_counts[rec.name][c]])
+			print("%-20s %-12s %-12s %-9.3f %-11.3f %-10.3f %-12.3f %-9.3f %-11d %-10.2f %-8.1f %s" % [
 				rec.name, rec.transponder_flag, c, net_rate, economy_rate, repair_rate, self_repair_rate, trade_rate,
-				delivery_counts[rec.name][c], min_stock[rec.name][c], verdict])
+				delivery_counts[rec.name][c], min_stock[rec.name][c], min(cover_hours, 999.0), verdict])
 			if summary != null:
 				summary.store_line("%d,%d,%d,%s,%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.3f,%s,%s" % [
 					int(SIM_MINUTES), int(SETTLE_MINUTES), NUM_HAULERS, rec.name, rec.transponder_flag, c,
@@ -589,7 +607,7 @@ const _CAUSE_HELP := {
 # +2.520/hr) on healthy trade. Net flow is the honest measure of "is this
 # station being kept alive"; the attribution columns then explain WHY it's
 # negative, which is what the cause string below reports.
-func _verdict_for(net_rate: float, economy_rate: float, repair_total: float, trade_rate: float, can_produce: bool, starved: bool, has_demand: bool) -> String:
+func _verdict_for(net_rate: float, economy_rate: float, repair_total: float, trade_rate: float, can_produce: bool, starved: bool, has_demand: bool, cover_hours: float) -> String:
 	# STARVED is checked FIRST, ahead of every other branch including the
 	# net_rate >= 0 early-out, because a flatlined station is the one case where
 	# net flow reads HEALTHY while the station is dead. A bin at zero cannot be
@@ -602,6 +620,11 @@ func _verdict_for(net_rate: float, economy_rate: float, repair_total: float, tra
 	if starved and has_demand and not can_produce:
 		return "STARVED"
 	if net_rate >= 0.0:
+		return "ok"
+	# Draining, but with plenty of runway -- not a failure, just not urgent yet.
+	# See COVER_HOURS_OK. Checked after STARVED (an empty bin has zero cover and
+	# must never fall through here) and after the net >= 0 early-out.
+	if cover_hours >= COVER_HOURS_OK:
 		return "ok"
 	var repair_mag: float = absf(min(repair_total, 0.0))
 	var economy_mag: float = absf(min(economy_rate, 0.0))
