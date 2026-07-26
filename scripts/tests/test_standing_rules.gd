@@ -64,10 +64,11 @@ func setup(_main) -> void:
 		{"name": "Raider", "flag": Standing.FLAG_PIRATE}, observer_a, Standing.HOSTILE, "flying"
 	])
 
-	# 4. A claimed name on the wanted list does NOT change standing -- suspicion
-	# is not a standing, it's the patrol's own assessment (which reads the
-	# wanted-names registry itself). A reporting ship stays NEUTRAL.
-	Standing.add_wanted(["TEAM_A"], "Mule")
+	# 4. Suspicion is not a standing -- a reporting ship stays NEUTRAL no matter
+	# what anyone thinks of the name. (This case used to seed a wanted-names
+	# entry first; that registry was deleted 2026-07-26 as dead ambient global
+	# state -- see the note further down. The assertion it guards is unchanged
+	# and still worth keeping: a name is cheap talk and never moves standing.)
 	cases.append([
 		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
 		{"name": "Mule", "flag": ""}, observer_a, Standing.NEUTRAL, "reporting clean"
@@ -128,29 +129,16 @@ func setup(_main) -> void:
 			printerr("[TEST FAILED] Case ", i, " expected standing=", expected_standing,
 				" reason~='", expected_reason_substr, "' got=", result)
 
-	# --- wanted names -------------------------------------------------------
+	# --- wanted names: REMOVED 2026-07-26 -------------------------------------
+	# Standing.wanted_names / add_wanted / is_wanted are gone. The registry was
+	# written by three call sites and read by NONE outside these tests -- the
+	# cases here were the only thing keeping it alive, testing a mechanism no
+	# production code consulted. It was also an ambient process-global set of
+	# hostile names with no expiry, no per-observer scoping, no comms gating
+	# and no authority check, which is precisely the "ambient global truth"
+	# design_ideas/warrants.md set out to replace with per-observer warrants.
+	# See design_ideas/2026-07-26-warrant_stickiness_audit.md, mismatch 3.
 	Standing.reset()
-	if Standing.is_wanted(["TEAM_A"], "Ghost"):
-		failed += 1
-		printerr("[TEST FAILED] wanted names: fresh registry should not know 'Ghost'")
-	else:
-		passed += 1
-
-	Standing.add_wanted(["TEAM_A", "TEAM_B"], "Ghost")
-	if Standing.is_wanted(["TEAM_A"], "Ghost") and Standing.is_wanted(["TEAM_B"], "Ghost") and not Standing.is_wanted(["TEAM_C"], "Ghost"):
-		passed += 1
-	else:
-		failed += 1
-		printerr("[TEST FAILED] wanted names: multi-tag add/lookup mismatch")
-
-	# Empty claimed name never registers (names are cheap talk, but an empty
-	# claim shouldn't pollute the registry).
-	Standing.add_wanted(["TEAM_A"], "")
-	if Standing.is_wanted(["TEAM_A"], ""):
-		failed += 1
-		printerr("[TEST FAILED] wanted names: empty name should never be wanted")
-	else:
-		passed += 1
 
 	# --- severity ordering ---------------------------------------------------
 	var order = ["", Standing.NEUTRAL, Standing.UNREPORTED, Standing.HOSTILE]

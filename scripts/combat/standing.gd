@@ -109,6 +109,52 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	# contact color lookup survives unchanged," only its input changed).
 	var skey: String = subject_key(t_name, sig)
 	var w: Dictionary = observer.warrant_index.get(skey, {})
+	# 2026-07-26 -- fall back to the SIGNATURE key when the name key misses.
+	# subject_key() files a warrant under "name:<claimed>" if a transponder name
+	# was known at posting time and "sig:<tags>|<cross_section>" if it was not,
+	# and nothing guarantees the two moments agree: a warrant posted while
+	# active_transponders had no record for the subject is filed under `sig:`,
+	# and once the transponder IS received every later lookup asks for `name:`
+	# and misses FOREVER. The warrant is still in the index, just unreachable.
+	#
+	# Found by test_patrol_interdiction while decimating the datalink relay to
+	# 10Hz (see Ship.DATALINK_RELAY_HZ): take_damage() posted an ASSAULT warrant
+	# with claimed_name "" because the relay had not yet populated
+	# active_transponders, and the next sensor recompute -- now holding the name
+	# -- looked up the wrong key, found nothing, and overwrote take_damage()'s
+	# eager HOSTILE stamp with NEUTRAL. The patrol then had no hostile contact
+	# and never interdicted. NOT a cadence bug: the relay interval only widened
+	# the race window from 1 frame to 6, which is what made it reproducible.
+	# At 60Hz it was a one-frame window that the test happened never to land in.
+	#
+	# It is also a live gameplay hole, which is the real reason to fix it here
+	# rather than paper over it in the relay: fire while dark, then light your
+	# transponder, and the victim's assault warrant against you silently stops
+	# applying. Turning a transponder ON should never launder a warrant.
+	#
+	# Deliberately ONE-DIRECTIONAL. The reverse case -- a warrant filed under
+	# `name:` and looked up by signature after the subject goes dark -- is left
+	# alone: that is designed behaviour (you cannot enforce a name warrant on a
+	# hull you have not identified, matching the UNREPORTED/yellow rule), and
+	# broadening name-keyed warrants to match by signature would let a warrant
+	# against one ship apply to any hull sharing its tags and cross-section.
+	#
+	# EXCEPT for offenses that SELF-RESOLVE ON ID. NO_ID is the whole reason
+	# this exception exists, and it is not an edge case -- the keying gap above
+	# is literally NO_ID's resolution mechanism. A NO_ID warrant is filed under
+	# `sig:` BY DEFINITION (the subject was not reporting a name; that IS the
+	# offense), and warrants.md's taxonomy says it "resolves itself the moment
+	# the subject reports a transponder -- compute_standing already flips them
+	# off UNREPORTED on its own, so there is no separate revocation path to
+	# build for it." That self-resolution worked precisely because the `name:`
+	# lookup missed the `sig:`-keyed record. Falling back unconditionally would
+	# have turned the cluster's most common, most forgivable offense into a
+	# permanent HOSTILE brand that no code path can ever clear -- the exact
+	# "enemy forever" failure the warrant model was built to retire.
+	if w.is_empty() and t_name != "":
+		var sig_w: Dictionary = observer.warrant_index.get(subject_key("", sig), {})
+		if not self_resolves_on_id(sig_w.get("offense", "")):
+			w = sig_w
 	if not w.is_empty():
 		var w_reason: String = w.get("reason", "")
 		return {"standing": HOSTILE, "reason": w_reason if w_reason != "" else ("warrant: " + w.get("offense", ""))}
@@ -120,11 +166,12 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 
 	# 4. transponder present (name + flag received, whatever their values --
 	# an empty flag is itself a legitimate "no flag" declaration) -> NEUTRAL.
-	# A claimed name on the faction wanted list does NOT change standing:
+	# A claimed name being disliked by somebody does NOT change standing:
 	# "suspicion" is not a standing (it has no shared meaning across roles),
 	# it is the PATROL's own assessment (design_ideas/economy_and_piracy.md).
-	# The wanted-names registry (below) stays as that patrol-assessment input;
-	# is_wanted is called by the patrol tree (M52), not by this classifier.
+	# This comment used to point at a wanted-names registry as that
+	# patrol-assessment input; that registry was deleted 2026-07-26 (see the
+	# note where it used to live) because nothing ever read it.
 	if has_transponder:
 		return {"standing": NEUTRAL, "reason": "reporting clean"}
 
@@ -133,26 +180,27 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	# (later milestone), the judgment itself is not.
 	return {"standing": UNREPORTED, "reason": "not reporting"}
 
-# --- Wanted-names registry -------------------------------------------------
-# faction tag (String) -> Dictionary-as-set of claimed names. Static process
-# state (shared by every ship in the running process) -- reset() for tests.
-static var wanted_names: Dictionary = {}
-
-static func add_wanted(tags: Array, claimed_name: String) -> void:
-	if claimed_name == "":
-		return
-	for tag in tags:
-		if not wanted_names.has(tag):
-			wanted_names[tag] = {}
-		wanted_names[tag][claimed_name] = true
-
-static func is_wanted(tags: Array, claimed_name: String) -> bool:
-	if claimed_name == "":
-		return false
-	for tag in tags:
-		if wanted_names.get(tag, {}).has(claimed_name):
-			return true
-	return false
+# --- Wanted-names registry: DELETED 2026-07-26 ------------------------------
+# `wanted_names` (faction tag -> set of claimed names), `add_wanted` and
+# `is_wanted` are gone. M48 introduced them; M52b's warrant model replaced
+# what they were for, and the removal was overdue:
+#
+#   - `is_wanted` had ZERO production callers. compute_standing's own comment
+#     claimed "is_wanted is called by the patrol tree (M52), not by this
+#     classifier" -- the patrol tree did not call it either. Three sites
+#     WROTE the registry (take_damage, and twice in the datalink relay's
+#     standing share); nothing ever read it back.
+#   - It was ambient process-global state: a name added by any ship was
+#     visible to every ship sharing that faction tag, with no comms link, no
+#     line of sight, no authority check and no expiry. That is exactly the
+#     "ambient global truth" design_ideas/warrants.md set out to replace, and
+#     it was the last unclearable "enemy forever" structure in the codebase.
+#
+# Per-observer `Ship.warrants` + `warrant_index` is the supported way to say
+# "this observer holds something against that subject". If a patrol tree ever
+# needs a suspicion input, derive it from warrants it can actually enforce --
+# do not reintroduce a global set.
+# See design_ideas/2026-07-26-warrant_stickiness_audit.md, mismatch 3.
 
 # --- Aggression event bus ---------------------------------------------------
 # Authority side (take_damage) posts one event per hit; observers consume
@@ -196,7 +244,6 @@ static func prune_stale(delta: float) -> void:
 		i -= 1
 
 static func reset() -> void:
-	wanted_names = {}
 	aggression_events = []
 	_aggression_seq = 0
 	_last_prune_frame = -1
@@ -252,15 +299,30 @@ const _RESPONSE_SEVERITY := {RESPONSE_INTERCEPT: 1, RESPONSE_MAX: 2}
 # expires on its own clock", not "never resolved" (NO_ID still resolves via
 # compute_standing's existing UNREPORTED-clearing rule, unrelated to this
 # table).
+#
+# `self_resolves_on_id` marks an offense whose whole content is "you were not
+# identifying yourself", so reporting a transponder ENDS it -- no clock, no
+# revocation record. Only NO_ID qualifies. It exists as an explicit flag
+# because the behaviour used to be implicit in a keying accident (a `sig:`-
+# keyed warrant simply became unreachable once a `name:` lookup started being
+# used), and compute_standing's signature fallback would otherwise have
+# silently converted that accident into a permanent brand. Do not add this to
+# ASSAULT and friends: shooting someone and then squawking is laundering, not
+# resolution.
 const _OFFENSE_TABLE := {
 	OFF_ASSAULT: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0},
 	OFF_SUSTAINED_ASSAULT: {"response": RESPONSE_MAX, "expires_after": -1.0},
 	OFF_ARMED_THREAT: {"response": RESPONSE_INTERCEPT, "expires_after": 1800.0},
 	OFF_ARMED_ROBBERY: {"response": RESPONSE_MAX, "expires_after": -1.0},
-	OFF_NO_ID: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0},
+	OFF_NO_ID: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "self_resolves_on_id": true},
 	OFF_SPEED_VIOLATION: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0},
 	OFF_OPERATOR_FLAGGED: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0},
 }
+
+# True for an offense that ends when the subject starts reporting a
+# transponder. See the table note above and warrants.md's NO_ID row.
+static func self_resolves_on_id(offense: String) -> bool:
+	return _OFFENSE_TABLE.get(offense, {}).get("self_resolves_on_id", false)
 
 static func response_class(offense: String) -> String:
 	return _OFFENSE_TABLE.get(offense, {}).get("response", RESPONSE_INTERCEPT)
