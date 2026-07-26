@@ -12,9 +12,9 @@ extends Node
 # established pattern for a "real hulls flying" tactical sim).
 #
 # Three phases, in order (each solving a different problem -- see the consts):
-#   1. WARMUP_HOURS  -- economy only, no physics, no haulers. Gives the world a
-#      standing imbalance to correct, instead of a perfectly flat start no
-#      route can profit from.
+#   1. SEED -- bins stated directly into a running-economy configuration
+#      (producers holding sellable surplus, consumers at a working reserve),
+#      because a flat world offers the planner no routes at all.
 #   2. SETTLE_MINUTES -- real physics, fleet flying, results DISCARDED. Excludes
 #      the promotion damage/self-repair transient from the measured rates.
 #   3. SIM_MINUTES   -- the measurement window. Everything reported comes from
@@ -60,38 +60,38 @@ const DT := 1.0 / 60.0
 const NUM_HAULERS := 8
 const SNAPSHOT_PERIOD := 30.0 # sim-seconds between min-stock/trace samples
 
-# M53c Phase C review fix (2026-07-25) -- see this file's own _finish()
-# report and the git history for the diagnosis. A FRESH HomeCluster.build()
-# starts EVERY bin exactly at target (ClusterLoader's _bin(): stock ==
-# target), which is SATISFIED -- no posting at all -- and stays that way for
-# EXPORT specifically until stock clears surplus_line (85% of capacity).
-# Because capacity is sized to ~24h of the bin's own rate (StationEconomy's
-# whole "no rate fudge factor" design) that gap is a near-constant ~8.4 REAL
-# HOURS for a converter/source whose capacity isn't floor-clamped, and up to
-# ~29h for one that is (Coldreach's ORE trickle, Ironhold's GOODS source --
-# both under the 50-lot capacity floor). A ship-side planner that requires a
-# matched EXPORT+IMPORT pair (this one; "both ends pay") can therefore find
-# LITERALLY ZERO routes for most of a day after a fresh load -- confirmed
-# empirically via route_planner_log: "EXPORT open 0, IMPORT open 24" on every
-# hauler, every check, for the whole length of an un-warmed-up run. That is a
-# SIM-METHODOLOGY gap, not a planner bug: the 30-minute MEASUREMENT window
-# (design doc: "2-3 trips per hull, enough to see whether stock trends up or
-# down") is about hauler correction against REAL standing imbalance, the same
-# way an actual campaign several hours old would look -- it was never meant
-# to also cover "wait for imbalance to accumulate from a perfectly flat
-# start" in the same 30 minutes. So: let the economy run WARMUP_HOURS
-# UNATTENDED (no haulers, no physics -- StationEconomy.tick() is pure
-# bookkeeping, same "no physics frames needed" trick economy_soak.gd uses)
-# before ever spawning a hauler or starting the timed/physics-driven
-# measurement window below. Authored rates/buffers/verdict logic are
-# UNTOUCHED -- this only changes how long the world has already been running
-# before the stopwatch (and the fleet) starts, matching real play.
-const WARMUP_HOURS := 48.0
+# SEEDED STEADY STATE, replacing a 48-hour unattended warmup.
+#
+# The problem the warmup solved was real: a FRESH HomeCluster.build() starts
+# every bin exactly AT target, which is SATISFIED -- no posting at all -- and an
+# EXPORT only opens above surplus_line. A planner needing a matched
+# EXPORT+IMPORT pair therefore finds literally zero routes on a flat world
+# (confirmed via route_planner_log: "EXPORT open 0, IMPORT open 24" on every
+# hauler, every check). The 30-minute measurement window is meant to observe
+# hauler correction against STANDING imbalance, like a campaign a few hours old
+# -- not to also wait for imbalance to accumulate.
+#
+# But simulating forward cannot produce that state once Commodity.BUFFER_HOURS
+# shortened the buffers, because the two requirements now cross:
+#   - a producer needs 0.35 x BUFFER_HOURS to clear surplus_line: ~2.1h for
+#     ORE/REFINED/GOODS, ~8.4h for RARE
+#   - a consumer starting at target empties in 0.5 x BUFFER_HOURS: 1.5h on
+#     VOLATILES, 3h elsewhere
+# So by the time producers can sell, consumers are dead. The 48h warmup made
+# this vivid: it emptied EVERY consumer to zero, and because an empty bin's
+# sinks consume nothing, net flow read 0.000 and the verdict scored those dead
+# stations "ok" -- the run's failing-row count IMPROVED from 19 to 1 as the
+# cluster collapsed.
+#
+# So state it directly instead of simulating toward it. Producers hold sellable
+# surplus, consumers hold a normal reserve. Deterministic, instant, and immune
+# to future BUFFER_HOURS changes -- which a tuned warmup duration would not be.
+const SEED_PRODUCER_FRACTION := 0.92   # of capacity -- above surplus_line (0.85), so EXPORT is open
+const SEED_CONSUMER_AT_TARGET := true  # a normal working reserve, neither desperate nor full
 
-# M53c Phase C follow-up (2026-07-25) -- SETTLE, distinct from WARMUP_HOURS
-# above and solving a different problem. The warmup advances the ECONOMY with
-# no physics; this one runs REAL PHYSICS with the fleet already flying, and
-# throws the results away.
+# SETTLE, distinct from the seed above and solving a different problem. The
+# seed states the ECONOMY's starting configuration; this one runs REAL PHYSICS
+# with the fleet already flying, and throws the results away.
 #
 # Why it has to exist: promoting the cluster produces a one-time burst of
 # component damage (bodies resolving overlap at spawn), and stations
@@ -169,7 +169,7 @@ var _last_station_health: Dictionary = {}   # station name -> {component id -> h
 func setup(main) -> void:
 	main_node = main
 	print("=== M53c economy_traffic: %.0f game-minutes, %d planner-driven haulers, real docking ===" % [SIM_MINUTES, NUM_HAULERS])
-	print("(after a %.0fh unattended economy warmup -- see this file's WARMUP_HOURS comment)" % WARMUP_HOURS)
+	print("(bins seeded to a running-economy state -- see this file's SEED_* comment)")
 
 	# Same reasoning as economy_soak.gd: this director prints one line per
 	# STALLED converter per pass, which would dominate a run this long.
@@ -179,7 +179,7 @@ func setup(main) -> void:
 	var def = HomeCluster.build()
 	manager = ClusterManager.new()
 	manager.name = "ClusterManager"
-	# WARMUP PHASE -- deliberately NOT added to the scene tree yet (economy_
+	# SEED PHASE -- deliberately NOT added to the scene tree yet (economy_
 	# soak.gd's exact technique): a bubble policy + a viewpoint far outside it
 	# guarantees _reconcile() promotes NOTHING, so the single big tick() below
 	# is pure bookkeeping, no physics, no live_parent needed at all.
@@ -189,7 +189,7 @@ func setup(main) -> void:
 	manager.viewpoint = Vector2(1e9, 1e9)
 	ClusterLoader.load_into(def, manager)
 	manager.directors.append(StationEconomy.new())
-	manager.tick(WARMUP_HOURS * 3600.0)
+	_seed_steady_state(manager)
 
 	# MEASUREMENT PHASE -- switch to the real full-sim policy (ClusterManager's
 	# own default; a fresh LivenessPolicy set up explicitly here so the swap
@@ -272,6 +272,32 @@ func setup(main) -> void:
 		get_tree().quit(1)
 		return
 	log_file.store_line("sim_minutes,phase,station,flag,commodity,stock,capacity")
+
+# Puts every authored bin into the state a cluster that has been running for a
+# while would be in. Producers (a source, or a converter that outputs it) hold
+# surplus above surplus_line so their EXPORT postings are open; anything merely
+# consumed sits at target. A commodity the station has no mechanism for is left
+# alone at its inert zero -- Drift Market has no ORE bin in any meaningful
+# sense, and inventing stock for it would invent a market.
+func _seed_steady_state(mgr) -> void:
+	var seeded: int = 0
+	for rec in mgr.records:
+		if rec.kind != ClusterEntity.Kind.STATION or not rec.stocks.has("self"):
+			continue
+		if rec.industry.is_empty():
+			continue
+		for c in Commodity.ALL:
+			var bin: Dictionary = rec.stocks["self"][c]
+			var capacity: float = bin.get("capacity", 0.0)
+			if capacity <= 0.0:
+				continue
+			if _can_produce(rec, c):
+				bin["stock"] = capacity * SEED_PRODUCER_FRACTION
+				seeded += 1
+			elif _has_demand(rec, c) and SEED_CONSUMER_AT_TARGET:
+				bin["stock"] = bin.get("target", capacity * 0.5)
+				seeded += 1
+	print("Seeded %d bins to a running-economy state." % seeded)
 
 func _physics_process(_delta: float) -> void:
 	if manager == null:
@@ -457,6 +483,17 @@ func _can_produce(rec, commodity: String) -> bool:
 			return true
 	return false
 
+# Does this station WANT the commodity at all? A sink, or a converter that
+# eats it. Distinguishes "starved" (wants it, has none) from "not applicable"
+# (Drift Market has no ORE mechanism, so its zero stock is meaningless).
+func _has_demand(rec, commodity: String) -> bool:
+	if rec.industry.get("sinks", {}).get(commodity, 0.0) > 0.0:
+		return true
+	for conv in rec.industry.get("converters", []):
+		if conv.get("in", {}).get(commodity, 0.0) > 0.0:
+			return true
+	return false
+
 func _finish() -> void:
 	log_file.flush()
 	log_file.close()
@@ -492,7 +529,12 @@ func _finish() -> void:
 			# station's own stock.
 			var economy_rate: float = net_rate - repair_rate - self_repair_rate - trade_rate
 			var can_produce: bool = _can_produce(rec, c)
-			var verdict: String = _verdict_for(net_rate, economy_rate, repair_rate + self_repair_rate, trade_rate, can_produce)
+			var has_demand: bool = _has_demand(rec, c)
+			# Same 2% -of-target convention economy_soak.gd uses: a bin at 2% of
+			# target is functionally out, and an exact-zero test under-reports.
+			var bin_target: float = rec.stocks["self"][c].get("target", 0.0)
+			var starved: bool = bin_target > 0.0 and min_stock[rec.name][c] <= bin_target * 0.02
+			var verdict: String = _verdict_for(net_rate, economy_rate, repair_rate + self_repair_rate, trade_rate, can_produce, starved, has_demand)
 			if verdict != "ok":
 				if not by_cause.has(verdict):
 					by_cause[verdict] = []
@@ -536,6 +578,7 @@ const _CAUSE_HELP := {
 	"UNDERSUPPLIED": "haulers ARE delivering, just not fast enough -- fleet size or route economics",
 	"OVER_EXPORTED": "the planner is hauling this AWAY faster than the station makes it -- pricing/urgency problem",
 	"REPAIR_DRAIN": "repair is the dominant drain -- a NAVIGATION problem (hulls taking damage), not an economy one",
+	"STARVED": "the bin hit EMPTY -- consumption has already stopped, so net flow reads 0.000 and means nothing",
 }
 
 # Keys on NET FLOW, not on the economy residual. The previous version keyed on
@@ -546,7 +589,18 @@ const _CAUSE_HELP := {
 # +2.520/hr) on healthy trade. Net flow is the honest measure of "is this
 # station being kept alive"; the attribution columns then explain WHY it's
 # negative, which is what the cause string below reports.
-func _verdict_for(net_rate: float, economy_rate: float, repair_total: float, trade_rate: float, can_produce: bool) -> String:
+func _verdict_for(net_rate: float, economy_rate: float, repair_total: float, trade_rate: float, can_produce: bool, starved: bool, has_demand: bool) -> String:
+	# STARVED is checked FIRST, ahead of every other branch including the
+	# net_rate >= 0 early-out, because a flatlined station is the one case where
+	# net flow reads HEALTHY while the station is dead. A bin at zero cannot be
+	# drained further, so its sinks consume nothing, so net_rate is exactly
+	# 0.000 -- and the old ordering returned "ok" for that. Observed when
+	# Commodity.BUFFER_HOURS shortened the buffers: the sim's headline count
+	# improved from 19 failing rows to 1 precisely BECAUSE most stations had
+	# emptied completely and stopped registering. An instrument whose numbers
+	# get better as the patient dies is worse than no instrument.
+	if starved and has_demand and not can_produce:
+		return "STARVED"
 	if net_rate >= 0.0:
 		return "ok"
 	var repair_mag: float = absf(min(repair_total, 0.0))
