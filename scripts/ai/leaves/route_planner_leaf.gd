@@ -85,6 +85,13 @@ func tick(actor: Node, _blackboard) -> int:
 		if not RoutePlanner.should_replan(remaining, candidate["score"]):
 			return FAILURE
 		actor.set_default_job(RoutePlanner.route_itinerary(candidate))
+		# Stamp the fresh job the same way the empty-search path below does.
+		# route_itinerary() returns a NEW dict with no _replan_check_frame, so
+		# without this _due_for_check() sees `last < 0` on the very next tick and
+		# runs another full O(stations^2 x commodities) search immediately --
+		# harmless but pointless, and an inconsistency between two paths that
+		# should behave identically.
+		actor.default_job["_replan_check_frame"] = Engine.get_physics_frames()
 		_job_log(actor, "RE-PLAN %s %s->%s (score %.1f beat remaining %.1f by margin)" %
 			[candidate["commodity"], candidate["pickup_name"], candidate["dropoff_name"], candidate["score"], remaining])
 		return FAILURE
