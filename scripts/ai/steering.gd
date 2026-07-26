@@ -44,21 +44,38 @@ const MIN_GOAL_WEIGHT := 0.15
 # limit is now sensible too -- no dodge and no suppression, i.e. pure
 # goal-seeking -- rather than "don't dodge, but still refuse to go there".
 static func steer(actor, desired_dir: Vector2, exclude_pos, weight: float = 1.0) -> Vector2:
-	var result: Dictionary = _avoidance(actor, exclude_pos)
-	var avoid: Vector2 = result["vec"] * weight
+	var avoid: Vector2 = _avoidance(actor, exclude_pos) * weight
 	if avoid == Vector2.ZERO:
 		return desired_dir
-	var goal_weight: float = clampf(1.0 - result["urgency"] * weight, MIN_GOAL_WEIGHT, 1.0)
+	var goal_weight: float = clampf(1.0 - last_urgency * weight, MIN_GOAL_WEIGHT, 1.0)
 	var combined: Vector2 = desired_dir.normalized() * goal_weight + avoid
 	if combined.length() < 0.01:
 		return avoid
 	return combined
 
-# Returns {"vec": Vector2, "urgency": float (0..1)}. `urgency` is the worst of
-# the anti-overlap floor's overlap fraction and the single worst predictive
-# threat's own urgency -- steer() uses it to shrink the goal's pull as a
-# threat gets more pressing, rather than an all-or-nothing switch.
-static func _avoidance(actor, exclude_pos) -> Dictionary:
+# Companion output of the LAST _avoidance() call: the worst of the anti-overlap
+# floor's overlap fraction and the single worst predictive threat's own urgency
+# (0..1). steer() uses it to shrink the goal's pull as a threat gets more
+# pressing, rather than an all-or-nothing switch.
+#
+# A static scratch field rather than a second return value BECAUSE THIS IS THE
+# HOTTEST PATH IN THE GAME: steer() runs per AI mover per physics frame, so
+# returning {"vec":..., "urgency":...} allocated and discarded a Dictionary
+# every ship every frame. That landed in the same gate where test_perf_baseline
+# moved 8.45 -> 12.42 ms avg -- a uniform per-frame cost, which is the right
+# shape for an average shift (the M53c route planner, the other suspect, is
+# throttled to one search per hull per 10s and cannot move a mean). It also
+# forced station_keeping_leaf.gd to allocate the dict purely to read ["vec"]
+# and throw the rest away.
+#
+# Safe as static state because physics is single-threaded and every caller
+# reads it IMMEDIATELY after its own _avoidance() call, before any other ship
+# can run. If avoidance ever moves off the physics thread this must become a
+# real return value again.
+static var last_urgency: float = 0.0
+
+# Returns the avoidance vector; also sets `last_urgency` (read it immediately).
+static func _avoidance(actor, exclude_pos) -> Vector2:
 	var pos: Vector2 = actor.position
 	var vel: Vector2 = actor.linear_velocity
 	var r_self: float = actor.get_bounding_radius()
@@ -148,8 +165,167 @@ static func _avoidance(actor, exclude_pos) -> Dictionary:
 
 	if worst_urgency >= 0.0:
 		floor_total += worst_avoid
-	var urgency: float = max(floor_urgency, maxf(worst_urgency, 0.0))
-	return {"vec": floor_total, "urgency": urgency}
+
+	# NEVER let avoidance push us INTO the body we have deliberately stopped
+	# watching. `exclude_pos` (the dock/combat target) is skipped as an obstacle
+	# above, which is correct -- a hull must be able to close on the thing it is
+	# approaching -- but it left a blind spot: a dodge computed against OTHER
+	# traffic can have a large component pointing straight at the excluded body,
+	# and nothing was there to object.
+	#
+	# scripts/tests/test_dock_approach.gd measured exactly this. Solo approaches
+	# are spotless (0 contacts, peak contact 0), but converging hulls dodging
+	# EACH OTHER shove one into the station: 26 damaging station contacts across
+	# three scenarios, all on arrival, none on departure. Worst case was the
+	# HEAVY Nexus Freighter -- ponderous enough (max_omega 0.6-1.8) that it
+	# cannot correct out of a shove, and massive enough that the one contact it
+	# did take cost 2890 station HP where a shuttle's would have been a scratch.
+	#
+	# Approach-speed discipline alone cannot fix that, because the hull is being
+	# DISPLACED, not travelling fast by choice. Projecting the inward component
+	# out leaves peer-dodging fully intact (the tangential part survives) and
+	# leaves goal-seeking alone (that is steer()'s own term), while making it
+	# impossible for avoidance to ADD velocity toward the target. The honest
+	# reading of "don't dodge my dock target": stop routing around it, do not go
+	# blind to it.
+	if exclude_pos != null and exclude_pos is Vector2 and exclude_pos.is_finite():
+		var to_target: Vector2 = exclude_pos - pos
+		if to_target.length() > 0.01:
+			var t_dir: Vector2 = to_target.normalized()
+			var into: float = floor_total.dot(t_dir)
+			if into > 0.0:
+				floor_total -= t_dir * into
+
+	last_urgency = max(floor_urgency, maxf(worst_urgency, 0.0))
+	return floor_total
+
+# ---------------------------------------------------------------------------
+# Approach discipline (design_ideas/port_zones_and_channels.md "Two speed
+# rules, not one"). Returns the speed this actor should actually be doing,
+# given `cruise` as what it WANTS to be doing.
+#
+# RULE 1 -- self-imposed, universal. Shed speed near anything dockable, at
+# every station, zone or no zone, authority or none. This is competence, not
+# compliance: you slow down because you don't want to hit the thing, and
+# physics does not care about jurisdiction. Five of the home cluster's eight
+# stations are SmallStations that publish no zone at all, so a rule that only
+# applied inside an authored zone would leave most of the cluster's traffic
+# ungoverned.
+#
+# RULE 2 -- externally imposed, only where an authority exists to impose it.
+# A port zone's `speed_advisory` (medium_station.gd), obeyed inside the zone
+# whether or not this hull is docking, since a ship merely transiting is still
+# traffic. NPCs treat it as mandatory; the player gets an amber gauge and is
+# free to be a menace (helm_panel.gd).
+#
+# WHY THIS EXISTS AT ALL: scripts/tests/test_dock_approach.gd measured 26
+# damaging station contacts over three scenarios -- ALL on arrival, none on
+# departure -- costing a MediumStation 36.9% of its hull in 9 dock cycles.
+# The mechanism is that Steering.steer() takes `exclude_pos` and deliberately
+# never dodges the body being approached, so converging hulls dodge EACH OTHER
+# straight into the station they have stopped watching. A station is
+# stationary, so ship<->station closing speed IS the ship's own speed: holding
+# it under Ship.COLLISION_DAMAGE_MIN_SPEED (150 u/s) on approach makes that
+# whole class of damage structurally impossible rather than merely rarer.
+const DOCK_APPROACH_SPEED := 120.0    # under COLLISION_DAMAGE_MIN_SPEED (150) with headroom for closing geometry
+# The allowed speed follows a BRAKING CURVE, v = sqrt(v_dock^2 + 2*a*d), not a
+# linear ramp over a fixed margin. Two earlier shapes were both wrong:
+#   - margin 6000, linear: demanded ~40 u/s^2 of braking no loaded hull has, so
+#     the clamp commanded a speed the ship could not reach and
+#     test_dock_approach still measured 385 u/s contacts against a 120 limit.
+#   - margin 18000, linear: fixed the damage (0.00% station HP) but made hulls
+#     crawl the whole way in -- MediumStation throughput fell from 16 dock
+#     cycles to 6, because a linear ramp is slowest exactly where there is
+#     still plenty of room.
+# The curve asks for a CONSTANT, achievable deceleration instead: full cruise
+# until braking is genuinely required, then a proper deceleration profile. It
+# also self-scales to the hull -- a Freighter (accel ~8-12, max_speed ~400)
+# needs far less room than a 700 u/s shuttle and is allowed to use it.
+# Braking authority is derived PER HULL from its own thrust and mass, not
+# assumed. A global constant here would silently require every ship in the
+# game to brake at least that hard: author a HEAVY hull at the top of its
+# max_speed band with weak engines and it would be physically unable to shed
+# speed on approach, ram the station, and nothing would explain why --
+# ComponentSpec.HANDLING_BANDS constrains max_speed and max_omega but says
+# NOTHING about acceleration. Deriving it also lets a nimble shuttle keep its
+# speed far longer than a loaded freighter, which is both faster and correct.
+#
+# BRAKE_FRACTION is below 1.0 because full rated thrust is not available for
+# braking: the hull must first rotate to point retrograde (max_omega is low on
+# exactly the heavy hulls that need the most braking room) and keeps spending
+# some authority on steering while it does.
+# 0.35, not the 0.65 first tried. Measured, not reasoned: at 0.65 a shuttle's
+# thrust-to-mass permitted far more speed than the earlier flat 8.0 u/s^2
+# constant did, and test_dock_approach's SmallStation traffic case regressed
+# from 0.00% station HP / peak contact 101 to 3.99% / peak 464 while throughput
+# doubled -- hulls arriving hot, exactly as if the clamp had been relaxed,
+# because it had been. Rotation time is only part of what a hull spends
+# braking authority on; it is also fighting the peer-avoidance shove that put
+# it off-axis in the first place.
+const APPROACH_BRAKE_FRACTION := 0.35
+const APPROACH_DECEL_FLOOR := 4.0     # u/s^2 -- a badly damaged/underpowered hull still gets a usable curve
+const APPROACH_MAX_RANGE := 45000.0   # beyond this, don't even consider the body (cheap early-out)
+
+# This hull's usable braking deceleration, u/s^2.
+static func _brake_accel(actor) -> float:
+	if not actor.has_method("get_ship_max_thrust"):
+		return APPROACH_DECEL_FLOOR
+	var thrust: float = actor.get_ship_max_thrust()
+	var m: float = maxf(0.001, actor.mass)
+	return maxf(APPROACH_DECEL_FLOOR, (thrust / m) * APPROACH_BRAKE_FRACTION)
+const APPROACH_CLOSE_RADII := 1.5     # fully slowed by this multiple of the target's bounding radius
+
+# Frame-scoped shared cache of dockable bodies, same idiom as ship.gd's
+# _port_authority_cache (and for the same reason -- see that comment, which
+# describes this exact trap). The first version of approach_speed_limit()
+# rescanned the ENTIRE "ships" group per ship per frame, calling get("dockable")
+# and get_port_zone() on each: O(ships^2) per tick, in the hottest path in the
+# game. It cost 5.3ms of average frame time (test_perf_baseline 12.42 -> 17.71
+# ms avg, and it FAILED the gate) -- and the giveaway was the distribution:
+# avg 17.71 / p95 18.44 / max 18.73, near-perfectly uniform, which is a fixed
+# per-frame cost rather than a spike.
+#
+# Rebuilt once per physics frame by whichever ship asks first, no invalidation
+# hooks to miss. A station promoted mid-frame lands next frame at worst
+# (1/60s), and dockability is set at construction/promote time anyway.
+static var _dockable_cache: Array = []
+static var _dockable_cache_frame: int = -1
+
+static func _dockables(actor) -> Array:
+	var frame: int = Engine.get_physics_frames()
+	if _dockable_cache_frame != frame:
+		_dockable_cache = []
+		for s in actor.get_tree().get_nodes_in_group("ships"):
+			if is_instance_valid(s) and s.get("dockable") == true:
+				_dockable_cache.append(s)
+		_dockable_cache_frame = frame
+	return _dockable_cache
+
+static func approach_speed_limit(actor, cruise: float) -> float:
+	var limit: float = cruise
+	var pos: Vector2 = actor.position
+	var decel: float = _brake_accel(actor)
+	for b in _dockables(actor):
+		if b == actor or not is_instance_valid(b):
+			continue
+		var dist: float = pos.distance_to(b.position)
+		if dist >= APPROACH_MAX_RANGE:
+			continue
+		var r: float = b.get_bounding_radius() if b.has_method("get_bounding_radius") else 300.0
+		# Rule 1: the braking curve. Fully slowed by APPROACH_CLOSE_RADII of the
+		# target's hull, and allowed whatever speed a constant APPROACH_DECEL
+		# could still shed over the distance remaining beyond that.
+		var near: float = r * APPROACH_CLOSE_RADII
+		var room: float = maxf(0.0, dist - near)
+		var allowed: float = sqrt(DOCK_APPROACH_SPEED * DOCK_APPROACH_SPEED + 2.0 * decel * room)
+		# Rule 2: a published limit, where there is an authority to publish one.
+		var zone: Dictionary = b.get_port_zone() if b.has_method("get_port_zone") else {}
+		if not zone.is_empty() and dist <= float(zone.get("radius", 0.0)):
+			var advisory: float = float(zone.get("rules", {}).get("speed_advisory", 0.0))
+			if advisory > 0.0:
+				allowed = minf(allowed, advisory)
+		limit = minf(limit, allowed)
+	return limit
 
 static func _nearby(actor) -> Array:
 	var out: Array = []

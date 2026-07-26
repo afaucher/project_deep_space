@@ -180,6 +180,12 @@ static func _cruise_toward(actor, target: Vector2, exclude_pos, speed: float) ->
 	if desired.length() > 0.01:
 		desired = desired.normalized()
 	var avoided: Vector2 = Steering.steer(actor, desired, exclude_pos)
+	# Approach discipline + published port limits (design_ideas/
+	# port_zones_and_channels.md "Two speed rules, not one"). Applied HERE
+	# because this is the single choke point every job-driven mover already
+	# funnels through, so GO_TO/DOCK_AT/intercept all inherit it without each
+	# growing its own copy of the rule.
+	speed = Steering.approach_speed_limit(actor, speed)
 	var desired_vel: Vector2 = avoided.normalized() * speed
 	var steer: Vector2 = desired_vel - actor.linear_velocity
 	if steer.length() < 10.0:

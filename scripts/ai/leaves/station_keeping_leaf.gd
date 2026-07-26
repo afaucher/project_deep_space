@@ -38,7 +38,7 @@ func tick(actor: Node, _blackboard) -> int:
 	# ships. Large structures (like AsteroidStations and Hubs) are too massive to dodge.
 	var avoid_vec = Vector2.ZERO
 	if actor.get("ship_tier") != null and actor.ship_tier != 4: # 4 is ComponentSpec.Tier.STRUCTURE
-		avoid_vec = Steering._avoidance(actor, Vector2.INF)["vec"]
+		avoid_vec = Steering._avoidance(actor, Vector2.INF)
 	
 	if avoid_vec.length() > 0.1:
 		# Use a stronger dodge velocity so slow-accelerating ships clear in time
