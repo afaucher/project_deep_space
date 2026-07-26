@@ -118,10 +118,14 @@ What settles the split is not realism but *what a blockade does*:
 | **VOLATILES** | **Coldreach** (ice) — the name is the tell, as with Refinery Prime and Drift Market | life support: water, air, propellant — *survival, locally sourced* |
 | **REFINED** | Refinery Prime, from ore | structure and parts — *why the refinery matters* |
 | **GOODS** | **imported only**, via Ironhold | machinery, medicine, tech — *why the wormhole matters* |
+| **RARE** *(M53d)* | **Meridian only** — Halvorsen Claim, Corvus Yards | exotics, consumed by nobody here — *why Meridian is a peer, not a client* |
 
-Four, but each does a distinct narrative job and dropping any one loses something
-real. If three are wanted, GOODS folds into REFINED — at the cost of the import
-dependency, which is the interesting half.
+Five, each doing a distinct narrative job; dropping any one loses something real.
+RARE is the odd one out by design: it has **no domestic consumer at all**, so
+every lot exists to leave. That is what makes it an income rather than a
+utility, and it is also what makes it *weak* leverage — home does not need it,
+so home can close the gate for free. See
+[../implementation_plans/m53d_meridian_sovereignty.md](../implementation_plans/m53d_meridian_sovereignty.md).
 
 ```
                         Nexus wormhole
@@ -376,22 +380,35 @@ the world already has is the difference between a model and a fudge factor. Note
 Coldreach's 22-rock field reads as ice-rich (mostly VOLATILES, little ORE);
 yield-per-rock stays consistent with Slag Bay's.
 
-| Station | Role | ORE | VOLATILES | REFINED | GOODS |
-| --- | --- | --- | --- | --- | --- |
-| **Ironhold** | port of export/import | **−5.6** *export sink* | −0.60 | −0.50 | **+1.50** *import source* |
-| **Drift Market** | eastern depot | — | −0.50 | −0.50 | −0.30 |
-| **Refinery Prime** | refinery | −3.3 *refining feed* | −0.45 | **+2.20** *only source* | −0.40 |
-| **Coldreach** | 22 rocks, ice-rich | +0.6 | **+2.60** *only source* | −0.25 | −0.20 |
-| **Slag Bay** | 32 rocks | +3.2 | −0.40 | −0.25 | −0.20 |
-| **Halvorsen Claim** | 18 rocks *(Meridian)* | +1.8 | −0.22 | −0.25 | −0.15 |
-| **Corvus Yards** | 18 rocks *(Meridian)* | +1.8 | −0.21 | −0.20 | −0.10 |
-| **Deepcut** | 15 rocks | +1.5 | −0.22 | −0.25 | −0.15 |
-| | **net** | **0** | **0** | **0** | **0** |
+| Station | Role | ORE | VOLATILES | REFINED | GOODS | RARE |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Ironhold** | port of export/import | **−0.8** *export sink* | −0.60 | **−2.10** *0.50 upkeep + 1.60 export* | **+1.85** *import source* | **−0.65** *export sink* |
+| **Drift Market** | eastern depot | — | −0.50 | −0.50 | −0.30 | — |
+| **Refinery Prime** | refinery | −6.6 *refining feed* | −0.45 | **+4.40** *only source* | −0.40 | — |
+| **Coldreach** | 22 rocks, ice-rich *(Meridian)* | +0.6 | **+3.20** *only source* | −0.25 | −0.20 | — |
+| **Slag Bay** | 32 rocks | +3.2 | −0.40 | −0.25 | −0.20 | — |
+| **Halvorsen Claim** | 18 rocks *(Meridian)* | +1.8 | −0.22 | −0.25 | −0.15 | **+0.40** |
+| **Corvus Yards** | 18 rocks *(Meridian)* | +1.8 | −0.21 | −0.20 | −0.10 | **+0.40** |
+| **Deepcut** | 15 rocks | +1.5 | −0.22 | −0.25 | −0.15 | — |
+| | **net surplus** | **+1.50** | **+0.60** | **+0.60** | **+0.35** | **+0.15** |
 
-The two cells that are *conduits outside the cluster* are both Ironhold's: ore is
-a **sink** (5.6 lots/hr leaving) and goods a **source** (1.5 net landed). Refined
-output is entirely consumed locally — the frontier refines what it needs and
-exports the surplus raw.
+**The net row is a surplus, not a zero — and that is the whole M53d correction.**
+The original table balanced every column to exactly 0.0, which reads as elegant
+closure and was in fact a bug: an EXPORT posting only opens above `surplus_line`,
+and a producer running at exactly 100% of demand never accumulates surplus, so
+REFINED and GOODS could never be hauled anywhere at any fleet size. Cargo in
+flight is a permanent deficit too, which a zero-margin system has no spare
+production to refill. Every column now carries ~16–23% margin, and that margin is
+precisely what leaves on the Nexus hauler.
+
+The cells that are *conduits outside the cluster* are all Ironhold's: REFINED and
+RARE are **sinks** (leaving), GOODS a **source** (landing). Note that ORE export
+collapsed 5.6 → 0.8 — the cluster used to ship out more unprocessed rock than it
+refined, which is a colony rather than an industrial base, and because an export
+sink bids at full urgency like any consumer it beat Refinery Prime to a supply
+that exactly covered both. The refinery now runs at the scale the ore supports
+(6.6 in / 4.4 out) and **refined is the main export**, bound for the shipyard in
+the next cluster.
 
 **Capacity check (why the numbers aren't arbitrary).** CargoShuttle cruises at
 700 u/s, so trips are real: Coldreach 5.4 min from Ironhold, Refinery Prime 7.4,

@@ -91,13 +91,24 @@ Never debug balance through a physics sim.
 
 | Stage | Runner | Answers | Cost |
 |---|---|---|---|
-| 1 | `economy_soak` | Are the numbers solvent at rest? Do bins starve or pin? | **seconds** for 30 game-days |
-| 2 | `economy_traffic` | Does a real fleet realise them? | ~20 real minutes |
+| 0 | pen and paper | Does supply exceed demand per commodity? (§1) | seconds |
+| 1 | `economy_soak` | Does the mechanism run — converters, bins, a new commodity — without erroring? | **seconds** for 30 game-days |
+| 2 | `economy_traffic` | Does a real fleet actually keep stations served? | ~20 real minutes |
 
 `StationEconomy.tick()` is pure bookkeeping — it needs no physics frames, which
-is why stage 1 covers weeks in seconds. **Get stage 1 green before running
-stage 2.** If you change rates and traffic in one step and the cluster
-misbehaves, you cannot tell which one did it.
+is why stage 1 covers weeks in seconds.
+
+**`economy_soak` CANNOT validate balance, and expecting it to is a trap I fell
+into while writing this file.** It runs nothing that redistributes: no ships,
+no hauling. So every consumer starves and every producer pins at capacity
+*regardless of how the rates are authored* — a well-margined cluster and a
+hopeless one produce identical soak output. What it is genuinely good for is
+that a run completes cleanly: no missing-key errors, a newly added commodity
+populating everywhere it should, converters entering the states you expect.
+
+**Solvency is a cluster-wide arithmetic property (stage 0), and whether the
+fleet realises it is stage 2.** There is no cheap simulation shortcut between
+those two.
 
 ```bash
 ./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --run-tactical-sim economy_soak

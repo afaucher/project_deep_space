@@ -252,3 +252,67 @@ fifth class mostly propagates itself. The churn is the 8×4 reference table in
 [../design_ideas/station_economy.md](../design_ideas/station_economy.md)
 becoming 8×5, `test_station_economy_reference`'s expectations, and one more row
 per station in both sim CSVs.
+
+---
+
+## AMENDMENT — export belongs on the Nexus hauler, not on sinks
+
+The rate table above expresses export as **Ironhold sinks** (REFINED 1.60 of
+its 2.10, RARE 0.65). That is deliberate scaffolding with a known lifespan,
+and it should be read that way rather than as the intended design.
+
+**The target shape:** the cluster's largest freighter comes through the Nexus
+wormhole periodically, docks at Ironhold, takes **whatever Ironhold is willing
+to give up**, and leaves. TrafficGuild already spawns transient wormhole
+freighters that arrive at the wormhole, dock, and `EXIT_AT` it — the code's own
+comment says they "rebalance nothing; just make the road busy." That is the
+export mechanism sitting there fully routed and carrying zero cargo; it needs
+`pending_delivery` on its `DOCK_AT` steps, which is exactly what
+`RoutePlanner.route_itinerary()` already emits.
+
+**Why this is strictly better than a sink:**
+
+- **"Whatever Ironhold is willing to give up" is already modelled.** A station
+  posts an EXPORT for stock above `surplus_line`. Willingness *is* the posting;
+  the hauler is just a very large buyer that clears the board.
+- **Export becomes the RESIDUAL CLAIMANT rather than a competitor.** A sink
+  bids at full urgency and can outbid domestic demand — which is exactly how
+  Ironhold's old 5.6/hr ore export starved Refinery Prime to 50% output. A
+  freighter taking only posted surplus *structurally cannot* do that. It also
+  means export rates need no precise tuning: **the margin is the export.**
+- **Ironhold stops being a sink and becomes a warehouse.** If freighters stop
+  coming, stock backs up, bins hit capacity, converters BLOCK, and the cascade
+  runs backwards into Refinery Prime through machinery that already exists. A
+  constant sink can never model an interrupted outside.
+- **It fixes the merged-sink wart.** Ironhold's REFINED 2.10 is population
+  upkeep and export fused together because the model allows one sink per
+  commodity. With a freighter, upkeep stays a sink and export is a ship —
+  independently disruptable, so "the shipyard cancelled its order" no longer
+  starves Ironhold's own people.
+- **Export becomes physical and interdictable.** A pirate can rob the shipment;
+  a blockade actually stops trade; "home controls export access" becomes home's
+  patrols sitting between Meridian and the gate. Geography, not a rule.
+- **It gives the economy a rhythm.** Stock accumulates, the hauler pulses, stock
+  drains. *"The Nexus hauler comes in two days"* is something a player can plan
+  a run around; a constant invisible drain is not.
+- **The Meridian squeeze becomes non-violent and visible.** RARE warehouses at
+  Ironhold. To pressure Meridian, home simply does not load it — no blockade, no
+  shots, just a hold that does not open.
+
+**Two knobs replace five export sinks:** visit interval and hold size. At ~3
+lots/hr of exportable surplus against ~24h bins, a visit every 12–18 game-hours
+arrives to 40–55 lots waiting — which is what justifies it being the largest
+hull in the game rather than merely a big one.
+
+**Verified feasible (2026-07-25):** `test_dock_approach`'s Nexus scenarios
+confirm a HEAVY `Freighter` (mass ~300, accel 8–12, max_speed ~400) berths at a
+MediumStation cleanly — solo, zero contacts, 0.00% station HP. Arriving into
+live shuttle traffic it needed the approach-discipline and avoidance-projection
+fixes to be safe (2.90% → 0.14% station HP), because collision damage scales
+with reduced mass and a 300-mass hull turns a shuttle-sized graze into 2890 HP.
+Docking works; the ferry-out alternative is not needed.
+
+**Staging:** keep the sinks until the M53d rates are validated end to end, then
+replace them. Changing rates and moving export onto ships in one step makes an
+unstable result uninterpretable — which is the same confound that produced three
+false findings in the session that authored this plan.
