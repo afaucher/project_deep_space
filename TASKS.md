@@ -248,7 +248,18 @@ guild quietly throttling itself out of the game.
 means in play. The doc's forgiveness half never shipped.
 → `design_ideas/2026-07-26-warrant_stickiness_audit.md`, mismatch 4
 
-### Campaign playtest: A1/A3 fixed, six items remain — *2026-07-26*
+### Campaign playtest: ALL NINE ITEMS CLOSED — *2026-07-27*
+A1/A2/A3, B, C1–C4, D1, D2, E are all fixed and gate-verified. Two things found
+DURING the investigation are still open and were never in the original list:
+the player never receives the police-stop exemption (`authority_flags` is empty
+on the player ship while NPC haulers carry it, so a lawful patrol stop makes the
+PLAYER post an ARMED_THREAT warrant — fix by surfacing the authority claim that
+already rides every hail, NOT by hardcoding a trust list, see
+`design_ideas/comms_verbs.md`), and the escalation ladder still has no middle
+rung. Superseded entry below kept for the item-by-item detail.
+→ `design_ideas/2026-07-26-campaign_playtest.md`
+
+### (superseded) Campaign playtest: A1/A3 fixed, six items remain — *2026-07-26*
 Nine items across identity/standing, weapons safety, UI and naming. **A1/A3 (a
 station opens fire on the player at campaign start) is fixed and guarded** —
 three causes, all closed 2026-07-26/27: the challenge-expiry comms-range check

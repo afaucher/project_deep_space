@@ -7,6 +7,34 @@ Ordered by severity, not by the order they were reported.
 
 ---
 
+## STATUS: all nine items closed — *2026-07-27*
+
+| Item | | Where |
+| --- | --- | --- |
+| A1 | station opens fire if you move | three independent layers, see below |
+| A2 | inconsistent classification | one tier table drives colour AND section |
+| A3 | repeated `DEMAND IDENTIFY` | same root cause as A1 |
+| B | weapons safety | console interlock, all three control routes |
+| C1 | menu ordering | declarative order list + sandbox-only labelling |
+| C2 | controls menu too small | proportional anchors, was a `CenterContainer` |
+| C3 | hails match tactical contacts | shared `Utils.contact_color` |
+| C4 | engineering log height | floor doubled + expand-fill |
+| D1 | dead broadcast button | removed |
+| D2 | port rules in engineering | call site removed |
+| E | "Missions" → "Contracts" | player-facing strings |
+
+**A1 turned out to be three separate defects**, not one: the challenge convicted
+hulls that had left comms range, `NO_ID` painted them red, and HOSTILE was
+treated as a firing authorization. Each is independently sufficient to produce
+the reported behaviour, and each is now guarded.
+
+Two things found during the investigation are NOT in the original list and
+remain open — the player never receives the police-stop exemption (see below),
+and the escalation ladder still has no middle rung. Both are recorded in
+TASKS.md.
+
+---
+
 ## ROOT CAUSE FOUND for A1 + A3 — *2026-07-27*
 
 **One mechanism, exactly as this doc predicted they'd share.** Not a standing
