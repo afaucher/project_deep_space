@@ -95,9 +95,15 @@ func setup(_main) -> void:
 	_assert(not Standing.self_resolves_on_id(Standing.OFF_ASSAULT),
 		"ASSAULT is NOT self-resolving -- squawking must never clear it")
 
+	# CAUTION, not HOSTILE. NO_ID is caution-grade (Standing's offense table):
+	# "wanted for not identifying itself" is something you cannot resolve from
+	# here, not a determination that the hull is an enemy. What this case is
+	# really about is the KEYING -- that the warrant is reachable at all while
+	# the subject is dark -- so the tier is incidental to it, but asserting the
+	# right one keeps the file honest.
 	var noid_dark: Dictionary = Standing.compute_standing(_contact(), {}, obs_noid)
-	_assert(noid_dark.get("standing", "") == Standing.HOSTILE,
-		"while still dark, the NO_ID warrant reads HOSTILE (got '%s')" % noid_dark.get("standing", ""))
+	_assert(noid_dark.get("standing", "") == Standing.CAUTION,
+		"while still dark, the NO_ID warrant is reachable and reads CAUTION (got '%s')" % noid_dark.get("standing", ""))
 
 	var noid_squawking: Dictionary = Standing.compute_standing(
 		_contact(), {"name": "Now Reporting", "flag": Standing.FLAG_CIVILIAN}, obs_noid)

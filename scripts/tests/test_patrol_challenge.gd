@@ -266,13 +266,28 @@ func _phase_ignored_in_range(station: Node, patrol: Node, patrol_tree: Node) -> 
 			break
 	_assert(posted, "phase 5: ignoring the challenge IN RANGE does post a NO_ID warrant (the mechanism still works -- phase 4's control)")
 
-	var hostile := false
+	# The warrant colors the contact CAUTION, not HOSTILE -- NO_ID is
+	# caution-grade, which is the playtest fix one layer upstream of the
+	# targeting gate: this hull never goes red, so nothing ever considers it a
+	# target in the first place.
+	#
+	# Asserted on the REASON, not the tier. This subject is dark, so it already
+	# reads caution-tier for an unrelated cause ("not reporting") and a tier
+	# check here would pass whether or not the warrant existed at all. The
+	# reason flipping to the warrant's own text is the only proof the warrant is
+	# what is being read.
+	var caution_reason := ""
 	for i in range(300):
 		await main_node.get_tree().physics_frame
-		if _find_contact(patrol, ignorer).get("standing", "") == Standing.HOSTILE:
-			hostile = true
+		var pv: Dictionary = _find_contact(patrol, ignorer)
+		if "identify challenge" in pv.get("standing_reason", ""):
+			caution_reason = pv.get("standing_reason", "")
 			break
-	_assert(hostile, "phase 5: the warrant colors the contact HOSTILE")
+	_assert(caution_reason != "",
+		"phase 5: the warrant colors the contact CAUTION with the warrant's own reason (got '%s')"
+			% _find_contact(patrol, ignorer).get("standing_reason", ""))
+	_assert(_find_contact(patrol, ignorer).get("standing", "") != Standing.HOSTILE,
+		"phase 5: and never HOSTILE -- a NO_ID hull is not an enemy determination")
 
 	# Now light up. The subject_key gap IS the resolution mechanism: the warrant
 	# was filed under `sig:` (a NO_ID subject has no claimed name by

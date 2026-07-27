@@ -97,17 +97,47 @@ func setup(_main) -> void:
 		{"name": "Ally", "flag": ""}, observer_warrant_crypto, Standing.FRIENDLY, ""
 	])
 
-	# 9. Precedence: a matching warrant beats a known-enemy flag check (order
-	# 2 before 3) -- both tiers land on HOSTILE, so the REASON text is what
+	# 9. Precedence: a HOSTILE-GRADE warrant beats the known-enemy flag check
+	# (order 2 before 3) -- both land on HOSTILE, so the REASON text is what
 	# proves which rule actually fired (the warrant's, not "flying <flag>").
+	#
+	# The offense here used to be ARMED_THREAT. It has to be a hostile-grade one
+	# now: a warrant no longer implies HOSTILE, and a caution-grade warrant
+	# deliberately does NOT short-circuit this rule (case 9b below).
 	var observer_warrant_precedence := _make_observer(["TEAM_A"])
 	observer_warrant_precedence.warrant_index = {
 		Standing.subject_key("Raider3", {}): Standing.make_warrant(
-			Standing.OFF_ARMED_THREAT, {"claimed_name": "Raider3"}, {"iid": 1, "name": "Witness"}, "", "k-case9", "warrant precedence reason")
+			Standing.OFF_ARMED_ROBBERY, {"claimed_name": "Raider3"}, {"iid": 1, "name": "Witness"}, "", "k-case9", "warrant precedence reason")
 	}
 	cases.append([
 		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
 		{"name": "Raider3", "flag": Standing.FLAG_PIRATE}, observer_warrant_precedence, Standing.HOSTILE, "warrant precedence reason"
+	])
+
+	# 9b. The other half of that precedence: a CAUTION-grade warrant must not
+	# MASK the enemy-flag rule. A pirate who has also picked up a NO_ID is still
+	# red -- reading yellow here would be a strictly worse bug than the flat
+	# HOSTILE this tier column was added to fix.
+	var observer_caution_no_mask := _make_observer(["TEAM_A"])
+	observer_caution_no_mask.warrant_index = {
+		Standing.subject_key("Raider4", {}): Standing.make_warrant(
+			Standing.OFF_NO_ID, {"claimed_name": "Raider4"}, {"iid": 1, "name": "Witness"}, "", "k-case9b", "ignored identify challenge")
+	}
+	cases.append([
+		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
+		{"name": "Raider4", "flag": Standing.FLAG_PIRATE}, observer_caution_no_mask, Standing.HOSTILE, "flying"
+	])
+
+	# 9c. But a caution-grade warrant still outranks NEUTRAL -- otherwise a
+	# warrant for a minor offense would be invisible on a hull reporting clean.
+	var observer_caution_over_neutral := _make_observer(["TEAM_A"])
+	observer_caution_over_neutral.warrant_index = {
+		Standing.subject_key("Quiet One", {}): Standing.make_warrant(
+			Standing.OFF_NO_ID, {"claimed_name": "Quiet One"}, {"iid": 1, "name": "Witness"}, "", "k-case9c", "ignored identify challenge")
+	}
+	cases.append([
+		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
+		{"name": "Quiet One", "flag": Standing.FLAG_CIVILIAN}, observer_caution_over_neutral, Standing.CAUTION, "ignored identify challenge"
 	])
 
 	for i in range(cases.size()):

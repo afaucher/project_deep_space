@@ -269,13 +269,24 @@ mirroring `Interdict`'s assign-a-job shape; balance risk is patrols abandoning
 routes, which needs an `economy_traffic`-scale check.
 → `design_ideas/2026-07-26-campaign_playtest.md`, "the missing middle rung"
 
-### `compute_standing` returns a flat HOSTILE — *2026-07-27*
-Every consumer re-derives severity from the warrant, which is exactly how the
-tier came to be dropped at the targeting gate (playtest A3). `authorizes_force`
-fixes that one gate; carrying the tier on the standing result would fix the
-shape once instead of at each gate. Touches every colour and targeting consumer,
-so it is a real piece of work — deferred until a second gate needs it.
-→ `design_ideas/2026-07-26-campaign_playtest.md`
+### Rename `UNREPORTED` → `CAUTION` — *2026-07-27*
+The yellow tier is CAUTION ("what your ship can determine without knowing
+more"); `UNREPORTED` is only one of its causes, alongside "demanded our
+submission" and "wanted for something minor". `Standing.CAUTION` exists as an
+alias and new code uses it, but the constant still reads `UNREPORTED` at ~40
+call sites and as a colour-dict key. Deliberately deferred: it is exactly the
+mechanical multi-site rewrite CLAUDE.md warns about, so it wants its own commit
+with nothing else in it and a full gate.
+→ `scripts/combat/standing.gd`, the CAUTION alias note
+
+### Per-flag enforcement thresholds — *2026-07-27*
+The offense table's `standing` and `authorizes_force` columns are the two halves
+of this and are kept separate for it: a harsher regime sets its threshold so
+NO_ID reads red, and decides independently whether red authorizes its guns.
+Nothing consumes an override yet. When one arrives it belongs as an
+observer-supplied argument to `standing_for_offense()`, NOT a second global
+table — an unread global registry is how `wanted_names` rotted.
+→ `scripts/combat/standing.gd`, `_OFFENSE_TABLE`
 
 ---
 

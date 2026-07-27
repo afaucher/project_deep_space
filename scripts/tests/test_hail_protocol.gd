@@ -76,6 +76,29 @@ func _find_contact(observer: Ship, target: Node) -> Dictionary:
 			return c
 	return {}
 
+# Did `observer` post an ARMED_THREAT warrant naming `subject`? The exemption
+# scenarios assert on this rather than on standing: a STOP demand now lands on
+# CAUTION rather than HOSTILE, and CAUTION is also what a non-reporting contact
+# reads anyway, so the warrant is the only signal that isolates the exemption.
+# Matched on the issuer's own signature (a dark issuer has no claimed name, so
+# subject_key falls back to the signature -- see Standing.subject_key).
+func _holds_armed_threat_against(observer: Ship, subject: Node) -> bool:
+	var subject_iid: int = subject.get_instance_id()
+	for key in observer.warrants:
+		var w: Dictionary = observer.warrants[key]
+		if w.get("offense", "") != Standing.OFF_ARMED_THREAT:
+			continue
+		if w.get("status", "") != Standing.WARRANT_OPEN:
+			continue
+		# Resolve the warrant's subject back to a live track on the observer.
+		var skey: String = Standing.warrant_subject_key(w)
+		var trk: String = "TRK-%03d" % (abs(subject_iid) % 1000)
+		var c: Dictionary = observer.active_contacts.get(trk, {})
+		var claimed: String = observer.active_transponders.get(subject_iid, {}).get("name", "")
+		if skey == Standing.subject_key(claimed, c.get("signature", {})):
+			return true
+	return false
+
 func _has_fresh_track(observer: Ship, target: Node) -> bool:
 	var c: Dictionary = _find_contact(observer, target)
 	if c.is_empty():
@@ -238,10 +261,15 @@ func _tick_scenario_b() -> int:
 			if step_frame < 3:
 				return -1
 			var c: Dictionary = _find_contact(target, issuer)
-			if c.get("standing", "") != Standing.HOSTILE or not ("demanding we stop" in c.get("standing_reason", "")):
-				printerr("  ASSERT FAILED: target should mark the issuer HOSTILE ('demanding we stop'), got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
+			# CAUTION, not HOSTILE. A ship demanding your submission is yellow
+			# even when the demand is lawful: from here you cannot tell police
+			# from a pirate in colors, and that unresolvable ambiguity IS what
+			# the yellow tier means. Escalating to red is the observer's own
+			# threshold, never an automatic consequence of being hailed.
+			if c.get("standing", "") != Standing.CAUTION or not ("demanding we stop" in c.get("standing_reason", "")):
+				printerr("  ASSERT FAILED: target should mark the issuer CAUTION ('demanding we stop'), got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
 				return 0
-			print("  [PASS] addressed target flips the issuer HOSTILE on a STOP demand (reason='", c.get("standing_reason", ""), "')")
+			print("  [PASS] addressed target flips the issuer CAUTION on a STOP demand (reason='", c.get("standing_reason", ""), "')")
 			return 1
 	return -1
 
@@ -262,8 +290,16 @@ func _tick_scenario_c() -> int:
 			if step_frame < 3:
 				return -1
 			var c: Dictionary = _find_contact(target, issuer)
-			if c.get("standing", "") == Standing.HOSTILE:
-				printerr("  ASSERT FAILED: a STOP demand from a trusted authority flag must NOT flip the issuer HOSTILE, got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
+			# Asserted on the WARRANT, not the tier. Since a non-exempt STOP now
+			# lands on CAUTION rather than HOSTILE, the old "must not be
+			# HOSTILE" check would be satisfied by BOTH branches -- the
+			# exemption could stop working entirely and this would still pass.
+			# Tier alone cannot separate them either: this issuer reports no
+			# transponder, so its contact is caution-tier anyway for an
+			# unrelated reason ("not reporting"). The posted ARMED_THREAT is the
+			# actual mechanism and the only unambiguous signal.
+			if _holds_armed_threat_against(target, issuer):
+				printerr("  ASSERT FAILED: a STOP demand from a trusted authority flag must NOT post ARMED_THREAT, got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
 				return 0
 			print("  [PASS] police-stop exemption held: trusted-flag STOP demand did not flip the issuer (standing='", c.get("standing", ""), "')")
 			return 1
@@ -287,10 +323,12 @@ func _tick_scenario_d() -> int:
 			if step_frame < 3:
 				return -1
 			var c: Dictionary = _find_contact(bystander, issuer)
-			if c.get("standing", "") != Standing.HOSTILE or not ("demanding a stop" in c.get("standing_reason", "")):
-				printerr("  ASSERT FAILED: witness should flip the issuer HOSTILE ('demanding a stop of ...'), got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
+			# CAUTION, not HOSTILE -- watching someone get pulled over tells you
+			# even less than being pulled over yourself.
+			if c.get("standing", "") != Standing.CAUTION or not ("demanding a stop" in c.get("standing_reason", "")):
+				printerr("  ASSERT FAILED: witness should flip the issuer CAUTION ('demanding a stop of ...'), got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
 				return 0
-			print("  [PASS] witness rule: bystander flipped the issuer HOSTILE on an overheard STOP demand (reason='", c.get("standing_reason", ""), "')")
+			print("  [PASS] witness rule: bystander flipped the issuer CAUTION on an overheard STOP demand (reason='", c.get("standing_reason", ""), "')")
 			return 1
 	return -1
 
@@ -340,8 +378,10 @@ func _tick_scenario_f() -> int:
 			if step_frame < 3:
 				return -1
 			var c: Dictionary = _find_contact(bystander, issuer)
-			if c.get("standing", "") == Standing.HOSTILE:
-				printerr("  ASSERT FAILED: assistance exemption should NOT flip the issuer (demand's target already HOSTILE to the witness), got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
+			# On the warrant, for the same reason as scenario C: neither "not
+			# HOSTILE" nor the tier distinguishes exempt from non-exempt now.
+			if _holds_armed_threat_against(bystander, issuer):
+				printerr("  ASSERT FAILED: assistance exemption should NOT post ARMED_THREAT (demand's target already HOSTILE to the witness), got standing=", c.get("standing", ""), " reason='", c.get("standing_reason", ""), "'")
 				return 0
 			print("  [PASS] assistance exemption held: lawful interdiction of an already-HOSTILE target did not flip the issuer (standing='", c.get("standing", ""), "')")
 			return 1

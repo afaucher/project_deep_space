@@ -143,11 +143,50 @@ Still open: NO_ID's *effectiveness* now rests entirely on the docking denial,
 since nothing shoots and nothing pursues. If that proves too weak in play, the
 missing middle rung below is the fix, not a higher response class.
 
-Remaining open, and bigger than the above: **`compute_standing` returning a flat
-HOSTILE may itself be the wrong shape.** Every caller has to re-derive severity
-from the warrant, which is precisely how the tier came to be dropped at the
-targeting gate. Carrying the tier on the standing result fixes it once rather
-than at each gate — but it touches every colour and targeting consumer.
+#### BUILT 2026-07-27 (second pass): the yellow tier
+
+The flat-`HOSTILE` shape question above is now answered, because a design
+decision made it load-bearing rather than merely tidy: **a ship demanding your
+submission turns yellow, always — including a legitimate police action.** From
+the receiving end you cannot tell police from a pirate in colours, and that
+unresolvable ambiguity IS what yellow means. Escalating to red is the
+observer's own threshold, which is where per-flag enforcement rules will live.
+
+That fixes the playtest bug a second time, further upstream: a `NO_ID` hull is
+never painted red at all, so nothing ever considers it a target. The aggression
+cap became the backstop rather than the only line of defence.
+
+- **`Standing.CAUTION`** — an ALIAS for the existing yellow tier, not a fifth
+  tier. The four tiers are epistemic states (you know / reporting-and-clean /
+  cannot resolve / determined enemy) and `UNREPORTED` was only ever one cause of
+  the third. Same string, same severity, so the datalink and every colour
+  consumer are untouched. The constant rename is deferred to its own commit.
+- **An offense-table `standing` column** — the default yellow/red threshold.
+  Kept separate from `authorizes_force` even though the two agree row for row
+  today; they are the two halves of per-flag rules, and collapsing them would
+  cost that axis.
+- **Precedence, which was the trap.** A caution-grade warrant is HELD, not
+  returned: returning early would let a minor warrant MASK the known-enemy-flag
+  rule, so a pirate who had also picked up a `NO_ID` would read yellow. Caution
+  loses to every more-severe rule and only beats `NEUTRAL`.
+- **Interdiction follows the warrant; engagement follows the standing.** Making
+  `NO_ID` caution-grade silently deleted the patrol's whole response to it,
+  since `InterdictLeaf` gated on `HOSTILE`. It now demands a stop from anyone we
+  hold an enforceable warrant against at any tier — so a silent hull is
+  intercepted and hailed and never shot at. The warrant requirement is
+  load-bearing: caution is also what an ordinary non-reporting contact reads,
+  and gating on the tier alone would have every patrol demanding a stop from
+  every unidentified ship in the cluster.
+- **Response priority — red threats, then SOS, then yellow.** `Interdict`/
+  `JobRunner` sit above `Engage` and `SOSResponse`, which was correct while a
+  demand job was a red matter by definition. Caution-grade work would otherwise
+  pre-empt a firefight and a distress call and hold the slot for the full 25s
+  patience. The tree is NOT reordered (one assignment slot, one runner — moving
+  the assigner changes nothing because the runner above `Engage` still executes
+  it); instead yellow work is not started while outranked, and is abandoned if
+  outranked mid-run. Its refusal memory is cleared on yielding: a demand broken
+  off to go deal with a pirate was never pressed, and leaving the entry would
+  retire that interdiction permanently.
 
 ### Follow-up: the escalation ladder is missing its middle rung — *open*
 

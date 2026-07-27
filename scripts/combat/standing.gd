@@ -29,6 +29,30 @@ const NEUTRAL := "NEUTRAL"
 const UNREPORTED := "UNREPORTED"
 const HOSTILE := "HOSTILE"
 
+# The yellow tier is CAUTION -- "what your ship can determine without knowing
+# more" -- and `UNREPORTED` is only ONE of its causes, not the category.
+# The four tiers are really epistemic states:
+#
+#   FRIENDLY  you know (crypto IFF handshake, unforgeable)
+#   NEUTRAL   reporting, and you hold nothing against them
+#   CAUTION   you have something you cannot resolve on your own
+#   HOSTILE   you have determined they are an enemy
+#
+# Causes of CAUTION now include: no transponder ever received (who are you?),
+# a demand for your submission (police, or a pirate in colors? -- you cannot
+# tell from here), and a warrant for an offense below your escalation
+# threshold. contact["standing_reason"] carries WHICH, so widening the tier
+# loses nothing.
+#
+# CAUTION is an ALIAS, not a new tier: same string, same severity, same color,
+# no datalink or UI change. The rename of the constant itself is deliberately
+# NOT done here -- "UNREPORTED" is a string used as a color-dict key, in the
+# datalink compare-and-copy and across many call sites, and CLAUDE.md is
+# emphatic about multi-site mechanical rewrites cascading into failures that
+# surface nowhere near the cause. Behaviour first; the rename is its own
+# isolated commit. New code should say CAUTION.
+const CAUTION := UNREPORTED
+
 const FLAG_PIRATE := "JOLLY_ROGER"
 const FLAG_DRIFT := "SOVEREIGN_DRIFT"     # home faction / militia
 const FLAG_CIVILIAN := "DRIFT_CIVILIAN"   # mobile homes, independents
@@ -155,14 +179,34 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 		var sig_w: Dictionary = observer.warrant_index.get(subject_key("", sig), {})
 		if not self_resolves_on_id(sig_w.get("offense", "")):
 			w = sig_w
+	# A warrant no longer means HOSTILE by itself -- see the offense table's
+	# `standing` column. A hostile-grade warrant is an enemy determination and
+	# returns immediately; a caution-grade one is a fact you cannot resolve
+	# ("wanted for something minor"), so it is HELD and applied further down.
+	#
+	# THE HOLD IS THE POINT: returning CAUTION here would let a minor warrant
+	# MASK the known-enemy-flag rule below, so a pirate who had also picked up a
+	# NO_ID would read yellow instead of red -- a strictly worse bug than the
+	# one this column fixes. Caution must lose to every more-severe rule and
+	# only beat NEUTRAL.
+	var caution_warrant: Dictionary = {}
 	if not w.is_empty():
 		var w_reason: String = w.get("reason", "")
-		return {"standing": HOSTILE, "reason": w_reason if w_reason != "" else ("warrant: " + w.get("offense", ""))}
+		var w_text: String = w_reason if w_reason != "" else ("warrant: " + w.get("offense", ""))
+		if escalates_to_hostile(w.get("offense", "")):
+			return {"standing": HOSTILE, "reason": w_text}
+		caution_warrant = {"standing": CAUTION, "reason": w_text}
 
 	# 3. flying a known-enemy flag -> HOSTILE, full stop (the one flag whose
 	# meaning is never ambiguous).
 	if has_transponder and t_flag != "" and observer.known_enemy_flags.has(t_flag):
 		return {"standing": HOSTILE, "reason": "flying " + t_flag}
+
+	# A held caution-grade warrant outranks both remaining rules: it is more
+	# severe than NEUTRAL, and it is a better REASON than "not reporting" for a
+	# dark hull we also hold a warrant against.
+	if not caution_warrant.is_empty():
+		return caution_warrant
 
 	# 4. transponder present (name + flag received, whatever their values --
 	# an empty flag is itself a legitimate "no flag" declaration) -> NEUTRAL.
@@ -342,20 +386,52 @@ const _RESPONSE_SEVERITY := {RESPONSE_INTERCEPT: 1, RESPONSE_MAX: 2}
 # playtest to notice. Note the CALLER must still allow HOSTILE-with-no-warrant
 # (a known-enemy flag, e.g. a Jolly Roger) -- that path has no offense string
 # at all and is not capped. See acquire_target_leaf.gd.
+#
+# `standing` is the tier a warrant for this offense produces -- the DEFAULT
+# yellow/red escalation threshold. Before this column every enforceable warrant
+# read flat HOSTILE, which is how a hull got painted red for not answering an
+# identify challenge; "wanted for something minor" is a CAUTION fact, not an
+# enemy determination.
+#
+# It is a SEPARATE column from authorizes_force even though the two currently
+# agree row for row (force-authorizing offenses read red, capped ones read
+# yellow -- that correspondence fell out rather than being imposed, which is
+# some evidence the cut is in the right place). They must stay separate because
+# they are the two halves of per-flag enforcement rules: a harsher regime sets
+# its threshold so NO_ID *does* read red, and decides INDEPENDENTLY whether red
+# authorizes its guns. Collapsing them into one column would buy tidiness now
+# and cost exactly that axis.
+#
+# Per-flag overrides are not built -- there is no consumer yet, and shipping an
+# unread registry is how `wanted_names` rotted (see its deletion note above).
+# When one arrives, it belongs as an observer-supplied override consulted by
+# standing_for_offense(), not as a second global table.
 const _OFFENSE_TABLE := {
-	OFF_ASSAULT: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0, "authorizes_force": true},
-	OFF_SUSTAINED_ASSAULT: {"response": RESPONSE_MAX, "expires_after": -1.0, "authorizes_force": true},
-	OFF_ARMED_THREAT: {"response": RESPONSE_INTERCEPT, "expires_after": 1800.0},
-	OFF_ARMED_ROBBERY: {"response": RESPONSE_MAX, "expires_after": -1.0, "authorizes_force": true},
-	OFF_NO_ID: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "self_resolves_on_id": true},
-	OFF_SPEED_VIOLATION: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0},
-	OFF_OPERATOR_FLAGGED: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "authorizes_force": true},
+	OFF_ASSAULT: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0, "authorizes_force": true, "standing": HOSTILE},
+	OFF_SUSTAINED_ASSAULT: {"response": RESPONSE_MAX, "expires_after": -1.0, "authorizes_force": true, "standing": HOSTILE},
+	OFF_ARMED_THREAT: {"response": RESPONSE_INTERCEPT, "expires_after": 1800.0, "standing": CAUTION},
+	OFF_ARMED_ROBBERY: {"response": RESPONSE_MAX, "expires_after": -1.0, "authorizes_force": true, "standing": HOSTILE},
+	OFF_NO_ID: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "self_resolves_on_id": true, "standing": CAUTION},
+	OFF_SPEED_VIOLATION: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0, "standing": CAUTION},
+	OFF_OPERATOR_FLAGGED: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "authorizes_force": true, "standing": HOSTILE},
 }
 
 # True for an offense that ends when the subject starts reporting a
 # transponder. See the table note above and warrants.md's NO_ID row.
 static func self_resolves_on_id(offense: String) -> bool:
 	return _OFFENSE_TABLE.get(offense, {}).get("self_resolves_on_id", false)
+
+# The tier a warrant for this offense produces. Defaults to CAUTION for an
+# unknown offense, matching authorizes_force's fail-closed default: an offense
+# nobody has classified is something you cannot resolve, not a determination
+# that someone is your enemy.
+static func standing_for_offense(offense: String) -> String:
+	return _OFFENSE_TABLE.get(offense, {}).get("standing", CAUTION)
+
+# True when a warrant for this offense is an ENEMY determination rather than a
+# caution fact -- i.e. it clears the default escalation threshold.
+static func escalates_to_hostile(offense: String) -> bool:
+	return standing_for_offense(offense) == HOSTILE
 
 # The aggression cap. True for an offense whose holder may open fire on the
 # strength of the warrant alone. See the _OFFENSE_TABLE note above for why this

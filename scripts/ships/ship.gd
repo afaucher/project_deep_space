@@ -3523,8 +3523,15 @@ func _physics_process(delta: float) -> void:
 									var issuer_claimed: String = active_transponders.get(sender_iid, {}).get("name", "")
 									post_warrant(Standing.OFF_ARMED_THREAT, issuer_claimed, active_contacts[issuer_trk].get("signature", {}), "demanding we stop")
 									# Eager same-tick cache stamp -- see take_damage's
-									# own instant-flip comment for why.
-									active_contacts[issuer_trk]["standing"] = Standing.HOSTILE
+									# own instant-flip comment for why. CAUTION, not
+									# HOSTILE: a ship demanding your submission is
+									# yellow even when the demand is a legitimate
+									# police action, because from here you CANNOT TELL
+									# -- police, or a pirate in colors, look identical
+									# at this moment. Escalating to red is the
+									# observer's own threshold, not an automatic
+									# consequence of being hailed.
+									active_contacts[issuer_trk]["standing"] = Standing.standing_for_offense(Standing.OFF_ARMED_THREAT)
 									active_contacts[issuer_trk]["standing_reason"] = "demanding we stop"
 				elif sender_iid != my_iid_hail:
 					# Overheard: only the STOP rung is witness-relevant --
@@ -3559,7 +3566,11 @@ func _physics_process(delta: float) -> void:
 									post_warrant(Standing.OFF_ARMED_THREAT, issuer_claimed2, issuer_c.get("signature", {}), stop_reason)
 									# Eager same-tick cache stamp -- see
 									# take_damage's own instant-flip comment for why.
-									issuer_c["standing"] = Standing.HOSTILE
+									# CAUTION, not HOSTILE, same as the addressed-to-me
+									# branch above: watching someone get pulled over
+									# tells you even less than being pulled over
+									# yourself.
+									issuer_c["standing"] = Standing.standing_for_offense(Standing.OFF_ARMED_THREAT)
 									issuer_c["standing_reason"] = stop_reason
 			Hail.VERB_ACKNOWLEDGE:
 				# What the AI honor rule reads (acquire_target_leaf.gd) --

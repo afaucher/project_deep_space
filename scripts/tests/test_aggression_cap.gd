@@ -36,6 +36,7 @@ extends Node
 const Frigate = preload("res://scripts/ships/frigate.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const AcquireTargetLeaf = preload("res://scripts/ai/leaves/acquire_target_leaf.gd")
+const InterdictLeaf = preload("res://scripts/ai/leaves/interdict_leaf.gd")
 
 var main_node: Node = null
 var failures: Array = []
@@ -134,6 +135,63 @@ func setup(main) -> void:
 	_assert(not Standing.authorizes_force("SOME_FUTURE_OFFENSE"),
 		"an unknown offense does not authorize force (the cap fails closed)")
 
+	# --- Part 1b: the standing tier a warrant produces -----------------------
+	# The yellow tier is CAUTION -- "what your ship can determine without
+	# knowing more" -- and a warrant for a minor offense is exactly that. Before
+	# this column every enforceable warrant read flat HOSTILE, which is how a
+	# clean hull got painted red for not answering an identify challenge.
+	print("\n--- what tier a warrant lands on ---")
+	var expected_tier := {
+		Standing.OFF_ASSAULT: Standing.HOSTILE,
+		Standing.OFF_SUSTAINED_ASSAULT: Standing.HOSTILE,
+		Standing.OFF_ARMED_ROBBERY: Standing.HOSTILE,
+		Standing.OFF_OPERATOR_FLAGGED: Standing.HOSTILE,
+		Standing.OFF_ARMED_THREAT: Standing.CAUTION,   # demanded our submission -- police or pirate? cannot tell
+		Standing.OFF_NO_ID: Standing.CAUTION,          # THE PLAYTEST BUG, fixed upstream of the targeting gate
+		Standing.OFF_SPEED_VIOLATION: Standing.CAUTION,
+	}
+	for offense in expected_tier:
+		_assert(Standing.standing_for_offense(offense) == expected_tier[offense],
+			"%s lands on %s (got '%s')" % [offense, expected_tier[offense], Standing.standing_for_offense(offense)])
+	_assert(Standing.standing_for_offense("SOME_FUTURE_OFFENSE") == Standing.CAUTION,
+		"an unknown offense lands on CAUTION, not HOSTILE (fails closed, same as authorizes_force)")
+
+	# CAUTION is an alias for the existing yellow tier, NOT a fifth tier -- same
+	# string, same severity, so the datalink compare-and-copy and every colour
+	# consumer are untouched.
+	_assert(Standing.CAUTION == Standing.UNREPORTED,
+		"CAUTION is an alias for the existing yellow tier, not a new one")
+	_assert(Standing.severity(Standing.CAUTION) < Standing.severity(Standing.HOSTILE)
+			and Standing.severity(Standing.CAUTION) > Standing.severity(Standing.NEUTRAL),
+		"caution sits between neutral and hostile in severity")
+
+	# A caution-grade warrant must never MASK a more severe rule. A pirate who
+	# has also picked up a NO_ID still reads HOSTILE off the enemy flag -- if
+	# the warrant short-circuited, this would read yellow, which is a strictly
+	# worse bug than the one the column fixes.
+	var flag_obs := _make_patrol("PatrolFlagPrecedence")
+	flag_obs.known_enemy_flags = [Standing.FLAG_PIRATE]
+	flag_obs.warrants = {}
+	flag_obs.post_warrant(Standing.OFF_NO_ID, "", _sig(), "test")
+	flag_obs._rebuild_warrant_index()
+	var masked: Dictionary = Standing.compute_standing(
+		{"classification": "UNIDENTIFIED VESSEL", "signature": _sig()},
+		{"name": "Black Sail", "flag": Standing.FLAG_PIRATE}, flag_obs)
+	_assert(masked.get("standing", "") == Standing.HOSTILE,
+		"a caution-grade warrant does NOT mask the known-enemy-flag rule (got '%s')" % masked.get("standing", ""))
+
+	# And it must still beat NEUTRAL, or a warrant for a minor offense would be
+	# invisible on a hull that is otherwise reporting clean.
+	var caution_obs := _make_patrol("PatrolCautionBeatsNeutral")
+	caution_obs.warrants = {}
+	caution_obs.post_warrant(Standing.OFF_NO_ID, "", _sig(), "ignored identify challenge")
+	caution_obs._rebuild_warrant_index()
+	var over_neutral: Dictionary = Standing.compute_standing(
+		{"classification": "UNIDENTIFIED VESSEL", "signature": _sig()},
+		{"name": "", "flag": Standing.FLAG_CIVILIAN}, caution_obs)
+	_assert(over_neutral.get("standing", "") == Standing.CAUTION,
+		"a caution-grade warrant still outranks NEUTRAL on a reporting hull (got '%s')" % over_neutral.get("standing", ""))
+
 	# --- Part 2: the targeting gate consumes it ------------------------------
 	print("\n--- AcquireTargetLeaf against an identical HOSTILE contact ---")
 
@@ -159,7 +217,119 @@ func setup(main) -> void:
 	_assert(_acquires(_make_patrol("PatrolFlagEnemy"), ""),
 		"a HOSTILE contact with NO matching warrant stays engageable (declared enemy / eager stamp)")
 
+	# --- Part 3: the other half of the ladder --------------------------------
+	# Interdiction follows the WARRANT; engagement follows the STANDING. Once
+	# NO_ID became caution-grade, InterdictLeaf's HOSTILE-only gate silently
+	# dropped the entire patrol response to it -- the offense the ladder exists
+	# for -- leaving the docking denial as its only consequence. It now demands
+	# a stop from anyone we hold an enforceable warrant against at any tier.
+	print("\n--- InterdictLeaf: demand a stop, at any warrant tier ---")
+	_assert(_interdicts(_make_patrol("InterdictNoID"), Standing.OFF_NO_ID, Standing.CAUTION),
+		"a caution-grade NO_ID warrant DOES get interdicted -- intercepted and hailed, never shot")
+	_assert(_interdicts(_make_patrol("InterdictAssault"), Standing.OFF_ASSAULT, Standing.HOSTILE),
+		"a hostile-grade warrant still gets interdicted (demand before weapons, unchanged)")
+
+	# The load-bearing negative. CAUTION is also what an ordinary non-reporting
+	# hull reads, so interdicting on the TIER rather than the warrant would have
+	# every patrol demanding a stop from every unidentified ship in the cluster.
+	_assert(not _interdicts(_make_patrol("InterdictBareCaution"), "", Standing.CAUTION),
+		"a caution contact with NO warrant is NOT interdicted (merely unidentified is not an offense)")
+
+	# --- Part 4: response priority -- red threats, SOS, then yellow ----------
+	# Interdict/JobRunner sit ABOVE Engage and SOSResponse, which was right when
+	# a demand job was a red matter by definition. Once caution-grade warrants
+	# became interdictable, a NO_ID chase would pre-empt a firefight AND a
+	# distress call, and hold the slot for the whole 25s INTERCEPT patience.
+	# Yellow work now yields instead.
+	print("\n--- priority: yellow work yields to red threats and SOS ---")
+
+	_assert(not _interdicts_with_bystander(_make_patrol("PrioRedBlocks"), Standing.OFF_NO_ID, _red_bystander()),
+		"a yellow interdiction is NOT started while a red threat is in range (bigger fish)")
+	_assert(not _interdicts_with_bystander(_make_patrol("PrioSOSBlocks"), Standing.OFF_NO_ID, _sos_bystander()),
+		"a yellow interdiction is NOT started while a distress call is live")
+	_assert(_interdicts_with_bystander(_make_patrol("PrioQuiet"), Standing.OFF_NO_ID, {}),
+		"...but IS started when nothing outranks it (the control -- otherwise the two above prove nothing)")
+	_assert(_interdicts_with_bystander(_make_patrol("PrioRedItself"), Standing.OFF_ASSAULT, _red_bystander()),
+		"RED work is never deferred -- a hostile-grade demand still goes out with other hostiles around")
+
+	# The harder half: a yellow job ALREADY RUNNING when the red threat shows
+	# up must be abandoned, not merely un-started.
+	var yielder := _make_patrol("PrioYields")
+	_assert(_interdicts(yielder, Standing.OFF_NO_ID, Standing.CAUTION),
+		"setup: a yellow demand job is running")
+	var yielded_iid: int = yielder.assignment.get("victim_iid", -1)
+	yielder.active_contacts["TRK-002"] = _red_bystander()
+	var leaf2 = InterdictLeaf.new()
+	var bb2 := StubBlackboard.new()
+	# Refusal memory as the leaf itself would have left it after assigning.
+	bb2.set_value("interdict_refused", {yielded_iid: true})
+	leaf2.tick(yielder, bb2)
+	leaf2.free()
+	_assert(yielder.assignment.is_empty(),
+		"a RUNNING yellow demand job is abandoned when a red threat appears")
+	_assert(not bb2.get_value("interdict_refused", {}).has(yielded_iid),
+		"and its refusal memory is cleared -- yielding must not read as 'already demanded and refused', which would retire the interdiction for good")
+
 	_finish()
+
+# A second contact that outranks yellow work: a fresh hostile.
+func _red_bystander() -> Dictionary:
+	var c: Dictionary = _hostile_contact(112233)
+	c["pos"] = Vector2(600, 0)
+	return c
+
+# ...and a live distress call. No staleness filter applies to these (see
+# InterdictLeaf._outranked) so a bare fresh contact is enough.
+func _sos_bystander() -> Dictionary:
+	return {
+		"instance_id": 445566,
+		"classification": "DISTRESS CALL",
+		"standing": "",
+		"pos": Vector2(900, 0),
+		"last_seen_at": Engine.get_physics_frames(),
+	}
+
+# _interdicts, plus one extra contact in the patrol's sensor picture.
+func _interdicts_with_bystander(patrol: Node, offense: String, bystander: Dictionary) -> bool:
+	var subject_iid: int = 987654
+	var c: Dictionary = _hostile_contact(subject_iid)
+	c["standing"] = Standing.HOSTILE if offense == Standing.OFF_ASSAULT else Standing.CAUTION
+	patrol.active_contacts = {"TRK-001": c}
+	if not bystander.is_empty():
+		patrol.active_contacts["TRK-002"] = bystander
+	patrol.active_transponders = {}
+	patrol.warrants = {}
+	patrol.assignment = {}
+	patrol.post_warrant(offense, "", _sig(), "test")
+	patrol._rebuild_warrant_index()
+
+	var leaf = InterdictLeaf.new()
+	var bb := StubBlackboard.new()
+	leaf.tick(patrol, bb)
+	leaf.free()
+	# The job must be against OUR subject -- with a red bystander present the
+	# leaf may legitimately interdict THAT instead, which is not the same claim.
+	return patrol.assignment.get("victim_iid", -1) == subject_iid
+
+# Same fixture shape as _acquires: one contact, optionally one warrant, leaf
+# ticked directly. Returns whether InterdictLeaf assigned a demand job.
+func _interdicts(patrol: Node, offense: String, standing: String) -> bool:
+	var subject_iid: int = 987654
+	var c: Dictionary = _hostile_contact(subject_iid)
+	c["standing"] = standing
+	patrol.active_contacts = {"TRK-001": c}
+	patrol.active_transponders = {}
+	patrol.warrants = {}
+	patrol.assignment = {}
+	if offense != "":
+		patrol.post_warrant(offense, "", _sig(), "test")
+	patrol._rebuild_warrant_index()
+
+	var leaf = InterdictLeaf.new()
+	var bb := StubBlackboard.new()
+	leaf.tick(patrol, bb)   # side-effect leaf: always FAILURE, assigns the job
+	leaf.free()
+	return not patrol.assignment.is_empty()
 
 func _finish() -> void:
 	for s in spawned:
