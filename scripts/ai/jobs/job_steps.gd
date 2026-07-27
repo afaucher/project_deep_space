@@ -24,6 +24,11 @@ class_name JobSteps
 const Steering = preload("res://scripts/ai/steering.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
+# The docking corridor geometry. Until 2026-07-26 this was referenced only by
+# navigation_panel.gd and exclusion_hatch.gd -- drawn for the player and flown
+# by nobody. step_dock_at now reads it. See
+# design_ideas/docking_approach_control.md.
+const PortChannel = preload("res://scripts/port/port_channel.gd")
 
 const CONTINUE := 0
 const DONE := 1
@@ -558,8 +563,97 @@ static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
 				target_berth = b
 				break
 
-	var approach_pt: Vector2 = target_berth.global_position + Vector2.RIGHT.rotated(target_berth.global_rotation) * (target_berth.capture_radius * 0.8)
-	_cruise_toward(actor, approach_pt, station.position, 700.0)
+	# FLY THE CORRIDOR (2026-07-26). Previously this aimed at a single point
+	# ~0.8 x capture_radius off the berth and passed station.position as
+	# `exclude_pos` -- the body steering will NEVER dodge -- from any range and
+	# any angle. So a docking ship flew one straight line at the station with
+	# station-avoidance switched off for the whole trip.
+	#
+	# PortChannel already computes the corridor the nav panel draws, and until
+	# now nothing outside the renderer read it. Two waypoints come straight out
+	# of guide_segment(): the MOUTH (where the berth's approach axis crosses
+	# the exclusion boundary) and the ENGAGE point (one capture_radius out from
+	# the berth, where the clamp's own reach takes over). Fly mouth -> engage
+	# instead of cutting the corner.
+	var docking_point: Vector2 = target_berth.global_position
+	var berth_heading: float = target_berth.global_rotation
+	var boundary_r: float = zone.get("exclusion_radius", 0.0)
+	var guide: Dictionary = PortChannel.guide_segment(
+		docking_point, berth_heading, station.position, boundary_r, target_berth.capture_radius)
+
+	# Fallback: no authored/derived exclusion zone (ladder levels 0-2 -- mobile
+	# homes, open berths) means no corridor to fly. Approach discipline still
+	# applies, so aim down the berth's own axis and keep avoiding the hull --
+	# see design_ideas/port_zones_and_channels.md on approach discipline being
+	# self-imposed and universal, while the published corridor is jurisdiction.
+	if guide.is_empty():
+		var axis_pt: Vector2 = docking_point + Vector2.RIGHT.rotated(berth_heading) * (target_berth.capture_radius * 0.8)
+		var close_enough: bool = actor.position.distance_to(axis_pt) <= target_berth.capture_radius
+		_cruise_toward(actor, axis_pt, station.position if close_enough else null, 700.0)
+		return CONTINUE
+
+	var mouth: Vector2 = guide["mouth"]
+	var engage: Vector2 = guide["engage"]
+
+	# THE CUT-OUT, expressed at the caller rather than inside Steering. The
+	# station is only excluded from avoidance once we are actually inside the
+	# approach cone; everywhere else it is an ordinary obstacle that pushes
+	# back. This is the fix for the measured failure -- an arriving ship that
+	# dodges other traffic gets displaced toward the hull, and with a blanket
+	# exclusion nothing corrects it.
+	#
+	# Deciding it here needs no change to Steering's signature or its other
+	# call sites: the corridor geometry lives with the caller that knows the
+	# berth, and `exclude_pos = null` simply means "avoid normally".
+	# HYSTERESIS, not a bare angular test. A ship sitting near the cone edge
+	# would otherwise flip between an OUTWARD target (the mouth) and an INWARD
+	# one every frame and dither in place -- measured as slower cycles across
+	# the board and a Freighter that never berthed at all. Once committed to
+	# the corridor it takes a wider angle to fall back out, the same shape
+	# RoutePlanner.HYSTERESIS_MARGIN uses against route thrash.
+	var axis_theta: float = PortChannel.axis_angle(docking_point, berth_heading, station.position, boundary_r)
+	var committed: bool = scratch.get("in_corridor", false)
+	if not is_nan(axis_theta):
+		var bearing: float = (actor.position - station.position).angle()
+		var off_axis: float = absf(wrapf(bearing - axis_theta, -PI, PI))
+		var enter: float = PortChannel.CONE_HALF_ANGLE * 0.8
+		var leave: float = PortChannel.CONE_HALF_ANGLE * 1.15
+		committed = off_axis <= (leave if committed else enter)
+		scratch["in_corridor"] = committed
+		step["scratch"] = scratch
+
+	# Inside the corridor, fly to the SEAT -- not to `engage`. guide_segment's
+	# engage point is where the DRAWN guide stops because the clamp's reach
+	# begins, so it sits ON the capture boundary. Steering to it parks the hull
+	# at the edge of the capture zone where the clamp never quite takes: light
+	# shuttles jittered in eventually, the 300-mass Freighter sat there for the
+	# full 600s and logged zero cycles. The seat is inside the clamp's reach,
+	# which is what the pre-corridor code aimed at and got right.
+	#
+	# `engage` still does useful work as the corridor's inner reference; it is
+	# just not a destination.
+	var seat: Vector2 = docking_point + Vector2.RIGHT.rotated(berth_heading) * (target_berth.capture_radius * 0.8)
+
+	# ALWAYS steer at the seat; `committed` only decides whether the station is
+	# avoided on the way. Measured 2026-07-26, and it overturned the obvious
+	# design:
+	#
+	# An earlier version steered at the corridor MOUTH until committed, then at
+	# the seat. Damage went to zero -- but the mouth sits ON the boundary
+	# circle, so a hull approaching from an arbitrary bearing reaches it
+	# TANGENTIALLY while station-avoidance is simultaneously pushing it off. It
+	# arcs around the boundary instead of lining up. Cycle time tripled with a
+	# SINGLE ship and no traffic (55s -> 180s), MediumStation fell 30 -> 17
+	# cycles, and the Freighter circled for the full 600s without ever berthing.
+	# Aiming at a point on a circle you are also being repelled from is a bad
+	# construction.
+	#
+	# Steering at the seat with avoidance ON produces the arc for free: the ship
+	# heads for the berth, the hull pushes it around, and it enters the cone
+	# aligned. Then the cut-out lets it close. The corridor still does the work
+	# that matters -- it decides WHEN the station stops being an obstacle -- it
+	# just is not a waypoint.
+	_cruise_toward(actor, seat, station.position if committed else null, 700.0)
 	return CONTINUE
 
 static func _find_station_near(actor, pos: Vector2):

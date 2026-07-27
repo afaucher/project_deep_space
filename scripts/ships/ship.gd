@@ -384,11 +384,39 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 	for s in get_tree().get_nodes_in_group("ships"):
 		if s == ship: continue
 		var g = s.get("docking_grant")
-		if g == null: continue
-		if g.get("authority", "") != zone.get("authority", ""): continue
-		var sid: String = g.get("slip_id", "")
-		if sid != "":
-			reserved_slips[sid] = s.name
+		if g != null and g.get("authority", "") == zone.get("authority", ""):
+			var sid: String = g.get("slip_id", "")
+			if sid != "":
+				reserved_slips[sid] = s.name
+		# DEPARTURE INTERLOCK (2026-07-26). A slip stays reserved while its
+		# previous occupant is still clearing the exclusion zone.
+		#
+		# Without this the port actively SCHEDULES a head-on conflict on every
+		# berth turnover: docking_grant is consumed the instant the bay
+		# releases, the bay reads EMPTY again immediately, so the next arrival
+		# is cleared to fly the corridor inbound while the departing hull is
+		# still outbound along the same axis. The arriving ship -- slow, on
+		# final approach -- dodges the departing one and gets displaced into
+		# the station, which it cannot avoid because the station is its
+		# `exclude_pos`.
+		#
+		# That is the measured signature: test_dock_approach records EVERY
+		# damaging station contact on ARRIVAL, never departure, and the worst
+		# offender is MediumStation (0.300/cycle) which has the most berths and
+		# therefore the most turnovers. Solo scenarios take zero hits, so it was
+		# never the approach path itself.
+		#
+		# `departing_slip` already exists and already clears itself once the
+		# ship leaves exclusion_radius (Ship._update_departing_slip), so the
+		# release condition needs no new machinery -- it was simply never
+		# consulted here. This is the rendezvous literature's HOLD POINT,
+		# expressed as a grant interlock rather than a waypoint.
+		var d = s.get("departing_slip")
+		if d != null and d is Dictionary and not d.is_empty() \
+				and d.get("authority", "") == zone.get("authority", ""):
+			var dsid: String = d.get("slip_id", "")
+			if dsid != "":
+				reserved_slips[dsid] = "%s (departing)" % s.name
 
 	var free_bays: Array = []
 	for b in bays:

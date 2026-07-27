@@ -197,7 +197,44 @@ that stopped stations running physics at all — but that is a separate change
 judged on its own merits, and CLAUDE.md's mechanical-multi-site-rewrite scar
 applies. Nothing serializes `ship_components`, so there is no format risk.
 
-### Docking approach: fly the corridor we already draw — *2026-07-26, designed*
+### Docking damage SOLVED; one throughput regression open — *2026-07-26*
+The corridor cut-out landed and station damage is essentially gone. Measured
+by `test_dock_approach` (six scenarios, **~190s** — the fast instrument, not
+the 3-hour sim):
+
+| scenario | before | after |
+|---|---|---|
+| traffic / MediumStation | 0.300 hits/cyc, 0.44% HP | **0.01% HP** |
+| traffic + rocks (Coldreach) | 0.250 hits/cyc, 0.43% HP | **0.000 hits, 0.00%** |
+| Nexus Freighter + shuttles | 0.100 hits/cyc, 0.14% HP | **0.01% HP** |
+| traffic / SmallStation | 0.033 hits/cyc | **0.000 hits** |
+
+**What actually worked was NOT what the design doc predicted.** Three things
+were tried and measured separately:
+- **The cut-out (station avoidance active until inside the approach cone) is
+  the whole win.** Steering at the seat with avoidance ON produces the
+  arc-around for free.
+- **Lane-following waypoints were pure cost and were removed.** Steering at
+  the corridor MOUTH meant aiming at a point on the boundary circle while
+  avoidance pushed the hull off it — arriving tangentially, never lining up.
+  Cycle time tripled with a SINGLE ship, and the 300-mass Freighter circled
+  for 600s and logged ZERO dockings. The corridor's real job is deciding WHEN
+  the station stops being an obstacle; it is not a waypoint.
+- **Widening the cone (45 -> 70 degrees) made damage WORSE** (Medium 0.01% ->
+  0.50%) by releasing avoidance before hulls were aligned. Reverted.
+
+**OPEN: solo shuttle / SmallStation is 3 cycles per 600s against a 4-per-223s
+baseline** — ~180s/cycle vs ~55s, with one ship and nothing to dodge. Cone
+width is NOT the cause (identical at 45 and 70). Traffic scenarios at the same
+station are barely slower, so it is specific to having no other traffic to
+jostle it into alignment. Next suspect is the interaction between
+station-avoidance standoff and a berth seated close to a small hull's centre.
+
+Also: `MAX_DAMAGING_STATION_CONTACTS_PER_CYCLE` is 0.50 and the old worst case
+was 0.300 — the threshold certified the problem. Tighten it once the
+regression above is closed.
+
+### Docking approach design — *2026-07-26*
 The highest-value item on the board. `PortChannel` (cone, guide, hatch cutout)
 is referenced ONLY by `navigation_panel.gd` and `exclusion_hatch.gd` — both
 rendering. The AI has never flown it: `step_dock_at` aims at a single point

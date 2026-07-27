@@ -19,9 +19,37 @@ class_name PortChannel
 # Pure static helper, no scene/node state -- PortZone/NavCorridor house style,
 # fixture-testable (test_port_channel.gd) with no station/bay/grant object.
 
-# Total cone apex angle is 90 degrees -> half-angle 45, per design: "more like
+# Cone half-angle. Was 45 degrees (a 90-degree cone), per design: "more like
 # 90 degrees from the ideal docking location" so approaches well off the exact
 # axis are still legal, with the two big circles doing the actual keep-back.
+#
+# 2026-07-26: widened to 70. This constant STOPPED BEING COSMETIC when
+# job_steps.step_dock_at started using the cone to decide when a station stops
+# being an obstacle (design_ideas/docking_approach_control.md). Until then
+# nothing outside the renderer read it and the angle only changed a drawing.
+# Now it directly sets how far a hull must ARC around the exclusion zone before
+# avoidance releases and it may close: measured at 45, a SOLO shuttle with
+# nothing to dodge took ~180s per dock cycle against a ~55s baseline, purely
+# circling to get its bearing inside the gate.
+#
+# MEASURED, and 45 wins -- widening was tried and reverted. The geometric
+# ceiling really is 90 (with station centre O, hull radius R, docking point D
+# at distance d and approach angle theta, |D + t*u|^2 = d^2 + 2*t*d*cos(theta)
+# + t^2: below 90 the closest point on the final run is D itself, which
+# berth_pos_for_bounding_radius already seats outside the hull, so any approach
+# in the outward hemisphere clears; past 90 the path dips inward first and
+# fails for a berth near the surface). But geometric safety is not the binding
+# constraint here.
+#
+# At 70 degrees, test_dock_approach measured station damage getting WORSE, not
+# better: MediumStation traffic 0.01% -> 0.50%, Nexus-plus-shuttles 0.01% ->
+# 0.48%. A wider gate releases station-avoidance EARLIER, so hulls close while
+# still badly aligned and clip the station on the way in. The angle trades
+# damage against arc time, and 45 sits better on that trade.
+#
+# It also did not fix what it was widened for: the solo-shuttle cycle-time
+# regression was identical at 45 and 70 (3 cycles either way), which rules out
+# arc angle as its cause. See TASKS.md.
 const CONE_HALF_ANGLE := PI / 4.0
 
 # Arc tessellation for sector_polygon: segments per arc. Originally 8 (~11
