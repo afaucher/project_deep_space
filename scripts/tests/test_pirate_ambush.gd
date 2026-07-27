@@ -91,7 +91,20 @@ func _build_hunt_job(staging_pos: Vector2, lane_pos: Vector2, exfil_pos: Vector2
 			# dark-transponder precondition to ever hold.
 			{"verb": "GO_DARK"},
 			{"verb": "GO_TO", "label": "exfil", "pos": exfil_pos},
-			{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 60.0},
+			# on_abort MATTERS -- see pirate_guild.gd's copy of this step and
+			# CLAUDE.md's "job step that ABORTs with no on_abort label reports
+			# SUCCESS". Production was fixed for this in July; this test's own
+			# copy of the job was not, and it silently drifted apart. It cost a
+			# confusing failure on 2026-07-27: the timeout finally became
+			# reachable, the unlabelled abort set current = steps.size(), and the
+			# runner logged "job complete" for a job that had skipped RELIGHT and
+			# EXIT_AT entirely.
+			#
+			# 180s to match production, raised from 60 for the same reason: a
+			# post-take pirate is hot, the thermal self-throttle eases it off, and
+			# the exfil now measures ~113s. The AWAIT completes NATURALLY at this
+			# budget rather than aborting.
+			{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 180.0, "on_abort": "exit"},
 			{"verb": "RELIGHT", "name": relight_name, "flag": Standing.FLAG_CIVILIAN},
 			{"verb": "EXIT_AT", "pos": exit_pos},
 		],
@@ -191,7 +204,12 @@ func setup(main) -> void:
 	# --- Phase 4: exfil dark, launder wait, relight under a NEW name. -------
 	print("\n--- Phase 4: exfil dark -> AWAIT track_quiet -> RELIGHT (new name) ---")
 	var relit := false
-	for i in range(3600): # up to 60s -- exfil leg + the 3s track_quiet wait
+	# 200s, raised from 60. Measured, not guessed: the exfil completes at ~113s
+	# now that a post-take pirate is thermally throttled (it just ran an
+	# intercept and a take, so it is hot exactly when it wants to leave). Margin
+	# per CLAUDE.md -- physics is not bit-deterministic run to run, so this is a
+	# budget with headroom, not a figure fitted to one observation.
+	for i in range(12000): # up to 200s -- exfil leg + the 3s track_quiet wait
 		await main_node.get_tree().physics_frame
 		if not is_instance_valid(pirate):
 			break

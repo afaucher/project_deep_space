@@ -491,7 +491,23 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 		# reached this step and got stranded. Every hull that got far enough to
 		# attempt a robbery was removed from the population, which is why the
 		# effectiveness sim measured zero takes across every targeting strategy.
-		{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 60.0, "on_abort": "exit"},
+		# 180s, raised from 60 (2026-07-27). The thermal self-throttle (Ship's
+		# _thermal_throttle_cap) made a post-take exfil take ~113s where 60 used
+		# to be ample: a pirate that has just run an intercept and a take is HOT,
+		# so it eases off exactly when it wants to leave. Measured on
+		# test_pirate_ambush -- the AWAIT completes NATURALLY at that budget
+		# (RELIGHT fires, cover identity resumes); at 60 it timed out and aborted
+		# to "exit", skipping RELIGHT, so pirates silently stopped resuming cover
+		# identities altogether.
+		#
+		# Slower is the RIGHT behaviour here, not a cost to be bought back. The
+		# exfil's defence is being unremarkable, not being quick -- and heat is a
+		# sensor-visible signature (Ship.get_signature returns it), so burning
+		# hard to escape would make a pirate a brighter contact at the exact
+		# moment it is trying to disappear. Deliberately NOT granting exfil the
+		# emergency thermal set point: nothing is shooting at it, and "emergency"
+		# has to keep meaning danger or it means nothing.
+		{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 180.0, "on_abort": "exit"},
 		# The launder relight draws the next unused paper from the ship's
 		# pre-provisioned identity kit (job_steps.gd RELIGHT from_kit) --
 		# a convincing identity can't be fabricated on the spot. Kit

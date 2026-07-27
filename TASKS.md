@@ -51,11 +51,27 @@ damage and 35-39s arrivals against a 90s budget; `test_visitor_itinerary` passes
 for the first time; `test_dock_approach` meets every cycle target. Five combat
 tests (incl. `test_ai_duel`, `test_missile_ai`) pass with the universal cap.
 
-**Still outstanding: the economy sim is the real acceptance and has not been read
-yet.** Note the run in flight measures `cfe7d01` — the LOS fix WITHOUT the
-throttle cap. Since the cap cuts proxy damage further (15 → 6.2) that should be a
-conservative bound, but that is an inference, not a measurement: if the figure
-lands near 1.33 lots/hr, re-run on final code before calling the goal met.
+## GOAL MET — confirmed on the economy sim, 2026-07-27
+
+`economy_traffic`, 180 game-minutes, 8 haulers: **`self_rep/hr` reads `-0.000` on
+every station-commodity row.** Self-repair 12.54 lots/hr → **zero**, against a
+1.33 threshold.
+
+**Both columns read the right way**, which was the trap: deliveries went
+**99 → 179**. Trade nearly doubled while repair collapsed — the coupling is
+broken, not the economy suppressed. `repair/hr` (haulers healing while docked) is
+zero too, and there were zero `[Death]` and zero `[SOS]` lines across three
+game-hours.
+
+Measured on `cfe7d01` (LOS fix, before the thermal cap). The cap only cuts proxy
+damage further (15 → 6.2 station HP), so this is a conservative bound.
+
+**The sim's own verdict is still FAILED, on unrelated criteria** — 4 rows
+net-negative on supply routing (Drift Market + Refinery Prime VOLATILES unserved,
+Refinery Prime ORE undersupplied). Drift Market is a known open item below; the
+others look like consequences of moving nearly twice the cargo, i.e. sinks
+draining faster than 8 haulers can feed them. **That is fleet size and route
+economics, not collisions** — and it is the next question, not this one.
 
 **Collision avoidance generally is the wider lever** — it benefits every ship,
 not just docking. Current `Steering._avoidance` does proper CPA (summed radii,
