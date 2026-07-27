@@ -587,9 +587,33 @@ static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
 	# see design_ideas/port_zones_and_channels.md on approach discipline being
 	# self-imposed and universal, while the published corridor is jurisdiction.
 	if guide.is_empty():
-		var axis_pt: Vector2 = docking_point + Vector2.RIGHT.rotated(berth_heading) * (target_berth.capture_radius * 0.8)
-		var close_enough: bool = actor.position.distance_to(axis_pt) <= target_berth.capture_radius
-		_cruise_toward(actor, axis_pt, station.position if close_enough else null, 700.0)
+		var outward: Vector2 = Vector2.RIGHT.rotated(berth_heading)
+		var axis_pt: Vector2 = docking_point + outward * (target_berth.capture_radius * 0.8)
+		# Same ANGULAR rule as the zoned path, derived from the berth alone --
+		# "degrade down the ladder, don't branch". The first version gated on
+		# DISTANCE (within capture_radius of the seat) and that was the bug
+		# behind the solo-shuttle regression: a couple of hundred units is
+		# inside the station's own avoidance standoff, so the hull was repelled
+		# right up until a threshold repulsion prevented it reaching. Traffic
+		# scenarios hid it because other ships jostle a hull into the seat; a
+		# lone shuttle just spiralled (3 cycles / 600s against 4 / 223s).
+		# Alignment AND proximity. Angular alone was measured releasing
+		# avoidance from ARBITRARY range: in the rock-field scenario a hull far
+		# out but roughly on-axis had the station excluded, dodged a rock, and
+		# drifted into it -- damage went 0.00% -> 1.00%, worse than baseline.
+		# Same error as widening the cone: let go too early and alignment stops
+		# meaning anything.
+		#
+		# The proximity bound DERIVES the exclusion radius this station never
+		# authored (PortZone's own rule, hull bounding radius x 6), so the
+		# unzoned path is the same rule as the zoned one rather than a second
+		# invented threshold -- "degrade down the ladder, don't branch".
+		var derived_zone: float = station.get_bounding_radius() * 6.0
+		var to_ship: Vector2 = actor.position - docking_point
+		var near: bool = actor.position.distance_to(station.position) <= derived_zone
+		var aligned: bool = near and (to_ship.length() < 1.0 \
+			or absf(to_ship.angle_to(outward)) <= PortChannel.CONE_HALF_ANGLE)
+		_cruise_toward(actor, axis_pt, station.position if aligned else null, 700.0)
 		return CONTINUE
 
 	var mouth: Vector2 = guide["mouth"]

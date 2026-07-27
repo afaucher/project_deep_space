@@ -278,3 +278,23 @@ cause). The two-sim split was explicitly rejected.
 - **Pirates stopped distributing across the cluster** — fixed 2026-07-26.
   Caused by M53d removing authored `route` arrays that hunt-point selection
   read. Strategy choice is still open (above).
+
+### Docking: hold points would recover the last 85% — *2026-07-26*
+`test_dock_approach` now PASSES with both the departure interlock and the
+avoidance cut-out. Total station HP lost across all six scenarios:
+baseline **851** -> both **255** (-70%) -> cut-out alone **15** (-98%).
+
+**The interlock is a net negative today and is kept for FICTION, not
+numbers** (a port handing a berth to an arrival while the previous occupant
+backs out of it reads wrong). It costs 17x the damage and ~70s of throughput
+because denying a grant does not stop the approach — the ship loiters near
+the station re-requesting every tick and an unstructured holding stack forms
+in the worst place. The rendezvous literature pairs an interlock with HOLD
+POINTS precisely for this; we built the first half.
+
+Give denied arrivals a designated waiting position outside the exclusion zone
+and the interlock should stop costing anything. That is the one layer of the
+four-layer model we still have no geometry for.
+
+Also still true: `MAX_DAMAGING_STATION_CONTACTS_PER_CYCLE` is 0.50 and the
+worst surviving case is 0.067 — tighten it, or it will certify a regression.

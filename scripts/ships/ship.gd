@@ -411,6 +411,20 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 		# release condition needs no new machinery -- it was simply never
 		# consulted here. This is the rendezvous literature's HOLD POINT,
 		# expressed as a grant interlock rather than a waypoint.
+		# KEPT ON BEHAVIOURAL GROUNDS, WITH A MEASURED COST. Isolation runs
+		# (test_dock_approach, 2026-07-26) show cut-out ALONE is strictly
+		# better: 15 HP lost cluster-wide vs 255 with the interlock on, and
+		# ~70s faster. The interlock is a net negative today because denying a
+		# grant does not stop a ship approaching -- it loiters near the station
+		# re-requesting every tick, so an unstructured holding stack forms in
+		# the worst possible place. The rendezvous literature pairs an
+		# interlock with HOLD POINTS for exactly this reason; we built the
+		# first half, and half is worse than neither.
+		#
+		# Retained anyway because a port that hands a berth to an arrival while
+		# the previous occupant is still backing out of it reads wrong, and the
+		# fiction is worth the 70%-instead-of-98% damage reduction for now.
+		# Recover the difference by giving denied arrivals somewhere to wait.
 		var d = s.get("departing_slip")
 		if d != null and d is Dictionary and not d.is_empty() \
 				and d.get("authority", "") == zone.get("authority", ""):
