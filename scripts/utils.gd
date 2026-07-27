@@ -87,6 +87,15 @@ const TIER_NEUTRAL := "NEUTRAL"
 # "Contracts" section, which holds contract-feed entries, not contacts).
 const CONTACT_SECTIONS := ["Enemies", "Alerts", "Ships", "All Contacts"]
 
+# Contact-row backgrounds, shared so a ship LOOKS the same wherever it is
+# listed (playtest C3: the hails section should follow the tactical contacts'
+# visual language). Border and header colour come from contact_color above;
+# these are just the selected/unselected fill. Kept here rather than as
+# literals in each panel for the same reason the colour table is -- that is
+# how the surfaces drifted in A2.
+const ROW_BG_SELECTED := Color(0.2, 0.4, 0.2, 0.8)
+const ROW_BG := Color(0.1, 0.1, 0.1, 0.8)
+
 const _TIERS := {
 	TIER_SOS:      {"color": Color(1.0, 0.25, 0.1, 0.95), "section": "Alerts"},
 	TIER_HOSTILE:  {"color": Color(0.85, 0.2, 0.2),       "section": "Enemies"},

@@ -40,11 +40,15 @@ func _ready() -> void:
 	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(backdrop)
 
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(center)
-
+	# Playtest C2: "shoved into a corner and needlessly hard to read... should
+	# occupy a much larger percentage of the screen."
+	#
+	# The cause was a CenterContainer, which sizes its child to that child's
+	# MINIMUM -- so the panel was only ever as big as the scroll box's hardcoded
+	# 520x460, regardless of how much screen was available. Replaced with
+	# proportional anchors, so the panel is a percentage of the viewport and
+	# scales with resolution instead of being a fixed pixel block centred in
+	# whatever space happens to exist.
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.06, 0.07, 0.09, 0.98)
@@ -52,10 +56,20 @@ func _ready() -> void:
 	style.set_border_width_all(2)
 	style.set_content_margin_all(18)
 	panel.add_theme_stylebox_override("panel", style)
-	center.add_child(panel)
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.anchor_left = 0.08
+	panel.anchor_top = 0.06
+	panel.anchor_right = 0.92
+	panel.anchor_bottom = 0.94
+	panel.offset_left = 0.0
+	panel.offset_top = 0.0
+	panel.offset_right = 0.0
+	panel.offset_bottom = 0.0
+	add_child(panel)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 6)
+	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(vbox)
 
 	var title := Label.new()
@@ -67,7 +81,11 @@ func _ready() -> void:
 
 	var scroll := ScrollContainer.new()
 	scroll.follow_focus = true
+	# Floor, not a fixed size -- the scroll now EXPANDS to fill the anchored
+	# panel above (C2), rather than the panel shrinking to fit this number.
 	scroll.custom_minimum_size = Vector2(520, 460)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	vbox.add_child(scroll)
 

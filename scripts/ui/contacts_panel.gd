@@ -300,10 +300,9 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		
 		# Update visual properties
 		var classification_str = classification
-		if c_id == selected_contact_id:
-			p_style.bg_color = Color(0.2, 0.4, 0.2, 0.8)
-		else:
-			p_style.bg_color = Color(0.1, 0.1, 0.1, 0.8)
+		# Shared with the hails section (Utils.ROW_BG*) so a ship looks the same
+		# in both lists -- playtest C3.
+		p_style.bg_color = Utils.ROW_BG_SELECTED if c_id == selected_contact_id else Utils.ROW_BG
 			
 		# M48 -- standing (an earned, per-observer judgment) takes priority
 		# over raw classification for a vessel's row color when present;

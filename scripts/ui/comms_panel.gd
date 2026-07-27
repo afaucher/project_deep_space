@@ -244,14 +244,24 @@ func _ready() -> void:
 
 	# M41 -- Missions section: header + a small text readout, updated in
 	# _update_missions_list() (called from update_data()).
+	#
+	# Playtest E: player-facing strings say CONTRACTS. The code layer stays
+	# "mission" (MissionLog/MissionCatalog/packet["missions"]) -- renaming that
+	# was explicitly deferred because contract_feed.gd already exists as its own
+	# concept and collapsing the two names in code risks conflating them.
+	#
+	# Worth noting this is NOT two names for two things at the UI level either:
+	# ContractFeed.build() walks the MissionLog's ACTIVE missions, so the
+	# contacts panel's "Contracts" section is the nav-layer view of exactly what
+	# this section grants. One concept, and now one word for it.
 	var missions_title = Label.new()
-	missions_title.text = "MISSIONS"
+	missions_title.text = "CONTRACTS"
 	missions_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	missions_title.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
 	top_pane.add_child(missions_title)
 
 	missions_label = Label.new()
-	missions_label.text = "(no active missions)"
+	missions_label.text = "(no active contracts)"
 	missions_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	missions_label.add_theme_font_size_override("font_size", 12)
 	top_pane.add_child(missions_label)
@@ -272,13 +282,14 @@ func _ready() -> void:
 	comms_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(comms_list_vbox)
 	
-	var btn_broadcast = Button.new()
-	btn_broadcast.text = "[ OPEN BROADCAST CHANNEL ]"
-	btn_broadcast.add_theme_color_override("font_color", Color.ORANGE)
-	btn_broadcast.custom_minimum_size.y = 40
-	btn_broadcast.pressed.connect(_open_broadcast)
-	comms_list_vbox.add_child(btn_broadcast)
-	
+	# Playtest D1: the "[ OPEN BROADCAST CHANNEL ]" button is gone. It opened an
+	# empty room -- set a chat header, printed one static "MONITORING OPEN
+	# FREQUENCIES" line and a DISCONNECT button, and stopped. Nothing anywhere
+	# read "BROADCAST" as an active_chat_contact and it never called
+	# Hail.send_broadcast(), so there was no channel behind it to monitor.
+	# Hail.send_broadcast() itself is untouched -- it is comms substrate with
+	# real callers (SOS), it just never had anything to do with this button.
+
 	# === BOTTOM PANE: CHAT UI ===
 	chat_panel = VBoxContainer.new()
 	chat_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -562,13 +573,31 @@ func _rebuild_vessel_list(entries: Array) -> void:
 		hails_vbox.add_child(none)
 
 	for e in entries:
+		# Playtest C3: the hails list follows the tactical contacts' visual
+		# language -- a bordered row per vessel, the selected one filled, and
+		# the SAME colour rule (Utils.contact_color) so a ship reads identically
+		# in both lists. Previously every row was a bare label, cyan when
+		# selected and white otherwise, which told you nothing about the ship
+		# and did not match the contacts panel at all.
+		var e_contact: Dictionary = current_state.get("contacts", {}).get(e["c_id"], {})
+		var row_color: Color = Utils.contact_color(e_contact) if not e_contact.is_empty() else Color(0.7, 0.7, 0.7)
+
+		var entry_panel = PanelContainer.new()
+		var e_style = StyleBoxFlat.new()
+		e_style.bg_color = Utils.ROW_BG_SELECTED if e["selected"] else Utils.ROW_BG
+		e_style.border_color = row_color
+		e_style.set_border_width_all(1)
+		e_style.set_content_margin_all(4)
+		entry_panel.add_theme_stylebox_override("panel", e_style)
+		hails_vbox.add_child(entry_panel)
+
 		var entry_box = VBoxContainer.new()
-		hails_vbox.add_child(entry_box)
+		entry_panel.add_child(entry_box)
 
 		var header = Label.new()
 		header.text = entry_header_text(e)
 		header.autowrap_mode = TextServer.AUTOWRAP_WORD
-		header.add_theme_color_override("font_color", Color.CYAN if e["selected"] else Color.WHITE)
+		header.add_theme_color_override("font_color", row_color)
 		entry_box.add_child(header)
 
 		var traffic_labels: Array = []
@@ -650,7 +679,7 @@ func _update_missions_list() -> void:
 		return
 	var missions: Array = current_state.get("missions", [])
 	if missions.is_empty():
-		missions_label.text = "(no active missions)"
+		missions_label.text = "(no active contracts)"
 		return
 	var lines: Array = []
 	for m in missions:
@@ -704,19 +733,6 @@ func _update_contacts_list() -> void:
 			if is_instance_valid(btn):
 				btn.queue_free()
 			npc_buttons.erase(k)
-
-func _open_broadcast() -> void:
-	active_chat_contact = "BROADCAST"
-	active_dialogue_resource = null
-	active_chat_source_id = 0
-	chat_header.text = "CHAT: OPEN BROADCAST CHANNEL"
-	chat_log.text = "[color=orange]-- MONITORING OPEN FREQUENCIES --[/color]\n"
-	_clear_responses()
-	
-	var btn_disconnect = Button.new()
-	btn_disconnect.text = "[ DISCONNECT ]"
-	btn_disconnect.pressed.connect(_disconnect_chat)
-	responses_vbox.add_child(btn_disconnect)
 
 func _start_dialogue(path: String, char_name: String, source_id: int = 0) -> void:
 	if path == "" or not ResourceLoader.exists(path):

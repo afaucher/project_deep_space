@@ -64,13 +64,28 @@ func _ready() -> void:
 	menu.get_node("LocalTestButton").pressed.connect(_on_local_test_pressed)
 
 	# Campaign entry -- added in code so no .tscn edit is needed (mirrors how the
-	# menu compass is added). Placed just under the ship dropdown, above Sandbox.
+	# menu compass is added). Ordering is handled below, not here.
 	var campaign_button := Button.new()
 	campaign_button.name = "CampaignButton"
 	campaign_button.text = "CAMPAIGN"
 	campaign_button.pressed.connect(_on_campaign_pressed)
 	menu.add_child(campaign_button)
-	menu.move_child(campaign_button, 1)
+
+	# Playtest C1: the ship dropdown used to sit ABOVE the campaign button,
+	# which reads as "pick a ship, then pick a mode" -- so it looked like it
+	# applied to the campaign. It does not: the campaign is hardcoded to a cargo
+	# shuttle and the dropdown only ever affected the sandbox.
+	#
+	# Fixed by grouping rather than by position alone (the notes ask for both):
+	# the dropdown now sits directly UNDER Sandbox with a label saying so, so
+	# the association is visible even to someone who never reads down the list.
+	var sandbox_ship_label := Label.new()
+	sandbox_ship_label.name = "SandboxShipLabel"
+	sandbox_ship_label.text = "Sandbox ship:"
+	sandbox_ship_label.add_theme_font_size_override("font_size", 11)
+	sandbox_ship_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	menu.add_child(sandbox_ship_label)
+	ship_select.tooltip_text = "Sandbox only -- the campaign always starts you in a cargo shuttle."
 
 	# Controls remapping -- button at the bottom of the menu, screen added in
 	# code (same no-.tscn-edit pattern). While the screen is open the menu is
@@ -80,6 +95,26 @@ func _ready() -> void:
 	controls_button.text = "CONTROLS"
 	controls_button.pressed.connect(_on_controls_pressed)
 	menu.add_child(controls_button)
+
+	# ONE declarative list decides menu order (playtest C1). The old code moved
+	# a single button to a hardcoded index, which is unreadable the moment a
+	# second entry moves and is how the dropdown ended up stranded above the
+	# mode buttons. Anything not listed keeps its existing position; a listed
+	# node that does not exist is skipped, so this cannot crash on a renamed
+	# button.
+	var menu_order: Array[String] = [
+		"CampaignButton",     # the primary experience, first
+		"LocalTestButton",    # "SANDBOX"
+		"SandboxShipLabel",   # ...and its ship dropdown, grouped directly under it
+		"ShipSelect",
+		"HostButton",
+		"JoinButton",
+		"ControlsButton",
+	]
+	for i in menu_order.size():
+		var n := menu.get_node_or_null(NodePath(menu_order[i]))
+		if n != null:
+			menu.move_child(n, i)
 
 	controls_menu = ControlsMenu.new()
 	ui_layer.add_child(controls_menu)

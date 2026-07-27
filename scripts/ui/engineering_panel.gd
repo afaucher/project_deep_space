@@ -2,7 +2,6 @@ extends Control
 
 signal component_power_toggled(component_id: String, is_active: bool)
 
-const PortRules = preload("res://scripts/port/port_rules.gd")
 const ShipSilhouette = preload("res://scripts/components/ship_silhouette.gd")
 
 const HIGHLIGHT_SENSOR_PEAK_EM_BONUS := 40.0 # flat display-only bump to "Peak EM" when the highlighted sensor is active
@@ -390,8 +389,13 @@ func _ready() -> void:
 	eng_log_rich.scroll_active = true
 	eng_log_rich.scroll_following = true
 	eng_log_rich.fit_content = false
-	eng_log_rich.custom_minimum_size = Vector2(0, 100)
+	# Playtest C4: "at least 2x taller -- expand vertically wherever the layout
+	# allows". Both halves matter: the floor doubles (100 -> 220) so the log is
+	# usable even in a cramped layout, and SIZE_EXPAND_FILL lets it claim the
+	# slack in taller ones instead of staying at its minimum forever.
+	eng_log_rich.custom_minimum_size = Vector2(0, 220)
 	eng_log_rich.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	eng_log_rich.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main_vbox.add_child(eng_log_rich)
 
 # One combined line for the controlled zone the ship is in: authority plus the
@@ -405,19 +409,14 @@ func _update_zone_status(state: Dictionary) -> void:
 	if authority == null or authority == "":
 		zone_status_lbl.text = ""
 		return
-	var rules: Dictionary = {}
-	for s in get_tree().get_nodes_in_group("ships"):
-		if not s.has_method("get_port_zone"):
-			continue
-		var zone: Dictionary = s.get_port_zone()
-		if zone.get("authority", "") == authority:
-			rules = zone.get("rules", {})
-			break
-	var summary: String = PortRules.banner_summary(rules)
-	if summary != "":
-		zone_status_lbl.text = "%s — %s" % [str(authority), summary]
-	else:
-		zone_status_lbl.text = str(authority)
+	# Playtest D2: the port-RULES summary ("docking by permission · speed
+	# advisory 200") is gone from here. It does not belong in engineering
+	# diagnostics -- the zone-crossing banner already carries it, and this panel
+	# should say which authority's space you are in, not recite its regulations.
+	# PortRules.banner_summary stays: it is the banner's own renderer and
+	# test_port_rules.gd covers it. Only this call site is removed, along with
+	# the whole zone scan that existed purely to feed it.
+	zone_status_lbl.text = str(authority)
 
 func _eng_log_severity_color(severity: String) -> String:
 	match severity:
