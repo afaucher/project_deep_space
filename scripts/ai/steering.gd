@@ -301,6 +301,21 @@ static func _dockables(actor) -> Array:
 		_dockable_cache_frame = frame
 	return _dockable_cache
 
+# The same braking curve approach_speed_limit applies to a station hull, but
+# aimed at an ARBITRARY point: the fastest this hull may travel `distance` from
+# a spot it needs to be doing `terminal` at, given its own derived braking
+# authority. v = sqrt(v_term^2 + 2*a*d).
+#
+# approach_speed_limit cannot serve this: it measures room to the nearest
+# DOCKABLE BODY's hull (APPROACH_CLOSE_RADII of the bounding radius), which for
+# a SmallStation is fully slowed only within ~300 units. A docking hull needs to
+# be slow much earlier than that -- not to avoid hitting the station, but
+# because at cruise it physically cannot turn onto the berth axis in the
+# ~1200 units of run the geometry provides. See job_steps.step_dock_at.
+static func speed_for_arrival(actor, distance: float, terminal: float) -> float:
+	var decel: float = _brake_accel(actor)
+	return sqrt(terminal * terminal + 2.0 * decel * maxf(0.0, distance))
+
 static func approach_speed_limit(actor, cruise: float) -> float:
 	var limit: float = cruise
 	var pos: Vector2 = actor.position

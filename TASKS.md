@@ -42,17 +42,53 @@ harness passed while both were broken, so totals alone never clear a change.
 |---|---|---|
 | baseline | 851 | 9.5x over |
 | shipped (zoned cut-out) | 238 | 2.6x over |
-| **stashed `approach-fix-with-latch`** | **86** | **under** — guards fail |
+| stashed `approach-fix-with-latch` | 86 | under — guards failed |
+| **LOS lookahead guidance** *(2026-07-27)* | **15** | **6x under — proxy MET** |
 
-Nearest path to the goal is making the stashed variant pass its guards, then
-confirming against the economy sim rather than the proxy.
+**Proxy is met and `test_nav_gauntlet` is green** (3/3, 0.0% hull damage, 35-40s
+arrivals against a 90s budget). The economy sim has NOT been run yet — that is
+the real acceptance and it is the next step.
+
+**One guard still red: `test_visitor_itinerary`, and it is NOT a docking
+failure.** The shuttle overheats. See the thermal item below; the gate is
+125 passed / 1 failed on that test alone.
 
 **Collision avoidance generally is the wider lever** — it benefits every ship,
 not just docking. Current `Steering._avoidance` does proper CPA (summed radii,
 relative velocity, bounded lookahead) but is KINEMATIC: it commits to one
 perpendicular dodge against the single worst threat and never asks whether the
-hull can physically execute it in time. Multi-path projection + slowing to
-clear all threats is the natural successor; worth a research pass.
+hull can physically execute it in time. **Researched 2026-07-27** — see
+`design_ideas/approach_guidance_and_avoidance.md`. Conclusion: do NOT rewrite
+the field as ORCA (it brings deadlock and dense-case conservatism we don't
+have). Take the one genuine capability gap first — **speed as an avoidance
+output**, i.e. let `_avoidance` say "no safe heading at this speed" and have
+`_cruise_toward` slow rather than only turn.
+
+### BLOCKER, needs a balance decision: shuttles cannot afford a gentle approach
+
+A `CargoShuttle` reaches the berth at **131/150 heat** under the new approach vs
+**111/150** cutting the corner; the exit burn costs ~26 on both, so the new one
+pegs at max, drains its reactor and `hulk()`s at 90% structural health. Baseline
+peaks at 144/150 — a 4% margin — so *any* approach change was going to break it.
+
+This is a real trade, not a test artifact: going from cruise to berthed is a
+fixed delta-v, and the baseline offloads it to the bay servo and (when that
+misses) the station's hull — which IS the 12.5 lots/hr this goal exists to
+remove. The new approach pays it with engines. **Cost moves from stations to
+hulls.**
+
+`max_heat = 150` is authored consistently across the small hulls (ore_shuttle,
+mobile_home, pirate_ore_shuttle); Freighter is 220 and docks fine. So raising it
+is a fleet-wide balance change, not a docking fix — hence not taken unilaterally.
+Options: raise `max_heat` toward the Ship default (200); give these hulls a
+`heat_dissipation_rate` above the default 10.0 (only `missile` overrides it
+today); or accept it as a real constraint and shorten the approach.
+
+**Separate defect found on the way:** `hulk()` is SILENT. A thermally-dead hull
+logs nothing and is indistinguishable from a ship flying badly — the visitor
+coasted straight *through* its exit point 159 units away without despawning,
+which reads as a navigation failure and is not one. `economy_traffic` runs for
+hours and would never report ships cooking themselves.
 
 ---
 

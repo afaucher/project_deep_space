@@ -521,6 +521,13 @@ static func _track_quiet_holds(actor, step: Dictionary, scratch: Dictionary) -> 
 
 const DOCK_STATION_SEARCH_RADIUS := 6000.0
 
+# Seconds of travel used as the LOS lookahead on a docking run (see the
+# guidance block in step_dock_at). Half of Steering.LOOKAHEAD_TIME, which is the
+# codebase's existing "long enough that a heavy hull has room to swing clear"
+# figure -- converging onto a line the hull is already near needs less room than
+# dodging an obstacle it is closing on.
+const LOS_LOOKAHEAD_TIME := 3.0
+
 static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
 	var scratch: Dictionary = step.get("scratch", {})
 	var delivery: Dictionary = step.get("delivery", {})
@@ -588,7 +595,6 @@ static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
 	# self-imposed and universal, while the published corridor is jurisdiction.
 	if guide.is_empty():
 		var outward: Vector2 = Vector2.RIGHT.rotated(berth_heading)
-		var axis_pt: Vector2 = docking_point + outward * (target_berth.capture_radius * 0.8)
 		# Same ANGULAR rule as the zoned path, derived from the berth alone --
 		# "degrade down the ladder, don't branch". The first version gated on
 		# DISTANCE (within capture_radius of the seat) and that was the bug
@@ -630,7 +636,118 @@ static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
 		# luck. A corridor gate cannot fix that on its own -- what the unzoned
 		# case actually needs is an approach fix OUTSIDE the standoff, which is
 		# the same hold-point geometry the interlock is waiting on.
-		_cruise_toward(actor, axis_pt, station.position, 700.0)
+		# LINE-OF-SIGHT GUIDANCE ONTO THE BERTH AXIS. The unzoned approach is a
+		# PATH-FOLLOWING problem, not a waypoint-capture one, and every attempt
+		# here up to now solved the wrong one.
+		#
+		# The immediately preceding attempt (an approach fix at 2x the avoidance
+		# standoff, plus a latch on arrival) got closest and still limit-cycled:
+		# test_nav_gauntlet's distance-to-station traced 1315 -> 3816 -> 895 ->
+		# 3981 -> 1060 -> 5762 at Deepcut, x pinned near the axis while y swung
+		# +/-4000 with GROWING amplitude. That is the textbook failure of
+		# capture-radius waypoint seeking by a constant-speed, bounded-turn-rate
+		# mover: _cruise_toward always commands full speed at its target, so the
+		# turn radius at 700 u/s far exceeds the capture tolerance -- the hull
+		# sails through, swings back, and the oscillation diverges. No latch can
+		# fix that, because the hull never satisfies the arrival test at all.
+		#
+		# The literature's answer (Lekkas & Fossen's lookahead LOS law -- see
+		# design_ideas/approach_guidance_and_avoidance.md) is to steer at a
+		# carrot sliding along the PATH instead of at a fixed point: project the
+		# hull onto the axis, then aim one lookahead further down it. Cross-track
+		# error decays exponentially with distance run -- e(s) = e0 *
+		# exp(-s / LOOKAHEAD) -- with no waypoint to overshoot and no arrival
+		# condition to satisfy. Lookahead trades convergence rate against
+		# overshoot, and the standoff is the natural length scale here (it is
+		# both the repulsion radius and roughly the hull's turn radius at
+		# cruise), so one standoff of lookahead converges within a few standoffs
+		# of run and cannot ring.
+		var standoff: float = actor.get_bounding_radius() + station.get_bounding_radius() + Steering.MARGIN
+		var rel: Vector2 = actor.position - docking_point
+		var along: float = rel.dot(outward)
+		var cross_track: float = (rel - outward * along).length()
+		var axis_along: float = target_berth.capture_radius * 0.8
+
+		if along <= axis_along:
+			# Behind the berth, or already inside the aim point without having
+			# captured: no legal run exists from here, so rejoin the axis out in
+			# free space -- station AVOIDED, since getting around the hull is
+			# precisely what avoidance is for.
+			# Braked toward the rejoin point, NOT flown at full cruise. Full cruise
+			# was tried on the theory that braking to a stop in empty space is a
+			# wasted burn on a heat-limited hull; measured, it is worse on both
+			# counts -- the hull sails past the rejoin point and has to come back,
+			# so the cycle went from frame 2585 to 3419 and the reactor pegged at
+			# max heat anyway. The overshoot costs more thrust than the braking
+			# saves.
+			var rejoin: Vector2 = docking_point + outward * (standoff * 2.0)
+			_cruise_toward(actor, rejoin, null, minf(700.0, Steering.speed_for_arrival(
+				actor, actor.position.distance_to(rejoin), Steering.DOCK_APPROACH_SPEED)))
+			return CONTINUE
+
+		# THE EXCLUSION GATE IS CROSS-TRACK, NOT ANGULAR. An angular gate was
+		# tried and measured worse (rock field 0.00% -> 1.00%) because a fixed
+		# angle is a tolerance that GROWS with range: it released avoidance from
+		# arbitrary distance, and a hull that then dodged a rock drifted into the
+		# body it had stopped watching. Cross-track error is absolute -- the same
+		# metres of misalignment mean the same thing at 500 units and at 5000.
+		# Once the hull is genuinely on the axis in the outward hemisphere the
+		# straight run in is safe by construction (port_channel.gd's geometry:
+		# below 90 degrees off-axis the nearest point of the run is the seat
+		# itself, which berth_pos_for_bounding_radius already seats outside the
+		# hull), and approach_speed_limit independently holds closing speed under
+		# COLLISION_DAMAGE_MIN_SPEED. If a dodge does knock the hull off the
+		# line, cross-track grows and avoidance comes straight back on -- the
+		# self-correction the angular gate could not offer. Hysteresis on the
+		# boundary, same shape as the zoned corridor gate, so a hull riding the
+		# tolerance does not flip every frame.
+		var on_axis: bool = scratch.get("on_axis", false)
+		var tol: float = target_berth.capture_radius * (2.0 if on_axis else 1.0)
+		on_axis = cross_track <= tol
+		scratch["on_axis"] = on_axis
+		step["scratch"] = scratch
+
+		# SPEED IS PART OF THE GUIDANCE LAW, but ONLY WHILE THERE IS CROSS-TRACK
+		# LEFT TO KILL. The first LOS attempt braked the whole run in and that is
+		# what broke test_visitor_itinerary: braking for convergence on top of
+		# approach_speed_limit's braking for CONTACT is two brakes for one
+		# problem, and it made the cycle 5.3s slower (dock at frame 2535 vs
+		# 2216). On this hull that is fatal rather than merely slow -- a
+		# CargoShuttle accrues heat at a flat ~2.66/s with no equilibrium, so it
+		# reached the berth at 129/150 instead of 111/150 and the exit burn then
+		# cooked its reactor (see TASKS.md; the thermal envelope is a separate
+		# defect this exposed, not one this code should paper over).
+		#
+		# A hull already ON the axis does not need to be slow: there is nothing
+		# left to steer around, the straight run is geometrically safe, and
+		# approach_speed_limit still governs the speed it actually touches the
+		# berth at. Braking is for CONVERGENCE, so spend it only while
+		# converging.
+		#
+		# Brake toward the CAPTURE BOUNDARY, not the seat. Inside the capture
+		# radius the bay's critically-damped servo owns the hull and arrests it
+		# for free (docking_bay.gd); engine-braking through that last stretch
+		# pays heat to fight a spring that was going to stop us anyway, and it is
+		# the most expensive stretch there is -- lowest speed, longest duration,
+		# engine lit the whole way.
+		var cruise: float = 700.0
+		if not on_axis:
+			cruise = minf(700.0, Steering.speed_for_arrival(
+				actor, along - target_berth.capture_radius, Steering.DOCK_APPROACH_SPEED))
+
+		# Lookahead scales with commanded speed, floored at the standoff. This is
+		# Lekkas & Fossen's time-varying lookahead: a fixed distance is either
+		# too tight when fast (overshoot, the failure above) or needlessly slow
+		# to converge when crawling. Expressed as a TIME it is one constant that
+		# stays correct across a 700 u/s shuttle and a loaded freighter, and it
+		# tightens automatically as the braking curve sheds speed.
+		var lookahead: float = maxf(standoff, cruise * LOS_LOOKAHEAD_TIME)
+
+		# The carrot: our own projection on the axis, one lookahead nearer the
+		# seat, never past the aim point.
+		var aim: Vector2 = docking_point + outward * maxf(along - lookahead, axis_along)
+
+		_cruise_toward(actor, aim, station.position if on_axis else null, cruise)
 		return CONTINUE
 
 	var mouth: Vector2 = guide["mouth"]
