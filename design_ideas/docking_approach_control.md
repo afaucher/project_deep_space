@@ -139,16 +139,17 @@ and less convergence at a single mouth.** Arrival convergence-shoving is an
 already-measured damage source, and a wider arc spreads arrivals instead of
 funnelling them.
 
-The cost is legibility. At 180° the exclusion zone only exists behind the
-station; it stops reading as a disc with a gate, and port control stops feeling
-like control. The resolution is already in the visual language: corridor edges
-draw as subdued zone geometry, the guide draws bright gold. **Widen what is
-LEGAL (tolerance) and keep the guide as the recommended line (ideal)** rather
-than treating one angle as both.
+**Not a decision for now — today it is purely cosmetic.** Nothing but the
+renderer reads the cone, so changing the angle changes a drawing and nothing
+else. The convergence argument above is a hypothesis about a system that does
+not exist yet: there is no mouth to converge on until the corridor is flown.
 
-Leaning: widen meaningfully (60–75° half-angle) rather than to the geometric
-limit, keeping the zone readable as a zone. Worth deciding against a picture,
-not arithmetic.
+Revisit AFTER the corridor is a constraint, when mouth queueing is something
+that can be measured rather than guessed. The derivation is recorded here only
+so that decision starts from "we have 90° of headroom and use 45" instead of
+re-deriving it. If it widens, widen what is LEGAL and keep the bright guide as
+the recommended line — the visual language already separates tolerance from
+ideal.
 
 ## Decisions this needs
 
