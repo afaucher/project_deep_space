@@ -28,26 +28,18 @@ func tick(actor: Node, blackboard) -> int:
 	var best_dist := INF
 	for c_id in actor.active_contacts:
 		var contact = actor.active_contacts[c_id]
+		# ENGAGEMENT POLICY -- this actor's own, deliberately kept here rather
+		# than in the shared helper below. A patrol/station fires only on a
+		# flagged target; a pirate tree may one day fire on anybody, and that
+		# difference must not be locked out by a shared function.
 		if contact.get("standing", "") != Standing.HOSTILE:
 			continue
-		# A dead ship's classification flips to WRECKAGE (Ship.classify_contact
-		# -- EM-dark hulk) but Standing.HOSTILE is sticky and never clears on
-		# death, so without this a hulk stays an acquirable target forever.
-		# Wreckage is never worth engaging -- skip it.
-		if contact.get("classification", "") == "WRECKAGE":
-			continue
-		# M49 -- no leaf targets a compliant stopped ship (comms_verbs.md's
-		# honor rule): stopped for customs, arrest, or robbery, it's off the
-		# table regardless of standing.
-		if contact.get("complied_stop", false):
-			continue
-		# Fire discipline (Ship.FIRE_STALENESS_MAX): a track nobody has
-		# actually seen in a while is a dead-reckoned guess about where a
-		# ship USED to be -- never worth acquiring as a weapons target.
-		# Without this gate the AI chased and volleyed at ghosts coasting
-		# toward CONTACT_TIMEOUT (and, before the relay echo-lock fix, at
-		# permanently-frozen ones).
-		if Ship.contact_age(contact, 0.0) > actor.FIRE_STALENESS_MAX:
+		# TRACK VALIDITY -- wreckage, the M49 honor rule (a complied ship is
+		# off the table regardless of standing) and fire-discipline staleness.
+		# Shared with the player's weapons console (Standing.track_engageable),
+		# because those three are mechanical rather than policy and nobody
+		# benefits from the two disagreeing -- the four-copies lesson from A2.
+		if not Standing.track_engageable(contact):
 			continue
 		# THE AGGRESSION CAP (campaign playtest 2026-07-26, A3). HOSTILE is a
 		# COLOR, not a firing authorization, and this leaf used to treat the two

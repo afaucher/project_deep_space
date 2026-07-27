@@ -224,6 +224,54 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	# (later milestone), the judgment itself is not.
 	return {"standing": UNREPORTED, "reason": "not reporting"}
 
+# --- Is this TRACK a coherent thing to shoot at? -----------------------------
+# The universal half of "may I fire on this", shared by the AI and the player's
+# weapons console (playtest B, 2026-07-27). Pure, over the contact dict alone --
+# which is all the replicated UI packet carries.
+#
+# THE SEAM MATTERS. Two different questions were tangled together in
+# AcquireTargetLeaf:
+#
+#   TRACK VALIDITY (here)  is there a real, live, still-fightable ship there?
+#   ENGAGEMENT POLICY      whose standing am I willing to shoot?
+#
+# Only the first is universal, so only the first lives here -- this function
+# deliberately does NOT look at standing. Whose standing a given shooter is
+# willing to fire on is per-role policy and stays at the call site: a patrol
+# requires HOSTILE plus the aggression cap, the player's console requires
+# HOSTILE as its safety interlock, and a pirate may legitimately shoot anybody.
+# Collapsing policy in here would impose the patrol's rules on every future AI
+# that called it.
+#
+# The checks below are ones nobody benefits from skipping. A hulk is not a
+# threat, a complied ship is off the table by the honor rule (the pirate
+# robbery flow DEPENDS on that -- you loot a stopped victim, you do not shoot
+# it), and a stale track is a guess about where a ship used to be.
+#
+# Returns "" when the track is engageable, otherwise a short human-readable
+# reason -- a reason rather than a bool because the UI has to SAY why it
+# refused: a fire control that silently does nothing reads as broken.
+static func track_engageable_refusal(contact: Dictionary) -> String:
+	if contact.is_empty():
+		return "TARGET LOST"
+	# A dead ship's classification flips to WRECKAGE (EM-dark hulk) while a
+	# HOSTILE standing never clears on death -- without this a hulk stays a
+	# valid target forever.
+	if contact.get("classification", "") == "WRECKAGE":
+		return "TARGET IS WRECKAGE"
+	# M49 honor rule: a contact holding station under a demand is off the table
+	# regardless of standing -- stopped for customs, arrest, or robbery.
+	if contact.get("complied_stop", false):
+		return "TARGET HAS COMPLIED"
+	# Fire discipline: a track nobody has actually seen in a while is a
+	# dead-reckoned guess about where a ship USED to be.
+	if Ship.contact_age(contact, 0.0) > Ship.FIRE_STALENESS_MAX:
+		return "TARGET TRACK STALE"
+	return ""
+
+static func track_engageable(contact: Dictionary) -> bool:
+	return track_engageable_refusal(contact) == ""
+
 # --- Wanted-names registry: DELETED 2026-07-26 ------------------------------
 # `wanted_names` (faction tag -> set of claimed names), `add_wanted` and
 # `is_wanted` are gone. M48 introduced them; M52b's warrant model replaced
