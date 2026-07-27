@@ -618,7 +618,10 @@ func update_data(packet: Dictionary) -> void:
 		var tpos: Vector2 = tc.get("pos", own_pos)
 		heading_dial.has_target = true
 		heading_dial.target_bearing = (tpos - own_pos).angle()
-		heading_dial.target_color = Utils.classification_color(tc.get("classification", ""))
+		# A2: shared SOS > standing > classification rule (utils.gd), not the
+		# classification-only table -- the dial used to read red for any
+		# non-IFF vessel, including neutral ones.
+		heading_dial.target_color = Utils.contact_color(tc)
 		heading_dial.rel_vel = own_vel - tc.get("vel", Vector2.ZERO)
 	else:
 		heading_dial.has_target = false

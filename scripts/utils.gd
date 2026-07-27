@@ -38,10 +38,105 @@ static func format_speed(mps: float) -> String:
 	var sign := "-" if mps < 0.0 else ""
 	return sign + format_dist(absf(mps)) + "/s"
 
-# Single source of truth for contact classification -> color, used by
-# navigation_panel (blips, off-screen indicators) and sensor_panel (contact
-# list border/font color) so the two views can't disagree about what a
-# given classification looks like.
+# --- Contact colour: THE single source of truth -----------------------------
+# Playtest A2, 2026-07-26 ("Ironhold is classified inconsistently -- enemy in
+# one place, neutral in another"; the follow-up report that map and list
+# disagreed). Three surfaces each had their own rule and only ONE consulted
+# Standing:
+#
+#   contacts_panel row colour   SOS > standing > classification   CORRECT
+#   navigation_panel blips      classification only               red
+#   helm_panel heading dial     classification only               red
+#
+# classification_color below genuinely WAS shared -- it was just shared over
+# the wrong axis, and structurally cannot see standing. That matters far beyond
+# one station: classify_contact() returns "UNIDENTIFIED VESSEL" for any live
+# vessel without an IFF crypto handshake, INCLUDING a fully identified,
+# reporting, neutral one. So every neutral station and civilian in the game
+# drew red on the nav map. The name is the lie -- it means "not IFF-friendly",
+# not "unknown".
+#
+# contact_color() is the precedence contacts_panel already had right, lifted
+# here so every surface inherits it. Takes the whole contact dict rather than a
+# classification string precisely so it CAN see standing and sos.
+#
+# The three colour tables that used to live in contacts_panel.gd move here with
+# it. Each of those files carried a comment explaining that the other module's
+# colours were "not ours to touch" -- which is exactly how three rules drifted
+# apart in the first place.
+# ONE TIER RESOLUTION, TWO CONSUMERS. Colour and list-section are both derived
+# from contact_tier() below, so they cannot drift apart -- a contact can never
+# be filed as an enemy while being painted neutral, which is the literal
+# contradiction A2 reported. Adding or changing a tier is one row here, with
+# its colour and its section side by side.
+#
+# Same "const registry, keyed dispatch" shape the codebase already uses for
+# DebugSettings.OPTIONS and PortRules.rule_summary_handlers().
+#
+# Tier keys are internal to this table; TIER_* consts name them so callers and
+# tests never spell them as bare strings.
+const TIER_SOS := "SOS"
+const TIER_HOSTILE := "HOSTILE"
+const TIER_CAUTION := "CAUTION"
+const TIER_FRIENDLY := "FRIENDLY"
+const TIER_NEUTRAL := "NEUTRAL"
+
+# Section display order, top to bottom. The two attention-demanding sections
+# sit adjacent at the top. Exported so contacts_panel builds its UI from THIS
+# rather than keeping its own parallel list (the panel appends its own
+# "Contracts" section, which holds contract-feed entries, not contacts).
+const CONTACT_SECTIONS := ["Enemies", "Alerts", "Ships", "All Contacts"]
+
+const _TIERS := {
+	TIER_SOS:      {"color": Color(1.0, 0.25, 0.1, 0.95), "section": "Alerts"},
+	TIER_HOSTILE:  {"color": Color(0.85, 0.2, 0.2),       "section": "Enemies"},
+	TIER_CAUTION:  {"color": Color(0.75, 0.7, 0.25),      "section": "Alerts"},
+	TIER_FRIENDLY: {"color": Color(0.2, 0.8, 0.2),        "section": "Ships"},
+	TIER_NEUTRAL:  {"color": Color(0.85, 0.85, 0.85),     "section": "All Contacts"},
+}
+
+# Standing string -> tier. Standing.UNREPORTED is the yellow CAUTION tier (it
+# means "cannot resolve from here" -- not reporting, OR holding a warrant, OR
+# demanding our submission); see standing.gd's CAUTION alias.
+const _STANDING_TIERS := {
+	"HOSTILE": TIER_HOSTILE,
+	"UNREPORTED": TIER_CAUTION,
+	"NEUTRAL": TIER_NEUTRAL,
+	"FRIENDLY": TIER_FRIENDLY,
+}
+
+# SOS beats standing. A ship in distress is more urgent than its ordinary
+# relationship to you. Returns "" for a contact with no standing at all -- a
+# non-vessel (ordnance, wreckage, asteroid) or one we have not judged yet --
+# whose callers fall back to the classification layer.
+static func contact_tier(c: Dictionary) -> String:
+	if c.get("sos", false):
+		return TIER_SOS
+	return _STANDING_TIERS.get(c.get("standing", ""), "")
+
+static func contact_color(c: Dictionary) -> Color:
+	var tier: String = contact_tier(c)
+	if tier != "":
+		return _TIERS[tier]["color"]
+	return classification_color(c.get("classification", ""))
+
+# Which list section a contact files under. Non-vessels fall through to the
+# classification buckets so ordnance/wreckage/asteroids behave as they always
+# have. Whether INCOMING ORDNANCE deserves "Alerts" is a live question -- it is
+# arguably the most urgent thing on the board -- but it sat in All Contacts
+# before this change too, so leaving it is not a regression. Not decided here.
+static func contact_section(c: Dictionary) -> String:
+	var tier: String = contact_tier(c)
+	if tier != "":
+		return _TIERS[tier]["section"]
+	if c.get("classification", "") == "FRIENDLY VESSEL":
+		return "Ships"
+	return "All Contacts"
+
+# Classification -> color. Kept as the FALLBACK layer under contact_color()
+# above (non-vessels, and anything that genuinely only has a classification
+# string). Do not call this directly for a contact you hold the full dict for
+# -- it cannot see standing, which is the A2 bug.
 static func classification_color(classification: String) -> Color:
 	match classification:
 		"INCOMING ORDNANCE": return Color.YELLOW

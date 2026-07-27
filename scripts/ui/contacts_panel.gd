@@ -11,31 +11,13 @@ extends Control
 signal contact_pin_toggled(c_id: String, is_pinned: bool)
 signal selection_changed(c_id: String)
 
-# Local color map -- standing.gd is phase-1, not ours to touch, and
-# scripts/utils.gd's classification_color is shared with the nav/sensor
-# panels (also out of scope here), so this is its own small const.
-const _STANDING_COLORS := {
-	"HOSTILE": Color(0.85, 0.2, 0.2),
-	"UNREPORTED": Color(0.75, 0.7, 0.25),
-	"NEUTRAL": Color(0.85, 0.85, 0.85),
-	"FRIENDLY": Color(0.2, 0.8, 0.2),
-}
-
-# M52 -- SOS as a generic contact attribute (calling session, 2026-07-23,
-# follow-up in implementation_plans/m52_sos_as_contact.md, then
-# implementation_plans/m52_sos_passive_sync.md): same RGB as utils.gd's
-# classification_color("DISTRESS CALL") (its own local literal there too --
-# this file doesn't import colors from other panels, matches the existing
-# "standing.gd is phase-1, not ours to touch" convention just above). A
-# contact carrying sos/sos_nature/sos_name (ship.gd's datalink_relay
-# reconciliation -- either stamped onto an existing real track, or a
-# brand-new "DISTRESS CALL"-classified entry with no real detection behind
-# it at all) gets this instead of its usual standing/classification color,
-# so a distress call reads as unmistakably urgent rather than blending into
-# the ordinary row treatment. UI-side, this panel is unchanged by the M52
-# passive-sync redesign -- same fields, same place, just reconciled
-# continuously now instead of by a wire event.
-const _SOS_COLOR := Color(1.0, 0.25, 0.1, 0.95)
+# Row colours and the SOS colour used to live here as local consts, each with
+# a comment explaining that the other modules' colours were "not ours to
+# touch". That politeness is precisely how three surfaces ended up with three
+# different rules (playtest A2): this panel's precedence was correct, while the
+# nav map and helm dial keyed off classification alone and drew every neutral
+# station red. Both tables now live in utils.gd behind Utils.contact_color, and
+# every surface reads that one function.
 
 var current_state: Dictionary = {}
 var contact_panels: Dictionary = {}
@@ -85,30 +67,27 @@ func _input(event: InputEvent) -> void:
 		
 		var pos = current_state.get("pos", Vector2.ZERO)
 		
-		var enemies = []
-		var ships = []
-		var others = []
-		
+		# Cycle order follows the DISPLAYED section order, so tabbing walks the
+		# list the way it looks. This block used to carry its own third copy of
+		# the classification bucketing rule -- which meant tabbing treated
+		# every neutral station as an enemy even after the visible list stopped
+		# doing so. Same table now (Utils.CONTACT_SECTIONS / contact_section).
+		var by_section: Dictionary = {}
+		for s_name in Utils.CONTACT_SECTIONS:
+			by_section[s_name] = []
 		for c_id in contacts.keys():
 			var c = contacts[c_id]
-			var classification = c.get("classification", "UNKNOWN")
 			var dist = pos.distance_to(c.get("pos", Vector2.ZERO))
-			
-			if classification == "UNIDENTIFIED VESSEL":
-				enemies.append({"id": c_id, "dist": dist})
-			elif classification == "FRIENDLY VESSEL":
-				ships.append({"id": c_id, "dist": dist})
-			else:
-				others.append({"id": c_id, "dist": dist})
-				
-		enemies.sort_custom(func(a, b): return a["dist"] < b["dist"])
-		ships.sort_custom(func(a, b): return a["dist"] < b["dist"])
-		others.sort_custom(func(a, b): return a["dist"] < b["dist"])
-		
+			var s_name: String = Utils.contact_section(c)
+			if by_section.has(s_name):
+				by_section[s_name].append({"id": c_id, "dist": dist})
+
 		var contact_list = []
-		for x in enemies: contact_list.append(x["id"])
-		for x in ships: contact_list.append(x["id"])
-		for x in others: contact_list.append(x["id"])
+		for s_name in Utils.CONTACT_SECTIONS:
+			var bucket: Array = by_section[s_name]
+			bucket.sort_custom(func(a, b): return a["dist"] < b["dist"])
+			for x in bucket:
+				contact_list.append(x["id"])
 			
 		if contact_list.is_empty(): return
 		
@@ -149,7 +128,16 @@ func _ready() -> void:
 	# affordance as the other three (this loop already builds that generically
 	# per section name -- no special-casing needed here, only in the
 	# count/content updater below).
-	var sections = ["Enemies", "Ships", "All Contacts", "Contracts"]
+	# Contact sections and their order come from Utils.CONTACT_SECTIONS, which
+	# is the SAME table that decides row colour (Utils.contact_section /
+	# contact_color both derive from Utils.contact_tier). Keeping a parallel
+	# list here is what let the old bucketing rule drift away from the colour
+	# rule in the first place -- playtest A2.
+	#
+	# "Contracts" is appended locally and deliberately: it holds contract-feed
+	# entries, not contacts, so it has no tier and belongs to this panel alone.
+	var sections: Array = Utils.CONTACT_SECTIONS.duplicate()
+	sections.append("Contracts")
 	for s_name in sections:
 		var btn = Button.new()
 		btn.text = s_name + " (-)"
@@ -298,13 +286,7 @@ func _update_contact_list(contacts: Dictionary) -> void:
 
 		# Parent to the correct section
 		var classification = c.get("classification", "UNKNOWN")
-		var target_vbox: VBoxContainer
-		if classification == "UNIDENTIFIED VESSEL":
-			target_vbox = section_vboxes["Enemies"]
-		elif classification == "FRIENDLY VESSEL":
-			target_vbox = section_vboxes["Ships"]
-		else:
-			target_vbox = section_vboxes["All Contacts"]
+		var target_vbox: VBoxContainer = section_vboxes[Utils.contact_section(c)]
 			
 		if panel.get_parent() != target_vbox:
 			if panel.get_parent():
@@ -331,17 +313,12 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		# help is more urgent than its ordinary standing color, and the row
 		# should read as unmistakably distinct at a glance (matches the nav
 		# map's pulsing-cross treatment for the same event).
+		# A2 (2026-07-27): this precedence was already CORRECT and is now the
+		# shared rule -- Utils.contact_color -- so the nav map and helm dial
+		# inherit it instead of each keying off classification alone. The local
+		# tables moved to utils.gd with it.
 		var is_sos: bool = c.get("sos", false)
-		var standing: String = c.get("standing", "")
-		var color: Color
-		if is_sos:
-			color = _SOS_COLOR
-		elif standing != "" and _STANDING_COLORS.has(standing):
-			color = _STANDING_COLORS[standing]
-		else:
-			color = Color(0.8, 0.8, 0.8)
-			if classification_str == "FRIENDLY VESSEL": color = Color(0.2, 0.8, 0.2)
-			elif classification_str == "UNIDENTIFIED VESSEL": color = Color(0.8, 0.2, 0.2)
+		var color: Color = Utils.contact_color(c)
 		p_style.border_color = color
 		header.add_theme_color_override("font_color", color)
 

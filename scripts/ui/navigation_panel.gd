@@ -1006,7 +1006,11 @@ func _get_contact_color(c: Dictionary) -> Color:
 	# Dim by confidence-from-age so stale dead-reckoned contacts fade toward ghosts
 	# instead of reading as solid as freshly-measured ones. Every blip/label/vector/
 	# off-screen-indicator path goes through here, so they all inherit the fade.
-	var base = Utils.classification_color(c.get("classification", ""))
+	# A2: was classification_color(), which cannot see standing -- so every
+	# identified, reporting, NEUTRAL station drew red here while the contact
+	# list drew it grey. contact_color() is the shared SOS > standing >
+	# classification rule (utils.gd).
+	var base = Utils.contact_color(c)
 	return Utils.fade_color(base, Utils.contact_confidence(c))
 
 # v1.1: the outline is a REFINED FOOTPRINT -- the same knowledge channel as
