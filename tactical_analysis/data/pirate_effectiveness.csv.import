@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://2sj8ri8bryg"
+
+[deps]
+
+files=["res://tactical_analysis/data/pirate_effectiveness.sim.translation", "res://tactical_analysis/data/pirate_effectiveness.haulers.translation", "res://tactical_analysis/data/pirate_effectiveness.takes.translation", "res://tactical_analysis/data/pirate_effectiveness.losses.translation", "res://tactical_analysis/data/pirate_effectiveness.returned.translation", "res://tactical_analysis/data/pirate_effectiveness.resolved.translation", "res://tactical_analysis/data/pirate_effectiveness.takes.translation", "res://tactical_analysis/data/pirate_effectiveness.take.translation", "res://tactical_analysis/data/pirate_effectiveness.loss.translation", "res://tactical_analysis/data/pirate_effectiveness.final.translation", "res://tactical_analysis/data/pirate_effectiveness.backoff.translation"]
+
+source_file="res://tactical_analysis/data/pirate_effectiveness.csv"
+dest_files=["res://tactical_analysis/data/pirate_effectiveness.sim.translation", "res://tactical_analysis/data/pirate_effectiveness.haulers.translation", "res://tactical_analysis/data/pirate_effectiveness.takes.translation", "res://tactical_analysis/data/pirate_effectiveness.losses.translation", "res://tactical_analysis/data/pirate_effectiveness.returned.translation", "res://tactical_analysis/data/pirate_effectiveness.resolved.translation", "res://tactical_analysis/data/pirate_effectiveness.takes.translation", "res://tactical_analysis/data/pirate_effectiveness.take.translation", "res://tactical_analysis/data/pirate_effectiveness.loss.translation", "res://tactical_analysis/data/pirate_effectiveness.final.translation", "res://tactical_analysis/data/pirate_effectiveness.backoff.translation"]
+
+[params]
+
+compress=true
+delimiter=0

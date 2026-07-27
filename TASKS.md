@@ -43,14 +43,81 @@ are the other half. Natural M53e or an M54 slice; not scoped anywhere today.
 → `implementation_plans/m53a_economic_expansion.md` Pass 4,
 `design_ideas/2026-07-20-pirate_playtest.md`, `design_ideas/mail_network.md`
 
-### Where pirates hunt now that lanes are emergent — *2026-07-26*
-Three map-only targeting strategies are implemented and measured; the default
-is `CROSSROADS`. Pick one (or ask for a blend) and the others can go.
-Measured spread / hazard clearance over 200 assemblies: CHORD 83 cells,
-APPROACH_RING 47, CROSSROADS 33, all 100% clear. The decisive metric — catch
-rate against real haulers, and pirate survival near hub defences — has **not**
-been measured; it needs `economy_traffic` with pirates enabled.
-→ `PirateGuild.HuntStrategy`, `scripts/tests/test_pirate_targeting.gd`
+### Pirates catch nothing — three compounding faults, none about targeting — *2026-07-26*
+Measured over 180 game-min each, campaign-real guild config, 8 haulers
+(`pirate_effectiveness` sim). **Do not pick a targeting strategy off this
+table — fix the faults first, then re-measure.**
+
+| strategy | members | resolved | takes | losses | empty |
+|---|---|---|---|---|---|
+| STATION_CHORD | 1 | 0 | — | — | — |
+| CROSSROADS | 1 | 0 | — | — | — |
+| APPROACH_RING | 5 | 5 | **0** | 1 | 4 |
+
+**Fault 1 — an unlabelled ABORT reads as JOB COMPLETE and strands the hull.
+FIXED 2026-07-26, needs re-measurement.** The exfil tail's
+`AWAIT track_quiet` carried `timeout: 60.0` and no `on_abort`.
+`JobRunnerLeaf._abort_to("")` sets `current = steps.size()`, which the runner
+treats as completion and clears the assignment — so the timeout skipped
+RELIGHT and EXIT_AT. The pirate never reached the wormhole, never despawned,
+never resolved; it sat dark and motionless forever while the ledger held it
+ACTIVE. Traced directly: `step 9 AWAIT` → `step -1/0 ?` with `speed=0` for the
+rest of the run.
+
+It also selected AGAINST success: SELECT_VICTIM aborts to the `"exit"` label
+and jumps straight to EXIT_AT, so a pirate that found nobody went home
+cleanly while a pirate that actually engaged reached this step and stranded.
+Every hull that got far enough to attempt a robbery was removed from the
+population — which is the real reason every strategy measured zero takes.
+
+**Two earlier explanations of this were WRONG and are recorded so nobody
+re-derives them: it is not slow transit** (traced at a flat 700 u/s closing
+21k units per 30s, ~8 min to target) **and not the unbounded opening
+`GO_TO`** (real as a missing bound, never reached). The map is ~15 min across;
+any "never arrived" theory should have died on that arithmetic immediately.
+
+**Still open at the runner level:** `_abort_to("")` making "aborted with
+nowhere to go" indistinguishable from "ran to completion" is a trap for every
+future job, not just this one. An unlabelled abort should at minimum log
+distinctly, and arguably should not clear the slot.
+
+**Fault 2 — one stuck member kills the guild permanently.** `base_cap: 1` and
+`takes_per_cap_raise: 2` mean the guild has one hull until it robs twice. With
+fault 1, that hull never resolves, so no arrival is ever scheduled again —
+silently, with no error anywhere. `presumed_lost_delay` does not catch it (it
+applies to OVERDUE members whose record is gone; this one is happily ACTIVE).
+A director whose ledger can stall forever is a bug independent of targeting.
+
+**Design target (2026-07-26): a LOW take rate is fine.** Pirates need enough
+successes to justify their presence and make occasional encounters
+interesting — not a high catch rate. That reframes fault 3 below, and it puts
+the current tuning in direct conflict with the intent:
+
+- **The profitability governor treats normal as failure.** Five consecutive
+  profitless resolutions drove backoff to x8.0, so arrivals become eight
+  times rarer. If a low take rate is intended, four empties between takes IS
+  the design working — and the governor throttles hardest exactly then. It
+  should trigger on a drought materially longer than the natural run of
+  empties.
+- **Cap growth is gated behind the scarce metric.** `takes_per_cap_raise: 2`
+  at a deliberately low take rate means ~10 cycles per extra hull, so the
+  guild sits at one pirate indefinitely — which is also why a single stranded
+  hull could zero the faction.
+- **The sim measures the wrong success.** `RETURNED_EMPTY` lumps "sat in empty
+  space and gave up" together with "held a freighter at gunpoint until a
+  patrol drove me off". Only the second is content. Count ENCOUNTERS
+  (intercept / demand issued) separately from takes, and give the sim real
+  acceptance criteria: takes > 0 over a session horizon, backoff not pinned
+  at max, encounters at a readable interval.
+
+**Fault 3 — the strategy that WORKS still takes nothing.** APPROACH_RING
+resolved 5 cycles: 4 withdrawals, 1 death, zero takes. So there is a second,
+separate ACQUISITION problem underneath, which cannot even be measured until
+pirates reliably arrive. The profitability governor then throttles arrivals
+8x (backoff x8.0 after 5 profitless resolutions) and cap never leaves 1 — the
+guild quietly throttling itself out of the game.
+→ `tactical_analysis/data/pirate_effectiveness_*.csv`,
+`tactical_analysis/sim_runners/pirate_effectiveness.gd`
 
 ### Authority-side warrant resolution is missing — *2026-07-26*
 `resolve_warrant` works but the only caller is the player's own un-MARK, so
@@ -95,12 +162,40 @@ N ms) so the next cadence change has something to fail against.
 
 ## Open / unscoped
 
-### Heat/EM is the top perf cost now — *2026-07-26*
-`heat_em_component_loop` is 10.04% of tick, above `datalink_relay`'s 6.45%
-after decimation. Known shape: ~11 component walks per ship per frame, one
-literal duplicate `get_total_power_rating("reactor")` call, uncached
-`get_total_rating`, string type dispatch, per-frame dict writes for unchanged
-values. Analysed, not implemented.
+### Heat/EM is the top perf cost — diagnosed, not fixed — *2026-07-26*
+`heat_em_component_loop` is 9.99% of tick (1664 µs/frame), now the largest
+single block after the relay dropped to 6.44%. Existing sub-probes already
+break it down and account for 93% of it: `he_comp_loop` 777 µs / 4.66%,
+`he_totals` 509 µs / 3.05%, `he_em_prep` 255 µs / 1.53%.
+
+**The cost is the number of passes, not the cost of a lookup.** All of it is
+ship-local arithmetic over ~30 component dicts, walked ~7 times per ship per
+frame. Three redundancies, in order of size:
+
+1. `_component_powered` runs TWICE per component per frame — once in
+   `he_totals`' passive loop, once in `he_comp_loop`. It is the expensive
+   predicate (4 dict reads plus the cached reactor check). Fold the passive
+   accumulation into the main loop, or stash the flag on the first pass.
+2. `get_total_power_rating("reactor")` is called in both `he_totals` and
+   `he_em_prep`. Reuse is correct EXCEPT during overheat, where the drain
+   between them makes the reused value one frame stale — decide deliberately.
+3. `get_sys_health("sensors")` + `get_sys_max_health("sensors")` are two full
+   scans producing one ratio.
+
+Together ~400 µs (~25% of the block) with no new caching machinery. After
+that, the structural win is routing `get_total_rating` through the existing
+`_comps_by_type_cache` and extending the invalidate-on-change pattern that
+`_get_reactor_power_rating_cached` already established (the M45 fix, which its
+own comment records as converting ~2.9 ms/frame).
+
+**Do NOT reach for StringName or an enum for speed.** At ~200 component-visits
+per ship per frame the cost is the visits; a cheaper comparison cannot beat
+deleting the pass. An enum for component `type` is still worth doing on
+TYPE-SAFETY grounds — 238 authored `"type": "..."` sites where a typo is a
+silent runtime miss today, the same bug family as the missing-`cooldown` dict
+that stopped stations running physics at all — but that is a separate change
+judged on its own merits, and CLAUDE.md's mechanical-multi-site-rewrite scar
+applies. Nothing serializes `ship_components`, so there is no format risk.
 
 ### Station repair drain exceeds the cluster's entire trade surplus — *2026-07-26*
 Self-repair burns ~7.6 lots/hr of REFINED+GOODS against a combined authored
