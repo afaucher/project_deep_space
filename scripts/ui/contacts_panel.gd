@@ -186,10 +186,18 @@ func _update_contact_list(contacts: Dictionary) -> void:
 	var my_components = current_state.get("engineering", {}).get("ship_components", [])
 	var mock_my_sig = {"rot": my_rot, "em_emitters": my_components}
 		
-	var enemies = []
-	var ships = []
-	var others = []
-	
+	# Bucketed by Utils.contact_section -- the SAME function that parents each
+	# row below and that drives the tab-cycle order. This block used to bucket
+	# on classification alone, which meant the A2 contradiction survived inside
+	# the file that fixed A2: a reporting NEUTRAL station's ROW filed under
+	# "All Contacts" while its COUNT incremented "Enemies", so the panel drew
+	# "Enemies (4)" above an empty Enemies section. It also meant "Alerts" --
+	# added with the A2 fix -- never got a count at all, on the one section
+	# holding CAUTION contacts and distress calls.
+	var buckets: Dictionary = {}
+	for s_name in Utils.CONTACT_SECTIONS:
+		buckets[s_name] = []
+
 	var transponders = current_state.get("transponders", {})
 	
 	for c_id in contacts.keys():
@@ -206,23 +214,23 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		c["_id"] = c_id
 		c["_dist"] = my_pos.distance_to(c.get("pos", Vector2.ZERO))
 		
-		if classification == "UNIDENTIFIED VESSEL":
-			enemies.append(c)
-		elif classification == "FRIENDLY VESSEL":
-			ships.append(c)
-		else:
-			others.append(c)
-			
-	enemies.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
-	ships.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
-	others.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
-	
-	# Update button headers with counts
-	section_buttons["Enemies"].text = "Enemies (" + str(enemies.size()) + ")" + (" (+)" if section_buttons["Enemies"].button_pressed else " (-)")
-	section_buttons["Ships"].text = "Ships (" + str(ships.size()) + ")" + (" (+)" if section_buttons["Ships"].button_pressed else " (-)")
-	section_buttons["All Contacts"].text = "All Contacts (" + str(others.size()) + ")" + (" (+)" if section_buttons["All Contacts"].button_pressed else " (-)")
-	
-	var sorted_contacts = enemies + ships + others
+		buckets[Utils.contact_section(c)].append(c)
+
+	# Sorted within each section, then concatenated in display order -- so
+	# every section is genuinely distance-ordered. The old concatenation
+	# (enemies + ships + others) handed "All Contacts" neutrals-by-distance
+	# followed by wreckage-by-distance, i.e. two runs rather than one list.
+	var sorted_contacts: Array = []
+	for s_name in Utils.CONTACT_SECTIONS:
+		var bucket: Array = buckets[s_name]
+		bucket.sort_custom(func(a, b): return a["_dist"] < b["_dist"])
+		# Counts come from the same buckets that place the rows, so a header
+		# can no longer contradict the section under it. Every section in
+		# CONTACT_SECTIONS gets one -- including Alerts, which had none.
+		section_buttons[s_name].text = "%s (%d)%s" % [
+			s_name, bucket.size(),
+			" (+)" if section_buttons[s_name].button_pressed else " (-)"]
+		sorted_contacts.append_array(bucket)
 	
 	# Keep track of which IDs are currently valid
 	var active_ids = []

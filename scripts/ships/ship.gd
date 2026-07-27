@@ -712,6 +712,27 @@ var warrant_index: Dictionary = {}
 # hailed stays listed so the hail can be tracked); same 8-entry ring as
 # last_hails.
 var comms_inbox: Array = []
+# Seq -> physics frame last seen, for OVERHEARD refresh suppression. Hail seqs
+# are process-globally monotonic (Hail.hail_seq) and a heartbeat deliberately
+# re-sends under its ORIGINAL seq, so "have I already heard this exact seq?" is
+# precisely the question "is this a re-assertion rather than a new hail?" --
+# and unlike pending_demand/compelled_stop it can be asked by a BYSTANDER.
+#
+# Why this exists (2026-07-27, campaign playtest follow-up): the two
+# refresh checks below both require `addressed_to_me`, so a demand heartbeat was
+# correctly suppressed for its target and treated as a brand-new hail by
+# everyone else -- every 2 seconds (JobSteps.DEMAND_REFRESH_FRAMES) for the life
+# of the demand. A single 25s interdiction thus spammed ~12 identical entries
+# into every bystander's last_hails ring and engineering log; a couple running
+# near the player at campaign start produced ~30. The block's own comment
+# already said a refresh "must not re-alert, re-decide, re-mark, or spam the
+# last_hails ring" -- that intent just only reached the addressed ship.
+var _seen_hail_seqs: Dictionary = {}
+# Must outlast JobSteps.DEMAND_REFRESH_FRAMES (2s) by a wide margin -- a live
+# demand re-stamps its own entry every heartbeat, so this only needs to survive
+# a gap, not the demand's whole lifetime.
+const SEEN_HAIL_SEQ_TTL_FRAMES := 600   # 10s @ 60Hz
+const SEEN_HAIL_SEQ_PRUNE_FLOOR := 64   # don't bother walking a small dict
 var pending_demand: Dictionary = {}
 var compelled_stop: Dictionary = {}
 var last_hails: Array = []
@@ -3457,6 +3478,23 @@ func _physics_process(delta: float) -> void:
 	# delivery, all interpretation lives here.
 	PerfProbe.begin("comms_inbox")
 	var my_iid_hail := get_instance_id()
+	# Prune the overheard-refresh memory. Only when there is actually inbox
+	# traffic AND the dict has grown past a floor -- comms_inbox is empty on the
+	# overwhelming majority of ticks (see the note above), so this costs nothing
+	# in the common case and never turns an event-driven block into a scan.
+	#
+	# The TTL only has to outlast the demand heartbeat interval (2s), because a
+	# live demand re-stamps its own entry every time it is heard. SEEN_HAIL_SEQ
+	# _TTL_FRAMES is comfortably longer so a dropped/late packet cannot make a
+	# still-running demand look new again.
+	if not comms_inbox.is_empty() and _seen_hail_seqs.size() > SEEN_HAIL_SEQ_PRUNE_FLOOR:
+		var seq_cutoff: int = Engine.get_physics_frames() - SEEN_HAIL_SEQ_TTL_FRAMES
+		var stale_seqs: Array = []
+		for s in _seen_hail_seqs:
+			if _seen_hail_seqs[s] < seq_cutoff:
+				stale_seqs.append(s)
+		for s in stale_seqs:
+			_seen_hail_seqs.erase(s)
 	for hail in comms_inbox:
 		var verb: String = hail.get("verb", "")
 		var sender_iid: int = hail.get("sender_iid", -1)
@@ -3480,12 +3518,41 @@ func _physics_process(delta: float) -> void:
 			and not compelled_stop.is_empty()
 			and compelled_stop.get("issuer_iid", -1) == sender_iid
 			and compelled_stop.get("demand_seq", -1) == hail_seq)
-		var is_refresh: bool = refreshes_pending or refreshes_hold
+		# A hail carrying a seq we have ALREADY heard from is a re-assertion,
+		# whoever it was addressed to. This is what makes the rule work for
+		# bystanders: the two checks above can only ever fire for the ship being
+		# demanded, because they compare against ITS OWN pending_demand /
+		# compelled_stop. Everyone else needs the seq itself.
+		#
+		# Recorded for EVERY hail with a seq (not just demands): the property is
+		# about re-assertion, not about the verb, and an ACKNOWLEDGE re-broadcast
+		# would spam the same way.
+		var seen_before: bool = hail_seq != -1 and _seen_hail_seqs.has(hail_seq)
+		if hail_seq != -1:
+			_seen_hail_seqs[hail_seq] = Engine.get_physics_frames()
+
+		var is_refresh: bool = refreshes_pending or refreshes_hold or seen_before
 
 		if not is_refresh:
-			last_hails.append(hail)
-			if last_hails.size() > 8:
-				last_hails.pop_front()
+			# ONLY ring hails the panel can actually show. build_vessel_entries
+			# renders traffic where target_iid == my_iid, and lists a vessel as
+			# having hailed us on the same condition -- so a hail DIRECTED AT
+			# SOMEONE ELSE could never appear, yet still consumed one of the
+			# eight slots and pushed a real, displayable hail out of the ring.
+			# In a busy home cluster that silently wiped the player's own hail
+			# history. Broadcasts (target_iid == -1, e.g. the SOS rising-edge
+			# marker appended in _reconcile_sos_contact) are kept: they are
+			# deliberate, rare, and not addressed away from us.
+			#
+			# The engineering log below is deliberately NOT filtered the same
+			# way -- overhearing a demand is real intel about what is happening
+			# nearby, and with heartbeat refreshes now suppressed it is one line
+			# per event rather than one every two seconds.
+			var target_iid_h: int = hail.get("target_iid", -1)
+			if target_iid_h == my_iid_hail or target_iid_h == -1:
+				last_hails.append(hail)
+				if last_hails.size() > 8:
+					last_hails.pop_front()
 			# Every distinct hail this ship sees, sent or overheard, any verb --
 			# the same non-refresh gate last_hails itself uses (a heartbeat
 			# re-assert of an already-open demand is a no-op re-statement, not
@@ -3594,7 +3661,12 @@ func _physics_process(delta: float) -> void:
 					var rep_standing: String = report.get("standing", "")
 					if rep_trk != "" and rep_standing != "" and active_contacts.has(rep_trk):
 						var rep_c: Dictionary = active_contacts[rep_trk]
-						if Standing.is_more_severe(rep_standing, rep_c.get("standing", "")):
+						# Same rule as the relay share below: only HOSTILE is
+						# shareable. This path is the MARK_HOSTILE broadcast so
+						# it should only ever carry HOSTILE anyway -- gating it
+						# explicitly means a malformed or future report cannot
+						# quietly propagate a CAUTION that is not ours to hold.
+						if rep_standing == Standing.HOSTILE and Standing.is_more_severe(rep_standing, rep_c.get("standing", "")):
 							rep_c["standing"] = rep_standing
 							rep_c["standing_reason"] = report.get("reason", "")
 	comms_inbox.clear()
@@ -3714,6 +3786,8 @@ func _physics_process(delta: float) -> void:
 	# has a documented history of physics-perf regressions in this exact
 	# area, see the M45 investigation).
 	var warrant_index_dirty := false
+	# Tracks imported from a peer this tick, judged locally after the loop.
+	var relayed_ids: Dictionary = {}
 	if self_comms_range > 0.0:
 		for s in get_tree().get_nodes_in_group("ships"):
 			if s == self: continue
@@ -3892,17 +3966,54 @@ func _physics_process(delta: float) -> void:
 					# import; that registry was deleted 2026-07-26 -- three
 					# writers, zero readers. Warrants relay on their own via
 					# the merge loop above, which is the supported path.)
-					var imported_standing: String = imported.get("standing", "")
-					if imported_standing != "":
-						imported["standing_reason"] = "datalink " + s.ship_name + ": " + imported.get("standing_reason", "")
+					# The peer's VERDICT does not come along -- see the deleted
+					# standing share below. Cleared here rather than left in
+					# place because duplicate(true) copies it wholesale, so
+					# dropping the update-path share alone would still let a
+					# peer's standing arrive on first import. It is re-derived
+					# from OUR OWN transponders/warrants/flags in the local
+					# pass after this loop.
+					imported["standing"] = ""
+					imported["standing_reason"] = ""
+					imported["_relayed_from"] = s.ship_name
 					active_contacts[c_id] = imported
+					relayed_ids[c_id] = true
 				else:
 					var c = active_contacts[c_id]
+					# Re-judge every tick the relay touches this track, not just
+					# on first import: the evidence changes underneath it (a
+					# transponder arriving a tick later, a warrant merging, a
+					# flag lighting) and a track we cannot personally sense gets
+					# no other recompute. Judging once at import would freeze a
+					# relayed contact at whatever we happened to know in the
+					# instant it first arrived.
+					relayed_ids[c_id] = true
 					if relayed_last_seen_at > c.get("last_seen_at", 0):
 						c["pos"] = external_contact["pos"]
 						c["vel"] = external_contact["vel"]
 						c["last_seen_at"] = relayed_last_seen_at
 						c["resolution"] = min(c["resolution"], external_contact["resolution"])
+						# Classification and signature ride the SAME
+						# freshest-wins gate as pos/vel, and for the same
+						# reason: they are OBSERVATIONS, and this is the
+						# observer's fresher one. (Standing is not -- that is a
+						# judgment, derived locally after this loop.)
+						#
+						# They were previously frozen at whatever arrived on
+						# FIRST import, because classification is only ever
+						# written by the sensor correlate path -- which a hull
+						# that cannot personally detect the contact never runs.
+						# Early in a track's life, before EM accumulates, that
+						# first value is "WRECKAGE"; a relayed-only observer
+						# therefore believed every distant ship was a hulk
+						# forever, and compute_standing correctly refuses to
+						# judge a non-vessel, so it also had no standing. The
+						# deleted standing share was papering over exactly this
+						# by copying the peer's verdict instead.
+						if external_contact.has("classification"):
+							c["classification"] = external_contact["classification"]
+						if external_contact.has("signature"):
+							c["signature"] = external_contact["signature"].duplicate(true)
 						# M52 passive sync (implementation_plans/
 						# m52_sos_passive_sync.md) -- the ONE actual behavioral
 						# change to the relay's own merge logic: sos/sos_nature
@@ -3920,17 +4031,83 @@ func _physics_process(delta: float) -> void:
 					# peer's judgment is worth adopting even off a stale
 					# position echo -- standing rides the track id, not
 					# position freshness).
-					var peer_standing: String = external_contact.get("standing", "")
-					if peer_standing != "" and Standing.is_more_severe(peer_standing, c.get("standing", "")):
-						c["standing"] = peer_standing
-						c["standing_reason"] = "datalink " + s.ship_name + ": " + external_contact.get("standing_reason", "")
-						# (An add_wanted() call sat here, mirroring the import
-						# path above. Global wanted-names registry deleted
-						# 2026-07-26 -- three writers, zero readers.)
+					# --- STANDING SHARE: DELETED 2026-07-27 --------------------
+					# A "severity compare-and-copy" used to sit here, adopting a
+					# peer's standing whenever it was more severe than ours.
+					#
+					# IT WAS ACTIVELY WRONG. _SEVERITY ranks UNREPORTED(1) above
+					# NEUTRAL(0), so a peer merely OUT OF COMMS RANGE with a
+					# ship -- honestly reading it as unreporting -- relayed that
+					# over every other peer's CORRECT NEUTRAL. Measured against
+					# the live campaign: Patrol Alpha held the player's
+					# transponder and recomputed NEUTRAL on every sample, while
+					# its cached standing sat at UNREPORTED because this line
+					# kept overwriting it, so it re-challenged the player
+					# forever. That was the playtest's repeated
+					# DEMAND(IDENTIFY); no fix inside ChallengeLeaf could reach
+					# it.
+					#
+					# IT IS ALSO REDUNDANT, which is why the fix is deletion
+					# rather than a HOSTILE-only gate. Standing is DERIVED, and
+					# everything it derives from already rides this same link,
+					# in this same pass:
+					#   - warrants merge monotonically ~15 lines above
+					#   - transponders are rebuilt at the top of this loop
+					# So a peer's HOSTILE re-derives itself on our next fusion
+					# tick, from the evidence rather than from their verdict.
+					#
+					# AND SHARING THE VERDICT BYPASSES TWO DELIBERATE GATES:
+					#   1. Warrant ENFORCEABILITY. build_warrant_index filters
+					#      to warrants THIS observer may enforce; an out-of-
+					#      jurisdiction warrant is visible-but-unenforceable on
+					#      purpose ("still information... you just can't fire on
+					#      the strength of it alone"). Copying the peer's
+					#      HOSTILE hands us a judgment we have no authority to
+					#      make -- and quietly dissolves the M53a jurisdiction
+					#      seam.
+					#   2. known_enemy_flags is PER SHIP. Rule 3 uses OUR list.
+					#      Adopting a peer's flag-derived HOSTILE imposes their
+					#      politics on us. Invisible today because everyone
+					#      defaults to [FLAG_PIRATE] -- the field exists to vary.
+					#
+					# The MARK_HOSTILE broadcast in the comms inbox is NOT this
+					# and stays: a player's OPERATOR_FLAGGED warrant is
+					# personal-origin, so it never relays, and that broadcast is
+					# the designed (faction-gated) channel for an operator's own
+					# judgment to reach their fleet.
 	# Rebuild the warrant subject-key index only if the merge above actually
 	# changed something -- most ticks are a no-op (same records re-seen).
 	if warrant_index_dirty:
 		_rebuild_warrant_index()
+
+	# JUDGE RELAYED TRACKS OURSELVES. compute_standing otherwise runs ONLY on a
+	# sensor-bin update (the correlate/new-contact paths above), so a contact we
+	# cannot personally detect -- a sensorless hull, or anything beyond our own
+	# sensor reach -- would never get a standing at all. That is the real work
+	# the deleted standing share was doing, and this replaces it with the honest
+	# version: same conclusion, derived from OUR transponders, OUR warrant index
+	# (already enforceability-filtered) and OUR known_enemy_flags, instead of
+	# adopting the peer's verdict.
+	#
+	# Runs AFTER the loop on purpose: active_transponders is cleared and rebuilt
+	# across it, so mid-loop it is only partially populated and a contact whose
+	# subject sorts later in the group scan would be judged against a missing
+	# transponder. Cost is O(tracks imported this tick) at the relay's 10Hz, not
+	# a per-frame scan.
+	#
+	# The warrant index is rebuilt just above, so rule 2 reads current records.
+	for r_id in relayed_ids:
+		if not active_contacts.has(r_id):
+			continue
+		var r_c: Dictionary = active_contacts[r_id]
+		var r_std: Dictionary = Standing.compute_standing(
+			r_c, active_transponders.get(r_c.get("instance_id", -1), {}), self)
+		r_c["standing"] = r_std.get("standing", "")
+		var r_reason: String = r_std.get("reason", "")
+		# Keep the provenance visible: this judgment is ours, but the TRACK is
+		# someone else's report and the UI should not imply we saw it.
+		var r_from: String = r_c.get("_relayed_from", "")
+		r_c["standing_reason"] = ("datalink " + r_from + ": " + r_reason) if (r_from != "" and r_reason != "") else r_reason
 	PerfProbe.end("datalink_relay")
 
 	if is_multiplayer_authority():

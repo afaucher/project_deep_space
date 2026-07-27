@@ -7,7 +7,9 @@ const Hail = preload("res://scripts/comms/hail.gd")
 # Mirrors Ship.FIRE_STALENESS_MAX (ship.gd) -- kept as a local const rather
 # than importing the Ship script here (this panel is client UI reading the
 # already-filtered packet, not sim-side); see ship.gd for the rationale.
-const SOS_FRESH_STALENESS := 3.0
+# (Was a local const mirroring Ship.FIRE_STALENESS_MAX, justified in a comment
+# as avoiding an import of Ship -- while the single line that used it already
+# called Ship.contact_age(). Self-refuting, so the copy is gone.)
 
 var current_state: Dictionary = {}
 
@@ -665,7 +667,7 @@ func _on_sos_toggled(pressed: bool) -> void:
 		var contacts: Dictionary = current_state.get("contacts", {})
 		for c_id in contacts:
 			var c: Dictionary = contacts[c_id]
-			if c.get("standing", "") == Standing.HOSTILE and Ship.contact_age(c) <= SOS_FRESH_STALENESS:
+			if c.get("standing", "") == Standing.HOSTILE and Ship.contact_age(c) <= Ship.FIRE_STALENESS_MAX:
 				nature = Hail.NATURE_UNDER_ATTACK
 				break
 	emit_signal("sos_toggled", pressed, nature)

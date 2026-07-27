@@ -67,7 +67,33 @@ $testsPassed = $true
 # Start-Process -PassThru's returned object doesn't reliably expose ExitCode
 # once -RedirectStandardOutput/-Error is also set -- use raw .NET Process
 # objects instead, which track exit codes correctly.
-$runners = foreach ($file in $testFiles) {
+# THROTTLE (2026-07-27). This loop used to Start() every test in one pass with
+# no cap, then wait on them all in the second loop -- so a full gate launched
+# one PowerShell host AND one headless Godot per test file, simultaneously. At
+# 134 tests on a 32-core box that is ~4x CPU oversubscription and tens of GB of
+# RAM in a single burst, and it crashed the machine outright twice once the
+# suite grew past ~130 (several of the newer tests bootstrap the whole home
+# cluster rather than a couple of hulls).
+#
+# Correctness is unaffected either way -- every test runs under --fixed-fps 60,
+# so frame counts are identical regardless of contention (see CLAUDE.md). What
+# contention DOES change is wall clock, and the perf tests, which were already
+# documented as untrustworthy under load. Capping makes those meaningfully less
+# noisy as a side effect.
+#
+# Cap leaves headroom for the OS, the editor and whatever else is running
+# rather than saturating every core.
+$maxParallel = [Math]::Max(2, [Math]::Min(12, [Environment]::ProcessorCount - 8))
+Write-Host "Test concurrency capped at $maxParallel (of $([Environment]::ProcessorCount) logical CPUs)" -ForegroundColor DarkCyan
+
+$runners = @()
+foreach ($file in $testFiles) {
+    # Hold here until a slot frees. Polling rather than WaitHandle juggling:
+    # these are multi-second processes, so a 200ms tick costs nothing and keeps
+    # the loop readable.
+    while (@($runners | Where-Object { -not $_.Process.HasExited }).Count -ge $maxParallel) {
+        Start-Sleep -Milliseconds 200
+    }
     $logDir = "$PSScriptRoot\test_logs"
     if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
     $runnerLog = "$logDir\$($file.BaseName).runner.log"
@@ -89,7 +115,9 @@ $runners = foreach ($file in $testFiles) {
     $stdOutTask = $proc.StandardOutput.ReadToEndAsync()
     $stdErrTask = $proc.StandardError.ReadToEndAsync()
 
-    [PSCustomObject]@{ Name = $file.BaseName; Process = $proc; StdOutTask = $stdOutTask; StdErrTask = $stdErrTask; RunnerLog = $runnerLog; RunnerErr = $runnerErr }
+    # += rather than collecting the loop's output, because the throttle above
+    # has to inspect $runners WHILE the loop is still running.
+    $runners += [PSCustomObject]@{ Name = $file.BaseName; Process = $proc; StdOutTask = $stdOutTask; StdErrTask = $stdErrTask; RunnerLog = $runnerLog; RunnerErr = $runnerErr }
 }
 
 foreach ($r in $runners) {

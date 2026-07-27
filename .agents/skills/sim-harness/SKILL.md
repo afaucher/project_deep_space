@@ -151,3 +151,83 @@ func _physics_process(_delta: float) -> void:
 - **A solo perf run right after a full gate is not trustworthy** — use the
   in-gate figure. When a number looks alarming, A/B it before believing the
   change caused it.
+
+## 7. Running a long sim durably (and working while it runs)
+
+Empirically established 2026-07-27. A long sim is tens of minutes of wall
+clock; most of the ways it dies are tooling, not the sim.
+
+### Launching
+
+- **Never launch a long sim in a foreground tool call.** The Bash tool
+  defaults to a 120s timeout and caps at 600s, so a 30-minute sim is killed
+  mid-run — and a truncated run reads as a crash or a clean finish depending
+  on where it stopped. Launch with `run_in_background`, redirect to a log
+  (`> tmp/sim_<name>.log 2>&1`), and read the log after the completion
+  notification. This is exactly how a scheduled overnight run was set up
+  wrong once.
+- **Do not impose any wall-clock timeout of your own.** The sims are
+  frame-driven; under contention their DURATION stretches a long way while
+  their RESULTS do not change. An external timeout is the only mechanism that
+  can truncate an otherwise valid run.
+- Sequential, not parallel — they contend for CPU and share the data dir.
+- **Never poll the output CSV for progress.** `store_line` buffers so hard the
+  file reads back as ZERO lines several seconds into an active write.
+
+### What you may safely edit while a sim runs
+
+Godot caches a script for the life of the process: once loaded, a `.gd` is
+**never re-read from disk**. Loading `main.gd` transitively pulls in `ship.gd`,
+every director, the cluster code, `ai_tree_factory.gd`, `ship_catalog.gd` and
+the station hulls — all of which are therefore immune to mid-run edits.
+
+**The entire exposure is four things**, which are loaded LAZILY and so pick up
+whatever is on disk at first use:
+
+- `scripts/ships/missile.gd`
+- `scripts/missile_controller.gd`   (both first loaded on the first missile launch — potentially deep into a pirate sim)
+- `scripts/ai/leaves/broadcast_transponder_leaf.gd`  (first AI-tree build)
+- `dialogue/**`  (loaded per-NPC on promotion, and edits also trigger a full reimport under the running sim)
+
+Treat those as read-only while a sim runs. A parse error in one does NOT fail
+loudly: `load()` returns a non-null, unparsed script whose constants read as
+null, and the engine keeps running — silent corruption, damage far from cause.
+
+Everything else is safe: UI, tests, docs, and every script in the startup
+closure. **Running the full gate concurrently is safe too** — no corruption
+path, and sim correctness is contention-immune. Only perf figures are
+invalidated (`test_perf_baseline`, `test_pd_kill_wave_perf`, `perf_combat`);
+discard those from any gate overlapping a sim, in either direction.
+
+### Git traps while a sim holds a CSV open
+
+- `git checkout -- <held file>` FAILS (`unable to unlink`).
+- `git stash` touching `tactical_analysis/data/` **partially succeeds**: it
+  creates the stash entry, then fails to update the working tree, leaving the
+  file staged AND unstaged with the change captured in a stash. Unwinding that
+  by hand is worse than avoiding it.
+- Godot holds no lock on `.gd` files at all — editing and branch switching
+  always succeed, which is precisely why the four lazy-loaded files above are
+  exposed.
+
+### Hard isolation, when it is worth it
+
+For a multi-hour sweep you can run from a separate worktree so edits cannot
+reach it at all:
+
+```bash
+git worktree add --detach <dir> <commit>
+cp -r .godot <dir>/.godot          # NON-OPTIONAL, see below
+./Godot_v4.4.1-stable_win64.exe --headless --fixed-fps 60 --path <dir> --run-tactical-sim <name>
+```
+
+- The ~95MB engine exe does NOT need duplicating (it is gitignored; invoke the
+  main tree's exe with `--path`). Cost is ~250MB of tracked files.
+- **The `cp -r .godot` is mandatory and cheap (~2.5MB, <1s).** `.godot/` is not
+  tracked, and without `global_script_class_cache.cfg` every `class_name` type
+  fails to resolve — cascading parse errors that HANG the run and read as a
+  timeout in the summary. This is the CLAUDE.md signature exactly.
+- `res://` resolves to the worktree, so outputs land there with no leakage;
+  copy the CSVs back.
+- **A worktree captures COMMITTED state.** If the job is meant to test your
+  working tree, commit first or you are testing something else.

@@ -19,6 +19,11 @@ const Standing = preload("res://scripts/combat/standing.gd")
 
 const SCAN_INTERVAL_TICKS := 30
 const CHALLENGE_WINDOW_FRAMES := 1200 # ~20s @ 60Hz physics tick rate
+# How long a track must be CONTINUOUSLY unreporting before it is worth asking.
+# Comfortably longer than a datalink relay round (DATALINK_RELAY_HZ, phase
+# offset per ship) plus sensor-fusion settle, so an honest ship whose
+# transponder is merely a few ticks behind is never challenged at all.
+const SILENT_GRACE_FRAMES := 300 # ~5s @ 60Hz
 
 func tick(actor: Node, blackboard) -> int:
 	if actor == null or actor.is_dead:
@@ -37,12 +42,37 @@ func tick(actor: Node, blackboard) -> int:
 		return FAILURE
 
 	var challenged: Dictionary = blackboard.get_value("challenged", {})
+	# How long a track must stay UNREPORTED before it is worth asking. See
+	# SILENT_GRACE_FRAMES.
+	var silent_since: Dictionary = blackboard.get_value("challenge_silent_since", {})
 
 	for c_id in actor.active_contacts:
 		if challenged.has(c_id):
 			continue
 		var c: Dictionary = actor.active_contacts[c_id]
 		if c.get("standing", "") != Standing.UNREPORTED:
+			# Reporting (or judged some other way) -- forget any silence timer.
+			silent_since.erase(c_id)
+			continue
+
+		# A FRESHLY ACQUIRED TRACK IS NOT A SILENT ONE. Every contact begins
+		# UNREPORTED and only becomes NEUTRAL once the datalink relay actually
+		# delivers a transponder (DATALINK_RELAY_HZ, with a per-ship phase
+		# offset), so at campaign start a patrol sees EVERYTHING as unreporting
+		# for a moment -- the player, the haulers, and the station it is
+		# guarding -- and challenged all of them at once. That is the campaign
+		# playtest's "DEMAND IDENTIFY immediately on start", and the reason
+		# Patrol Alpha was observed hailing Ironhold.
+		#
+		# The offense is REFUSING to identify, which is a sustained state, so
+		# require the silence to be sustained before asking. This also makes the
+		# challenge cheap to satisfy honestly: anyone whose transponder is
+		# simply a few relay ticks behind is never asked at all.
+		var first_silent: int = silent_since.get(c_id, -1)
+		if first_silent < 0:
+			silent_since[c_id] = frame
+			continue
+		if frame - first_silent < SILENT_GRACE_FRAMES:
 			continue
 		if Ship.contact_age(c) > actor.FIRE_STALENESS_MAX:
 			continue
@@ -62,6 +92,16 @@ func tick(actor: Node, blackboard) -> int:
 		Hail.send(actor, target_node, {"verb": Hail.VERB_DEMAND, "rung": Hail.RUNG_IDENTIFY})
 		challenged[c_id] = {"expire_frame": frame + CHALLENGE_WINDOW_FRAMES}
 
+	# Drop silence timers for tracks we no longer hold at all, so a re-acquired
+	# contact starts its grace afresh rather than inheriting an old timestamp.
+	var stale_silent: Array = []
+	for k in silent_since:
+		if not actor.active_contacts.has(k):
+			stale_silent.append(k)
+	for k in stale_silent:
+		silent_since.erase(k)
+
+	blackboard.set_value("challenge_silent_since", silent_since)
 	blackboard.set_value("challenged", challenged)
 	return FAILURE
 
