@@ -49,6 +49,30 @@ func tick(actor: Node, blackboard) -> int:
 		# permanently-frozen ones).
 		if Ship.contact_age(contact, 0.0) > actor.FIRE_STALENESS_MAX:
 			continue
+		# THE AGGRESSION CAP (campaign playtest 2026-07-26, A3). HOSTILE is a
+		# COLOR, not a firing authorization, and this leaf used to treat the two
+		# as the same thing -- every path that could paint a contact red also
+		# pointed guns at it. That is how the playtest's player, flying clean,
+		# got shot by the home station for not answering an ID challenge: an
+		# ignored challenge posts NO_ID, NO_ID reads HOSTILE, and HOSTILE was
+		# the whole test.
+		#
+		# Standing.authorizes_force is the gate (see its offense-table note for
+		# why response_class could not be reused). The demand ladder is
+		# unaffected -- InterdictLeaf still intercepts and demands a stop on any
+		# HOSTILE, which is the intended enforcement for a capped offense; what
+		# changes is that when the ladder is refused, an uncapped offense falls
+		# through to Engage and a capped one does not. A NO_ID hull gets chased
+		# and hailed and refused docking, never shot.
+		#
+		# NO MATCHING WARRANT MEANS UNCAPPED, deliberately. Two live paths reach
+		# HOSTILE without one: a known-enemy flag (compute_standing rule 3 -- a
+		# declared pirate is engageable on sight, unchanged) and the eager
+		# same-tick cache stamps in take_damage/the aggression witness, which
+		# always post their warrant in the same breath, so the miss is at most a
+		# one-tick lag on a warrant that does authorize force anyway.
+		if not _force_authorized(actor, contact):
+			continue
 		var d = actor.position.distance_to(contact["pos"])
 		if d > engagement_radius:
 			continue
@@ -64,3 +88,17 @@ func tick(actor: Node, blackboard) -> int:
 	if actor.has_method("set_sensor_target"):
 		actor.set_sensor_target(best_id)
 	return SUCCESS
+
+# Resolve the warrant behind a HOSTILE contact and ask whether it puts weapons
+# on the table. Same subject-key derivation InterdictLeaf uses to pick its
+# demand patience (claimed name if we have received a transponder, else the
+# track signature) against the same per-observer, already-filtered
+# warrant_index -- so an unenforceable warrant, which never colored the contact
+# HOSTILE in the first place, cannot authorize force either.
+func _force_authorized(actor: Node, contact: Dictionary) -> bool:
+	var claimed_name: String = actor.active_transponders.get(contact.get("instance_id", -1), {}).get("name", "")
+	var skey: String = Standing.subject_key(claimed_name, contact.get("signature", {}))
+	var w: Dictionary = actor.warrant_index.get(skey, {})
+	if w.is_empty():
+		return true   # flag-declared enemy / eager stamp -- uncapped, see tick()
+	return Standing.authorizes_force(w.get("offense", ""))

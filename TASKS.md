@@ -248,9 +248,33 @@ guild quietly throttling itself out of the game.
 means in play. The doc's forgiveness half never shipped.
 → `design_ideas/2026-07-26-warrant_stickiness_audit.md`, mismatch 4
 
-### Campaign playtest items are documented, none implemented — *2026-07-26*
-Nine items across identity/standing, weapons safety, UI and naming. A1 (a
-station opens fire on the player at campaign start) is the severe one.
+### Campaign playtest: A1/A3 fixed, six items remain — *2026-07-26*
+Nine items across identity/standing, weapons safety, UI and naming. **A1/A3 (a
+station opens fire on the player at campaign start) is fixed and guarded** —
+three causes, all closed 2026-07-26/27: the challenge-expiry comms-range check
+(`f6cbaeb`), the aggression cap (`Standing.authorizes_force`, consumed by
+`AcquireTargetLeaf`), and identify-to-dock as the non-violent consequence that
+replaces it. Remaining: B (weapons safety — recommended next, small and
+bounded), A2, C1–C4, D1–D2, E.
+→ `design_ideas/2026-07-26-campaign_playtest.md`
+
+### The escalation ladder has no middle rung — *2026-07-27*
+A hull can ignore an identify challenge by flying away: `ChallengeLeaf` never
+claims the tick so the patrol lobs a demand and keeps flying its route, and
+`Interdict` only pursues contacts that are ALREADY hostile — so closing happens
+after the verdict instead of being how the verdict is earned. Now more load-
+bearing than when it was written: with the aggression cap in, NO_ID's only
+consequence is the docking denial. Fix is to have a challenge drive an approach,
+mirroring `Interdict`'s assign-a-job shape; balance risk is patrols abandoning
+routes, which needs an `economy_traffic`-scale check.
+→ `design_ideas/2026-07-26-campaign_playtest.md`, "the missing middle rung"
+
+### `compute_standing` returns a flat HOSTILE — *2026-07-27*
+Every consumer re-derives severity from the warrant, which is exactly how the
+tier came to be dropped at the targeting gate (playtest A3). `authorizes_force`
+fixes that one gate; carrying the tier on the standing result would fix the
+shape once instead of at each gate. Touches every colour and targeting consumer,
+so it is a real piece of work — deferred until a second gate needs it.
 → `design_ideas/2026-07-26-campaign_playtest.md`
 
 ---

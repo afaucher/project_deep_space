@@ -74,6 +74,8 @@ static func get_controller_name(station) -> String:
 #                                        silently expire on the very next tick (_update_docking_grant's zone check), which
 #                                        read as "permission granted then nothing happened" -- surface it instead
 #   {"outcome": "no_berths"}          -- station.issue_docking_grant() denied (pool full)
+#   {"outcome": "no_id"}              -- requester is running dark; a controlled port won't berth an unidentified hull
+#                                        (Ship.issue_docking_grant's identify-to-dock rule -- light the transponder and re-ask)
 #   {"outcome": "stalled"}            -- MINIMAL style, still within its stall window; no grant issued, no pool call wasted
 # station.issue_docking_grant(ship) is the M32 single pool allocator
 # (ship.gd) -- called here and ONLY here, so the dialogue path and the
@@ -116,6 +118,15 @@ static func request_docking(station, ship) -> Dictionary:
 		# Stall window has elapsed -- fall through to a real request. Leave the
 		# counter at/above the threshold so subsequent requests keep succeeding
 		# (a single retry clears it, per the roadmap: "re-request to retry").
+
+	# Identify-to-dock (see Ship.issue_docking_grant). Checked HERE as well as in
+	# the allocator purely so the player gets the right sentence: the allocator
+	# returns a bare null for every denial, and reporting "no open berths" to a
+	# dark ship sitting in front of an empty port is the kind of wrong-reason
+	# message that sends someone hunting a bug in the berth pool.
+	if ship.has_method("get_active_transponder_data") and ship.has_method("get_comms_range") \
+			and ship.get_comms_range() > 0.0 and ship.get_active_transponder_data().is_empty():
+		return {"outcome": "no_id"}
 
 	var grant = station.issue_docking_grant(ship, true)
 	if grant == null:

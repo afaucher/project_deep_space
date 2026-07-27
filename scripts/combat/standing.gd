@@ -309,20 +309,59 @@ const _RESPONSE_SEVERITY := {RESPONSE_INTERCEPT: 1, RESPONSE_MAX: 2}
 # silently converted that accident into a permanent brand. Do not add this to
 # ASSAULT and friends: shooting someone and then squawking is laundering, not
 # resolution.
+#
+# `authorizes_force` is the AGGRESSION CAP (campaign playtest 2026-07-26, item
+# A3 -- design_ideas/2026-07-26-campaign_playtest.md). It answers a question
+# `response` does NOT: may a holder of this warrant SHOOT the subject on the
+# strength of the warrant alone?
+#
+# It has to be its own flag, because response class does not separate the two
+# groups. ASSAULT is INTERCEPT-class yet obviously authorizes force -- it means
+# "they fired on us", and a ship that cannot shoot back at someone shooting it
+# is broken. NO_ID is INTERCEPT-class and obviously does not: not identifying
+# yourself is the cluster's most common and most forgivable offense, and the
+# playtest's actual experience was being shot by the home station for it.
+# Response class is about PATIENCE (how long the demand ladder runs before it
+# gives up); this is about whether guns are on the table at the end of it.
+#
+# The rule that generated the column: force answers force, or a MAX-class
+# offense, or an explicit operator order.
+#   ASSAULT / SUSTAINED_ASSAULT  -- they used violence. Self-defense.
+#   ARMED_ROBBERY               -- MAX-class; they took cargo under guns.
+#   OPERATOR_FLAGGED            -- the player MARKed them; that IS the order.
+#   ARMED_THREAT                -- they demanded WE stop. Threat, not violence:
+#                                  interdict them, do not open fire.
+#   NO_ID / SPEED_VIOLATION     -- administrative. The consequence is being
+#                                  denied docking (Ship.issue_docking_grant),
+#                                  not being shot.
+#
+# Defaults to FALSE for anything not listed, deliberately. A cap should fail
+# closed: a new offense whose author forgets this column produces "my patrol
+# won't shoot", which is loud and trivial to diagnose, rather than "my patrol
+# shot a civilian", which is the bug this exists to fix and which took a
+# playtest to notice. Note the CALLER must still allow HOSTILE-with-no-warrant
+# (a known-enemy flag, e.g. a Jolly Roger) -- that path has no offense string
+# at all and is not capped. See acquire_target_leaf.gd.
 const _OFFENSE_TABLE := {
-	OFF_ASSAULT: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0},
-	OFF_SUSTAINED_ASSAULT: {"response": RESPONSE_MAX, "expires_after": -1.0},
+	OFF_ASSAULT: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0, "authorizes_force": true},
+	OFF_SUSTAINED_ASSAULT: {"response": RESPONSE_MAX, "expires_after": -1.0, "authorizes_force": true},
 	OFF_ARMED_THREAT: {"response": RESPONSE_INTERCEPT, "expires_after": 1800.0},
-	OFF_ARMED_ROBBERY: {"response": RESPONSE_MAX, "expires_after": -1.0},
+	OFF_ARMED_ROBBERY: {"response": RESPONSE_MAX, "expires_after": -1.0, "authorizes_force": true},
 	OFF_NO_ID: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "self_resolves_on_id": true},
 	OFF_SPEED_VIOLATION: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0},
-	OFF_OPERATOR_FLAGGED: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0},
+	OFF_OPERATOR_FLAGGED: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "authorizes_force": true},
 }
 
 # True for an offense that ends when the subject starts reporting a
 # transponder. See the table note above and warrants.md's NO_ID row.
 static func self_resolves_on_id(offense: String) -> bool:
 	return _OFFENSE_TABLE.get(offense, {}).get("self_resolves_on_id", false)
+
+# The aggression cap. True for an offense whose holder may open fire on the
+# strength of the warrant alone. See the _OFFENSE_TABLE note above for why this
+# is not derivable from response_class, and why it defaults false.
+static func authorizes_force(offense: String) -> bool:
+	return _OFFENSE_TABLE.get(offense, {}).get("authorizes_force", false)
 
 static func response_class(offense: String) -> String:
 	return _OFFENSE_TABLE.get(offense, {}).get("response", RESPONSE_INTERCEPT)

@@ -104,6 +104,45 @@ missing, and it is what gives a capped response teeth without violence:
   anonymous or you can dock, not both — and it is exactly the kind of pressure a
   station can apply on its own authority.
 
+#### BUILT 2026-07-27
+
+All three landed together, because they are one mechanism: capping the response
+to `NO_ID` removes the (wrong) consequence, so the right consequence has to
+arrive in the same change or "run dark" becomes free.
+
+- **`Standing.authorizes_force(offense)`** — the cap itself, a new column on the
+  offense table. `AcquireTargetLeaf` consults it before treating a HOSTILE
+  contact as a weapons target. A contact HOSTILE with **no** matching warrant
+  (a declared enemy flag, or the one-tick eager cache stamp) stays uncapped.
+- **Identify to dock** — `Ship.issue_docking_grant` denies a hull that is not
+  reporting a transponder, ahead of the idempotent-renewal branch so going dark
+  also stops a held grant being renewed. `PortControl` surfaces a distinct
+  `no_id` outcome so the player is told the real reason rather than "no berths".
+- **Tests** — `test_aggression_cap` (the table, plus the leaf ticked directly
+  against an identical contact so only the offense varies),
+  `test_patrol_challenge` phases 4–5 (the comms-range regression guard, with a
+  non-vacuity assertion that the subject is still SEEN, and the live NO_ID
+  self-resolution), `test_docking_permission`'s identify-to-dock block.
+
+**The plan above was wrong on one point, and it matters.** "Weapons only for
+`RESPONSE_MAX`" would have broken self-defense: `ASSAULT` — *they fired on us* —
+is `RESPONSE_INTERCEPT`, so a ship being shot at could not have shot back.
+Response class turns out to encode **patience** (how long the demand ladder
+runs), not **permission**, and the two genuinely cross: `ASSAULT` and `NO_ID`
+share a response class and must differ on force. Hence a separate column rather
+than a reinterpretation of the existing one. It defaults to `false`, so a future
+offense whose author forgets it produces "my patrol won't shoot" — loud and
+trivially diagnosed — rather than another silent civilian-shooting.
+
+Scoped deliberately to **identity, not standing**: a berth is denied for running
+dark, not for carrying a warrant. Denying port access to every hull that has
+ever been in a fight is a much larger economic change (repair and cargo flow,
+pirates included) and wants its own measured pass.
+
+Still open: NO_ID's *effectiveness* now rests entirely on the docking denial,
+since nothing shoots and nothing pursues. If that proves too weak in play, the
+missing middle rung below is the fix, not a higher response class.
+
 Remaining open, and bigger than the above: **`compute_standing` returning a flat
 HOSTILE may itself be the wrong shape.** Every caller has to re-derive severity
 from the warrant, which is precisely how the tier came to be dropped at the

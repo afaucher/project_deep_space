@@ -22,6 +22,9 @@ else
 	elif outcome == "stalled"
 		Port Control: Stand by...
 		=> start
+	elif outcome == "no_id"
+		Port Control: Negative. We do not berth a hull we cannot name. Light your transponder and re-request.
+		=> start
 	else
 		Port Control: Negative, we have no open berths. Hold position.
 		=> start

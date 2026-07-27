@@ -384,6 +384,54 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 	if zone.is_empty():
 		return null
 
+	# IDENTIFY TO DOCK (campaign playtest 2026-07-26 -- the enforcement model in
+	# design_ideas/2026-07-26-campaign_playtest.md). A controlled port does not
+	# berth a hull that will not say who it is.
+	#
+	# This is the OTHER half of the aggression cap (Standing.authorizes_force).
+	# Capping the response to NO_ID meant a patrol may no longer shoot a silent
+	# hull -- which, on its own, would make not identifying yourself entirely
+	# consequence-free. The consequence belongs here instead: run dark and you
+	# keep your anonymity and lose the ports. Anonymous or docked, not both.
+	# It is also pressure a station applies on its OWN authority, needing no
+	# patrol and no violence, which is the shape the rest of the model wants.
+	#
+	# Deliberately scoped to IDENTITY, not standing. Denying a berth to anyone
+	# carrying any warrant is a much larger economic change (every hull that has
+	# ever been in a fight loses port access, pirates included, with knock-on
+	# effects on repair and cargo flow that want their own measured pass) and
+	# nobody asked for it yet. One rule: are you reporting?
+	#
+	# The check reads the requester's own transponder state rather than THIS
+	# station's active_transponders record. A grant request is a comms act from
+	# inside the control zone, so the link is a given; keying off the relay's
+	# per-tick record instead would make berthing depend on DATALINK_RELAY_HZ
+	# timing and false-deny a ship that has been reporting honestly all along.
+	# Permissionless (zone-less) stations are unaffected -- they return null
+	# above, before this runs.
+	#
+	# IT IS A REFUSAL TEST, NOT A SILENCE TEST -- a hull with no WORKING radio
+	# (get_comms_range() <= 0.0: comms shot out, unpowered, or absent, the same
+	# capability gate ChallengeLeaf and InterdictLeaf use before trying to hail)
+	# is not refusing to identify, it is unable to. Denying those a berth bricks
+	# the one ship that most needs one: battle damage takes comms out, and a
+	# hull that cannot dock cannot be repaired, so it can never get its radio
+	# back. test_station_repair_economy caught exactly that -- its damaged
+	# shuttle limps in with a dead comms_array specifically to have it fixed.
+	# The symmetry with the challenge fix is deliberate: silence we cannot hear
+	# is not evidence, and silence they cannot break is not refusal.
+	#
+	# The cost of that carve-out is an exploit with a real price: destroy your
+	# own comms and you may berth unidentified. You also lose hailing, the
+	# datalink, and every dialogue -- an expensive way to stay anonymous, and a
+	# far better story than a repair deadlock.
+	if ship.has_method("get_active_transponder_data") and ship.has_method("get_comms_range") \
+			and ship.get_comms_range() > 0.0 and ship.get_active_transponder_data().is_empty():
+		if verbose:
+			print("[PORT] %s: DENIED %s -- has a radio and is not reporting" % [
+				zone.get("authority", "?"), ship.name])
+		return null
+
 	# Idempotent re-request: a ship that already holds a live grant from THIS
 	# authority gets the SAME grant back with a fresh countdown, not a second
 	# trip through the pool (which would either double-book it a new slip or

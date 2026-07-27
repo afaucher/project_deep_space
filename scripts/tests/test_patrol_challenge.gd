@@ -125,7 +125,176 @@ func setup(main) -> void:
 	_assert(never_challenged and not was_tracked_as_challenge,
 		"a dark contact outside any controlled zone is never challenged (pending_demand=%s, tracked_by_challenge=%s)" % [str(outside_ship.pending_demand), was_tracked_as_challenge])
 
+	await _phase_left_comms_range(station, patrol, patrol_tree)
+	await _phase_ignored_in_range(station, patrol, patrol_tree)
+
 	_finish()
+
+func _noid_warrants(observer: Node) -> int:
+	var n: int = 0
+	for key in observer.warrants:
+		if observer.warrants[key].get("offense", "") == Standing.OFF_NO_ID:
+			n += 1
+	return n
+
+# ---------------------------------------------------------------------------
+# Phase 4 -- REGRESSION GUARD for the challenge-expiry comms-range check
+# (commit f6cbaeb; campaign playtest A1/A3, design_ideas/2026-07-26-campaign_
+# playtest.md).
+#
+# A hull is challenged legitimately inside the zone and then simply LEAVES, as
+# anyone would. The window lapses while it is out of comms range. Before the
+# fix, ChallengeLeaf's expiry path posted a NO_ID warrant anyway -- convicting
+# it of refusing to answer a question the patrol could no longer hear the
+# answer to. compute_standing then read that warrant as HOSTILE and the home
+# station opened fire. "If you move, the station shoots you" was literal.
+#
+# THE BAND IS THE WHOLE TEST. Comms reach is deliberately shorter than sensor
+# reach (test_patrol_id_read measures both), and parking the subject between
+# the two is what makes this guard non-vacuous: it stays a live, UNREPORTED
+# contact the patrol can SEE, so the buggy code would post, and only the range
+# check stops it. Teleport it out of SENSOR range too and the track is dropped
+# entirely -- standing goes "" rather than UNREPORTED, the old code would not
+# have posted either, and the test passes against the very bug it exists to
+# catch.
+#
+# The band is built by giving the SUBJECT a weak radio rather than by flying it
+# far away, because a link is capped by the weaker of the two sets
+# (ship.gd's datalink loop: `link_range = min(self_comms, their_comms)`, and
+# ChallengeLeaf's expiry check mirrors it exactly). Two Frigates both carry
+# 30000u radios and 40000u sensors, so the natural band sits past 30000 -- and
+# out there a DARK hull is not reliably detected at all, which is exactly the
+# vacuum described above. Capping the subject's own radio moves the same band
+# in to a distance where the track is solid, and exercises the identical
+# min()-of-two-ranges code path. A small hull with a cheap radio produces this
+# situation for real; nothing here is contrived for the test.
+const SUBJECT_COMMS_RANGE := 8000.0
+const BAND_DISTANCE := 15000.0   # > the 8000 link, well inside 40000 sensor reach
+
+func _phase_left_comms_range(station: Node, patrol: Node, patrol_tree: Node) -> void:
+	print("--- Phase 4: challenged, then leaves comms range -> NO warrant ---")
+	var noid_before: int = _noid_warrants(patrol)
+
+	var leaver = _make_ship("Leaver", 604, Vector2(2000, 500), ["TEAM_LEAVER"])
+	leaver.set_transponder_active(false)
+	for c in leaver.get_components_by_type("comms"):
+		c["range"] = SUBJECT_COMMS_RANGE
+	_assert(leaver.get_comms_range() == SUBJECT_COMMS_RANGE,
+		"phase 4 (setup): the leaver carries a short-range radio (%.0fu), so the link caps well inside sensor reach" % SUBJECT_COMMS_RANGE)
+
+	var trk: String = _trk_for(leaver)
+	var challenged := false
+	for i in range(900):
+		await main_node.get_tree().physics_frame
+		if patrol_tree.blackboard.get_value("challenged", {}).has(trk):
+			challenged = true
+			break
+	_assert(challenged, "phase 4: the leaver is challenged while in-zone (setup for the guard)")
+
+	# Out past comms, still inside sensor reach -- measured from the patrol's
+	# CURRENT position, since the patrol is free to have moved.
+	var far_pos: Vector2 = patrol.position + Vector2.RIGHT * BAND_DISTANCE
+	# Wake-safe teleport (CLAUDE.md's sleeping-RigidBody2D gotcha): a settled
+	# body's collision shape does not follow a plain `.position =`, and the
+	# patrol's sensor queries would keep finding it at the OLD spot forever.
+	var xform: Transform2D = leaver.global_transform
+	xform.origin = far_pos
+	PhysicsServer2D.body_set_state(leaver.get_rid(), PhysicsServer2D.BODY_STATE_TRANSFORM, xform)
+	leaver.position = far_pos
+	leaver.linear_velocity = Vector2.ZERO
+	leaver.sleeping = false
+
+	# Outlast the challenge window (1200 frames) with room to spare.
+	for i in range(1500):
+		await main_node.get_tree().physics_frame
+
+	var still_open: bool = patrol_tree.blackboard.get_value("challenged", {}).has(trk)
+	_assert(not still_open, "phase 4: the challenge window closed (entry voided, not left pending)")
+
+	# Non-vacuity: the patrol must still SEE it, and still read it UNREPORTED.
+	# If either fails, the guard proves nothing and says so.
+	var view: Dictionary = _find_contact(patrol, leaver)
+	var gap: float = patrol.position.distance_to(leaver.position)
+	_assert(not view.is_empty(),
+		"phase 4 (non-vacuity): the leaver is STILL a live contact at %.0fu -- seen but unheard, the band this guard needs" % gap)
+	_assert(view.get("standing", "") == Standing.UNREPORTED,
+		"phase 4 (non-vacuity): and still reads UNREPORTED (got '%s') -- so the old code WOULD have posted" % view.get("standing", ""))
+
+	_assert(_noid_warrants(patrol) == noid_before,
+		"phase 4: NO NO_ID warrant against a hull that was out of comms range when the window lapsed -- silence we cannot hear is not evidence")
+
+	_free_ship(leaver)
+
+# ---------------------------------------------------------------------------
+# Phase 5 -- the positive control for phase 4, and the LIVE proof of NO_ID
+# self-resolution.
+#
+# Same challenge, but the subject stays in comms range and stays dark. That is
+# a real refusal, so the warrant SHOULD land -- without this, phase 4 would
+# also pass against a build that had simply stopped posting NO_ID at all.
+#
+# Then it lights its transponder. warrants.md says NO_ID "resolves itself the
+# moment the subject reports a transponder... no separate revocation path to
+# build for it," and test_warrant_identity_change proves that at the
+# compute_standing level. What it cannot prove is that the LIVE path agrees:
+# the transponder has to reach the patrol over the datalink relay, the warrant
+# index has to be rebuilt, and the fusion tick has to recompute this track's
+# standing. That chain is what the enforcement model leans on -- NO_ID is
+# supposed to self-resolve most of the time -- so it is worth a live test.
+# ---------------------------------------------------------------------------
+func _phase_ignored_in_range(station: Node, patrol: Node, patrol_tree: Node) -> void:
+	print("--- Phase 5: challenged in range and ignored -> warrant; then relight -> self-resolves ---")
+	var noid_before: int = _noid_warrants(patrol)
+
+	var ignorer = _make_ship("Ignorer", 605, Vector2(2500, 1200), ["TEAM_IGNORER"])
+	ignorer.set_transponder_active(false)
+
+	var trk: String = _trk_for(ignorer)
+	var challenged := false
+	for i in range(900):
+		await main_node.get_tree().physics_frame
+		if patrol_tree.blackboard.get_value("challenged", {}).has(trk):
+			challenged = true
+			break
+	_assert(challenged, "phase 5: the ignorer is challenged while in-zone")
+
+	var posted := false
+	for i in range(1500):
+		await main_node.get_tree().physics_frame
+		if _noid_warrants(patrol) > noid_before:
+			posted = true
+			break
+	_assert(posted, "phase 5: ignoring the challenge IN RANGE does post a NO_ID warrant (the mechanism still works -- phase 4's control)")
+
+	var hostile := false
+	for i in range(300):
+		await main_node.get_tree().physics_frame
+		if _find_contact(patrol, ignorer).get("standing", "") == Standing.HOSTILE:
+			hostile = true
+			break
+	_assert(hostile, "phase 5: the warrant colors the contact HOSTILE")
+
+	# Now light up. The subject_key gap IS the resolution mechanism: the warrant
+	# was filed under `sig:` (a NO_ID subject has no claimed name by
+	# definition), lookups now ask for `name:`, and compute_standing's signature
+	# fallback deliberately skips offenses marked self_resolves_on_id.
+	ignorer.set_transponder_active(true)
+	var resolved := false
+	for i in range(600):
+		await main_node.get_tree().physics_frame
+		if _find_contact(patrol, ignorer).get("standing", "") == Standing.NEUTRAL:
+			resolved = true
+			break
+	_assert(resolved,
+		"phase 5: lighting the transponder SELF-RESOLVES the NO_ID live -- back to NEUTRAL with no revocation (got '%s')"
+			% _find_contact(patrol, ignorer).get("standing", ""))
+
+	_free_ship(ignorer)
+
+func _free_ship(s: Node) -> void:
+	spawned.erase(s)
+	if is_instance_valid(s):
+		s.queue_free()
 
 func _trk_for(ship: Node) -> String:
 	return "TRK-%03d" % (abs(ship.get_instance_id()) % 1000)
