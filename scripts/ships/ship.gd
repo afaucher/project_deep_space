@@ -1901,9 +1901,15 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 			if COMBAT_DEBUG: print("[Damage] Raycast completely missed all internal components!")
 			
 
-	# Check death condition (reactor dead)
+	# Check death condition (reactor dead). The console line for this lives in
+	# hulk() now, NOT here -- one print per death at a single choke point that
+	# also covers the paths this branch never saw (most importantly the thermal
+	# one, which drains reactor health directly and never comes through
+	# take_damage at all). Deliberately not two prints: every PD-killed missile
+	# runs this branch, and per-death console I/O in a kill-wave is the
+	# documented 278ms-in-one-frame spike (implementation_plans/
+	# m45c_pd_kill_wave_perf.md), so the count must not go up.
 	if is_sys_destroyed("reactor") or is_sys_destroyed("hull"):
-		print("[Damage] ", name, " suffers catastrophic failure and dies.")
 		hulk()
 
 # M28 -- kinetic collision damage. Fires on THIS body when its collision shape
@@ -1981,6 +1987,36 @@ func hulk() -> void:
 	# per-frame) and doesn't assume which host, if any, is repairing us.
 	if not _eng_was_hulk_logged:
 		log_event(ENG_LOG_SEVERITY_CRIT, "Catastrophic failure -- all systems dead")
+		# ...and a CROSS-SHIP-VISIBLE line, unconditionally. log_event above
+		# writes only this ship's own engineering panel, which is toggle-gated
+		# and useless for an NPC nobody is looking at -- the same gap the
+		# reactor-overheat attribution comment describes. A ship dying is rare
+		# and significant, so this is one line per death, not a debug toggle.
+		#
+		# WHY THIS EXISTS: a thermally-dead hull was completely silent. Nothing
+		# logged, and because JobRunnerLeaf.tick returns FAILURE for a dead
+		# actor, the corpse keeps its velocity and coasts in a straight line
+		# forever -- test_visitor_itinerary's shuttle flew THROUGH its own exit
+		# point 159 units away without despawning, which reads in a log as a
+		# navigation failure and is nothing of the sort. Over a 180-minute
+		# economy_traffic run, haulers cooking themselves would have shown up
+		# only as unexplained low throughput.
+		#
+		# Identified via debug_label() per CLAUDE.md -- omniscient, and carries
+		# the Cluster_<record_id> name a director's ledger can be matched on.
+		# heat/health are included because they SEPARATE the causes: a hull at
+		# max heat with most of its structure intact cooked its own reactor,
+		# which looks nothing like being shot apart and is currently impossible
+		# to tell apart after the fact.
+		var struct_health: float = 0.0
+		var struct_max: float = 0.0
+		for c in ship_components:
+			struct_health += maxf(0.0, c.get("health", 0.0))
+			struct_max += c.get("max_health", 0.0)
+		var cause: String = last_damage_attacker_name if last_damage_attacker_name != "" else "unattributed"
+		print("[Death] %s hulked -- cause '%s' (attacker iid %d), heat %.1f/%.1f, structure %.0f/%.0f, at %s" % [
+			debug_label(), cause, last_damage_attacker_iid,
+			current_heat, max_heat, struct_health, struct_max, str(position)])
 		_eng_was_hulk_logged = true
 	var tree = get_tree()
 	if tree != null:
