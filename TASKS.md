@@ -298,3 +298,20 @@ four-layer model we still have no geometry for.
 
 Also still true: `MAX_DAMAGING_STATION_CONTACTS_PER_CYCLE` is 0.50 and the
 worst surviving case is 0.067 — tighten it, or it will certify a regression.
+
+### Interlock disabled pending hold points — *2026-07-26, decided*
+`INTERLOCK_ENABLED = false` in `Ship.issue_docking_grant`. Code and full
+measurement retained at the call site; only the reservation write is off.
+
+Shipping config is **cut-out only**: total station HP lost across
+`test_dock_approach`'s six scenarios **851 -> 15 (-98%)**, and five of six
+scenarios now take ZERO damaging contacts. Projected effect on the economy:
+self-repair ~12.5 lots/hr -> ~0.25, against a combined authored REFINED+GOODS
+margin of ~1.33/hr — i.e. this should flip the cluster from structurally
+insolvent (repair ~9x the surplus) to solvent. **Projection, not measured** —
+confirm with a 180-min `economy_traffic` run against the 12.54 baseline.
+
+Re-enable the interlock together with HOLD POINTS, not before. Every duration
+tried was a net negative (long: ships pile up waiting; short: more hold grants
+at once so they pile up arriving) because denying or clearing a ship never
+tells it WHERE TO BE.

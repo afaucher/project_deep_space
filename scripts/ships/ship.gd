@@ -412,7 +412,31 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 		# release condition needs no new machinery -- it was simply never
 		# consulted here. This is the rendezvous literature's HOLD POINT,
 		# expressed as a grant interlock rather than a waypoint.
-		# KEPT ON BEHAVIOURAL GROUNDS, WITH A MEASURED COST. Isolation runs
+		# DEPARTURE INTERLOCK -- BUILT, MEASURED, AND DELIBERATELY DISABLED
+		# PENDING HOLD POINTS (2026-07-26). The code below is left intact
+		# because the behaviour is wanted and the finding is expensive to
+		# re-derive; only the reservation write is removed.
+		#
+		# It is correct in intent: today a slip frees the instant the bay
+		# releases, so the next arrival is cleared to fly the corridor inbound
+		# while the previous occupant is still outbound along the same axis --
+		# the port schedules a head-on conflict on every berth turnover.
+		#
+		# But it measures as a NET NEGATIVE, at every duration tried:
+		#   no interlock            30 cycles / 504s /  15 HP   <- best
+		#   interlock, full zone    30 cycles / 577s / 247 HP
+		#   interlock, 600u release 27 cycles / 600s / 116 HP   <- fails count
+		# Long, and ships pile up waiting; short, and more hold grants at once
+		# so they pile up arriving. Duration is not the variable: denying (or
+		# clearing) a ship does not tell it WHERE TO BE, and without that the
+		# holding pattern forms wherever the hulls happen to be -- next to the
+		# station. The rendezvous literature pairs an interlock with HOLD
+		# POINTS for exactly this reason; we built the first half, and half is
+		# worse than neither.
+		#
+		# Re-enable together with hold points, not before. See TASKS.md.
+		var INTERLOCK_ENABLED := false
+		# Original rationale, retained. Isolation runs
 		# (test_dock_approach, 2026-07-26) show cut-out ALONE is strictly
 		# better: 15 HP lost cluster-wide vs 255 with the interlock on, and
 		# ~70s faster. The interlock is a net negative today because denying a
@@ -456,7 +480,7 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 			# So duration is not the variable. Every interlock variant is worse
 			# than none because ships -- denied or newly cleared -- have nowhere
 			# assigned to be. Hold points, not tuning.
-			if dsid != "":
+			if dsid != "" and INTERLOCK_ENABLED:
 				reserved_slips[dsid] = "%s (departing)" % s.name
 
 	var free_bays: Array = []
