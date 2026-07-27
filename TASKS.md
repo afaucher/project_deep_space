@@ -337,3 +337,33 @@ hysteresis — exactly what the zoned corridor gate already has and this did not
 
 This is the mechanism the unzoned outposts (~45% of the economy's repair
 drain) and the departure interlock are both waiting on. Worth finishing.
+
+### Approach fix + arrival latch — WORKS, blocked on two time budgets — *2026-07-27*
+Stashed as `approach-fix-with-latch` (`git stash list`). **Best result yet and
+the first that passes `test_dock_approach` outright**, all six scenarios
+completing their cycles:
+
+| | shipped | with latch |
+|---|---|---|
+| total station HP | 238 | **86** (851 baseline, **-90%**) |
+| traffic + rocks | 0.43% | **0.14%** |
+| traffic / SmallStation | 0.01% | **0.00%** |
+| solo / SmallStation | 4 cyc / 223s | 4 cyc / 320s |
+
+The latch is what the earlier attempt lacked: `_cruise_toward` has no arrival
+condition, so a hull reaching the fix overshot and orbited, `lateral`
+oscillated across the threshold, and it dithered between fix and seat forever.
+Latch on arrival at the fix; drop it only if the hull ends up genuinely behind
+the berth.
+
+**BLOCKED ON (unverified hypothesis):** `test_nav_gauntlet` still fails at
+Deepcut and Slag Bay, `test_visitor_itinerary` at EXIT_AT — but the visitor now
+gets to **640 units from the exit** (was 15,046) and nav_gauntlet is down from
+three stations to two. Solo cycle time is **+43%** (223s -> 320s) because the
+fix adds a genuine detour, and both those tests have budgets calibrated to the
+old direct approach. **Verify that before touching the budgets** — "the test
+timeout is wrong" is exactly the reasoning that needs checking, not assuming.
+
+Next: instrument whether those two are timing out mid-progress or genuinely
+stuck, then either widen the budgets with justification or shorten the detour
+(fix at 1.5x standoff instead of 2x).
