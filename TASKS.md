@@ -13,7 +13,46 @@ Conventions:
 - Dates are when the thread was opened or last moved.
 - Delete an entry when it lands. Git remembers; this file should stay short.
 
-Last swept: 2026-07-26.
+Last swept: 2026-07-27.
+
+---
+
+## GOAL: collisions below the economic surplus — *set 2026-07-27*
+
+**Station self-repair must cost less than the cluster's trade surplus.** Today
+it costs ~9x more, which is why the economy cannot be fixed by tuning rates:
+every throughput gain is spent on hull repair.
+
+| | value | source |
+|---|---|---|
+| authored REFINED+GOODS margin | **1.33 lots/hr** | `home_cluster.gd` stage-0 tally |
+| self-repair, baseline | 12.54 lots/hr | `economy_traffic`, 180 min |
+| **required reduction** | **>= 89%** | |
+
+**Acceptance (the real one):** `economy_traffic` self-repair < 1.33 lots/hr
+with delivery count holding. Read BOTH columns — a change that suppresses
+trade cuts repair too and is not a win.
+
+**Proxy (the fast one, ~190s):** `test_dock_approach` total station HP
+**<= 90**, derived as 851 x (1.33 / 12.54). Plus every scenario completing its
+cycle count, gated by `test_nav_gauntlet` and `test_visitor_itinerary` — the
+harness passed while both were broken, so totals alone never clear a change.
+
+| variant | total HP | vs goal |
+|---|---|---|
+| baseline | 851 | 9.5x over |
+| shipped (zoned cut-out) | 238 | 2.6x over |
+| **stashed `approach-fix-with-latch`** | **86** | **under** — guards fail |
+
+Nearest path to the goal is making the stashed variant pass its guards, then
+confirming against the economy sim rather than the proxy.
+
+**Collision avoidance generally is the wider lever** — it benefits every ship,
+not just docking. Current `Steering._avoidance` does proper CPA (summed radii,
+relative velocity, bounded lookahead) but is KINEMATIC: it commits to one
+perpendicular dodge against the single worst threat and never asks whether the
+hull can physically execute it in time. Multi-path projection + slowing to
+clear all threats is the natural successor; worth a research pass.
 
 ---
 
