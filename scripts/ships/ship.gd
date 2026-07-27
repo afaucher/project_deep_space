@@ -79,6 +79,29 @@ const ROTATION_TRACKING_GAIN := 10.0  # required_alpha = omega_error * this -- h
 # but the formulas that feed them are shared across every ship and live here.
 const REACTOR_HEAT_COEFFICIENT := 2.0 # reactor_heat = this * reactor power slider (0-1)
 const OVERHEAT_DAMAGE_RATE := 10.0    # HP/sec drained from reactors while current_heat is pegged at max_heat
+# Thermal self-throttle band (see _thermal_throttle_cap / the block in
+# _physics_process). Full throttle below EASE_START of max_heat, ramping to the
+# applicable floor by EASE_FULL.
+const THERMAL_EASE_START := 0.6       # heat fraction where easing off begins
+const THERMAL_EASE_FULL := 0.9        # heat fraction where the floor is reached
+# 0.6 sits just under the ~0.69 heat-neutral throttle, so a saturated hull
+# actively COOLS instead of merely heating slower -- the whole point.
+const THERMAL_CRUISE_FLOOR := 0.6
+# AN EMERGENCY MOVES THE SET POINT, IT DOES NOT RAISE THE CEILING. A hull about
+# to hit something gets the FULL throttle range and simply tolerates being much
+# hotter before it starts easing off -- which is what "run hot to save yourself"
+# actually means, and it leaves the self-throttle intact at the top of the band
+# where it is protecting the reactor rather than the schedule.
+#
+# Capping emergency throttle instead was tried at two values and measured badly
+# both times. At 0.85: 29/30 cycles at the busy station, bit-identical across
+# reruns, so a real ~12% throughput cost rather than noise. At 0.90 it got WORSE
+# rather than better -- 27 cycles and station HP 7.7 -> 562.4 -- because a hull
+# that cannot complete a dodge at the speed it committed to arrives badly
+# aligned and shoves, which is the same non-monotonic trap widening the docking
+# cone fell into. A ceiling mid-manoeuvre is the wrong instrument.
+const THERMAL_EMERGENCY_EASE_START := 0.85
+const THERMAL_EMERGENCY_EASE_FULL := 1.0
 const STRUCTURE_DESPIN_RATE := 0.15   # rad/s^2 a live STRUCTURE sheds residual spin at (see the despin block in _physics_process)
 const PASSIVE_COMPONENT_HEAT := 0.1   # flat heat leak per powered, alive, non-hull component
 const PASSIVE_COMPONENT_EM := 0.5     # flat EM leak per powered, alive, non-hull component
@@ -578,6 +601,11 @@ func _init() -> void:
 
 var target_thrust: float = 0.0
 var target_velocity: float = 0.0
+
+# Frame-scoped "I am about to hit something" flag, consumed every physics tick.
+# Raises the thermal self-throttle's floor (never removes it) -- see the
+# thermal-self-throttle block in _physics_process.
+var throttle_emergency: bool = false
 var target_heading: float = 0.0
 var steering_mode: int = 0 # 0 = Smooth, 1 = Combat
 var linear_mode: int = 0 # 0 = Throttle, 1 = Velocity
@@ -1972,6 +2000,24 @@ func _on_body_entered(other: Node) -> void:
 	# fault heuristic + a warning tier, not an instant HOSTILE mark.
 	take_damage(damage, hit_pos, hit_dir, "kinetic", -1)
 
+# Throttle ceiling this hull may spend right now, from how hot it already is.
+# 1.0 below THERMAL_EASE_START of max_heat, ramping to the applicable floor by
+# THERMAL_EASE_FULL. `throttle_emergency` picks the higher floor.
+#
+# Note it caps rather than commands: a hull with nothing to do still coasts at
+# zero. This only bites when something is asking for more thrust than the
+# thermal budget can afford.
+func _thermal_throttle_cap() -> float:
+	if max_heat <= 0.0:
+		return 1.0
+	var frac: float = current_heat / max_heat
+	var ease_start: float = THERMAL_EMERGENCY_EASE_START if throttle_emergency else THERMAL_EASE_START
+	var ease_full: float = THERMAL_EMERGENCY_EASE_FULL if throttle_emergency else THERMAL_EASE_FULL
+	if frac <= ease_start:
+		return 1.0   # full range available -- an emergency simply tolerates more heat first
+	var t: float = clampf((frac - ease_start) / maxf(0.001, ease_full - ease_start), 0.0, 1.0)
+	return lerpf(1.0, THERMAL_CRUISE_FLOOR, t)
+
 func hulk() -> void:
 	is_dead = true
 	# Shut down all individual components
@@ -2735,8 +2781,52 @@ func _physics_process(delta: float) -> void:
 		actual_throttle = clampf(actual_throttle, -SMOOTH_MODE_THRUST_RATIO, SMOOTH_MODE_THRUST_RATIO)
 	else:
 		actual_throttle = clampf(actual_throttle, -1.0, 1.0)
-	
+
 	var is_my_ship = (multiplayer.get_unique_id() == owner_id)
+
+	# THERMAL SELF-THROTTLE -- a THIRD limit, deliberately separate from the two
+	# above, because steering_mode is the wrong knob for it. Smooth mode already
+	# caps throttle at 0.5, but it also caps torque to 0.2 and omega to 0.25 of
+	# combat values, which would gut exactly the turn authority collision
+	# avoidance and the LOS docking convergence depend on. A hull must be able to
+	# burn gently and still turn hard.
+	#
+	# WHY: engine heat is LINEAR in throttle (_engine_heat_contribution:
+	# |throttle| * 10.0 * ...) while dissipation is a flat rate per second. For a
+	# fixed delta-v -- where throttle * time is constant, and total engine heat
+	# with it -- a longer, gentler burn therefore sheds strictly more heat. Net
+	# over a manoeuvre is C * (10 - 7.2/f): positive at full throttle, ZERO
+	# around f = 0.69, NEGATIVE below it. A hull under ~0.69 cools while it
+	# burns. Measured on test_visitor_itinerary: +2.66/s under thrust, -5.9/s
+	# coasting, implying dissipation 10.0 -- which is heat_dissipation_rate
+	# exactly, confirming the model rather than fitting to it.
+	#
+	# HERE, not in the AI, so it covers EVERY hull rather than only the ones
+	# running job verbs. It first shipped in JobSteps._cruise_toward and that was
+	# too narrow: combat leaves call apply_control_input directly, so a warship
+	# manoeuvring hard was still free to cook itself.
+	#
+	# Keyed on thermal state, not a flat cap. A flat 0.6 was measured and was
+	# perfect on damage (station HP 15 -> 0) but bad on throughput -- the
+	# Freighter scenario fell from 2 dock cycles to 1, the rock field from 20 to
+	# 6 -- because it taxes hulls with no thermal problem at all (a Freighter's
+	# max_heat is 220 and its accel is low enough that a cap costs it far more
+	# than it costs a shuttle). Spending freely while there is headroom and
+	# easing off as it runs out fixed both columns at once.
+	#
+	# EMERGENCIES RAISE THE FLOOR, THEY DO NOT REMOVE IT. An imminent collision
+	# buys THERMAL_EMERGENCY_FLOOR, not 1.0: a hull is allowed to run hot to save
+	# itself, but never to the point of cooking its own reactor to avoid a dent.
+	# throttle_emergency is frame-scoped and consumed here (same idiom as the
+	# dockable cache), so a leaf that stops asking for it loses it immediately
+	# and no stale flag can leave a hull permanently in the hot band.
+	#
+	# The local player is exempt: running hot deliberately is theirs to choose,
+	# same asymmetry as the port speed limit (NPCs comply, the player gets a
+	# gauge and the freedom to be a menace).
+	if not is_my_ship:
+		actual_throttle = clampf(actual_throttle, -_thermal_throttle_cap(), _thermal_throttle_cap())
+	throttle_emergency = false
 	
 	var is_captured_and_willing = (docking_bay != null and wants_dock)
 	

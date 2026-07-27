@@ -43,15 +43,19 @@ harness passed while both were broken, so totals alone never clear a change.
 | baseline | 851 | 9.5x over |
 | shipped (zoned cut-out) | 238 | 2.6x over |
 | stashed `approach-fix-with-latch` | 86 | under — guards failed |
-| **LOS lookahead guidance** *(2026-07-27)* | **15** | **6x under — proxy MET** |
+| LOS lookahead guidance *(2026-07-27)* | 15 | 6x under |
+| **LOS + thermal self-throttle** *(2026-07-27)* | **6.2** | **14x under — proxy MET** |
 
-**Proxy is met and `test_nav_gauntlet` is green** (3/3, 0.0% hull damage, 35-40s
-arrivals against a 90s budget). The economy sim has NOT been run yet — that is
-the real acceptance and it is the next step.
+**Proxy met, all three guards green.** `test_nav_gauntlet` 3/3 with 0.0% hull
+damage and 35-39s arrivals against a 90s budget; `test_visitor_itinerary` passes
+for the first time; `test_dock_approach` meets every cycle target. Five combat
+tests (incl. `test_ai_duel`, `test_missile_ai`) pass with the universal cap.
 
-**One guard still red: `test_visitor_itinerary`, and it is NOT a docking
-failure.** The shuttle overheats. See the thermal item below; the gate is
-125 passed / 1 failed on that test alone.
+**Still outstanding: the economy sim is the real acceptance and has not been read
+yet.** Note the run in flight measures `cfe7d01` — the LOS fix WITHOUT the
+throttle cap. Since the cap cuts proxy damage further (15 → 6.2) that should be a
+conservative bound, but that is an inference, not a measurement: if the figure
+lands near 1.33 lots/hr, re-run on final code before calling the goal met.
 
 **Collision avoidance generally is the wider lever** — it benefits every ship,
 not just docking. Current `Steering._avoidance` does proper CPA (summed radii,
@@ -64,25 +68,53 @@ have). Take the one genuine capability gap first — **speed as an avoidance
 output**, i.e. let `_avoidance` say "no safe heading at this speed" and have
 `_cruise_toward` slow rather than only turn.
 
-### BLOCKER, needs a balance decision: shuttles cannot afford a gentle approach
+### RESOLVED: shuttles could not afford a gentle approach — thermal self-throttle
 
-A `CargoShuttle` reaches the berth at **131/150 heat** under the new approach vs
-**111/150** cutting the corner; the exit burn costs ~26 on both, so the new one
-pegs at max, drains its reactor and `hulk()`s at 90% structural health. Baseline
-peaks at 144/150 — a 4% margin — so *any* approach change was going to break it.
+Was going to be a `max_heat` balance decision. It wasn't needed: **nobody had
+ever limited AI throttle at all.**
 
-This is a real trade, not a test artifact: going from cruise to berthed is a
-fixed delta-v, and the baseline offloads it to the bay servo and (when that
-misses) the station's hull — which IS the 12.5 lots/hr this goal exists to
-remove. The new approach pays it with engines. **Cost moves from stations to
-hulls.**
+The defect. Velocity mode is effectively bang-bang (`actual_throttle = v_error *
+gain * mass / max_thrust`), so any large velocity error saturates it — every AI
+ship ran **100% accelerating, 100% braking, 0% cruising**, the most
+heat-expensive profile available. A throttle cap existed
+(`SMOOTH_MODE_THRUST_RATIO`, 0.5) but only in steering_mode 0, which no AI mover
+uses.
 
-`max_heat = 150` is authored consistently across the small hulls (ore_shuttle,
-mobile_home, pirate_ore_shuttle); Freighter is 220 and docks fine. So raising it
-is a fleet-wide balance change, not a docking fix — hence not taken unilaterally.
-Options: raise `max_heat` toward the Ship default (200); give these hulls a
-`heat_dissipation_rate` above the default 10.0 (only `missile` overrides it
-today); or accept it as a real constraint and shorten the approach.
+The physics, which makes gentleness strictly free. Engine heat is LINEAR in
+throttle (`|throttle| * 10.0 * ...`) while dissipation is flat per second. For a
+fixed delta-v, `throttle * time` is constant — so total engine heat is fixed and
+dissipation scales with duration. Net over a manoeuvre is `C * (10 - 7.2/f)`:
+positive at full throttle, **zero at f ≈ 0.69, negative below**. A hull under
+~0.69 *cools while it burns*. Verified against measurement rather than fitted:
++2.66/s under thrust and −5.9/s coasting imply dissipation 10.0, which is
+`heat_dissipation_rate` exactly.
+
+Shipped shape — `Ship._thermal_throttle_cap()`, applied in `_physics_process` so
+it covers **every hull**, not just job movers (combat leaves call
+`apply_control_input` directly and were entirely unthrottled; a warship
+manoeuvring hard could still cook itself). Full throttle to 60% heat, easing to
+0.6 by 90%. **The local player is exempt** — running hot deliberately is theirs
+to choose, same asymmetry as the port speed limit.
+
+**An emergency moves the SET POINT, it does not raise the ceiling.** Full
+throttle range stays available until 85% heat, then eases across the last 15%.
+Three variants measured, and the ceiling approach is a trap worth remembering:
+
+| variant | station HP | cycles |
+|---|---|---|
+| no cap | 15 | all pass |
+| flat 0.6 cap | 0 | **fails 2 scenarios** |
+| emergency *ceiling* 0.85 | 7.7 | **29/30** (bit-identical on rerun — real, not noise) |
+| emergency *ceiling* 0.90 | **562** | **27/30** |
+| **emergency = set-point shift** | **6.2** | **all pass** |
+
+Tightening the emergency ceiling from 0.85 to 0.90 made damage **73x worse**.
+Non-monotonic, same trap as widening the docking cone: a hull that cannot
+complete the dodge it committed to arrives misaligned and shoves. A ceiling
+mid-manoeuvre is the wrong instrument.
+
+Left alone deliberately: `max_heat = 150` on the small hulls. It was never the
+problem.
 
 **Separate defect found on the way:** `hulk()` is SILENT. A thermally-dead hull
 logs nothing and is indistinguishable from a ship flying badly — the visitor
@@ -236,6 +268,52 @@ N ms) so the next cadence change has something to fail against.
 ---
 
 ## Open / unscoped
+
+### Distress SOS for a hull cooking its own reactor — *built, reverted, 2026-07-27*
+Written and working, then reverted deliberately: **nothing in the AI consumes
+SOS today** (it is a contact badge and tests only), so there was no way to test
+the behaviour end-to-end rather than just the flag flipping. Revisit alongside
+tugs/salvage, which give it a consumer. What it did, so this isn't re-derived:
+
+- Raise `NATURE_DISABLED` when overheating has drained the reactor below **50%**;
+  stand down once repairs bring it back above **90%**. Two thresholds so a hull
+  on the boundary doesn't flap its beacon.
+- **Keyed on reactor health, not heat.** Pegging `max_heat` is routine for a
+  warship in sustained combat and is not a mayday; losing half your reactor to
+  it is. In practice it fires for cargo hulls, which is the point.
+- **Must be raised BEFORE the death check.** `set_sos_active` early-returns on
+  `is_dead` and `hulk()` unpowers everything, so a beacon lit after death is a
+  no-op. Lit while the reactor is dying, a doomed hull at least dies
+  broadcasting — and `datalink_relay` floors an SOS sender's range to
+  `Hail.SOS_BATTERY_RANGE`, so it stays audible with dead comms.
+- **NOT `get_power_ratio("reactor")`** for the health read — that returns 0 for a
+  reactor merely switched OFF, so a ship running dark on purpose (an undercover
+  pirate, exactly the hull that must not advertise itself) would light a
+  distress beacon the moment it powered down.
+
+**Two ownership bugs found on the way, pointing in opposite directions.** Both
+are real today and worth fixing whenever this is picked up:
+
+1. `threat_response_leaf` clears SOS **unconditionally** at its three
+   incident-resolution points (hold lapsed, issuer track lost, overtaken). Fine
+   while piracy was the only thing that raised one — but any second source means
+   a hauler shaken down by a pirate and then released silently stands down a
+   mayday it still needs. It should clear only `UNDER_ATTACK`.
+2. Clearing on **nature alone** is equally wrong in reverse: it cancels any
+   `DISABLED` beacon anyone else raised. Caught by `test_sos_contact_attribute`,
+   which lights one by hand on a healthy hull and had it cleared within a tick.
+   Needs an explicit ownership flag, released if the beacon goes out by some
+   other route so a later relight isn't treated as ours.
+
+**Separately: nothing lights a wreck beacon at death.** `hulk()` does not clear
+`sos_active`, so a hull already broadcasting stays audible — but a ship that
+dies without one can never raise it, which makes recovery depend on having
+predicted its own end. Gate any death beacon on `ORDNANCE_CS_THRESHOLD` (the
+existing vessel-vs-munition line) or every PD-killed missile squawks a mayday.
+Semantics — who responds, what a wreck is worth, whether a destroyed pirate
+squawks — belong with the salvage/tug work.
+→ `Ship._physics_process` overheat block, `Ship.hulk()`,
+  `threat_response_leaf.gd`, `Hail.NATURE_DISABLED`, `Hail.SOS_BATTERY_RANGE`
 
 ### Heat/EM is the top perf cost — diagnosed, not fixed — *2026-07-26*
 `heat_em_component_loop` is 9.99% of tick (1664 µs/frame), now the largest

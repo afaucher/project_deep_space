@@ -195,6 +195,15 @@ static func _cruise_toward(actor, target: Vector2, exclude_pos, speed: float) ->
 	var steer: Vector2 = desired_vel - actor.linear_velocity
 	if steer.length() < 10.0:
 		steer = desired_vel
+	# Tell the hull whether this is an emergency. The thermal self-throttle
+	# itself lives on Ship (it must cover combat leaves and every other mover,
+	# not just job verbs); all this does is raise its floor when a dodge is
+	# actually pressing.
+	#
+	# Steering.last_urgency is set by the _avoidance() call made just above and
+	# MUST be read immediately -- it is static scratch, valid only until the next
+	# ship steers (see steering.gd). This is exactly that moment.
+	actor.throttle_emergency = Steering.last_urgency >= URGENT_THROTTLE_RELEASE
 	actor.apply_control_input(0.0, speed, steer.angle(), 1, 1)
 
 # Velocity mode with target_velocity 0.0 -- ACTIVELY brakes toward a stop
@@ -527,6 +536,12 @@ const DOCK_STATION_SEARCH_RADIUS := 6000.0
 # figure -- converging onto a line the hull is already near needs less room than
 # dodging an obstacle it is closing on.
 const LOS_LOOKAHEAD_TIME := 3.0
+
+# Avoidance urgency (Steering.last_urgency, 0..1) at which a mover declares a
+# thermal emergency, raising the hull's self-throttle floor (Ship's
+# THERMAL_EMERGENCY_FLOOR -- it never removes the limit). Mid-scale on purpose:
+# a hull should be spending hard well before a dodge becomes desperate.
+const URGENT_THROTTLE_RELEASE := 0.5
 
 static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
 	var scratch: Dictionary = step.get("scratch", {})
