@@ -4012,7 +4012,27 @@ func _physics_process(delta: float) -> void:
 						# by copying the peer's verdict instead.
 						if external_contact.has("classification"):
 							c["classification"] = external_contact["classification"]
-						if external_contact.has("signature"):
+						# Signature is copied ONLY IF WE HAVE NONE -- never
+						# refreshed per tick. It arrives with the contact on
+						# first import (duplicate(true) of the whole record),
+						# and a signature barely moves afterwards, so a
+						# per-tick refresh bought nothing.
+						#
+						# It cost catastrophically, though: MEASURED at 550
+						# MB/sec of unreclaimed allocation, taking a 90-second
+						# campaign run from a 189MB baseline to >30GB on a
+						# linear curve, and destabilising the machine. This
+						# loop is O(peers x their contacts) at the relay's
+						# 10Hz -- roughly 400k deep copies per second in a
+						# full cluster -- so a deep copy here is not a small
+						# cost multiplied, it is the dominant allocation in
+						# the game.
+						#
+						# Deliberately NOT a shallow reference assignment
+						# either: sharing one signature Dictionary between two
+						# ships would alias mutable fusion state across hulls,
+						# which is a correctness bug rather than a perf one.
+						if not c.has("signature") and external_contact.has("signature"):
 							c["signature"] = external_contact["signature"].duplicate(true)
 						# M52 passive sync (implementation_plans/
 						# m52_sos_passive_sync.md) -- the ONE actual behavioral
