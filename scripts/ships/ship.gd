@@ -1380,6 +1380,11 @@ func get_comms_range() -> float:
 # call. That mattered: the physics tick calls this ~10x per ship per frame
 # (weapons cooldown, heat/EM x5, sensor sweep, PD...), and get_signature()
 # (5 calls) runs per sweep-HIT and per datalink link on top of that.
+# Per-component "is it powered" flags for the heat/EM block, positional to
+# ship_components. A MEMBER so it is allocated once per ship rather than once
+# per ship per frame -- see the note at its fill site in the heat/EM loop.
+var _powered_flags: Array = []
+
 var _comps_by_type_cache: Dictionary = {}
 var _comps_by_type_source: Array = []
 
@@ -2783,10 +2788,43 @@ func _physics_process(delta: float) -> void:
 		for eng in get_components_by_type("engines"):
 			total_engine_heat += _engine_heat_contribution(eng, actual_throttle, torque, active_max_torque, ship_max_thrust)
 
+		# Perf (2026-07-26): _component_powered() used to be evaluated TWICE per
+		# component per frame -- once here and again in he_comp_loop below --
+		# and it is the expensive predicate in this whole block (4 dict reads
+		# plus the cached reactor-rating check). Compute it once, keep the flags
+		# positionally, and let the main loop read them.
+		#
+		# The block's cost was never lookup SPEED, it was pass COUNT: ~7 walks
+		# of ship_components per ship per frame at 1664 us/frame total. This is
+		# the largest single duplicate.
+		#
+		# ONE-FRAME CAVEAT, deliberate: the overheat branch below can drain a
+		# reactor to 0 health between here and the main loop, which would flip
+		# that reactor's powered state. A stale flag then leaves it contributing
+		# passive heat/EM for one extra frame at max heat, self-correcting on
+		# the next tick. Not a pure refactor -- flagged rather than hidden.
 		var passive_heat = 0.0
 		var passive_em = 0.0
-		for comp in ship_components:
-			if comp["type"] != "hull" and _component_powered(comp):
+		# Reused member array rather than a fresh local each frame. Kept on
+		# principle (no per-frame allocation), but be clear about what it did
+		# NOT do: hoisting it changed the measured cost by nothing at all
+		# (heat_em 1472.31 -> 1475.60 us, he_totals 623.86 -> 619.89 -- noise).
+		# The first version of this comment claimed the allocation was eating a
+		# third of the win. That was a guess, and the gate disproved it.
+		#
+		# The unexplained +115 us this block picked up is therefore NOT
+		# allocation. Leading hypothesis, UNVERIFIED: the loop FORM changed from
+		# `for comp in ship_components` to `for i in range(size)` + indexed
+		# read, and range() itself builds an Array per call in GDScript. A
+		# manual counter would test that. Measure before believing it -- two
+		# consecutive predictions about this block have already been wrong.
+		_powered_flags.resize(ship_components.size())
+		var powered_flags: Array = _powered_flags
+		for i in range(ship_components.size()):
+			var pc: Dictionary = ship_components[i]
+			var pc_powered: bool = _component_powered(pc)
+			powered_flags[i] = pc_powered
+			if pc_powered and pc["type"] != "hull":
 				passive_heat += PASSIVE_COMPONENT_HEAT
 				passive_em += PASSIVE_COMPONENT_EM
 
@@ -2833,10 +2871,28 @@ func _physics_process(delta: float) -> void:
 
 		# Update Component EM & Heat
 		PerfProbe.begin("he_em_prep")
-		var base_em = get_total_power_rating("reactor")
+		# Reuse he_totals' scan instead of repeating it -- this was a second
+		# full get_total_power_rating("reactor") walk of every component, for a
+		# value already in hand. Same one-frame overheat caveat as the powered
+		# flags above: the drain between the two points makes the reused value
+		# stale for one tick at max heat only.
+		var base_em = ship_reactor_rating
 		var current_em = base_em + (abs(actual_throttle) * get_total_power_rating("engines"))
 		var sensor_em = 0.0
-		var sensor_power_ratio = get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
+		# One pass for both halves of the ratio -- get_sys_health and
+		# get_sys_max_health each walked every component to produce one number.
+		# Mirrors get_sys_health/get_sys_max_health EXACTLY: health counts only
+		# powered_on components and clamps negatives; max_health counts every
+		# component of the type regardless of power. Dropping the powered_on
+		# filter here would silently inflate the ratio for a switched-off
+		# sensor.
+		var sensor_health := 0.0
+		var sensor_max_health := 0.0
+		for sc in get_components_by_type("sensors"):
+			if sc.get("powered_on", true):
+				sensor_health += maxf(sc.get("health", 0.0), 0.0)
+			sensor_max_health += sc.get("max_health", 0.0)
+		var sensor_power_ratio = sensor_health / max(1.0, sensor_max_health)
 		if sensor_power_ratio > 0.0:
 			for s in get_components_by_type("sensors"):
 				if s.get("active", true):
@@ -2844,8 +2900,10 @@ func _physics_process(delta: float) -> void:
 		PerfProbe.end("he_em_prep")
 
 		PerfProbe.begin("he_comp_loop")
-		for comp in ship_components:
-			var is_powered = _component_powered(comp)
+		for ci in range(ship_components.size()):
+			var comp: Dictionary = ship_components[ci]
+			# Reused from he_totals' single evaluation -- see the note there.
+			var is_powered: bool = powered_flags[ci]
 			var b_heat = PASSIVE_COMPONENT_HEAT if (is_powered and comp["type"] != "hull") else 0.0
 			var b_em = PASSIVE_COMPONENT_EM if (is_powered and comp["type"] != "hull") else 0.0
 
