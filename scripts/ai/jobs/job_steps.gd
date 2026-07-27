@@ -608,12 +608,29 @@ static func step_dock_at(actor, step: Dictionary, _job: Dictionary) -> int:
 		# authored (PortZone's own rule, hull bounding radius x 6), so the
 		# unzoned path is the same rule as the zoned one rather than a second
 		# invented threshold -- "degrade down the ladder, don't branch".
-		var derived_zone: float = station.get_bounding_radius() * 6.0
-		var to_ship: Vector2 = actor.position - docking_point
-		var near: bool = actor.position.distance_to(station.position) <= derived_zone
-		var aligned: bool = near and (to_ship.length() < 1.0 \
-			or absf(to_ship.angle_to(outward)) <= PortChannel.CONE_HALF_ANGLE)
-		_cruise_toward(actor, axis_pt, station.position if aligned else null, 700.0)
+		# UNZONED STATIONS KEEP BASELINE BEHAVIOUR: the station stays excluded
+		# from avoidance for the whole approach. The cut-out ships only on the
+		# ZONED path, where it is measured.
+		#
+		# Three gates were tried here and all three failed, which is why this
+		# is now deliberately conservative:
+		#   - distance to the seat  -> a couple of hundred units, inside the
+		#     avoidance standoff, so a lone shuttle spiralled (3 cycles/600s).
+		#   - angular only          -> released at arbitrary range; a hull
+		#     dodging a rock drifted in (rock field 0.00% -> 1.00%).
+		#   - angular + derived zone -> the gate condition sits at or inside
+		#     the avoidance standoff (Steering.MARGIN 400 plus both radii puts
+		#     it ~1550 at a SmallStation), so hulls park at the standoff and
+		#     orbit, never aligning. test_nav_gauntlet caught this at Deepcut
+		#     (stuck at 1550) and Slag Bay, and test_visitor_itinerary never
+		#     reached capture at all.
+		#
+		# The underlying issue is that goal attraction and obstacle repulsion
+		# reach equilibrium at the standoff, and alignment then only happens by
+		# luck. A corridor gate cannot fix that on its own -- what the unzoned
+		# case actually needs is an approach fix OUTSIDE the standoff, which is
+		# the same hold-point geometry the interlock is waiting on.
+		_cruise_toward(actor, axis_pt, station.position, 700.0)
 		return CONTINUE
 
 	var mouth: Vector2 = guide["mouth"]
