@@ -49,6 +49,37 @@ transponder received and standing resolving NEUTRAL. The classification string
 never reflects identification — possibly A2's third colour source showing
 through. **Not yet investigated.**
 
+### Follow-up: the escalation ladder is missing its middle rung — *open*
+
+The fix above makes the warrant *fair*. It does not make it *effective*: a hull
+can now ignore an identify challenge simply by flying away, and nothing happens.
+That is a hole, and it is the same hole from the other side.
+
+`challenge_leaf` **always returns FAILURE** — it is pure side-effect and never
+claims the tick, so the patrol lobs a `DEMAND{IDENTIFY}` as it passes and keeps
+flying `FollowRoute`. It never closes. Meanwhile `Interdict` only pursues
+contacts that are **already HOSTILE**:
+
+```
+Challenge (no movement) --> warrant --> HOSTILE --> Interdict (movement)
+```
+
+So closing happens AFTER the verdict rather than being how the verdict is
+earned. **If a patrol is prepared to convict you, it should be trying to
+intercept you.**
+
+**Proposed:** a challenge drives an approach. The patrol closes to keep the
+subject inside comms range while the challenge window runs; the NO_ID warrant
+lands only if it has actually closed and still received nothing. Mirror
+`Interdict`'s existing shape — assign a job, let `JobRunner` pick it up the same
+tick — rather than inventing a second mechanism.
+
+**Balance risk to design against, not discover:** patrols abandoning their
+routes to chase every unidentified hull. Needs bounding — controlled space only,
+a time/distance budget, and a way back to the route. Route abandonment is
+exactly the kind of thing that looks fine in a unit test and wrecks a 3-hour
+sim, so it wants an `economy_traffic`-scale check, not just a scenario test.
+
 ---
 
 ## A. Identity/standing cluster
