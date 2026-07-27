@@ -136,3 +136,44 @@ tests from day one.
 | Enemy warship in your space | DEMAND(STOP) | refused; fight — same message, judged by flag |
 | Threatened ship runs | SOS(UNDER_ATTACK) | patrol intercepts weapons-hot |
 | Reactor burnout | SOS(DISABLED) | rescue response, weapons cold; SOS counts as reporting |
+
+## Later: the authority claim rides the hail — *designed 2026-07-27, not built*
+
+A `DEMAND(STOP)` turns its sender **yellow** on the receiver, always, including
+a lawful police stop (see the yellow tier in
+`design_ideas/2026-07-26-campaign_playtest.md`). That is correct — from the
+receiving end you cannot tell a patrol from a pirate in colours, and that
+unresolvable ambiguity is exactly what yellow means.
+
+But yellow should not mean *illegible*. The refinement: **a demand also shows
+who is claiming to make it**, so a patrol reads as caution AND as *the cops* —
+"PATROL ALPHA · claims SOVEREIGN DRIFT authority · DEMANDS STOP". The colour
+says "I cannot resolve this"; the row text says what is being asserted. The
+player decides what to do about it.
+
+**Most of this already exists.** `Hail._dispatch` already stamps
+`hail["sender_flag"]` from the sender's live transponder, and the police-stop
+exemption already reads it. What is missing is surfacing the claim in the hails
+UI, and the player having any way to act on it.
+
+**Claiming authority costs you your anonymity, which is what keeps it honest.**
+`sender_flag` comes from `get_active_transponder_data()`, so a dark demand
+carries no flag at all — "a dark demand has no flag, that's the fiction". To
+claim to be police you must be squawking, which means you are identifiable and
+can be held to it afterwards. The claim stays cheap talk in the sense this
+codebase already means it ("flags are cheap talk except the pirate flag") — a
+pirate CAN squawk a militia flag and demand your surrender — but doing so puts a
+name on the act, and the victim's `ARMED_THREAT` warrant then names that
+identity rather than an anonymous signature.
+
+**This is the intended resolution of the `authority_flags` gap** (playtest notes,
+found 2026-07-27): the player ship's `authority_flags` is empty while NPC
+haulers carry `[FLAG_DRIFT]`, so a lawful patrol stop makes the PLAYER post an
+`ARMED_THREAT` warrant that an NPC civilian would not. Rather than hardcoding a
+trust list onto the player's hull, show the claim and let the player judge.
+
+That lands on the asymmetry this codebase already uses twice — **NPCs comply
+with a rule, the player gets a gauge and the freedom to be a menace** (the port
+speed advisory, and the thermal self-throttle exemption at `ship.gd`'s
+`_thermal_throttle_cap` call site). `authority_flags` stays as the machine rule
+for NPCs; the player gets information instead.

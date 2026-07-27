@@ -188,6 +188,29 @@ cap became the backstop rather than the only line of defence.
   off to go deal with a pirate was never pressed, and leaving the entry would
   retire that interdiction permanently.
 
+### Also found: the player can never receive the police-stop exemption — *open, found 2026-07-27*
+
+`authority_flags` is documented as "flags this observer considers a legitimate
+interdiction authority (**home civilians trust the militia flag**)". It is
+authored on exactly one entity template — the NPC traffic haulers
+(`home_cluster.gd`) — and `main.gd`'s `_spawn_player_ship` never sets it, so the
+player's list is empty.
+
+So when a home patrol lawfully demands the player stop, `police_stop` evaluates
+false and the player's ship posts an `ARMED_THREAT` warrant against the patrol.
+The NPC haulers get this right; the one ship where it matters most does not.
+
+The yellow tier dropped the severity considerably — a lawful stop now reads
+CAUTION rather than HOSTILE, so the patrol no longer paints red — but the
+player still treats lawful police differently from every NPC civilian, which is
+wrong regardless of colour.
+
+**Do not fix by handing the player `authority_flags = [FLAG_DRIFT]`.** The
+intended resolution is to show the authority CLAIM that already rides every
+hail and let the player judge it — see `design_ideas/comms_verbs.md`, "the
+authority claim rides the hail". Hardcoding a trust list onto the player's hull
+would settle the bug and forfeit the more interesting mechanic.
+
 ### Follow-up: the escalation ladder is missing its middle rung — *open*
 
 The fix above makes the warrant *fair*. It does not make it *effective*: a hull
