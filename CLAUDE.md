@@ -82,6 +82,33 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   census), and either wait for the machine to settle or trust the gate run.
 - **`FileAccess.store_line` buffers** — a CSV being written may read back 0 lines
   until the file is flushed/closed.
+- **A `ClusterManager` in the scene tree ticks NOTHING unless `viewpoint_node`
+  is a live node.** Its `_physics_process` self-ticks only when that field
+  holds a valid node ("in the live game the player ship is the viewpoint"), so
+  headless code that sets a bare `viewpoint` Vector2 — every sim, and any test
+  that promotes a cluster — must call `manager.tick(dt)` itself. Nothing warns
+  you: directors never run, the economy never advances, guilds never spawn, and
+  the run completes normally with all-zero results. `pirate_effectiveness` was
+  written by copying `economy_traffic`'s setup and omitting its one
+  `manager.tick(DT)` line; it ran 28 game-minutes and reported
+  `takes 0 / losses 0 / returned_empty 0`, which reads exactly like "pirates are
+  ineffective" and meant "no pirate was ever created".
+- **Read the PerfProbe attribution BEFORE theorising about a hot block.** The
+  sub-tags usually already exist and already answer the question:
+  `heat_em_component_loop` had `he_totals` / `he_em_prep` / `he_comp_loop`
+  underneath it accounting for 93% of its cost, which located three redundant
+  component walks in one grep. Reasoning from the shape of the code instead
+  produced two confident wrong predictions in a row (an enum would help; a new
+  array allocation was eating the win — the gate disproved both).
+- **PowerShell capture traps, both of which silently corrupt a long run.**
+  `Select-Object -First N` TERMINATES the upstream pipeline, which kills the
+  Godot process mid-run — a truncated sim then looks like a crash or a clean
+  finish depending on where it stopped. And `Select-String` is case-insensitive
+  by default, so a pattern like `RETURNED` matches `returned_empty=0` in every
+  routine status line and burns the `-First` quota in seconds. Separately,
+  `*>` does NOT capture a native executable's stdout the way it captures a
+  `.ps1`'s streams: the file is created and stays empty. Pipe to `Select-String`
+  (no `-First`, add `-CaseSensitive`) rather than redirecting.
 - Long-running commands get auto-backgrounded by the harness; wait for the
   completion notification, then read the log file.
 - **A sleeping RigidBody2D's collision shape does NOT follow a script-side
@@ -168,6 +195,18 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
 - **Sensor fusion** (angular-bin sweep → correlate → classify → decay/dead-reckon
   → datalink) lives in `ship.gd`'s `_physics_process`. See
   `design_ideas/real-time-sensor-signal.md` and `contact_tracing_and_cleanup.md`.
+- **A job step that ABORTs with no `on_abort` label reports SUCCESS and clears
+  the slot.** `JobRunnerLeaf._abort_to("")` sets `current = steps.size()`, which
+  is indistinguishable from running off the end of a completed job — so every
+  remaining step is skipped, the assignment vanishes, and the log says "job
+  complete". Give every abortable step an `on_abort` label unless you genuinely
+  mean "stop here and forget the rest". This cost a whole faction: the pirate
+  exfil tail's `AWAIT track_quiet` had a timeout and no label, so its 60s
+  timeout skipped `RELIGHT`/`EXIT_AT` and left the hull dark and motionless in
+  deep space forever while `PirateGuild`'s ledger held it ACTIVE — and since
+  `SELECT_VICTIM`'s abort bypasses the exfil tail entirely, it removed exactly
+  the pirates that had *succeeded* in engaging someone. Nothing in the ledger,
+  the runner, or the guild's status line indicated a problem.
 
 ## Conventions
 

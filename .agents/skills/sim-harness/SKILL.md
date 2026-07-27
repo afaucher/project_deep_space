@@ -26,20 +26,15 @@ Every convention below exists because that already happened.
 
 ---
 
-## 1. Drive the cluster clock — this is not optional and nothing warns you
+## 1. Drive the cluster clock — use `SimHarness.Clock`
 
-`ClusterManager._physics_process` self-ticks **only when `viewpoint_node` is a
-live node** ("in the live game the player ship is the viewpoint"). A headless
-sim sets a bare `viewpoint` Vector2 and no node, so a manager sitting in the
-scene tree ticks **nothing**: no directors, no economy, no guild, no traffic.
+A `ClusterManager` in the scene tree ticks nothing unless `viewpoint_node` is a
+live node, which no headless sim sets. **See CLAUDE.md's headless gotchas for
+the full trap and the incident** — it is filed there rather than here because
+it catches tests too, not just sims.
 
-Observed 2026-07-26: `pirate_effectiveness` was written by copying
-`economy_traffic`'s setup and omitting its one `manager.tick(DT)` line. It ran
-28 game-minutes of physics and reported `takes 0 / losses 0 / returned_empty 0`
-— which reads exactly like "pirates are ineffective", and actually meant *no
-pirate was ever created*. Nothing in the output distinguished those.
-
-**Use `SimHarness.Clock`**, which owns the tick. Do not hand-roll the loop.
+`SimHarness.Clock` owns the tick so no runner has to remember. Do not hand-roll
+the loop.
 
 ## 2. Declare liveness, and report NO DATA rather than 0%
 
