@@ -215,9 +215,71 @@ they'd spam the ring buffer on every timeout/retry cycle.
   is real gameplay and DEFERRED to its own milestone; nothing in the model
   above depends on how hard enforcement eventually bites.
 
+## The speeding ticket — designed 2026-07-27, not built
+
+The "escalation is deferred to its own milestone" note above now has somewhere
+to land. M52b's warrants and the 2026-07-27 yellow tier
+(`design_ideas/2026-07-26-campaign_playtest.md`) supply the whole enforcement
+ladder; `Standing.OFF_SPEED_VIOLATION` is already authored — caution-grade,
+no force, 60s clock — and is currently the **only offense in the table that
+nothing ever posts**. That is the same shape the deleted `wanted_names`
+registry had, so it either gets a posting site or it gets removed.
+
+**Almost all of it already exists:**
+
+- `medium_station.gd` authors `"speed_advisory": 200.0` in its `port_zone.rules`.
+- `PortRules.speed_advisory_active(in_zone, speed, limit)` is a written, tested
+  truth table (plus `speed_zone_state`'s three-state helm readout).
+- Stations default `warrant_authority: [own flag]` ("stations ARE the
+  authority"), so a station's warrant is **flagged, not personal-origin** — it
+  relays to any patrol holding that flag with no new plumbing.
+- Contacts already carry `vel` (`ship.gd`'s complied-stop check reads it).
+- Downstream is untouched: caution tier → `InterdictLeaf` demands a stop →
+  never engaged, and it yields to red threats and SOS.
+
+**The only missing piece is the OBSERVATION.** `speed_advisory_active` is
+called solely by the player's own helm HUD; nothing evaluates another ship's
+speed against the zone rule.
+
+**Why this offense fits the model unusually well.** The rule is documented as
+warn-only, and the asymmetry is deliberate — *"NPCs comply, the player gets a
+gauge and the freedom to be a menace."* NPCs self-limit inside `_cruise_toward`
+via `Steering.approach_speed_limit`, so in practice **only player-controlled
+hulls can speed**: this is a player-facing offense by construction. It is also
+fair in the way the campaign playtest demanded, without any new UI — the
+crossing banner announces the limit as you enter, and the gauge goes amber
+*before* red. A ticket is never a surprise.
+
+**Design decisions, settled:**
+
+1. **It is an EVENT, not a STATE — the first regulatory offense that is.**
+   `NO_ID` is a continuing condition, which is exactly why lighting a
+   transponder self-resolves it. Speeding is a past act: slowing down must not
+   erase the ticket, so it rides its 60s clock instead. This usefully splits
+   the regulatory bucket — regulatory offenses drop when you leave the
+   jurisdiction, but only *state* ones clear on compliance.
+2. **Observed speed, with a tolerance and a dwell.** A station reads `c.vel`
+   off its own sensor track, which carries per-frame noise by design. Ticketing
+   on what it actually observed is correct by the warrant honesty rule, but a
+   single noisy sample must never issue — it needs a margin over the limit and
+   a sustained-over window, the same shape as `ChallengeLeaf`'s.
+3. **Issued by the STATION, not by patrols.** The limit is a property of that
+   zone's own `rules`; a patrol has no business enforcing a limit it does not
+   publish. `scoped_origin` already gives this for free.
+4. **Stays out of the docking denial.** That gate is identity-only on purpose
+   (`Ship.issue_docking_grant`); locking a ship out of port over a speed
+   infraction is disproportionate.
+
+**Why it is worth building at all**, given the consequence is deliberately mild
+(you get hailed, it expires in a minute): it is the **second** regulatory
+offense, which is what turns the yellow tier from a fixture built for `NO_ID`
+into an actual system — and it gives a player a low-stakes way to see the whole
+enforcement ladder run without dying to it.
+
 ## Deliberately out of scope
 
-- Enforcement escalation (above).
+- Enforcement escalation (above) — now designed, see the speeding-ticket
+  section; still unbuilt.
 - Level 4 content (multiple lanes, tolls, weapons-safe) — the schema leaves
   room; nothing authors it yet.
 - Boarding-clamp mechanics for Level 0 targets — separate feature; this doc

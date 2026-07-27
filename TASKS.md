@@ -269,6 +269,19 @@ mirroring `Interdict`'s assign-a-job shape; balance risk is patrols abandoning
 routes, which needs an `economy_traffic`-scale check.
 → `design_ideas/2026-07-26-campaign_playtest.md`, "the missing middle rung"
 
+### `SPEED_VIOLATION` is authored but nothing posts it — *2026-07-27*
+The only offense in `Standing._OFFENSE_TABLE` with no posting site, which is the
+shape `wanted_names` had before it was deleted: it gets a posting site or it
+goes. Designed and ready — stations already author `speed_advisory: 200.0`,
+`PortRules.speed_advisory_active` is a tested truth table, station warrants are
+already flagged so a ticket relays to patrols, and the caution-tier ladder
+carries it downstream unchanged. **The only missing piece is the observation**:
+nothing evaluates another ship's speed against the zone rule. Needs a
+tolerance + sustained-over dwell (sensor `vel` is noisy by design). Worth it as
+the SECOND regulatory offense — that is what makes the yellow tier a system
+rather than a fixture built for `NO_ID`.
+→ `design_ideas/port_zones_and_channels.md`, "The speeding ticket"
+
 ### Rename `UNREPORTED` → `CAUTION` — *2026-07-27*
 The yellow tier is CAUTION ("what your ship can determine without knowing
 more"); `UNREPORTED` is only one of its causes, alongside "demanded our

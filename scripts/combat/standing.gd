@@ -412,6 +412,13 @@ const _OFFENSE_TABLE := {
 	OFF_ARMED_THREAT: {"response": RESPONSE_INTERCEPT, "expires_after": 1800.0, "standing": CAUTION},
 	OFF_ARMED_ROBBERY: {"response": RESPONSE_MAX, "expires_after": -1.0, "authorizes_force": true, "standing": HOSTILE},
 	OFF_NO_ID: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "self_resolves_on_id": true, "standing": CAUTION},
+	# NOTHING POSTS THIS YET -- the only such row in this table, which is the
+	# shape `wanted_names` had before it was deleted. Designed out in
+	# design_ideas/port_zones_and_channels.md ("The speeding ticket"): stations
+	# already author a `speed_advisory` port-zone rule and already hold flagged
+	# warrant authority, so only the OBSERVATION is missing. Note it is an
+	# EVENT, not a state -- unlike NO_ID, slowing down must not clear it, hence
+	# the clock expiry and no self_resolves_on_id.
 	OFF_SPEED_VIOLATION: {"response": RESPONSE_INTERCEPT, "expires_after": 60.0, "standing": CAUTION},
 	OFF_OPERATOR_FLAGGED: {"response": RESPONSE_INTERCEPT, "expires_after": -1.0, "authorizes_force": true, "standing": HOSTILE},
 }
