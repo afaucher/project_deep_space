@@ -49,6 +49,48 @@ transponder received and standing resolving NEUTRAL. The classification string
 never reflects identification — possibly A2's third colour source showing
 through. **Not yet investigated.**
 
+### A1 part two: the aggression cap exists and never reaches the trigger — *open, verified 2026-07-27*
+
+Why a NO_ID warrant gets you **shot** rather than intercepted. The
+proportionality cap is authored and is enforced in exactly one place, which is
+not the place that fires.
+
+`standing.gd` defines two response tiers and a `response_class()` accessor:
+
+| Tier | Offences |
+| --- | --- |
+| `RESPONSE_INTERCEPT` (1) | `NO_ID`, `ASSAULT`, `ARMED_THREAT`, `SPEED_VIOLATION`, `OPERATOR_FLAGGED` |
+| `RESPONSE_MAX` (2) | `SUSTAINED_ASSAULT`, `ARMED_ROBBERY` |
+
+**The only consumer is `interdict_leaf.gd:114`**, which reads it to decide
+whether to skip the demand and go straight to force. Nothing else reads
+`"response"` anywhere.
+
+Meanwhile `compute_standing` returns **HOSTILE for any warrant**, tier ignored,
+and `acquire_target_leaf` engages on `standing == HOSTILE` full stop. So the
+mildest offence in the table — the one authored to mean *intercept* — is
+indistinguishable at the targeting gate from armed robbery.
+
+**This is the exact defect the warrant model was built to retire**, surviving one
+layer lower. `warrants.md` opens by naming M48's failure as "a speeding
+freighter and a serial killer get the same bit." Warrants fixed that in the
+STANDING computation and left the trigger collapsing it back down.
+
+**Fix direction:** the engagement gate must consult the governing warrant's
+response class, not just the HOSTILE bit — weapons only for `RESPONSE_MAX`,
+while `RESPONSE_INTERCEPT` drives interception and demands. Two things to check
+first, neither verified yet:
+
+- **Do stations have an interdict path at all?** If a station's tree is only
+  Engage (acquire → steer → fire), then it has no way to express "intercept" and
+  a capped response means it should do *nothing* — which may be right (stations
+  are not police) or may want a call for a patrol.
+- **`compute_standing` returning a flat HOSTILE may itself be the wrong shape.**
+  Every caller now has to re-derive severity from the warrant. Carrying the tier
+  on the standing result would fix it once instead of at each gate — but it
+  touches every colour/targeting consumer, so it is a bigger change than the
+  targeting gate alone.
+
 ### Follow-up: the escalation ladder is missing its middle rung — *open*
 
 The fix above makes the warrant *fair*. It does not make it *effective*: a hull
