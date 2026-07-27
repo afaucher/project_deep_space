@@ -475,7 +475,23 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 	var exfil_tail: Array = [
 		{"verb": "GO_DARK"}, # dark_lurk: re-achieve dark after DEMAND_STOP's show_colors relit us. false_flag_cruise: first time dark at all -- break the track before laundering.
 		{"verb": "GO_TO", "label": "exfil", "pos": exfil_pos},
-		{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 60.0},
+		# on_abort MATTERS HERE and its absence was catastrophic (found 2026-07-26
+		# by tracing a member that stayed ACTIVE for three game-hours).
+		# JobRunnerLeaf._abort_to("") sets current = steps.size(), which the
+		# runner reads as JOB COMPLETE and clears the assignment -- so a
+		# timeout on this step skipped RELIGHT and EXIT_AT entirely. The pirate
+		# never flew to the wormhole, never despawned, and never resolved: it
+		# sat dark and motionless in deep space forever while the guild's
+		# ledger held it ACTIVE. At base_cap 1 that permanently stalls the
+		# whole guild -- no further arrival is ever scheduled, silently.
+		#
+		# Worse, it selected against success. SELECT_VICTIM's own abort targets
+		# "exit" and jumps straight to EXIT_AT, so a pirate that found NOBODY
+		# went home cleanly, while a pirate that actually engaged someone
+		# reached this step and got stranded. Every hull that got far enough to
+		# attempt a robbery was removed from the population, which is why the
+		# effectiveness sim measured zero takes across every targeting strategy.
+		{"verb": "AWAIT", "condition": "track_quiet", "seconds": 3.0, "clear_range": 5000.0, "timeout": 60.0, "on_abort": "exit"},
 		# The launder relight draws the next unused paper from the ship's
 		# pre-provisioned identity kit (job_steps.gd RELIGHT from_kit) --
 		# a convincing identity can't be fabricated on the spot. Kit
