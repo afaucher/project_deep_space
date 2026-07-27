@@ -197,6 +197,19 @@ that stopped stations running physics at all — but that is a separate change
 judged on its own merits, and CLAUDE.md's mechanical-multi-site-rewrite scar
 applies. Nothing serializes `ship_components`, so there is no format risk.
 
+### Docking approach: fly the corridor we already draw — *2026-07-26, designed*
+The highest-value item on the board. `PortChannel` (cone, guide, hatch cutout)
+is referenced ONLY by `navigation_panel.gd` and `exclusion_hatch.gd` — both
+rendering. The AI has never flown it: `step_dock_at` aims at a single point
+~300u off the hull and passes `station.position` as `exclude_pos`, the body
+steering will never dodge. So ships fly a straight line at a station with
+avoidance disabled, and if the berth faces away that line goes through the
+hull. Speed was never the problem — the braking work helped and could not fix
+it, because a ship arriving slowly through a station still hits it.
+Design (corridor-as-constraint, mouth→guide→capture waypoints, keep-out with a
+cone cut-out replacing the binary `exclude_pos`) and the open decisions are in
+→ `design_ideas/docking_approach_control.md`
+
 ### Station repair drain exceeds the cluster's entire trade surplus — *2026-07-26*
 Self-repair burns ~7.6 lots/hr of REFINED+GOODS against a combined authored
 margin of ~1.3/hr. Ironhold is the sharp case: only GOODS producer, 23%
