@@ -105,6 +105,51 @@ corridor at Level 3+ is then a *published, enforceable* version of a rule every
 competent hull already follows — which is exactly the asymmetry that doc wants
 to keep.
 
+## Cone width: we are using half the room we have
+
+`PortChannel.CONE_HALF_ANGLE` is 45° (a 90° cone). `sector_polygon` already
+takes `half_angle` as a parameter with that as the default, so widening is a
+one-constant change the geometry supports today.
+
+**The geometric bound is 90°, not 45°.** With station centre `O`, hull bounding
+radius `R`, docking point `D` at distance `d` from `O`, and a ship at angle `θ`
+off the approach axis, the squared distance from `O` along the final run is
+`|D + t·u_θ|² = d² + 2·t·d·cos θ + t²`:
+
+- **θ < 90°** — `cos θ > 0`, so distance from the station increases
+  monotonically moving outward. The closest point on the entire segment is `D`
+  itself, and `berth_pos_for_bounding_radius` already guarantees that seat sits
+  outside the hull. **The straight run never enters the hull, from anywhere in
+  the outward hemisphere.**
+- **θ > 90°** — `cos θ < 0`, so the path dips inward before receding, with
+  minimum distance `d·sin θ`. Clear only while `d·sin θ > R`, which fails
+  immediately for a berth seated near the hull.
+
+The circle model errs conservatively (bounding radius circumscribes a hull that
+is narrower in most directions), so real clearance is equal or better.
+
+**What widening does and does not buy.** It does NOT fix hull strikes: even at
+45° the final run is already safe, and collisions come from `exclude_pos`
+disabling avoidance everywhere, so ships cut across the station on the way to
+the aim point. Cone width does not change whether the hull is avoided *outside*
+the cone — the cut-out does that.
+
+What it does buy is separate and still worth having: **shorter circumnavigation,
+and less convergence at a single mouth.** Arrival convergence-shoving is an
+already-measured damage source, and a wider arc spreads arrivals instead of
+funnelling them.
+
+The cost is legibility. At 180° the exclusion zone only exists behind the
+station; it stops reading as a disc with a gate, and port control stops feeling
+like control. The resolution is already in the visual language: corridor edges
+draw as subdued zone geometry, the guide draws bright gold. **Widen what is
+LEGAL (tolerance) and keep the guide as the recommended line (ideal)** rather
+than treating one angle as both.
+
+Leaning: widen meaningfully (60–75° half-angle) rather than to the geometric
+limit, keeping the zone readable as a zone. Worth deciding against a picture,
+not arithmetic.
+
 ## Decisions this needs
 
 - **No grant, no corridor?** A pirate boarding a hull (Level 0 by definition)
