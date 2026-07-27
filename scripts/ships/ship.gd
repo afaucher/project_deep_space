@@ -307,6 +307,7 @@ var departing_slip: Dictionary = {}
 # (see _update_docking_grant()). Grant duration in seconds.
 const GRANT_DURATION := 120.0
 
+
 # M32 -- player-initiated undock flag. false (default) preserves the M19
 # auto-release-after-dock_duration behavior (see DockingBay._physics_process),
 # which is why the existing docking/traffic regression tests stay green
@@ -429,6 +430,32 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 		if d != null and d is Dictionary and not d.is_empty() \
 				and d.get("authority", "") == zone.get("authority", ""):
 			var dsid: String = d.get("slip_id", "")
+			# Release the slip once the departing hull is clear of the BERTH,
+			# not of the whole exclusion zone. departing_slip itself persists
+			# out to exclusion_radius (hull x 6, ~1584u at a medium station)
+			# because it has a second job -- keeping the corridor drawn for the
+			# ship on its way out -- but the thing that reads WRONG is clearing
+			# an arrival into a berth whose previous occupant is still backing
+			# out of it, and that conflict ends about 4x sooner.
+			#
+			# Interlock dwell is what costs: a denied ship does not stop
+			# approaching, it loiters near the station re-requesting every tick
+			# and an unstructured stack forms. Shrinking the window shrinks the
+			# stack without touching the fiction.
+			# MEASURED AND REVERTED: releasing at INTERLOCK_CLEAR_RADIUS (600u
+			# off the berth) instead of at the full zone halved damage at
+			# MediumStation (247 -> 116 HP) and fully recovered the
+			# Nexus-plus-shuttles case (0.0 HP in 223s, matching no-interlock)
+			# -- but MediumStation LOST throughput and failed at 27/30 cycles.
+			#
+			# Freeing the slip sooner lets more hulls hold grants at once, so
+			# they converge on the approach together. The long interlock was
+			# accidentally serialising them. Shortening trades stacking for
+			# congestion: a different failure, not less of one.
+			#
+			# So duration is not the variable. Every interlock variant is worse
+			# than none because ships -- denied or newly cleared -- have nowhere
+			# assigned to be. Hold points, not tuning.
 			if dsid != "":
 				reserved_slips[dsid] = "%s (departing)" % s.name
 
