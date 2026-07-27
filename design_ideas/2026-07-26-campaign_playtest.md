@@ -341,6 +341,40 @@ standing in, colour out — and have tactical contacts, the nav panel, the senso
 panel, the target list and the enemies list all call it. Anything less leaves
 the next surface free to drift.
 
+#### BUILT 2026-07-27 — and it was FOUR copies, not three
+
+The prescription above was right; the count was low. Beyond the three colour
+sources there was a fourth and fifth rule in `contacts_panel.gd` itself: the
+**section bucketing** and the **tab-cycle ordering**, both keyed on
+classification. So Ironhold filed under "Enemies" while being painted grey *in
+the same panel* — the literal contradiction, sitting in one file.
+
+**It was never one station.** `classify_contact()` returns `UNIDENTIFIED
+VESSEL` for any live vessel with no IFF crypto handshake, including a fully
+identified, reporting, NEUTRAL one. So every neutral station and civilian in
+the cluster drew red on the nav map and filed under Enemies. Ironhold was just
+the one that got noticed. That is why this outranked the remaining playtest
+items once A1 was closed: the map was lying about the whole world.
+
+**One tier resolution, two consumers.** `Utils.contact_tier()` maps a contact
+to a tier; colour and section are both looked up from a single registry where
+each tier declares them on the same row, so they cannot be separately
+maintained and cannot drift. Section ORDER moved to `Utils.CONTACT_SECTIONS`
+for the same reason — the panel's parallel section list is *how* the bucketing
+drifted from the colouring. `test_contact_tier` asserts every tier resolves to
+both a colour and a real section, so a future tier that defines one and forgets
+the other fails in the gate rather than shipping.
+
+A new **"Alerts"** section sits between Enemies and All Contacts, holding the
+CAUTION tier and distress calls. Fixed in passing: an SOS from a friendly ship
+used to file under All Contacts while being painted SOS-orange.
+
+Still open, deliberately: `INCOMING ORDNANCE` carries no standing, so it stays
+in All Contacts. Arguably the most urgent thing on the board and a candidate
+for Alerts — but unchanged from before, so not a regression.
+
+**C3 is now unblocked** — the hails section can consume `Utils.contact_color`.
+
 ### A3. `DEMAND IDENTIFY` from Patrol Alpha immediately on campaign start, repeatedly
 
 Two distinct problems:
