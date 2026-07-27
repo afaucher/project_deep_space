@@ -315,3 +315,25 @@ Re-enable the interlock together with HOLD POINTS, not before. Every duration
 tried was a net negative (long: ships pile up waiting; short: more hold grants
 at once so they pile up arriving) because denying or clearing a ship never
 tells it WHERE TO BE.
+
+### Approach fix outside the standoff — CLOSE, needs arrival + hysteresis — *2026-07-27*
+Tried and reverted, but it produced the **best damage numbers of any variant**:
+total station HP **15** across `test_dock_approach` (vs 238 shipped), with the
+Coldreach rock field back to **0.00%** and `traffic/SmallStation` 0.00%.
+
+Construction: aim at a point on the berth axis at **2x the avoidance standoff**
+(`actor.radius + station.radius + Steering.MARGIN`), in free space, so the hull
+arrives ALIGNED without fighting repulsion; then a short run down the axis it
+is already on. Lined-up test by axis projection (`along > 0` and
+`lateral <= capture_radius`), not distance.
+
+**Why it was reverted:** solo docking at unzoned stations fails outright
+(0 cycles; `nav_gauntlet` fails at Deepcut/Coldreach/Slag Bay). Traffic
+scenarios at the SAME stations pass, so ships only get in when jostled.
+`_cruise_toward` has no arrival condition, so a hull reaching the fix point
+overshoots and orbits it, `lateral` oscillates across the threshold, and it
+dithers between "go to fix" and "go to seat". Needs an arrival test plus
+hysteresis — exactly what the zoned corridor gate already has and this did not.
+
+This is the mechanism the unzoned outposts (~45% of the economy's repair
+drain) and the departure interlock are both waiting on. Worth finishing.
