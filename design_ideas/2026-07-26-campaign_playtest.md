@@ -76,20 +76,39 @@ layer lower. `warrants.md` opens by naming M48's failure as "a speeding
 freighter and a serial killer get the same bit." Warrants fixed that in the
 STANDING computation and left the trigger collapsing it back down.
 
-**Fix direction:** the engagement gate must consult the governing warrant's
-response class, not just the HOSTILE bit — weapons only for `RESPONSE_MAX`,
-while `RESPONSE_INTERCEPT` drives interception and demands. Two things to check
-first, neither verified yet:
+**The intended model, stated 2026-07-27 — this answers the open question about
+stations.**
 
-- **Do stations have an interdict path at all?** If a station's tree is only
-  Engage (acquire → steer → fire), then it has no way to express "intercept" and
-  a capped response means it should do *nothing* — which may be right (stations
-  are not police) or may want a call for a patrol.
-- **`compute_standing` returning a flat HOSTILE may itself be the wrong shape.**
-  Every caller now has to re-derive severity from the warrant. Carrying the tier
-  on the standing result would fix it once instead of at each gate — but it
-  touches every colour/targeting consumer, so it is a bigger change than the
-  targeting gate alone.
+> A station issues a warrant; a patrol interdicts if not complied with. NO_ID
+> should self-resolve most of the time, once the ship lights its transponder.
+> Docking permission should probably require it.
+
+So a station **posting the warrant IS its enforcement action**. It has no
+business shooting an unidentified hull, and it does not need an interdict path
+of its own — delegation to a patrol is the design, not a gap in it. That makes
+the targeting-gate fix simpler than feared: weapons only for `RESPONSE_MAX`, and
+`RESPONSE_INTERCEPT` is a patrol's job, not a turret's.
+
+**Enforcement is denial of service, not gunfire.** That is the part currently
+missing, and it is what gives a capped response teeth without violence:
+
+- **`NO_ID` self-resolves on ID.** Already authored (`self_resolves_on_id: true`)
+  and the mechanism is described at length in `standing.gd` — the `sig:`-keyed
+  warrant is deliberately unreachable by `name:` lookup once a transponder
+  arrives, which IS the resolution. **Worth a test**: it is load-bearing for the
+  whole model and currently proven only by the code comment.
+- **Docking permission should require ID — unbuilt.** `Ship.issue_docking_grant`
+  checks slip availability and grant idempotency and nothing else: no
+  transponder check, no standing check. Requiring ID for a grant turns "go dark
+  and squat in controlled space" into a choice with a real cost — you can be
+  anonymous or you can dock, not both — and it is exactly the kind of pressure a
+  station can apply on its own authority.
+
+Remaining open, and bigger than the above: **`compute_standing` returning a flat
+HOSTILE may itself be the wrong shape.** Every caller has to re-derive severity
+from the warrant, which is precisely how the tier came to be dropped at the
+targeting gate. Carrying the tier on the standing result fixes it once rather
+than at each gate — but it touches every colour and targeting consumer.
 
 ### Follow-up: the escalation ladder is missing its middle rung — *open*
 
