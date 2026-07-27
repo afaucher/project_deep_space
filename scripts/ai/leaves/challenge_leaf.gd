@@ -88,7 +88,36 @@ func _check_windows(actor: Node, blackboard) -> void:
 			to_erase.append(trk)
 			continue
 		if frame >= entry.get("expire_frame", 0):
-			if standing == Standing.UNREPORTED:
+			# A SILENT CONTACT ONLY MEANS SOMETHING IF WE COULD STILL HEAR IT.
+			# Issuing the challenge above already gates on comms range; this
+			# expiry path never did, so a hull that was challenged legitimately
+			# and then simply LEFT was convicted for not answering a question
+			# the patrol could no longer hear the answer to. Comms is
+			# deliberately shorter than sensor reach -- being able to see
+			# something you cannot hail is the intended asymmetry, the little
+			# bit of omniscience you have to close distance to earn -- so
+			# outside that range "not reporting" is a fact about OUR DEAFNESS,
+			# not about them.
+			#
+			# This is the campaign playtest's A1 and A3 in one mechanism
+			# (design_ideas/2026-07-26-campaign_playtest.md): the player is
+			# challenged at spawn, moves off as anyone would, the window lapses
+			# out of comms range, a NO_ID warrant lands, compute_standing reads
+			# it as HOSTILE, and the home station opens fire. "If you move the
+			# station opens fire" is literal.
+			#
+			# Voided, not deferred: the entry is erased either way, so the
+			# patrol may challenge again the moment the contact is back in
+			# range. Keeping it pending instead would accumulate challenges
+			# against every hull that ever wandered off.
+			var still_in_comms: bool = false
+			var subject_node = _resolve_track_node(actor, trk)
+			if subject_node != null and is_instance_valid(subject_node):
+				var their_r: float = subject_node.get_comms_range()
+				var our_r: float = actor.get_comms_range()
+				if their_r > 0.0 and our_r > 0.0:
+					still_in_comms = actor.position.distance_to(subject_node.position) <= min(our_r, their_r)
+			if standing == Standing.UNREPORTED and still_in_comms:
 				ignored[trk] = true
 				# M52 -- suspicion assessment folded into the warrant pipeline
 				# (implementation_plans/m52_patrol_interdiction.md item 3): an

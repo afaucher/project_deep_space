@@ -7,6 +7,50 @@ Ordered by severity, not by the order they were reported.
 
 ---
 
+## ROOT CAUSE FOUND for A1 + A3 — *2026-07-27*
+
+**One mechanism, exactly as this doc predicted they'd share.** Not a standing
+value, not IFF: `challenge_leaf.gd`'s challenge-EXPIRY path never re-checked
+comms range.
+
+Comms reach is authored **shorter than sensor reach on purpose** — measured at
+25,000 vs 35,000 by `test_patrol_id_read.gd` — because hearing a hull's
+transponder is a piece of omniscience you close distance to earn. Inside that
+band a reporting hull reads NEUTRAL; outside it reads UNREPORTED, correctly,
+because you genuinely cannot hear it.
+
+Issuing a challenge already gated on comms range. Expiring one did not. So:
+
+1. Patrol closes, legitimately sends `DEMAND{IDENTIFY}` (**A3 is real, and the
+   demand is not a bug** — it is the right response to a hull it can see and
+   cannot identify)
+2. **The player moves**, leaving comms range
+3. The window lapses with the contact still UNREPORTED — because it is
+   unhearable, not because it refused
+4. `NO_ID` warrant posted → `compute_standing` reads HOSTILE →
+   `acquire_target_leaf` engages → **A1: the home station opens fire**
+
+*"If you move the station opens fire"* is the literal mechanism. The patrol
+convicts you for not answering a question it can no longer hear the answer to.
+
+**Fixed** by requiring the subject to still be inside comms range before a
+NO_ID warrant may be posted; the challenge is voided rather than deferred, so it
+can be re-issued when the contact returns. `test_patrol_id_read.gd` locks the
+calibration down as a property.
+
+**This invalidates the 3-second grace period as A3's fix** (below). A grace
+period covers a few frames of relay lag; it does nothing for a hull sitting
+outside comms range indefinitely — the grace would expire and the demand would
+fire anyway. Still worth adding on its own merits, and the dedup is still a real
+bug, but neither is the cause.
+
+Note also: contacts read `UNIDENTIFIED VESSEL` even at 1,000 units with the
+transponder received and standing resolving NEUTRAL. The classification string
+never reflects identification — possibly A2's third colour source showing
+through. **Not yet investigated.**
+
+---
+
 ## A. Identity/standing cluster
 
 **A1 and A3 probably share a cause; A2 probably does not.** Revised once the
