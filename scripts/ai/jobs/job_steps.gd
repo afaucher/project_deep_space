@@ -333,7 +333,7 @@ static func _fresh_vessel_within(actor, r: float) -> bool:
 		var c: Dictionary = actor.active_contacts[c_id]
 		if not _is_fresh(actor, c):
 			continue
-		if not _VESSEL_CLASSIFICATIONS.has(c.get("classification", "")):
+		if not Standing.is_vessel(c.get("classification", "")):
 			continue
 		if actor.position.distance_to(c.get("pos", actor.position)) <= r:
 			return true
@@ -867,8 +867,6 @@ static func step_exit_at(actor, step: Dictionary, _job: Dictionary) -> int:
 # stamps job["victim_iid"].
 # ---------------------------------------------------------------------------
 
-const _VESSEL_CLASSIFICATIONS := ["FRIENDLY VESSEL", "UNIDENTIFIED VESSEL"]
-
 static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 	var lane_pos: Vector2 = step.get("lane_pos", actor.position)
 	var lurk_radius: float = step.get("lurk_radius", 2500.0)
@@ -919,7 +917,7 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 		var c: Dictionary = actor.active_contacts[c_id]
 		if not _is_fresh(actor, c):
 			continue
-		if not _VESSEL_CLASSIFICATIONS.has(c.get("classification", "")):
+		if not Standing.is_vessel(c.get("classification", "")):
 			continue
 		all_fresh_vessels.append(c)
 

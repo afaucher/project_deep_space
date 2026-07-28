@@ -462,7 +462,7 @@ func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
 	# Reason (a): the selected contact, if it's a vessel we hold a track on.
 	var sel: Dictionary = contacts.get(selected_id, {})
 	var sel_class: String = sel.get("classification", "")
-	if not sel.is_empty() and (sel_class == "UNIDENTIFIED VESSEL" or sel_class == "FRIENDLY VESSEL"):
+	if not sel.is_empty() and Standing.is_vessel(sel_class):
 		var sel_iid: int = sel.get("instance_id", -1)
 		by_iid[sel_iid] = _blank_entry(selected_id, sel_iid)
 

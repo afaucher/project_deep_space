@@ -77,7 +77,28 @@ const AGGRESSION_EVENT_TTL := 2.0
 # Vessel classifications (Ship.classify_contact's own return strings) that
 # standing applies to. Ordnance/wreckage/asteroid contacts always get
 # standing "" -- PD and classification flows are untouched by this module.
-const _VESSEL_CLASSIFICATIONS := ["FRIENDLY VESSEL", "UNIDENTIFIED VESSEL"]
+#
+# PUBLIC, and the single source of truth for "is this contact a ship?" -- the
+# same list was maintained in four places (a second identical const in
+# job_steps.gd, plus inline two-way comparisons in weapons_panel and
+# comms_panel). The set is genuinely OPEN: the SOS work already added
+# "DISTRESS CALL" to the classification vocabulary and had to reason about
+# excluding it from allow-lists like these, so the next addition would have
+# been remembered in some copies and not others -- yielding a hull the sim
+# treats as a vessel that the weapons panel refuses to show a standing for.
+#
+# NOTE what is deliberately NOT routed through here, because it asks a
+# DIFFERENT question: navigation_panel's "is this friendly" (a different set,
+# including FRIENDLY ORDNANCE), Utils.contact_section/classification_color
+# (which bucket/colour, not which are vessels), and job_steps'
+# _third_party_in_range, which matches only UNIDENTIFIED VESSEL on purpose --
+# its own comment argues that case ("a witness is a witness").
+const VESSEL_CLASSIFICATIONS := ["FRIENDLY VESSEL", "UNIDENTIFIED VESSEL"]
+
+# Does standing apply to this contact at all? Prefer this to comparing the
+# strings, so a new vessel classification lands in one place.
+static func is_vessel(classification: String) -> bool:
+	return VESSEL_CLASSIFICATIONS.has(classification)
 
 # Severity order for datalink share's compare-and-copy (a peer's copy of a
 # track only overrides mine if it's MORE severe). "" (no standing -- non-
@@ -111,7 +132,7 @@ static func _iff_tags_overlap(tags_a: Array, tags_b: Array) -> bool:
 static func compute_standing(contact: Dictionary, transponder: Dictionary, observer) -> Dictionary:
 	# Vessels only -- ordnance/wreckage/asteroid never carry a standing.
 	var classification: String = contact.get("classification", "")
-	if not _VESSEL_CLASSIFICATIONS.has(classification):
+	if not is_vessel(classification):
 		return {"standing": "", "reason": ""}
 
 	var sig: Dictionary = contact.get("signature", {})

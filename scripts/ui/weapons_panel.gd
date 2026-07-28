@@ -469,7 +469,7 @@ func _update_standing_row(c: Dictionary) -> void:
 	if standing_label == null:
 		return
 	var classification: String = c.get("classification", "")
-	var is_vessel: bool = classification == "UNIDENTIFIED VESSEL" or classification == "FRIENDLY VESSEL"
+	var is_vessel: bool = Standing.is_vessel(classification)
 	var standing: String = c.get("standing", "") if is_vessel else ""
 
 	# M52b -- surface the warrant reason behind an escalated standing (e.g.
