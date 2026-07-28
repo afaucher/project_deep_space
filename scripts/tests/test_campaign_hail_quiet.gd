@@ -92,16 +92,26 @@ func setup(main) -> void:
 	_assert(dupes.is_empty(),
 		"no hail log line repeats (repeats were the whole symptom; got %s)" % str(dupes))
 
-	# last_hails is what the comms panel's HAILS section renders. Nothing
-	# addressed to another ship may occupy one of its 8 slots.
-	var my_iid: int = player.get_instance_id()
-	var misfiled: int = 0
+	# last_hails records EVERYTHING heard, overheard traffic included -- that is
+	# the mechanic, and test_hail_protocol pins it. (An earlier version of this
+	# assertion demanded the opposite, matching a filter I had wrongly added to
+	# the ring; test_hail_protocol caught that and both are now corrected.)
+	#
+	# What must NOT happen is the ring filling with REPEATS of one conversation,
+	# which is what the heartbeat bug did -- ~12 copies of a single demand,
+	# evicting everything else.
+	var seq_counts: Dictionary = {}
 	for h in player.last_hails:
-		var t_iid: int = h.get("target_iid", -1)
-		if t_iid != my_iid and t_iid != -1:
-			misfiled += 1
-	_assert(misfiled == 0,
-		"the player's last_hails holds only hails addressed to them (or broadcasts) -- %d misfiled" % misfiled)
+		var sq: int = h.get("seq", -1)
+		if sq != -1:
+			seq_counts[sq] = seq_counts.get(sq, 0) + 1
+	var repeated_seqs: Array = []
+	for sq in seq_counts:
+		if seq_counts[sq] > 1:
+			repeated_seqs.append(sq)
+	_assert(repeated_seqs.is_empty(),
+		"no hail seq appears twice in the player's ring -- a heartbeat is not a new hail (repeats: %s)"
+			% str(repeated_seqs))
 
 	# The specific report: a patrol challenging the station it is guarding.
 	# Nothing in the cluster should be challenging a hull that is reporting.

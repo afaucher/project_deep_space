@@ -255,6 +255,15 @@ const REPAIR_RATE := 20.0 # HP/sec per component while under repair
 # a repair cycle in the panel without unbounded growth on a long play session.
 const ENG_LOG_CAP := 50
 
+# last_hails / sent_hails ring depth. Was a bare 8 repeated at three sites.
+# Raised because the ring holds EVERYTHING heard -- including hails directed at
+# other ships, which the comms panel cannot render but which the witness rules
+# and test_hail_protocol both depend on being recorded. At 8, overheard traffic
+# in a busy cluster evicted the player's own hail history before they could see
+# it. Widening the ring is the honest fix for that; filtering what goes in was
+# tried and was wrong (see the append site).
+const LAST_HAILS_CAP := 24
+
 const ENG_LOG_SEVERITY_INFO := "info"
 const ENG_LOG_SEVERITY_WARN := "warn"
 const ENG_LOG_SEVERITY_CRIT := "crit"
@@ -3534,25 +3543,28 @@ func _physics_process(delta: float) -> void:
 		var is_refresh: bool = refreshes_pending or refreshes_hold or seen_before
 
 		if not is_refresh:
-			# ONLY ring hails the panel can actually show. build_vessel_entries
-			# renders traffic where target_iid == my_iid, and lists a vessel as
-			# having hailed us on the same condition -- so a hail DIRECTED AT
-			# SOMEONE ELSE could never appear, yet still consumed one of the
-			# eight slots and pushed a real, displayable hail out of the ring.
-			# In a busy home cluster that silently wiped the player's own hail
-			# history. Broadcasts (target_iid == -1, e.g. the SOS rising-edge
-			# marker appended in _reconcile_sos_contact) are kept: they are
-			# deliberate, rare, and not addressed away from us.
+			# EVERY hail this ship heard, including ones directed at someone
+			# else. That is what this ring IS -- "the last hails heard" -- and
+			# overhearing is load-bearing, not incidental: the witness rules in
+			# this same block key off other people's demands, and
+			# test_hail_protocol pins that an in-range bystander records a
+			# directed DEMAND it merely overheard.
 			#
-			# The engineering log below is deliberately NOT filtered the same
-			# way -- overhearing a demand is real intel about what is happening
-			# nearby, and with heartbeat refreshes now suppressed it is one line
-			# per event rather than one every two seconds.
-			var target_iid_h: int = hail.get("target_iid", -1)
-			if target_iid_h == my_iid_hail or target_iid_h == -1:
-				last_hails.append(hail)
-				if last_hails.size() > 8:
-					last_hails.pop_front()
+			# A brief attempt to filter this to "addressed to me or broadcast"
+			# was WRONG and test_hail_protocol caught it. The motivation was
+			# real -- build_vessel_entries only renders traffic where
+			# target_iid == my_iid, so overheard hails consumed ring slots they
+			# could never be displayed from, evicting the player's own history
+			# -- but that is an argument about the RING'S SIZE, not about what
+			# belongs in it. Conflating "what the panel shows" with "what the
+			# ship heard" threw away a real mechanic to fix a display problem.
+			#
+			# LAST_HAILS_CAP is the actual fix for the eviction. It is also far
+			# less pressing now that heartbeat refreshes are suppressed: a live
+			# demand costs the ring ONE slot instead of one every two seconds.
+			last_hails.append(hail)
+			if last_hails.size() > LAST_HAILS_CAP:
+				last_hails.pop_front()
 			# Every distinct hail this ship sees, sent or overheard, any verb --
 			# the same non-refresh gate last_hails itself uses (a heartbeat
 			# re-assert of an already-open demand is a no-op re-statement, not
@@ -3980,15 +3992,32 @@ func _physics_process(delta: float) -> void:
 					relayed_ids[c_id] = true
 				else:
 					var c = active_contacts[c_id]
-					# Re-judge every tick the relay touches this track, not just
-					# on first import: the evidence changes underneath it (a
-					# transponder arriving a tick later, a warrant merging, a
-					# flag lighting) and a track we cannot personally sense gets
-					# no other recompute. Judging once at import would freeze a
-					# relayed contact at whatever we happened to know in the
-					# instant it first arrived.
-					relayed_ids[c_id] = true
+					# Re-judged when the EVIDENCE CHANGES, not on every tick the
+					# relay merely looks at this track. Judging once at import
+					# would freeze a relayed contact at whatever we knew in that
+					# instant (a transponder arriving a tick later, a warrant
+					# merging, a flag lighting all have to land) -- but the
+					# stamp belongs inside the freshest-wins gate below, not
+					# outside it.
+					#
+					# Outside, it re-judged EVERY relayed contact of EVERY peer
+					# every relay tick, and compute_standing builds a
+					# subject-key string per call. MEASURED: datalink_relay went
+					# from 980us to 1894us per frame -- nearly doubled, taking
+					# the whole physics step from 10.5ms avg to 16.0ms and
+					# failing the perf gate. The distribution shifted uniformly
+					# rather than spiking, which is the signature of a fixed
+					# per-frame cost (CLAUDE.md documents the same shape from
+					# approach_speed_limit).
+					#
+					# Inside the gate it fires only when the peer genuinely has
+					# newer data -- which for a contact we also sense ourselves
+					# is rare, because our own reading is fresher. The
+					# relayed-ONLY contacts this pass exists for still update
+					# continuously, because for them the peer is always the
+					# fresher source.
 					if relayed_last_seen_at > c.get("last_seen_at", 0):
+						relayed_ids[c_id] = true
 						c["pos"] = external_contact["pos"]
 						c["vel"] = external_contact["vel"]
 						c["last_seen_at"] = relayed_last_seen_at
@@ -4216,7 +4245,7 @@ func _reconcile_sos_contact(s, sos_in_range: bool) -> void:
 				"name": sos_name,
 			}
 			last_hails.append(synthetic_hail)
-			if last_hails.size() > 8:
+			if last_hails.size() > LAST_HAILS_CAP:
 				last_hails.pop_front()
 			log_event(ENG_LOG_SEVERITY_INFO, "Distress call (SOS) heard from %s" % sos_name)
 	elif active_contacts.has(sender_trk):
@@ -4722,7 +4751,7 @@ func _remember_sent_hail(entry: Dictionary) -> void:
 	if entry.get("seq", -1) == -1:
 		return
 	sent_hails.append(entry)
-	if sent_hails.size() > 8:
+	if sent_hails.size() > LAST_HAILS_CAP:
 		sent_hails.pop_front()
 
 # M52 passive sync (implementation_plans/m52_sos_passive_sync.md, replaces

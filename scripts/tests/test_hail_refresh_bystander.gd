@@ -108,14 +108,20 @@ func setup(main) -> void:
 		"the addressed TARGET still logs it exactly once (unchanged behaviour, %d new)"
 			% [tgt_after - tgt_before])
 
-	# last_hails is only 8 deep and the comms panel's HAILS section reads it.
-	# A hail directed at SOMEONE ELSE can never be rendered there
-	# (build_vessel_entries filters on target_iid == my_iid), so it must not
-	# occupy a slot at all -- it would push a real, displayable hail out of the
-	# ring. Bystander gains ZERO here: the demand was addressed to `target`.
-	_assert(bystander.last_hails.size() - by_hails_before == 0,
-		"the bystander's ring gains NOTHING for a hail addressed elsewhere -- it could never be displayed, and would evict real history (gained %d)"
-			% [bystander.last_hails.size() - by_hails_before])
+	# The ring records what this ship HEARD, overheard traffic included -- that
+	# is the mechanic (test_hail_protocol pins it, and the witness rules depend
+	# on it). So the bystander gains exactly ONE entry: it overheard one demand.
+	#
+	# The bug was the ring filling with REPEATS -- ~12 copies of a single
+	# conversation, evicting everything else from a ring that was then only 8
+	# deep. One entry for eight heartbeats is the whole fix.
+	#
+	# (An earlier version of this assertion demanded ZERO, matching a filter I
+	# had wrongly added to the ring. test_hail_protocol caught that; the filter
+	# is reverted and LAST_HAILS_CAP raised instead.)
+	_assert(bystander.last_hails.size() - by_hails_before == 1,
+		"the bystander's ring gains ONE entry for the overheard demand, not %d -- heartbeats are not new hails (gained %d)"
+			% [REFRESHES, bystander.last_hails.size() - by_hails_before])
 
 	# The demand must still be LIVE on the target: suppression changes what gets
 	# logged, never whether the demand is honoured. Asserted on pending_demand
