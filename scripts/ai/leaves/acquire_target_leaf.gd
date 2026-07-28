@@ -77,8 +77,6 @@ func tick(actor: Node, blackboard) -> int:
 
 	blackboard.set_value("target_id", best_id)
 	blackboard.set_value("target_pos", actor.active_contacts[best_id]["pos"])
-	if actor.has_method("set_sensor_target"):
-		actor.set_sensor_target(best_id)
 	return SUCCESS
 
 # Resolve the warrant behind a HOSTILE contact and ask whether it puts weapons

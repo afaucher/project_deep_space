@@ -4,12 +4,9 @@ const DialogueScratch = preload("res://scripts/dialogue_scratch.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
 
-# Mirrors Ship.FIRE_STALENESS_MAX (ship.gd) -- kept as a local const rather
-# than importing the Ship script here (this panel is client UI reading the
-# already-filtered packet, not sim-side); see ship.gd for the rationale.
-# (Was a local const mirroring Ship.FIRE_STALENESS_MAX, justified in a comment
-# as avoiding an import of Ship -- while the single line that used it already
-# called Ship.contact_age(). Self-refuting, so the copy is gone.)
+# (A local SOS_FRESH_STALENESS const mirroring Ship.FIRE_STALENESS_MAX lived
+# here, justified as avoiding an import of Ship -- while the one line that used
+# it already called Ship.contact_age(). Self-refuting, so the copy is gone.)
 
 var current_state: Dictionary = {}
 
@@ -475,7 +472,7 @@ func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
 		if t_iid == -1:
 			continue
 		if not by_iid.has(t_iid):
-			by_iid[t_iid] = _blank_entry(iid_to_cid.get(t_iid, "TRK-%03d" % (abs(t_iid) % 1000)), t_iid)
+			by_iid[t_iid] = _blank_entry(iid_to_cid.get(t_iid, Ship.track_id(t_iid)), t_iid)
 
 	# Reason (c): vessels that hailed US directly.
 	for h in last_hails:
@@ -485,7 +482,7 @@ func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
 		if s_iid == -1 or s_iid == my_iid:
 			continue
 		if not by_iid.has(s_iid):
-			by_iid[s_iid] = _blank_entry(iid_to_cid.get(s_iid, "TRK-%03d" % (abs(s_iid) % 1000)), s_iid)
+			by_iid[s_iid] = _blank_entry(iid_to_cid.get(s_iid, Ship.track_id(s_iid)), s_iid)
 		# A hail's stamped flag is the freshest read we have on a sender that
 		# may not be transponding now.
 		if by_iid[s_iid]["flag"] == "":

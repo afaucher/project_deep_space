@@ -132,6 +132,23 @@ const CONTACT_TIMEOUT := 20.0          # seconds with no fresh detection before 
 # isn't a compile-time constant, so contact_age() reads it directly and this
 # helper computes CONTACT_TIMEOUT's frame equivalent once per prune pass
 # (contact_decay) instead of a file-level const.
+# THE instance-id -> contact-key derivation. This is also the PRIMARY KEY of
+# active_contacts, and it was open-coded as `"TRK-%03d" % (abs(iid) % 1000)` at
+# 17 production sites across five files with no named home (see
+# design_ideas/2026-07-27-duplication_audit.md, finding 3) -- so a change to
+# how tracks are keyed would silently break every copy that was not found.
+#
+# KNOWN LIMITATION, deliberately preserved here rather than fixed: `% 1000`
+# gives only 1000 buckets against sequentially-allocated instance ids, so two
+# ships far enough apart in allocation order collapse into ONE track. That is
+# reachable by construction (not yet observed), and the same namespace is
+# shared with the sequential `next_contact_id` counter for anonymous sensor
+# bins. Widening it touches the fusion hot path AND the datalink wire format,
+# so it is a separate decision -- naming the derivation first is what makes
+# that decision possible to implement in one place.
+static func track_id(iid: int) -> String:
+	return "TRK-%03d" % (abs(iid) % 1000)
+
 static func contact_age(c: Dictionary, missing_default: float = 999.0) -> float:
 	if not c.has("last_seen_at"):
 		return missing_default
@@ -1866,7 +1883,7 @@ func take_damage(amount: float, global_pos: Vector2 = Vector2.ZERO, global_dir: 
 		last_damage_attacker_iid = -1
 		last_damage_attacker_name = "unattributed %s" % damage_type
 	else:
-		var attacker_trk: String = "TRK-%03d" % (abs(attacker_id) % 1000)
+		var attacker_trk: String = Ship.track_id(attacker_id)
 		# M52a death-cause instrumentation: remember who last hit us. Prefer the
 		# attacker's claimed transponder name, fall back to the live node name.
 		last_damage_attacker_iid = attacker_id
@@ -2512,10 +2529,24 @@ var last_aggression_seq: int = 0
 # teammate who couldn't see the despawn. Maps trk_id -> seconds of suppression left.
 var _contact_tombstones := {}
 
-var _high_res_target_idx: int = 0
-var _high_res_target_timer: float = 0.0
-
-var manual_sensor_target: String = ""
+# --- manual sensor targeting: DELETED 2026-07-27 -----------------------------
+# `manual_sensor_target`, `set_sensor_target()` and `_high_res_target_idx` /
+# `_high_res_target_timer` are gone. Three writers, ZERO readers -- the same
+# shape as the `wanted_names` registry deleted 2026-07-26, and the strongest
+# remaining instance of it in the codebase (see
+# design_ideas/2026-07-27-duplication_audit.md, finding 6).
+#
+# It looked alive, which is why it survived: acquire_target_leaf called it on
+# every acquisition, ai_drone_controller called it, and terminal_display fired
+# it as an RPC every time THE PLAYER SELECTED A CONTACT. So clicking a contact
+# sent a network round trip to set a String that nothing ever read.
+#
+# It was the remains of a "manually point the directional high-res sensor"
+# feature. Utils.HIGHLIGHT_SENSOR_ID ("dir_high_res") still exists and is
+# still used for display highlighting; if that feature is ever built, it wants
+# a fresh design rather than this corpse -- notably a decision about whether
+# manual targeting is a SHIP property (server-authoritative, as this RPC
+# implied) or a console one.
 
 @rpc("any_peer", "call_local")
 func request_spawn(type: String) -> void:
@@ -2565,13 +2596,6 @@ func set_all_sensors_state(is_active: bool) -> void:
 			pass
 	for s in get_components_by_type("sensors"):
 		s["active"] = is_active
-
-@rpc("any_peer", "call_local")
-func set_sensor_target(target_id: String) -> void:
-	if not is_multiplayer_authority(): return
-	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 1:
-		if multiplayer.get_remote_sender_id() != 0: pass
-	manual_sensor_target = target_id
 
 # M52b -- posts a warrant into THIS ship's OWN store (event_key -> record),
 # origin-scoped by warrant_authority (Standing.scoped_origin -- only a flag
@@ -3299,7 +3323,7 @@ func _physics_process(delta: float) -> void:
 		var new_id = ""
 		
 		if bin_instance_id != -1:
-			new_id = "TRK-%03d" % (abs(bin_instance_id) % 1000)
+			new_id = Ship.track_id(bin_instance_id)
 			bin["contact_id"] = new_id
 			if active_contacts.has(new_id):
 				closest_contact_id = new_id
@@ -3426,7 +3450,7 @@ func _physics_process(delta: float) -> void:
 		if attacker_iid == my_iid or victim_iid == my_iid:
 			continue # own hit already handled in take_damage
 
-		var attacker_trk: String = "TRK-%03d" % (abs(attacker_iid) % 1000)
+		var attacker_trk: String = Ship.track_id(attacker_iid)
 		if not active_contacts.has(attacker_trk):
 			continue # no live track on the attacker -- can't witness what we can't see
 		var atk_c: Dictionary = active_contacts[attacker_trk]
@@ -3437,7 +3461,7 @@ func _physics_process(delta: float) -> void:
 		# already HOSTILE to us, this is assistance, not aggression -- ignore
 		# entirely (a patrol must not flip on the player lawfully engaging a
 		# marked pirate).
-		var victim_trk: String = "TRK-%03d" % (abs(victim_iid) % 1000)
+		var victim_trk: String = Ship.track_id(victim_iid)
 		if active_contacts.has(victim_trk) and active_contacts[victim_trk].get("standing", "") == Standing.HOSTILE:
 			continue
 
@@ -3594,7 +3618,7 @@ func _physics_process(delta: float) -> void:
 							var sender_flag: String = hail.get("sender_flag", "")
 							var police_stop: bool = sender_flag != "" and authority_flags.has(sender_flag)
 							if not police_stop:
-								var issuer_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+								var issuer_trk: String = Ship.track_id(sender_iid)
 								if active_contacts.has(issuer_trk):
 									# M52b -- ARMED_THREAT warrant (replaces the old
 									# direct sticky-HOSTILE write): a non-authority
@@ -3618,7 +3642,7 @@ func _physics_process(delta: float) -> void:
 					# No aggro_hits dampening: a demand is deliberate, it
 					# cannot be a stray accident.
 					if rung == Hail.RUNG_STOP:
-						var issuer_trk2: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+						var issuer_trk2: String = Ship.track_id(sender_iid)
 						if active_contacts.has(issuer_trk2):
 							var issuer_c: Dictionary = active_contacts[issuer_trk2]
 							# (a) need a live fresh track on the sender -- can't
@@ -3628,7 +3652,7 @@ func _physics_process(delta: float) -> void:
 								# on the demand's TARGET and it's already
 								# HOSTILE to us, this is lawful interdiction of
 								# a marked pirate -- ignore.
-								var demand_target_trk: String = "TRK-%03d" % (abs(target_iid) % 1000)
+								var demand_target_trk: String = Ship.track_id(target_iid)
 								var assistance_exempt: bool = active_contacts.has(demand_target_trk) and active_contacts[demand_target_trk].get("standing", "") == Standing.HOSTILE
 								# (c) police-stop exemption, same rule as the
 								# addressed-to-me branch.
@@ -3657,7 +3681,7 @@ func _physics_process(delta: float) -> void:
 				# whether the demand was ours to issue. The grace timer lets
 				# the behavioral speed check (below) wait out the sender's
 				# braking distance -- see COMPLIED_STOP_GRACE.
-				var sender_trk: String = "TRK-%03d" % (abs(sender_iid) % 1000)
+				var sender_trk: String = Ship.track_id(sender_iid)
 				if active_contacts.has(sender_trk):
 					active_contacts[sender_trk]["complied_stop"] = true
 					active_contacts[sender_trk]["complied_stop_grace"] = COMPLIED_STOP_GRACE
@@ -3892,7 +3916,7 @@ func _physics_process(delta: float) -> void:
 			# instance_id-derived TRK id sensors would assign s, so it
 			# correlates with (rather than duplicates) any independent
 			# sensor detection of s.
-			var self_report_id = "TRK-%03d" % (abs(s.get_instance_id()) % 1000)
+			var self_report_id = Ship.track_id(s.get_instance_id())
 			# One get_signature() per link (it was called twice -- once for the
 			# "signature" field, once for classify_contact -- and it's not free:
 			# component-list assembly + bounding geometry per call).
@@ -4211,7 +4235,7 @@ func _physics_process(delta: float) -> void:
 # call's own write -- no separate per-track "was active last tick" memory
 # needed, since the active_contacts entry itself already IS that memory.
 func _reconcile_sos_contact(s, sos_in_range: bool) -> void:
-	var sender_trk: String = "TRK-%03d" % (abs(s.get_instance_id()) % 1000)
+	var sender_trk: String = Ship.track_id(s.get_instance_id())
 	if sos_in_range:
 		var was_active: bool = active_contacts.get(sender_trk, {}).get("sos", false)
 		var sos_name: String = s.get_active_transponder_data().get("name", s.ship_name)

@@ -48,9 +48,9 @@ func _physics_process(delta: float) -> void:
 	var angle_to_target = (target_pos - ship.position).angle()
 	var dist_to_target = ship.position.distance_to(target_pos)
 	
-	# Point sensor at target
-	ship.set_sensor_target(target_id)
-	
+	# (A "point sensor at target" call sat here. Ship.set_sensor_target wrote a
+	# field nothing read -- deleted 2026-07-27, see ship.gd.)
+
 	var fwd_missile = ship.get_component("hp_fwd_missile")
 	var has_ammo = not fwd_missile.is_empty() and fwd_missile["ammo"] > 0
 	

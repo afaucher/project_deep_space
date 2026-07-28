@@ -1166,7 +1166,7 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		# victim names the pirate off whatever it can actually see (its own
 		# live track + transponder read on the pirate), the "honesty rule"
 		# the design doc's subject field is built around.
-		var pirate_trk: String = "TRK-%03d" % (abs(actor.get_instance_id()) % 1000)
+		var pirate_trk: String = Ship.track_id(actor.get_instance_id())
 		var pirate_c: Dictionary = victim.active_contacts.get(pirate_trk, {})
 		var pirate_claimed: String = victim.active_transponders.get(actor.get_instance_id(), {}).get("name", "")
 		victim.post_warrant(Standing.OFF_ARMED_ROBBERY, pirate_claimed, pirate_c.get("signature", {}), "took cargo")

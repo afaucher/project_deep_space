@@ -203,6 +203,6 @@ func _resolve_track_node(actor: Node, trk_id: String) -> Node:
 	for s in tree.get_nodes_in_group("ships"):
 		if s == actor:
 			continue
-		if "TRK-%03d" % (abs(s.get_instance_id()) % 1000) == trk_id:
+		if Ship.track_id(s.get_instance_id()) == trk_id:
 			return s
 	return null

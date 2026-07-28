@@ -76,7 +76,7 @@ func tick(actor: Node, blackboard) -> int:
 	# through to CargoRun (resume route).
 	if blackboard.has_value("threat_issuer_iid"):
 		var issuer_iid: int = blackboard.get_value("threat_issuer_iid")
-		var issuer_trk: String = "TRK-%03d" % (abs(issuer_iid) % 1000)
+		var issuer_trk: String = Ship.track_id(issuer_iid)
 		var c: Dictionary = actor.active_contacts.get(issuer_trk, {})
 		if c.is_empty() or Ship.contact_age(c) > actor.FIRE_STALENESS_MAX:
 			blackboard.erase_value("threat_issuer_iid")
@@ -129,7 +129,7 @@ func tick(actor: Node, blackboard) -> int:
 	blackboard.set_value("last_decided_seq", demand_seq)
 
 	var issuer_iid: int = demand.get("sender_iid", -1)
-	var issuer_trk2: String = "TRK-%03d" % (abs(issuer_iid) % 1000)
+	var issuer_trk2: String = Ship.track_id(issuer_iid)
 	var threat_speed: float = 0.0
 	var threat_pos: Vector2 = demand.get("sender_pos", actor.position)
 	if actor.active_contacts.has(issuer_trk2):

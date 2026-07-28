@@ -746,9 +746,10 @@ func _on_selection_changed(c_id: String) -> void:
 	if comms_panel and comms_panel.has_method("set_selected_contact_id"):
 		comms_panel.set_selected_contact_id(c_id)
 
-	var ship_node = _get_my_ship()
-	if ship_node:
-		ship_node.rpc_id(1, "set_sensor_target", c_id)
+	# (An rpc_id(1, "set_sensor_target", c_id) sat here, fired on EVERY contact
+	# selection. Ship.set_sensor_target wrote a field nothing read -- deleted
+	# 2026-07-27, see ship.gd. Selection is panel-side state; it needs no
+	# server round trip.)
 
 func _on_sensor_state_changed(sensor_id: String, is_active: bool) -> void:
 	var ship_node = _get_my_ship()
