@@ -3,6 +3,7 @@ extends Control
 signal contact_selected(c_id: String)
 
 const ComponentSpec = preload("res://scripts/components/component_spec.gd")
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
 
@@ -418,9 +419,13 @@ func _ready() -> void:
 	overlay.position = Vector2(10, 10)
 	overlay.size = Vector2(300, 40)
 	add_child(overlay)
-	
 
-	
+	# Every panel names itself. This one rides the existing floating control
+	# strip rather than taking a title bar of its own -- the map is the whole
+	# point of this panel and vertical space here is the most expensive on the
+	# console (design_ideas/2026-07-27-ui_style_guide.md §4).
+	overlay.add_child(UIStyle.panel_title("NAVIGATION", UIStyle.ACCENT_NAV))
+
 	var zoom_label = Label.new()
 	zoom_label.text = "Zoom:"
 	overlay.add_child(zoom_label)
@@ -833,7 +838,7 @@ func _draw() -> void:
 			
 			if show_contact_labels:
 				var display_name = c.get("name", c_id)
-				draw_string(font, screen_pos + Vector2(10, 10), display_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, color)
+				draw_string(font, screen_pos + Vector2(10, 10), display_name, HORIZONTAL_ALIGNMENT_LEFT, -1, UIStyle.FONT_CANVAS_SMALL, color)
 				
 			if c_id == selected_id:
 				_draw_selection_bracket(screen_pos, Color.WHITE)
@@ -853,7 +858,7 @@ func _draw() -> void:
 					
 				var text_y = screen_pos.y + (24.0 if show_contact_labels else 10.0)
 				for line in info_text.split("\n"):
-					draw_string(font, Vector2(screen_pos.x + 10, text_y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+					draw_string(font, Vector2(screen_pos.x + 10, text_y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, UIStyle.FONT_CANVAS_TINY, Color.WHITE)
 					text_y += 12.0
 	
 	# Scale Reference
@@ -873,7 +878,7 @@ func _draw() -> void:
 		
 		# Draw text centered above the line
 		var scale_text_pos = bottom_right - Vector2(ref_len / 2.0 + scale_text_size.x / 2.0, 10)
-		draw_string(scale_font, scale_text_pos, scale_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+		draw_string(scale_font, scale_text_pos, scale_text, HORIZONTAL_ALIGNMENT_LEFT, -1, UIStyle.FONT_CANVAS, Color.WHITE)
 
 
 
@@ -887,7 +892,7 @@ func _draw() -> void:
 	var map_rot = Utils.get_map_rotation(is_ship_oriented, rot)
 
 	var font = ThemeDB.fallback_font
-	var font_size = 14
+	var font_size = UIStyle.FONT_CANVAS
 
 	for i in range(0, 360, 30):
 		var draw_angle = deg_to_rad(i - 90.0) + map_rot
@@ -906,7 +911,7 @@ func _draw() -> void:
 		draw_string(font, text_pos - text_size / 2.0 + Vector2(0, font_size / 3.0), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, style["color"])
 	
 	# Draw telemetry text
-	var default_font_size = 16
+	var default_font_size = UIStyle.FONT_CANVAS_LARGE
 	draw_string(font, Vector2(10, size.y - 40), "X: %.2f Y: %.2f" % [pos.x, pos.y], HORIZONTAL_ALIGNMENT_LEFT, -1, default_font_size, Color.GREEN)
 	draw_string(font, Vector2(10, size.y - 20), "SPD: %.2f HDG: %.2f" % [vel.length(), wrapf(rad_to_deg(rot) + 90.0, 0.0, 360.0)], HORIZONTAL_ALIGNMENT_LEFT, -1, default_font_size, Color.GREEN)
 
@@ -957,7 +962,7 @@ func _draw() -> void:
 			# objectives at once, unlike the dense sensor picture
 			# show_contact_labels gates against).
 			var text_size = font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
-			draw_string(font, screen_pos + Vector2(10, -10 - text_size.y), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CONTRACT_COLOR)
+			draw_string(font, screen_pos + Vector2(10, -10 - text_size.y), title, HORIZONTAL_ALIGNMENT_LEFT, -1, UIStyle.FONT_CANVAS_SMALL, CONTRACT_COLOR)
 
 	# M52 -- SOS markers removed as a special case (implementation_plans/
 	# m52_sos_as_contact.md item 7): a "DISTRESS CALL"-classified contact now
@@ -1000,7 +1005,7 @@ func _draw_offscreen_indicator(edge_pos: Vector2, dir_to_contact: Vector2, color
 		return
 	var text_size = font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
 	var label_pos = edge_pos - dir_to_contact * 15.0 - Vector2(text_size.x/2.0, -text_size.y/3.0)
-	draw_string(font, label_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, color)
+	draw_string(font, label_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, UIStyle.FONT_CANVAS_SMALL, color)
 
 func _get_contact_color(c: Dictionary) -> Color:
 	# Dim by confidence-from-age so stale dead-reckoned contacts fade toward ghosts

@@ -3,6 +3,7 @@ extends Control
 signal component_power_toggled(component_id: String, is_active: bool)
 
 const ShipSilhouette = preload("res://scripts/components/ship_silhouette.gd")
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 
 const HIGHLIGHT_SENSOR_PEAK_EM_BONUS := 40.0 # flat display-only bump to "Peak EM" when the highlighted sensor is active
 const POWER_TOGGLE_DEBOUNCE_MSEC := 500 # how long a local power-button click is trusted over a conflicting server update
@@ -20,12 +21,11 @@ var comp_rows: Dictionary = {}
 var lbl_peak_em: Label
 var lbl_det_dist: Label
 
-# Controlled-zone status: ONE combined line merging the former helm/top-bar
-# "LIMIT" readout and the port-zone rules message -- "<authority> — <rules
-# summary>" (the summary already carries the speed advisory, i.e. the limit),
-# blank outside any zone. Placed here per playtest feedback; the engineering
-# screen is becoming the general ship-status surface.
-var zone_status_lbl: Label
+# NO controlled-zone line here. It arrived as "<authority> — <rules summary>",
+# lost the rules summary to playtest D2, and lost the authority name too on the
+# next pass: the zone-crossing banner already tells you whose space you entered,
+# and engineering diagnostics is about the hull, not the jurisdiction. The ship
+# field itself (Ship.current_port_zone) is untouched -- other readers use it.
 
 # M40 -- engineering log section. eng_log_rich mirrors Ship.eng_log
 # (newest entry LAST, matching the ring buffer's own append order -- see
@@ -221,7 +221,7 @@ class ComponentSpatialView extends Control:
 				if font:
 					var text_size = font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
 					var text_pos = Vector2(draw_x + (draw_w - text_size.x) / 2.0, draw_y + (draw_h + text_size.y) / 2.0)
-					draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+					draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, UIStyle.FONT_CANVAS_TINY, Color.WHITE)
 
 		if eng_state.has("hit_traces"):
 			for trace in eng_state["hit_traces"]:
@@ -261,20 +261,7 @@ func _ready() -> void:
 	main_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(main_vbox)
 	
-	# Title
-	var title = Label.new()
-	title.text = "ENGINEERING DIAGNOSTICS"
-	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color(0.8, 0.6, 0.2))
-	main_vbox.add_child(title)
-
-	# Combined controlled-zone status line ("<authority> — <rules summary>").
-	zone_status_lbl = Label.new()
-	zone_status_lbl.text = ""
-	zone_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	zone_status_lbl.add_theme_font_size_override("font_size", 13)
-	zone_status_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	main_vbox.add_child(zone_status_lbl)
+	main_vbox.add_child(UIStyle.panel_title("ENGINEERING DIAGNOSTICS", UIStyle.ACCENT_ENGINEERING))
 
 	# Top Gauges (Heat and EM)
 	top_hbox = HBoxContainer.new()
@@ -380,9 +367,7 @@ func _ready() -> void:
 	var log_sep = HSeparator.new()
 	main_vbox.add_child(log_sep)
 
-	var log_lbl = Label.new()
-	log_lbl.text = "ENGINEERING LOG"
-	main_vbox.add_child(log_lbl)
+	main_vbox.add_child(UIStyle.section_header("ENGINEERING LOG", UIStyle.ACCENT_ENGINEERING))
 
 	eng_log_rich = RichTextLabel.new()
 	eng_log_rich.bbcode_enabled = true
@@ -396,27 +381,11 @@ func _ready() -> void:
 	eng_log_rich.custom_minimum_size = Vector2(0, 220)
 	eng_log_rich.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	eng_log_rich.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	eng_log_rich.add_theme_font_size_override("normal_font_size", UIStyle.FONT_DETAIL)
+	# No extra inset here -- the panel FRAME now pays UIStyle.FRAME_PAD_H, so the
+	# log lines up with the component rows above it rather than being indented
+	# further than its own siblings.
 	main_vbox.add_child(eng_log_rich)
-
-# One combined line for the controlled zone the ship is in: authority plus the
-# rules summary (which already includes the speed advisory / limit). Resolves
-# the live zone rules from the authority string the same way helm_panel /
-# terminal_display do (a "ships" group scan). Blank outside any zone.
-func _update_zone_status(state: Dictionary) -> void:
-	if zone_status_lbl == null:
-		return
-	var authority = state.get("current_port_zone", null)
-	if authority == null or authority == "":
-		zone_status_lbl.text = ""
-		return
-	# Playtest D2: the port-RULES summary ("docking by permission · speed
-	# advisory 200") is gone from here. It does not belong in engineering
-	# diagnostics -- the zone-crossing banner already carries it, and this panel
-	# should say which authority's space you are in, not recite its regulations.
-	# PortRules.banner_summary stays: it is the banner's own renderer and
-	# test_port_rules.gd covers it. Only this call site is removed, along with
-	# the whole zone scan that existed purely to feed it.
-	zone_status_lbl.text = str(authority)
 
 func _eng_log_severity_color(severity: String) -> String:
 	match severity:
@@ -460,8 +429,6 @@ func _update_eng_log(eng: Dictionary) -> void:
 
 func update_data(state: Dictionary) -> void:
 	current_state = state
-
-	_update_zone_status(state)
 
 	if state.has("engineering"):
 		var eng = state["engineering"]

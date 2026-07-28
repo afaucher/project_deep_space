@@ -1,5 +1,7 @@
 extends Control
 
+
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 # Control-remapping screen, opened from the main menu's CONTROLS button
 # (see design_ideas/control_remapping.md). One row per remappable action with
 # a keyboard slot and a gamepad slot; click (or gamepad-select) a slot, then
@@ -50,12 +52,7 @@ func _ready() -> void:
 	# scales with resolution instead of being a fixed pixel block centred in
 	# whatever space happens to exist.
 	var panel := PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.07, 0.09, 0.98)
-	style.border_color = Color(0.3, 0.6, 0.9)
-	style.set_border_width_all(2)
-	style.set_content_margin_all(18)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.add_theme_stylebox_override("panel", UIStyle.modal_frame())
 	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	panel.anchor_left = 0.08
 	panel.anchor_top = 0.06
@@ -72,11 +69,7 @@ func _ready() -> void:
 	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(vbox)
 
-	var title := Label.new()
-	title.text = "CONTROLS -- REMAP"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
-	vbox.add_child(title)
+	vbox.add_child(UIStyle.panel_title("CONTROLS -- REMAP", UIStyle.ACCENT_MODAL))
 	vbox.add_child(HSeparator.new())
 
 	var scroll := ScrollContainer.new()
@@ -99,7 +92,7 @@ func _ready() -> void:
 	for header in ["ACTION", "KEYBOARD", "GAMEPAD"]:
 		var h := Label.new()
 		h.text = header
-		h.add_theme_font_size_override("font_size", 12)
+		h.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 		h.add_theme_color_override("font_color", Color(0.5, 0.5, 0.55))
 		grid.add_child(h)
 
@@ -126,7 +119,7 @@ func _ready() -> void:
 
 	_status = Label.new()
 	_status.text = "Select a binding to change it. Esc cancels a capture."
-	_status.add_theme_font_size_override("font_size", 12)
+	_status.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 	_status.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(_status)
@@ -252,5 +245,5 @@ func _set_status(msg: String) -> void:
 func _slot_button() -> Button:
 	var btn := Button.new()
 	btn.custom_minimum_size = Vector2(130, 0)
-	btn.add_theme_font_size_override("font_size", 13)
+	btn.add_theme_font_size_override("font_size", UIStyle.FONT_BODY)
 	return btn

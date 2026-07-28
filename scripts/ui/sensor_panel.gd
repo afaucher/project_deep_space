@@ -28,6 +28,7 @@ func get_selected_contact_id() -> String:
 	return selected_contact_id
 
 const SensorModuleUI = preload("res://scripts/ui/sensor_module_ui.gd")
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 
 func _ready() -> void:
 	clip_contents = true
@@ -35,7 +36,9 @@ func _ready() -> void:
 	main_vbox = VBoxContainer.new()
 	main_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(main_vbox)
-	
+
+	main_vbox.add_child(UIStyle.panel_title("SENSORS", UIStyle.ACCENT_SENSORS))
+
 	var master_hbox = HBoxContainer.new()
 	master_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	var master_lbl = Label.new()

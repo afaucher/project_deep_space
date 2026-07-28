@@ -115,6 +115,31 @@ func setup(_main) -> void:
 	_assert(Utils.contact_color(ordnance) == Utils.classification_color("INCOMING ORDNANCE"),
 		"incoming ordnance keeps its own colour (it carries no standing)")
 
+	# --- What the player is SHOWN -------------------------------------------
+	# Both of these came out of the 2026-07-27 playtest and both are one-liners
+	# over tables that already existed -- pinned here so a future edit to the
+	# tier table can't silently change what a player reads.
+	print("\n--- standing display names ---")
+	_assert(Utils.standing_display(Standing.UNREPORTED) == "CAUTION",
+		"the wire constant UNREPORTED is SHOWN as CAUTION -- 'not reporting' is one cause of the tier, not the tier")
+	_assert(Utils.standing_display(Standing.HOSTILE) == "HOSTILE",
+		"every other tier shows under its own name")
+	_assert(Utils.standing_display("") == "",
+		"no standing displays as nothing, not as a fabricated tier")
+
+	print("\n--- entity labels: one naming grammar for every list ---")
+	_assert(Utils.entity_label("TRK-068", "", "", "UNIDENTIFIED VESSEL") == "TRK-068",
+		"an unidentified vessel is just its track id -- no '[UNIDENTIFIED VESSEL]', no 'dark'")
+	_assert(Utils.entity_label("TRK-815", "Ironhold", "SOVEREIGN_DRIFT", "UNIDENTIFIED VESSEL")
+			== "TRK-815 \"Ironhold\" — SOVEREIGN_DRIFT",
+		"an identified vessel shows its flag, NOT the sensor bucket that calls it unidentified")
+	_assert(Utils.entity_label("TRK-402", "", "", "WRECKAGE") == "TRK-402 [WRECKAGE]",
+		"a non-vessel keeps its classification -- there the class IS the news")
+	_assert(Utils.entity_label("TRK-777", "Old Hull", "", "ASTEROID") == "TRK-777 \"Old Hull\" [ASTEROID]",
+		"...and a named non-vessel shows both")
+	_assert(not Utils.entity_label("TRK-815", "Ironhold", "SOVEREIGN_DRIFT", "UNIDENTIFIED VESSEL").contains("UNIDENTIFIED"),
+		"the label a player reads never contradicts the name printed beside it")
+
 	# Section order is the display order, and Alerts sits directly under
 	# Enemies -- the two attention-demanding sections adjacent at the top.
 	print("\n--- section order ---")

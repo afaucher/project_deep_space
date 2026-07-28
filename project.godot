@@ -36,6 +36,10 @@ window/size/mode=3
 
 enabled=PackedStringArray("res://addons/godotsteam/plugin.cfg", "res://addons/beehave/plugin.cfg", "res://addons/dialogue_manager/plugin.cfg")
 
+[gui]
+
+theme/default_font_size=18
+
 [input]
 
 menu_start={

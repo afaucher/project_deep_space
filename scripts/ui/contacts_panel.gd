@@ -1,5 +1,7 @@
 extends Control
 
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
+
 # M48 -- Standings & flags (IFF v2): row color prefers standing over raw
 # classification for vessels. Referenced via preload const, never bare
 # class_name. (Standing/Hail preloads removed with the action buttons --
@@ -108,11 +110,7 @@ func _ready() -> void:
 	main_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(main_vbox)
 	
-	var title = Label.new()
-	title.text = "TACTICAL CONTACTS"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color.GREEN)
-	main_vbox.add_child(title)
+	main_vbox.add_child(UIStyle.panel_title("TACTICAL CONTACTS", UIStyle.ACCENT_CONTACTS))
 	
 	main_vbox.add_child(HSeparator.new())
 	
@@ -138,23 +136,16 @@ func _ready() -> void:
 	# entries, not contacts, so it has no tier and belongs to this panel alone.
 	var sections: Array = Utils.CONTACT_SECTIONS.duplicate()
 	sections.append("Contracts")
+	# UIStyle.list_section owns the fold affordance and the "(+)/(-)" marker --
+	# a section holding an unbounded list folds, one holding a fixed readout
+	# does not (design_ideas/2026-07-27-ui_style_guide.md §2.1). The comms
+	# panel's HAILS/CONTRACTS/LOCAL CONTACTS use the same helper.
 	for s_name in sections:
-		var btn = Button.new()
-		btn.text = s_name + " (-)"
-		btn.toggle_mode = true
-		content_vbox.add_child(btn)
-		
-		var vbox = VBoxContainer.new()
-		vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		content_vbox.add_child(vbox)
-		
-		section_vboxes[s_name] = vbox
-		section_buttons[s_name] = btn
-		
-		btn.toggled.connect(func(pressed):
-			vbox.visible = not pressed
-			btn.text = s_name + (" (+)" if pressed else " (-)")
-		)
+		var sec: Dictionary = UIStyle.list_section(s_name, UIStyle.ACCENT_CONTACTS)
+		content_vbox.add_child(sec["button"])
+		content_vbox.add_child(sec["content"])
+		section_vboxes[s_name] = sec["content"]
+		section_buttons[s_name] = sec["button"]
 
 func _on_contact_selected(c_id: String) -> void:
 	if selected_contact_id == c_id:
@@ -182,10 +173,10 @@ func update_data(packet: Dictionary) -> void:
 
 func _update_contact_list(contacts: Dictionary) -> void:
 	var my_pos = current_state.get("pos", Vector2.ZERO)
-	var my_rot = current_state.get("rot", 0.0)
-	var my_components = current_state.get("engineering", {}).get("ship_components", [])
-	var mock_my_sig = {"rot": my_rot, "em_emitters": my_components}
-		
+	# (my_rot / ship_components were only ever read to build a fake signature for
+	# the per-row emissions estimate; that moved to the targeting computer.)
+
+
 	# Bucketed by Utils.contact_section -- the SAME function that parents each
 	# row below and that drives the tab-cycle order. This block used to bucket
 	# on classification alone, which meant the A2 contradiction survived inside
@@ -227,9 +218,8 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		# Counts come from the same buckets that place the rows, so a header
 		# can no longer contradict the section under it. Every section in
 		# CONTACT_SECTIONS gets one -- including Alerts, which had none.
-		section_buttons[s_name].text = "%s (%d)%s" % [
-			s_name, bucket.size(),
-			" (+)" if section_buttons[s_name].button_pressed else " (-)"]
+		UIStyle.set_list_section_title(section_buttons[s_name],
+			"%s (%d)" % [s_name, bucket.size()])
 		sorted_contacts.append_array(bucket)
 	
 	# Keep track of which IDs are currently valid
@@ -266,8 +256,10 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			info = refs["info"]
 		else:
 			panel = PanelContainer.new()
-			p_style = StyleBoxFlat.new()
-			p_style.border_width_left = 4
+			# One row shape for an entity listed anywhere -- the hails list
+			# builds its rows from the same helper. bg/border colour are
+			# re-set every update below; this establishes the geometry.
+			p_style = UIStyle.row_style(Color.WHITE, false)
 			panel.add_theme_stylebox_override("panel", p_style)
 			panel.gui_input.connect(_on_contact_panel_gui_input.bind(c_id))
 
@@ -287,7 +279,7 @@ func _update_contact_list(contacts: Dictionary) -> void:
 			header_hbox.add_child(pin_btn)
 
 			info = Label.new()
-			info.add_theme_font_size_override("font_size", 12)
+			info.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 			vbox.add_child(info)
 
 			contact_panels[c_id] = {"panel": panel, "style": p_style, "header": header, "pin_btn": pin_btn, "info": info}
@@ -339,8 +331,10 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		# shows a real name instead of "TRK-xxx" whenever the caller
 		# self-identified.
 		var sos_name: String = c.get("sos_name", "") if is_sos else ""
-		var base_name = t_name if t_name != "" else (sos_name if sos_name != "" else c_id)
-		header.text = ("[SOS] " + base_name + " [" + classification_str + "]") if is_sos else (base_name + " [" + classification_str + "]")
+		var base_name: String = t_name if t_name != "" else sos_name
+		var label: String = Utils.entity_label(c_id, base_name,
+			c.get("transponder_flag", ""), classification_str)
+		header.text = ("[SOS] " + label) if is_sos else label
 
 		var dist = c["_dist"]
 		var vel = c.get("vel", Vector2.ZERO)
@@ -350,18 +344,21 @@ func _update_contact_list(contacts: Dictionary) -> void:
 		var their_pos = c.get("pos", Vector2.ZERO)
 		var hdg = wrapf(rad_to_deg((their_pos - my_pos).angle()) + 90.0, 0.0, 360.0)
 
-		var angle_from_them_to_us = (my_pos - their_pos).angle()
-		var my_em_emit = Utils.get_directional_em(mock_my_sig, angle_from_them_to_us)
-		var detect_dist = my_em_emit * (10000.0 / 15.0)
-
+		# "Our Emit" / "Det Limit" used to be here, on EVERY row. Both were raw
+		# inputs to a question neither of them asked out loud -- "can this ship
+		# see me?" -- and answering it meant comparing two numbers in your head,
+		# per contact, continuously. It is now one stated verdict on the ONE
+		# contact you are actually working (the targeting computer's
+		# counter-detection line, weapons_panel.gd), computed by
+		# Utils.counter_detection, which also fixed the quiet-hull case this
+		# copy got wrong.
 		var sig = c.get("signature", {})
 		var sos_line: String = ""
 		if is_sos:
 			var nature: String = c.get("sos_nature", "")
 			sos_line = "\nSOS: %s" % (nature if nature != "" else "distress call")
-		info.text = ("Dist: %s | Hdg: %03d | Spd: %.1f m/s | Age: %.1fs\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f\nOur Emit: %.1f | Det Limit: %s" + sos_line) % [
-			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0),
-			my_em_emit, Utils.format_dist(detect_dist)
+		info.text = ("Dist: %s | Hdg: %03d | Spd: %.1f m/s | Age: %.1fs\nHeat: %.1f | EM: %.1f\nCS: %.1f | Den: %.1f" + sos_line) % [
+			Utils.format_dist(dist), hdg, speed, age_s, sig.get("heat", 0.0), sig.get("em_noise", 0.0), sig.get("cross_section", 1.0), sig.get("density", 0.0)
 		]
 		# (Standing metadata -- the "Standing: X (reason)" detail line -- moved
 		# to the weapons panel's targeting-computer section alongside MARK/
@@ -388,7 +385,7 @@ func _update_contracts_list(contracts: Array) -> void:
 	var btn = section_buttons.get("Contracts", null)
 	if btn == null:
 		return # defensive -- Contracts section always exists after _ready(), but never assume
-	btn.text = "Contracts (" + str(contracts.size()) + ")" + (" (+)" if btn.button_pressed else " (-)")
+	UIStyle.set_list_section_title(btn, "Contracts (" + str(contracts.size()) + ")")
 
 	var target_vbox: VBoxContainer = section_vboxes["Contracts"]
 

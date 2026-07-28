@@ -144,6 +144,103 @@ static func contact_tier(c: Dictionary) -> String:
 		return TIER_SOS
 	return _STANDING_TIERS.get(c.get("standing", ""), "")
 
+# --- Counter-detection -------------------------------------------------------
+# "Can that ship see ME right now?" -- the inverse of the question every other
+# readout answers. Doctrine calls this COUNTER-DETECTION: the range at which an
+# adversary picks YOU up, as distinct from your own detection range on them.
+# The two are independent, and on a hull whose emitters are directional they
+# differ by bearing -- turning the ship changes this number.
+#
+# Mirrors ship.gd's passive-EM gate exactly (_run_sensor_sweep):
+#     received = emit * (REF / max(REF, dist))
+#     detected = received >= PASSIVE_EM_NOISE_FLOOR
+# solved for distance, with `emit` taken along the bearing to them.
+#
+# Two things about the shape of the answer:
+#
+#   * Below the noise floor there is NO range at which we are detectable --
+#     not even at zero. Inside REF the falloff term is 1.0, so a quiet enough
+#     hull is simply invisible to passive EM. The old inline version in
+#     contacts_panel (emit * 10000/15, both constants hand-typed) missed this
+#     and reported a confident detection range for a ship that could not be
+#     seen at all: emit 10 read as "detectable to 6.7 km" when the true answer
+#     is "never".
+#   * Above the floor the range is always >= REF, for the same reason. There
+#     is no ramp near zero -- the state is genuinely bimodal.
+#
+# This is OUR assessment of OUR OWN emissions, not knowledge of their receiver:
+# it assumes their passive sensors match the model's. That is what the sim
+# actually runs, so it is honest, but it is an estimate by nature.
+# Returns {"emit", "range", "exposed", "silent"}.
+static func counter_detection(my_components: Array, my_rot: float,
+		my_pos: Vector2, their_pos: Vector2) -> Dictionary:
+	var bearing_to_us: float = (my_pos - their_pos).angle()
+	var emit: float = get_directional_em(
+		{"rot": my_rot, "em_emitters": my_components}, bearing_to_us)
+	if emit < Ship.PASSIVE_EM_NOISE_FLOOR:
+		return {"emit": emit, "range": 0.0, "exposed": false, "silent": true}
+	var r: float = emit * Ship.EM_FALLOFF_REFERENCE_DISTANCE / Ship.PASSIVE_EM_NOISE_FLOOR
+	return {
+		"emit": emit,
+		"range": r,
+		"exposed": my_pos.distance_to(their_pos) <= r,
+		"silent": false,
+	}
+
+# --- Naming an entity on screen ----------------------------------------------
+# ONE grammar, shared by the tactical contacts list and the hails list:
+#
+#   TRK-068                                  nothing known but the return
+#   TRK-815 "Ironhold" — SOVEREIGN_DRIFT     identified and flagged
+#   TRK-402 [WRECKAGE]                       not a vessel; the class IS the news
+#
+# Two things this fixes, both reported in the 2026-07-27 playtest.
+#
+# ONE: every row read "<name> [UNIDENTIFIED VESSEL]". That bracket is
+# classify_contact()'s output, and classify_contact has no notion of identity
+# -- it returns UNIDENTIFIED VESSEL for anything powered that isn't an IFF
+# friendly, including a station broadcasting its name and flag at you. So the
+# label contradicted the name printed immediately to its left, on every
+# contact, permanently. Where the contact IS a vessel the flag is the useful
+# qualifier and the classification says nothing; where it is NOT (wreckage,
+# asteroid, incoming ordnance) the classification is the entire point, so it
+# stays.
+#
+# TWO: the two lists named the same ship differently -- "Ironhold" in tactical
+# contacts, "TRK-815 \"Ironhold\"" in hails, "TRK-815" in the targeting
+# computer -- so a player could not tell that three rows were one ship. That is
+# the same correlation problem CLAUDE.md documents for debug logs, in the UI.
+# The track id leads every label now, because it is the one identifier every
+# surface shares.
+#
+# `name` is whatever the caller resolved (transponder name, an SOS's claimed
+# name); the caller owns that precedence and any [SOS] prefix.
+static func entity_label(track_id: String, name: String, flag: String, classification: String) -> String:
+	var s: String = track_id
+	if name != "":
+		s += " \"%s\"" % name
+	if Standing.is_vessel(classification):
+		if flag != "":
+			s += " — %s" % flag
+	elif classification != "":
+		s += " [%s]" % classification
+	return s
+
+# What to CALL a standing on screen. The wire constant is `UNREPORTED`, which
+# leaked into the weapons panel's readout as "Standing: UNREPORTED -- demanding
+# a stop of Patrol Alpha" -- a line that names a cause ("demanding a stop")
+# which has nothing to do with reporting, because UNREPORTED stopped being the
+# category and became one of several causes of the yellow tier (see standing.gd's
+# CAUTION note). The player-facing name is the TIER name, which this table
+# already holds; no second mapping is introduced.
+#
+# This is presentation only. The wire value is untouched, so the datalink
+# compare-and-copy, every `== Standing.UNREPORTED` test and the saved-state
+# format all keep working -- and the eventual constant rename stays the
+# isolated commit standing.gd asks for.
+static func standing_display(standing: String) -> String:
+	return _STANDING_TIERS.get(standing, standing)
+
 static func contact_color(c: Dictionary) -> Color:
 	var tier: String = contact_tier(c)
 	if tier != "":

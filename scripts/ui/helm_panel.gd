@@ -1,6 +1,7 @@
 extends Control
 
 const PortRules = preload("res://scripts/port/port_rules.gd")
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 
 var current_state: Dictionary = {
 	"pos": Vector2.ZERO,
@@ -80,7 +81,7 @@ class HeadingDial extends Control:
 		
 		# Draw markings
 		var font = ThemeDB.fallback_font
-		var font_size = 12
+		var font_size = UIStyle.FONT_CANVAS
 		var map_rot = Utils.get_map_rotation(is_ship_oriented, actual_angle)
 
 		for i in range(0, 360, 30):
@@ -283,7 +284,7 @@ class EngineSlider extends Control:
 		# states (M46) replace the old binary amber; see PortRules.speed_zone_state.
 		if show_speed_number:
 			var font = ThemeDB.fallback_font
-			var font_size = 14
+			var font_size = UIStyle.FONT_CANVAS
 			var speed_color := SPEED_NORMAL_COLOR
 			match zone_speed_state:
 				PortRules.SpeedState.APPROACHING:
@@ -303,7 +304,7 @@ class EngineSlider extends Control:
 			# state sitting over a legal-looking FORWARD number explains itself
 			# (the readout's color keys off TRUE speed, this text shows why).
 			if show_drift_cue:
-				var drift_font_size = 11
+				var drift_font_size = UIStyle.FONT_CANVAS_SMALL
 				var drift_text = "lat %d" % int(round(lateral_speed))
 				var drift_size = font.get_string_size(drift_text, HORIZONTAL_ALIGNMENT_CENTER, -1, drift_font_size)
 				var drift_pos = Vector2(size.x / 2.0 - drift_size.x / 2.0, text_pos.y + font_size + 2.0)
@@ -323,8 +324,9 @@ var max_speed: float = 1000.0
 # (see update_data()) -- the other axis is just coasting on an implied value,
 # not a real setpoint. The speed number used to draw inside the velocity
 # gauge (EngineSlider.show_speed_number); it now lives out here to the side.
-# (The controlled-zone LIMIT line lives on the engineering screen -- see
-# engineering_panel.gd's zone_status_lbl.)
+# (The controlled-zone LIMIT no longer has a permanent readout anywhere: the
+# zone-crossing banner announces the rules on entry. It briefly lived on the
+# engineering screen and was removed by playtest feedback.)
 var throttle_readout_lbl: Label
 var throttle_setpoint_lbl: Label
 var velocity_setpoint_lbl: Label
@@ -391,7 +393,11 @@ func _ready() -> void:
 	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	add_child(vbox)
-	
+
+	# Every panel names itself (2026-07-27 playtest: "some things have headers
+	# like TACTICAL CONTACTS and others don't like HELM").
+	vbox.add_child(UIStyle.panel_title("HELM", UIStyle.ACCENT_HELM))
+
 	# Dial + stat readouts, side by side -- the dial's needles are dense and
 	# unlabeled, so these make Speed/Heading/Course/Bearing self-discoverable.
 	var dial_row = HBoxContainer.new()
@@ -415,7 +421,7 @@ func _ready() -> void:
 	course_stat_lbl = Label.new()
 	bearing_stat_lbl = Label.new()
 	for lbl in [speed_stat_lbl, heading_stat_lbl, course_stat_lbl, bearing_stat_lbl]:
-		lbl.add_theme_font_size_override("font_size", 15)
+		lbl.add_theme_font_size_override("font_size", UIStyle.FONT_READOUT)
 		stats_vbox.add_child(lbl)
 	# Match the dial's own needle colors so the stat readouts are
 	# self-explanatory: Heading is the cyan actual-heading needle; Course and
@@ -456,7 +462,7 @@ func _ready() -> void:
 	throttle_readout_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	throttle_readout_lbl.custom_minimum_size = Vector2(52, 0)
 	throttle_readout_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	throttle_readout_lbl.add_theme_font_size_override("font_size", 15)
+	throttle_readout_lbl.add_theme_font_size_override("font_size", UIStyle.FONT_READOUT)
 	engine_hbox.add_child(throttle_readout_lbl)
 
 	# Throttle Slider
@@ -493,7 +499,7 @@ func _ready() -> void:
 	throttle_setpoint_lbl = Label.new()
 	throttle_setpoint_lbl.custom_minimum_size = Vector2(56, 0)
 	throttle_setpoint_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	throttle_setpoint_lbl.add_theme_font_size_override("font_size", 13)
+	throttle_setpoint_lbl.add_theme_font_size_override("font_size", UIStyle.FONT_BODY)
 	engine_hbox.add_child(throttle_setpoint_lbl)
 
 	# Fixed gap so the throttle and velocity groups read as separate.
@@ -508,7 +514,7 @@ func _ready() -> void:
 	speed_readout_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	speed_readout_lbl.custom_minimum_size = Vector2(80, 0)
 	speed_readout_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	speed_readout_lbl.add_theme_font_size_override("font_size", 16)
+	speed_readout_lbl.add_theme_font_size_override("font_size", UIStyle.FONT_READOUT)
 	engine_hbox.add_child(speed_readout_lbl)
 
 	# Velocity Slider
@@ -544,7 +550,7 @@ func _ready() -> void:
 	velocity_setpoint_lbl = Label.new()
 	velocity_setpoint_lbl.custom_minimum_size = Vector2(90, 0)
 	velocity_setpoint_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	velocity_setpoint_lbl.add_theme_font_size_override("font_size", 13)
+	velocity_setpoint_lbl.add_theme_font_size_override("font_size", UIStyle.FONT_BODY)
 	engine_hbox.add_child(velocity_setpoint_lbl)
 
 	vbox.add_child(engine_hbox)

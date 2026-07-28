@@ -1,6 +1,15 @@
-extends PanelContainer
+extends Control
 class_name WeaponsPanel
 
+# Plain Control, like every other console panel. This was the ONE panel that
+# was itself a PanelContainer and framed itself -- while ALSO being wrapped in
+# terminal_display's weapons_container, which frames it too. Two nested frames
+# meant two backgrounds (the inner one lighter) and two border rules offset
+# from each other, which is a bevel: the weapons panel was the only one that
+# looked 3D. Invisible at the old 3px frame margin, obvious once padding went
+# to 8px. The frame belongs to the container, once, for all seven panels.
+
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 
 signal fire_weapon_requested(weapon_id: String)
@@ -26,6 +35,7 @@ var selected_contact_id: String = ""
 var weapon_buttons: Dictionary = {}
 var target_info_label: Label
 var standing_label: Label
+var counter_detect_label: Label
 var btn_mark_hostile: Button
 var btn_unmark: Button
 var weapon_grid: GridContainer
@@ -42,25 +52,12 @@ var _closing_vel_samples: Array = [] # [{"t": float, "v": float}, ...]
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(460, 200)
-	
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.05, 0.05, 0.8)
-	style.border_width_top = 2
-	style.border_color = Color.RED
-	style.content_margin_left = 3
-	style.content_margin_right = 3
-	style.content_margin_top = 3
-	style.content_margin_bottom = 3
-	add_theme_stylebox_override("panel", style)
-	
+
 	var vbox = VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(vbox)
-	
-	var title = Label.new()
-	title.text = "WEAPONS CONTROL"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color.RED)
-	vbox.add_child(title)
+
+	vbox.add_child(UIStyle.panel_title("WEAPONS CONTROL", UIStyle.ACCENT_WEAPONS))
 	
 	vbox.add_child(HSeparator.new())
 	
@@ -77,6 +74,12 @@ func _ready() -> void:
 	# same glance as the button it governs.
 	safety_check = CheckButton.new()
 	safety_check.text = "SAFETY"
+	# Shrink to content so the switch sits immediately after the word rather
+	# than being flung to the panel's right edge by a FILL stretch -- matches
+	# how every other toggle in the UI reads (contacts_panel's "Pin",
+	# engineering_panel's per-component power), where the control is adjacent
+	# to the label it governs.
+	safety_check.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	safety_check.button_pressed = true
 	safety_check.tooltip_text = "Master arm. While engaged, no weapon will fire from this console."
 	safety_check.toggled.connect(_on_safety_toggled)
@@ -84,7 +87,7 @@ func _ready() -> void:
 
 	safety_status_label = Label.new()
 	safety_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	safety_status_label.add_theme_font_size_override("font_size", 11)
+	safety_status_label.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 	vbox.add_child(safety_status_label)
 
 	fire_all_btn = Button.new()
@@ -95,16 +98,12 @@ func _ready() -> void:
 
 	vbox.add_child(HSeparator.new())
 	
-	var target_label = Label.new()
-	target_label.text = "TARGETING COMPUTER"
-	target_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	target_label.add_theme_color_override("font_color", Color.ORANGE)
-	vbox.add_child(target_label)
+	vbox.add_child(UIStyle.section_header("TARGETING COMPUTER", UIStyle.ACCENT_WEAPONS))
 	
 	target_info_label = Label.new()
 	target_info_label.text = "NO TARGET LOCKED"
 	target_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	target_info_label.add_theme_font_size_override("font_size", 14)
+	target_info_label.add_theme_font_size_override("font_size", UIStyle.FONT_BODY)
 	vbox.add_child(target_info_label)
 
 	# Standing metadata + MARK HOSTILE/UNMARK -- moved here from the comms/
@@ -114,8 +113,18 @@ func _ready() -> void:
 	standing_label = Label.new()
 	standing_label.text = ""
 	standing_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	standing_label.add_theme_font_size_override("font_size", 12)
+	standing_label.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 	vbox.add_child(standing_label)
+
+	# "Can THIS ship see ME?" -- see _update_counter_detection below. Used to be
+	# two raw numbers ("Our Emit" / "Det Limit") on every row of the tactical
+	# contacts list, leaving the player to do the comparison themselves, per
+	# contact, forever. Now one two-word state, on the target you are working.
+	counter_detect_label = Label.new()
+	counter_detect_label.text = ""
+	counter_detect_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	counter_detect_label.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
+	vbox.add_child(counter_detect_label)
 
 	var standing_hbox = HBoxContainer.new()
 	standing_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -284,7 +293,7 @@ func _create_weapon_ui(grid: GridContainer, w_id: String, w_name: String) -> voi
 	
 	var ammo_label = Label.new()
 	ammo_label.text = "Ammo: -- | CD: --"
-	ammo_label.add_theme_font_size_override("font_size", 12)
+	ammo_label.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 	info_vbox.add_child(ammo_label)
 	
 	grid.add_child(info_vbox)
@@ -422,10 +431,12 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 		target_info_label.text = "NO TARGET LOCKED"
 		if is_instance_valid(history_graph): history_graph.hide()
 		_update_standing_row({})
+		_update_counter_detection({})
 	else:
 		if current_state.has("contacts") and current_state["contacts"].has(selected_contact_id):
 			var c = current_state["contacts"][selected_contact_id]
 			_update_standing_row(c)
+			_update_counter_detection(c)
 			# c["signature"] is OUR OWN sensors' fused, lerp-smoothed track data
 			# (Ship._run_sensor_sweep + the correlation lerp in _physics_process),
 			# not the target's actual current_heat/em_signature -- the history
@@ -457,6 +468,44 @@ func update_data(packet: Dictionary, target_id: String) -> void:
 			target_info_label.text = "TARGET LOST"
 			if is_instance_valid(history_graph): history_graph.hide()
 			_update_standing_row({})
+			_update_counter_detection({})
+
+# "Can this ship see US?" -- the inverse of every other line on this panel.
+# Utils.counter_detection holds the rule and mirrors ship.gd's passive-EM gate.
+# "Counter-detection" is doctrine's name for the quantity (the range at which an
+# adversary picks you up, as opposed to your own detection range on them); it
+# stays in the code and out of the UI.
+#
+# PASSIVE EXPOSED / PASSIVE CLEAR, two words, nothing else. What got cut, and
+# why, so it doesn't creep back:
+#
+#   * The "Counter-detection:" prefix -- the panel has exactly one line about
+#     being seen; it needn't introduce itself every frame.
+#   * The supporting range figures. They explained WHY, at the cost of turning
+#     a glanceable state into a sentence to be read.
+#   * The third state. Utils still distinguishes SILENT and that distinction is
+#     real, but it is a PREDICTION ("invisible at any range"), and this line
+#     answers about the contact in front of you right now -- where silent and
+#     merely-out-of-range are the same answer. `silent` stays on the returned
+#     dict for anything that wants to reason ahead.
+#
+# PASSIVE is load-bearing: this is the passive-EM gate only. An active sensor
+# lock is a different question and this line says nothing about it.
+# Colour still carries the state, so the verdict lands before it is read.
+func _update_counter_detection(c: Dictionary) -> void:
+	if counter_detect_label == null:
+		return
+	if c.is_empty() or not c.has("pos"):
+		counter_detect_label.text = ""
+		return
+	var cd: Dictionary = Utils.counter_detection(
+		current_state.get("engineering", {}).get("ship_components", []),
+		current_state.get("rot", 0.0),
+		current_state.get("pos", Vector2.ZERO),
+		c.get("pos", Vector2.ZERO))
+	counter_detect_label.text = "PASSIVE EXPOSED" if cd["exposed"] else "PASSIVE CLEAR"
+	counter_detect_label.add_theme_color_override("font_color",
+		Color(0.95, 0.5, 0.2) if cd["exposed"] else Color(0.6, 0.75, 0.6))
 
 # Standing metadata + MARK HOSTILE/UNMARK enablement (moved here from comms_
 # panel.gd -- see that file's now-removed _update_action_row() for the rules
@@ -478,12 +527,16 @@ func _update_standing_row(c: Dictionary) -> void:
 	# already cache-stamps contact["standing_reason"] with this text
 	# (standing.gd/ship.gd), it just had zero UI consumers until now.
 	var reason: String = c.get("standing_reason", "") if is_vessel else ""
+	# Utils.standing_display, not the raw constant -- the wire value UNREPORTED
+	# reads as a claim about transponders, which is only one of the yellow
+	# tier's causes and usually not the one in `reason`.
+	var standing_text: String = Utils.standing_display(standing)
 	if standing == "":
 		standing_label.text = ""
 	elif reason != "":
-		standing_label.text = "Standing: %s -- %s" % [standing, reason]
+		standing_label.text = "Standing: %s -- %s" % [standing_text, reason]
 	else:
-		standing_label.text = "Standing: %s" % standing
+		standing_label.text = "Standing: %s" % standing_text
 
 	# M52 -- SOS as a generic contact attribute (calling session, 2026-07-23,
 	# implementation_plans/m52_sos_passive_sync.md): same source

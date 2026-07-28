@@ -118,11 +118,94 @@ func _test_builder_rules(panel) -> void:
 					"their demand shows as inbound traffic, got %s" % str(e["traffic"]))
 				_assert(e["known_contact"], "tracked vessel -> actions enabled")
 			"TRK-203":
-				_assert(panel.entry_header_text(e) == "TRK-203 — dark",
-					"no-transponder header reads dark, got '%s'" % panel.entry_header_text(e))
+				# 2026-07-27 playtest: a flagless vessel is just its track id.
+				# The old "— dark" suffix was this list's private vocabulary --
+				# the word appeared nowhere else in the game.
+				_assert(panel.entry_header_text(e) == "TRK-203",
+					"no-transponder header is the bare track id, got '%s'" % panel.entry_header_text(e))
 				_assert(e["traffic"] == ["> DEMAND(IDENTIFY)"],
 					"our sent demand shows as outbound traffic, got %s" % str(e["traffic"]))
 				_assert(not e["known_contact"], "hail-only vessel (no track) -> actions disabled")
+
+	_test_docked_host_entry(panel)
+	_test_demander_entry(panel)
+	_test_repeat_collapse(panel)
+
+# The vessel DEMANDING something of us is guaranteed a row, because the
+# ACKNOWLEDGE banner rides that row and must never be homeless while a demand
+# is live -- the same guarantee, for the same reason, as the docked host.
+func _test_demander_entry(panel) -> void:
+	print("\n--- build_vessel_entries: the demanding vessel earns its own row ---")
+	# iid 777: no contact, no hail in either buffer, not selected. Nothing else
+	# in the builder would produce a row for it.
+	var entries: Array = panel.build_vessel_entries(
+		_fixture_contacts(), _fixture_transponders(),
+		_fixture_last_hails(), _fixture_sent_hails(), "", MY_IID, -1, 777)
+	var demanders: Array = entries.filter(func(e): return e["demanding"])
+	_assert(demanders.size() == 1 and demanders[0]["iid"] == 777,
+		"a demander with no track and no surviving hail STILL gets a row (the banner's home)")
+
+	var none: Array = panel.build_vessel_entries(
+		_fixture_contacts(), _fixture_transponders(),
+		_fixture_last_hails(), _fixture_sent_hails(), "", MY_IID, -1, -1)
+	_assert((none.filter(func(e): return e["demanding"]) as Array).is_empty(),
+		"nobody demanding -> no entry claims to be the demander")
+
+# Eleven identical "< DEMAND(IDENTIFY)" lines from one patrol was the playtest's
+# most visible symptom. The AI bug behind it is fixed in challenge_leaf.gd, but
+# the panel should degrade gracefully when a ship legitimately repeats itself
+# rather than burying the conversation under a wall of identical rows.
+func _test_repeat_collapse(panel) -> void:
+	print("\n--- traffic lines: consecutive repeats collapse, order is preserved ---")
+	_assert(panel._collapse_runs([]) == [], "empty stays empty")
+	_assert(panel._collapse_runs(["< A"]) == ["< A"], "a single line is left alone (no 'x1')")
+	_assert(panel._collapse_runs(["< A", "< A", "< A"]) == ["< A x3"],
+		"three identical lines collapse to one with a count")
+	# ORDER IS THE STORY. An IDENTIFY, then a STOP, then another IDENTIFY is a
+	# genuine escalation-and-back and must not be summarised into two tallies.
+	_assert(panel._collapse_runs(["< A", "< B", "< A"]) == ["< A", "< B", "< A"],
+		"non-adjacent repeats stay separate -- runs, not a global tally")
+	_assert(panel._collapse_runs(["< A", "< A", "< B", "< B", "< B", "> C"])
+			== ["< A x2", "< B x3", "> C"],
+		"multiple runs each collapse independently")
+
+# The station we are BERTHED at gets a row even though it is silent, unselected
+# and not a vessel (the is_vessel gate above deliberately drops a merely-
+# selected station). Playtest: the Undock control needs a row to ride instead
+# of a bare strip hanging under the list.
+func _test_docked_host_entry(panel) -> void:
+	print("\n--- build_vessel_entries: the docked host earns its own row ---")
+	var docked: Array = panel.build_vessel_entries(
+		_fixture_contacts(), _fixture_transponders(),
+		_fixture_last_hails(), _fixture_sent_hails(), "", MY_IID, 209)
+	var docked_ids: Array = docked.map(func(e): return e["c_id"])
+	_assert(docked_ids.has("TRK-009"),
+		"the docked station is listed despite being silent, unselected and a non-vessel")
+
+	var flags: Array = docked.filter(func(e): return e["docked"])
+	_assert(flags.size() == 1 and flags[0]["c_id"] == "TRK-009",
+		"exactly one entry carries docked=true, and it is the host")
+	_assert(flags.size() == 1 and flags[0]["known_contact"],
+		"the docked host is a tracked contact -> its actions stay live")
+
+	# Free-flying, nothing changes: no phantom docked row, no docked flag.
+	var free: Array = panel.build_vessel_entries(
+		_fixture_contacts(), _fixture_transponders(),
+		_fixture_last_hails(), _fixture_sent_hails(), "", MY_IID, -1)
+	var free_ids: Array = free.map(func(e): return e["c_id"])
+	var free_docked: Array = free.filter(func(e): return e["docked"])
+	_assert(not free_ids.has("TRK-009"),
+		"free-flying: the station is silent again and drops out")
+	_assert(free_docked.is_empty(),
+		"free-flying: no entry claims to be the docked host")
+
+	# Docked to something we hold no track on -- still a row, under a derived id.
+	var untracked: Array = panel.build_vessel_entries(
+		_fixture_contacts(), _fixture_transponders(),
+		_fixture_last_hails(), _fixture_sent_hails(), "", MY_IID, 777)
+	var derived: Array = untracked.filter(func(e): return e["docked"])
+	_assert(derived.size() == 1 and not derived[0]["known_contact"],
+		"an untracked docked host still gets a row, with actions disabled")
 
 # --- The rendered widget: entry nodes, button state, no [TO YOU] -------------
 func _test_rendered_entries(panel) -> void:
@@ -175,6 +258,24 @@ func _test_banner_states(panel) -> void:
 	_assert(not panel.btn_stop.visible, "STOP button parked/hidden even for a STOP-rung demand")
 	_assert(panel.hail_banner_label.text == "DEMAND(STOP) from flag: JOLLY_ROGER",
 		"banner names the demanding flag, got '%s'" % panel.hail_banner_label.text)
+
+	# ...and it is parented INSIDE the demanding vessel's row, not floating in a
+	# fixed bar at the top of the panel. Walk up from the banner: the entry row
+	# for TRK-002 (iid 202, the demander in this fixture) must be an ancestor.
+	# Playtest 2026-07-27: "the ACKNOWLEDGE button and that whole red box are at
+	# the top instead of on the ship it came from."
+	var row_header: Label = panel._entry_nodes.get("TRK-002", {}).get("header", null)
+	_assert(row_header != null, "the demanding vessel has a rendered row to host the banner")
+	if row_header != null:
+		var entry_box: Node = row_header.get_parent()
+		var found := false
+		var walk: Node = panel.hail_banner
+		while walk != null:
+			if walk == entry_box:
+				found = true
+				break
+			walk = walk.get_parent()
+		_assert(found, "the banner is parented inside the DEMANDING vessel's row, not the panel top")
 
 	# An IDENTIFY-rung demand shows ONLY ACKNOWLEDGE -- nothing to "stop" for.
 	panel.update_data(_packet({"pending_demand": {"rung": Hail.RUNG_IDENTIFY, "seq": 10,

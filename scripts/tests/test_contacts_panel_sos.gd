@@ -75,8 +75,18 @@ func setup(main) -> void:
 
 	# M52 follow-up -- an UNRESOLVED distress contact (no real transponder/
 	# sensor data at all -- classification "DISTRESS CALL", no transponders
-	# entry for its instance_id) falls back to sos_name for the header
-	# instead of the bare "TRK-xxx" track id.
+	# entry for its instance_id) shows sos_name in its header rather than
+	# leaving the player with nothing but a track number.
+	#
+	# 2026-07-27: the original form of this asserted the track id was ABSENT
+	# once a name was known. That was stricter than the complaint behind it
+	# ("the row shows TRK-xxx instead of a real name") and it collided with the
+	# playtest ask that every list name a ship the same way. Both lists now lead
+	# with the track id and append the name -- the name is still there, which is
+	# what the M52 follow-up actually wanted, and the id is what lets a player
+	# match this row to the hails list and the targeting computer, which both
+	# speak in TRK-xxx. If leading with the name matters more, this is the
+	# assertion to flip and Utils.entity_label is the one place to change.
 	panel.update_data({
 		"pos": Vector2.ZERO,
 		"contacts": {
@@ -93,8 +103,9 @@ func setup(main) -> void:
 		var refs4: Dictionary = panel.contact_panels["TRK-300"]
 		var header4: Label = refs4["header"]
 		var style4: StyleBoxFlat = refs4["style"]
-		_assert(header4.text.begins_with("[SOS] Mystery Caller"), "no transponder data -> header falls back to sos_name, got '%s'" % header4.text)
-		_assert(not header4.text.contains("TRK-300"), "the bare track id is NOT shown once sos_name is available, got '%s'" % header4.text)
+		_assert(header4.text.begins_with("[SOS] "), "an unresolved distress contact still leads with the SOS badge, got '%s'" % header4.text)
+		_assert(header4.text.contains("Mystery Caller"), "no transponder data -> the header still names the caller from sos_name, got '%s'" % header4.text)
+		_assert(header4.text.contains("TRK-300"), "...alongside the track id every other panel refers to it by, got '%s'" % header4.text)
 		_assert(style4.border_color == Color(1.0, 0.25, 0.1, 0.95), "unresolved distress row still uses the distress color, got %s" % str(style4.border_color))
 
 	# SOS clears (e.g. once the report ages out server-side) -> the badge

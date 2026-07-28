@@ -11,6 +11,7 @@ const HelpOverlay = preload("res://scripts/ui/help_overlay.gd")
 const DockingControl = preload("res://scripts/ui/docking_control.gd")
 const PortRules = preload("res://scripts/port/port_rules.gd")
 const ZoneBanner = preload("res://scripts/port/zone_banner.gd")
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 
 var nav_panel: Control
 var helm_panel: Control
@@ -265,12 +266,8 @@ func _ready() -> void:
 	var nav_container = PanelContainer.new()
 	nav_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	nav_container.size_flags_stretch_ratio = 2.0
-	var nav_style = StyleBoxFlat.new()
-	nav_style.bg_color = Color(0.05, 0.05, 0.1)
-	nav_style.border_width_right = 2
-	nav_style.border_color = Color(0.2, 0.4, 0.2)
-	_add_margins(nav_style)
-	nav_container.add_theme_stylebox_override("panel", nav_style)
+	nav_container.add_theme_stylebox_override("panel", UIStyle.panel_frame(
+		UIStyle.ACCENT_NAV, Color(0.05, 0.05, 0.1), ["right"]))
 	
 	nav_panel = NavigationPanel.new()
 	nav_panel.contact_selected.connect(_on_selection_changed)
@@ -282,12 +279,8 @@ func _ready() -> void:
 	var contacts_container = PanelContainer.new()
 	contacts_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	contacts_container.size_flags_stretch_ratio = 1.0
-	var contacts_style = StyleBoxFlat.new()
-	contacts_style.bg_color = Color(0.02, 0.05, 0.02)
-	contacts_style.border_width_right = 2
-	contacts_style.border_color = Color(0.2, 0.4, 0.2)
-	_add_margins(contacts_style)
-	contacts_container.add_theme_stylebox_override("panel", contacts_style)
+	contacts_container.add_theme_stylebox_override("panel", UIStyle.panel_frame(
+		UIStyle.ACCENT_CONTACTS, Color(0.02, 0.05, 0.02), ["right"]))
 	
 	contacts_panel = ContactsPanel.new()
 	contacts_panel.contact_pin_toggled.connect(_on_contact_pin_toggled)
@@ -304,12 +297,8 @@ func _ready() -> void:
 	# --- Helm Panel ---
 	var helm_container = PanelContainer.new()
 	helm_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var helm_style = StyleBoxFlat.new()
-	helm_style.bg_color = Color(0.05, 0.05, 0.05)
-	helm_style.border_width_left = 2
-	helm_style.border_color = Color(0.2, 0.4, 0.2)
-	_add_margins(helm_style)
-	helm_container.add_theme_stylebox_override("panel", helm_style)
+	helm_container.add_theme_stylebox_override("panel", UIStyle.panel_frame(
+		UIStyle.ACCENT_HELM, Color(0.05, 0.05, 0.05), ["left"]))
 	
 	helm_panel = HelmPanel.new()
 	helm_container.add_child(helm_panel)
@@ -318,13 +307,8 @@ func _ready() -> void:
 	# --- Weapons Panel ---
 	var weapons_container = PanelContainer.new()
 	weapons_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var weapons_style = StyleBoxFlat.new()
-	weapons_style.bg_color = Color(0.05, 0.0, 0.0)
-	weapons_style.border_width_top = 2
-	weapons_style.border_width_left = 2
-	weapons_style.border_color = Color.DARK_RED
-	_add_margins(weapons_style)
-	weapons_container.add_theme_stylebox_override("panel", weapons_style)
+	weapons_container.add_theme_stylebox_override("panel", UIStyle.panel_frame(
+		UIStyle.ACCENT_WEAPONS, Color(0.05, 0.0, 0.0), ["top", "left"]))
 	
 	weapons_panel = WeaponsPanel.new()
 	weapons_panel.fire_weapon_requested.connect(_on_fire_weapon_requested)
@@ -340,12 +324,8 @@ func _ready() -> void:
 	var eng_container = PanelContainer.new()
 	eng_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	eng_container.size_flags_stretch_ratio = 1.0
-	var eng_style = StyleBoxFlat.new()
-	eng_style.bg_color = Color(0.05, 0.05, 0.05)
-	eng_style.border_width_left = 2
-	eng_style.border_color = Color(0.6, 0.4, 0.1)
-	_add_margins(eng_style)
-	eng_container.add_theme_stylebox_override("panel", eng_style)
+	eng_container.add_theme_stylebox_override("panel", UIStyle.panel_frame(
+		UIStyle.ACCENT_ENGINEERING, Color(0.05, 0.05, 0.05), ["left"]))
 	
 	eng_panel = EngineeringPanel.new()
 	eng_panel.component_power_toggled.connect(_on_component_power_toggled)
@@ -356,12 +336,8 @@ func _ready() -> void:
 	var comms_container = PanelContainer.new()
 	comms_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	comms_container.size_flags_stretch_ratio = 1.0
-	var comms_style = StyleBoxFlat.new()
-	comms_style.bg_color = Color(0.05, 0.05, 0.1)
-	comms_style.border_width_left = 2
-	comms_style.border_color = Color(0.2, 0.6, 0.8)
-	_add_margins(comms_style)
-	comms_container.add_theme_stylebox_override("panel", comms_style)
+	comms_container.add_theme_stylebox_override("panel", UIStyle.panel_frame(
+		UIStyle.ACCENT_COMMS, Color(0.05, 0.05, 0.1), ["left"]))
 	
 	comms_panel = CommsPanel.new()
 	comms_panel.transponder_toggled.connect(_on_transponder_toggled)
@@ -391,12 +367,8 @@ func _ready() -> void:
 	sensor_container = PanelContainer.new()
 	sensor_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sensor_container.size_flags_stretch_ratio = 1.0
-	var sensor_style = StyleBoxFlat.new()
-	sensor_style.bg_color = Color(0.02, 0.05, 0.02)
-	sensor_style.border_width_right = 2
-	sensor_style.border_color = Color(0.2, 0.4, 0.2)
-	_add_margins(sensor_style)
-	sensor_container.add_theme_stylebox_override("panel", sensor_style)
+	sensor_container.add_theme_stylebox_override("panel", UIStyle.panel_frame(
+		UIStyle.ACCENT_SENSORS, Color(0.02, 0.05, 0.02), ["right"]))
 	
 	sensor_panel = SensorPanel.new()
 	sensor_panel.selection_changed.connect(_on_selection_changed)
@@ -430,7 +402,7 @@ func _ready() -> void:
 	overheat_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	overheat_label.offset_top = 50
 	overheat_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.2))
-	overheat_label.add_theme_font_size_override("font_size", 28)
+	overheat_label.add_theme_font_size_override("font_size", UIStyle.FONT_ALERT)
 	overheat_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overheat_label.visible = false
 	add_child(overheat_label)
@@ -446,7 +418,7 @@ func _ready() -> void:
 	zone_banner_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	zone_banner_label.offset_top = 90
 	zone_banner_label.add_theme_color_override("font_color", Color(0.3, 0.8, 1.0))
-	zone_banner_label.add_theme_font_size_override("font_size", 20)
+	zone_banner_label.add_theme_font_size_override("font_size", UIStyle.FONT_BANNER)
 	zone_banner_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	zone_banner_label.visible = false
 	add_child(zone_banner_label)
@@ -467,7 +439,7 @@ func _ready() -> void:
 		version_text = "  |  " + f.get_as_text().strip_edges()
 	help_hint.text = "F1  Controls" + version_text
 	help_hint.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
-	help_hint.add_theme_font_size_override("font_size", 13)
+	help_hint.add_theme_font_size_override("font_size", UIStyle.FONT_BODY)
 	bottom_bar.add_child(help_hint)
 
 	var bottom_spacer := Control.new()
@@ -477,16 +449,11 @@ func _ready() -> void:
 	_perf_label = Label.new()
 	_perf_label.text = "FPS --"
 	_perf_label.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
-	_perf_label.add_theme_font_size_override("font_size", 13)
+	_perf_label.add_theme_font_size_override("font_size", UIStyle.FONT_BODY)
 	bottom_bar.add_child(_perf_label)
 
 	main_vbox.add_child(bottom_bar)
 
-func _add_margins(style: StyleBoxFlat) -> void:
-	style.content_margin_left = 3
-	style.content_margin_right = 3
-	style.content_margin_top = 3
-	style.content_margin_bottom = 3
 
 func _get_my_ship() -> Node:
 	var ship_node_name = "Ship_" + str(multiplayer.get_unique_id())

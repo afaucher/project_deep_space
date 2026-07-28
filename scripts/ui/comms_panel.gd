@@ -1,6 +1,7 @@
 extends Control
 
 const DialogueScratch = preload("res://scripts/dialogue_scratch.gd")
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
 
@@ -96,13 +97,15 @@ var hail_banner_label: Label
 var btn_acknowledge: Button
 var btn_stop: Button
 var btn_sos: CheckButton
-var hails_title: Label
+var hails_title: Button # the HAILS list section's fold control (also the flash target)
 var hails_vbox: VBoxContainer
 var _last_entries_rendered: Array = []
 var _entry_nodes: Dictionary = {} # c_id -> {header, traffic, actions_hbox, buttons: {..}}
 var selected_contact_id: String = ""
 var _hosted_docking: Control = null
 var _docking_fallback_row: HBoxContainer = null
+# Where the demand banner parks when no vessel row is claiming it.
+var _banner_fallback_row: HBoxContainer = null
 # Test seam: headless widget tests have no /root/Main/Ship_<peer> node to
 # resolve, so they set this to the instance id last_hails' target_iid uses.
 var my_iid_override: int = -1
@@ -120,16 +123,11 @@ func _ready() -> void:
 	top_pane.custom_minimum_size.y = 200
 	vsplit.add_child(top_pane)
 	
-	var title = Label.new()
-	title.text = "COMMS & TRANSPONDERS"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color.CYAN)
-	top_pane.add_child(title)
+	top_pane.add_child(UIStyle.panel_title("COMMS & TRANSPONDERS", UIStyle.ACCENT_COMMS))
 	
 	var my_panel = PanelContainer.new()
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.2, 0.3, 0.8)
-	my_panel.add_theme_stylebox_override("panel", style)
+	my_panel.add_theme_stylebox_override("panel",
+		UIStyle.inner_panel(Color(0.1, 0.2, 0.3, 0.8)))
 	top_pane.add_child(my_panel)
 	
 	var my_vbox = VBoxContainer.new()
@@ -181,12 +179,20 @@ func _ready() -> void:
 	# demand"]). This is the fear moment the design wants (design_ideas/
 	# comms_verbs.md) -- a STOP demand arriving from a dark, untrusted
 	# contact on YOUR panel.
+	#
+	# 2026-07-27: it is no longer parented HERE. _rebuild_vessel_list reparents
+	# it onto the row of the vessel that issued the demand (entry["demanding"]),
+	# because a fixed bar at the top of the panel could not say WHO -- with two
+	# ships listed, ACKNOWLEDGE gave no clue what it was answering. This is only
+	# where it is constructed; _banner_fallback_row below is where it parks when
+	# nothing is demanding anything.
 	hail_banner = PanelContainer.new()
-	var banner_style = StyleBoxFlat.new()
-	banner_style.bg_color = Color(0.4, 0.05, 0.05, 0.9)
-	hail_banner.add_theme_stylebox_override("panel", banner_style)
+	hail_banner.add_theme_stylebox_override("panel",
+		UIStyle.inner_panel(Color(0.4, 0.05, 0.05, 0.9)))
 	hail_banner.visible = false
-	top_pane.add_child(hail_banner)
+	_banner_fallback_row = HBoxContainer.new()
+	top_pane.add_child(_banner_fallback_row)
+	_banner_fallback_row.add_child(hail_banner)
 
 	var banner_hbox = HBoxContainer.new()
 	hail_banner.add_child(banner_hbox)
@@ -219,13 +225,13 @@ func _ready() -> void:
 	top_pane.add_child(HSeparator.new())
 
 	# M52d -- HAILS: one vessel-grouped list (see the state block above).
-	hails_title = Label.new()
-	hails_title.text = "HAILS"
-	hails_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hails_title.add_theme_color_override("font_color", Color.ORANGE_RED)
+	# A foldable list section, same helper the tactical contacts panel uses --
+	# these three comms sections all hold unbounded lists and had no way to get
+	# out of the way (2026-07-27 playtest / design_ideas/…ui_style_guide.md §2.1).
+	var hails_sec: Dictionary = UIStyle.list_section("HAILS", UIStyle.ACCENT_COMMS)
+	hails_title = hails_sec["button"]
+	hails_vbox = hails_sec["content"]
 	top_pane.add_child(hails_title)
-
-	hails_vbox = VBoxContainer.new()
 	top_pane.add_child(hails_vbox)
 
 	# Fallback home for the hosted docking control while no vessel entry is
@@ -253,30 +259,29 @@ func _ready() -> void:
 	# ContractFeed.build() walks the MissionLog's ACTIVE missions, so the
 	# contacts panel's "Contracts" section is the nav-layer view of exactly what
 	# this section grants. One concept, and now one word for it.
-	var missions_title = Label.new()
-	missions_title.text = "CONTRACTS"
-	missions_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	missions_title.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
-	top_pane.add_child(missions_title)
+	var missions_sec: Dictionary = UIStyle.list_section("CONTRACTS", UIStyle.ACCENT_COMMS)
+	top_pane.add_child(missions_sec["button"])
+	top_pane.add_child(missions_sec["content"])
 
 	missions_label = Label.new()
-	missions_label.text = "(no active contracts)"
+	missions_label.text = ""
+	missions_label.visible = false
 	missions_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	missions_label.add_theme_font_size_override("font_size", 12)
-	top_pane.add_child(missions_label)
+	missions_label.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
+	missions_sec["content"].add_child(missions_label)
 
 	top_pane.add_child(HSeparator.new())
 
-	var title2 = Label.new()
-	title2.text = "LOCAL CONTACTS"
-	title2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title2.add_theme_color_override("font_color", Color.CYAN)
-	top_pane.add_child(title2)
-	
+	var locals_sec: Dictionary = UIStyle.list_section("LOCAL CONTACTS", UIStyle.ACCENT_COMMS)
+	top_pane.add_child(locals_sec["button"])
+	var locals_content: VBoxContainer = locals_sec["content"]
+	locals_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	top_pane.add_child(locals_content)
+
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	top_pane.add_child(scroll)
-	
+	locals_content.add_child(scroll)
+
 	comms_list_vbox = VBoxContainer.new()
 	comms_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(comms_list_vbox)
@@ -296,21 +301,16 @@ func _ready() -> void:
 	vsplit.add_child(chat_panel)
 	
 	var chat_panel_bg = PanelContainer.new()
-	var chat_style = StyleBoxFlat.new()
-	chat_style.bg_color = Color(0.05, 0.05, 0.05, 0.9)
-	chat_style.border_width_top = 2
-	chat_style.border_color = Color.CYAN
-	chat_panel_bg.add_theme_stylebox_override("panel", chat_style)
+	chat_panel_bg.add_theme_stylebox_override("panel", UIStyle.inner_panel(
+		Color(0.05, 0.05, 0.05, 0.9), UIStyle.ACCENT_COMMS, ["top"]))
 	chat_panel_bg.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	chat_panel.add_child(chat_panel_bg)
 	
 	var chat_vbox = VBoxContainer.new()
 	chat_panel_bg.add_child(chat_vbox)
 	
-	chat_header = Label.new()
-	chat_header.text = "CHAT: OFFLINE"
-	chat_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	chat_header.add_theme_color_override("font_color", Color.CYAN)
+	# A fixed readout, not a list -- section_header, no fold (style guide §2.1).
+	chat_header = UIStyle.section_header("CHAT: OFFLINE", UIStyle.ACCENT_COMMS)
 	chat_vbox.add_child(chat_header)
 	
 	chat_vbox.add_child(HSeparator.new())
@@ -349,11 +349,12 @@ func update_data(packet: Dictionary) -> void:
 	_update_vessel_list()
 
 # Hosts the terminal's DockingControl button (created + wired by
-# terminal_display). M52d: it rides the SELECTED vessel's entry row in the
-# vessel list (docking is a per-track action aimed at the selected station);
-# _rebuild_vessel_list reparents it on every rebuild, with
-# _docking_fallback_row as its home while nothing is selected (the Undock
-# face must never vanish mid-dock). Callable BEFORE this panel enters the
+# terminal_display). M52d: it rides an entry row in the vessel list -- the
+# DOCKED host's while berthed, otherwise the SELECTED vessel's (docking is a
+# per-track action aimed at the selected station). _rebuild_vessel_list
+# reparents it on every rebuild, with _docking_fallback_row as its home when
+# neither exists (the Undock face must never vanish mid-dock, which is why the
+# docked host gets an entry of its own). Callable BEFORE this panel enters the
 # tree (terminal_display wires panels prior to add_child, so _ready hasn't
 # run yet): the control parks in _pending_docking_control and _ready adopts
 # it.
@@ -445,13 +446,15 @@ func flash_hails_alert() -> void:
 # ---------------------------------------------------------------------------
 
 # One entry per vessel that is (a) the selected contact, (b) a vessel we
-# sent a directed hail to, or (c) a vessel that hailed US directly. Entry:
-# {c_id, iid, name, flag, selected, known_contact, traffic:[..]} ordered
+# sent a directed hail to, (c) a vessel that hailed US directly, or (d) the
+# host we are currently DOCKED to. Entry:
+# {c_id, iid, name, flag, selected, docked, known_contact, traffic:[..]} ordered
 # selected-first then by c_id. Traffic lines are that vessel's
 # directed exchanges with us, oldest first: "> them" = ours, "< them" =
 # theirs. No "[TO YOU]" tag -- being listed under the vessel already says so.
 func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
-		last_hails: Array, sent_hails: Array, selected_id: String, my_iid: int) -> Array:
+		last_hails: Array, sent_hails: Array, selected_id: String, my_iid: int,
+		docked_iid: int = -1, demander_iid: int = -1) -> Array:
 	var by_iid: Dictionary = {} # iid -> entry-in-progress
 	var iid_to_cid: Dictionary = {}
 	for c_id in contacts:
@@ -488,6 +491,23 @@ func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
 		if by_iid[s_iid]["flag"] == "":
 			by_iid[s_iid]["flag"] = h.get("sender_flag", "")
 
+	# Reason (d): the host we are physically docked to. Note this bypasses the
+	# is_vessel() gate reason (a) applies -- a station is NOT a vessel and a
+	# merely-selected one is deliberately absent from this list, but one we are
+	# berthed at is the least ambiguous contact we have, and the Undock control
+	# needs a row of its own to ride rather than a bare orphan strip under the
+	# list (playtest).
+	if docked_iid != -1 and not by_iid.has(docked_iid):
+		by_iid[docked_iid] = _blank_entry(iid_to_cid.get(docked_iid, Ship.track_id(docked_iid)), docked_iid)
+
+	# Reason (e): whoever is currently demanding something of us, or holding us.
+	# Reason (c) usually covers them already, but only for as long as their
+	# original hail survives in the last_hails ring -- and the banner that rides
+	# this row must never be homeless while the demand is live. Guaranteeing the
+	# row here is the same guarantee the docked host gets, for the same reason.
+	if demander_iid != -1 and not by_iid.has(demander_iid):
+		by_iid[demander_iid] = _blank_entry(iid_to_cid.get(demander_iid, Ship.track_id(demander_iid)), demander_iid)
+
 	# Fill in identity + per-vessel traffic + action gating.
 	for iid in by_iid:
 		var e: Dictionary = by_iid[iid]
@@ -497,16 +517,20 @@ func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
 		if t.get("flag", "") != "" and e["flag"] == "":
 			e["flag"] = t.get("flag")
 		e["selected"] = e["c_id"] == selected_id and selected_id != ""
+		e["docked"] = iid == docked_iid and docked_iid != -1
+		e["demanding"] = iid == demander_iid and demander_iid != -1
 		var c: Dictionary = contacts.get(e["c_id"], {})
 		e["known_contact"] = not c.is_empty()
 		# Traffic, buffer order (oldest first) -- theirs to us, then ours to
 		# them interleaved per source buffer (both are small rings).
+		var raw_traffic: Array = []
 		for h2 in last_hails:
 			if h2.get("sender_iid", -1) == iid and h2.get("target_iid", -1) == my_iid:
-				e["traffic"].append("< %s" % _verb_text(h2))
+				raw_traffic.append("< %s" % _verb_text(h2))
 		for sh2 in sent_hails:
 			if sh2.get("target_iid", -1) == iid:
-				e["traffic"].append("> %s" % _verb_text(sh2))
+				raw_traffic.append("> %s" % _verb_text(sh2))
+		e["traffic"] = _collapse_runs(raw_traffic)
 
 	var entries: Array = by_iid.values()
 	entries.sort_custom(func(a, b):
@@ -517,18 +541,43 @@ func build_vessel_entries(contacts: Dictionary, transponders: Dictionary,
 
 func _blank_entry(c_id: String, iid: int) -> Dictionary:
 	return {"c_id": c_id, "iid": iid, "name": "", "flag": "", "selected": false,
-		"known_contact": false, "traffic": []}
+		"docked": false, "demanding": false, "known_contact": false, "traffic": []}
+
+# Consecutive identical lines collapse to one with a count: eleven repeats of
+# "< DEMAND(IDENTIFY)" from one patrol become "< DEMAND(IDENTIFY) x11".
+#
+# The eleven-line pile-up that prompted this was a REAL bug in the patrol AI
+# (challenge_leaf.gd's ask-once fix), not a display artifact, and this does not
+# paper over it -- the count still says eleven. But the display should degrade
+# gracefully when a ship legitimately repeats itself, and a wall of identical
+# rows pushed the actual conversation off the panel.
+#
+# Runs only, not a global tally: DEMAND(IDENTIFY), DEMAND(STOP),
+# DEMAND(IDENTIFY) stays three lines, because the ORDER is the story.
+func _collapse_runs(lines: Array) -> Array:
+	var out: Array = []
+	var i: int = 0
+	while i < lines.size():
+		var run: int = 1
+		while i + run < lines.size() and lines[i + run] == lines[i]:
+			run += 1
+		out.append(lines[i] if run == 1 else "%s x%d" % [lines[i], run])
+		i += run
+	return out
 
 func _verb_text(hail: Dictionary) -> String:
 	var verb: String = hail.get("verb", "")
 	var rung: String = hail.get("rung", "")
 	return verb + ("(" + rung + ")" if rung != "" else "")
 
-# Header per the playtest's ask: track id + claimed name + flag.
+# Header per the playtest's ask: track id + claimed name + flag. Shares the ONE
+# naming grammar with the tactical contacts list (Utils.entity_label) so a ship
+# reads identically in both. 2026-07-27: the old "— dark" suffix for a
+# flagless vessel is gone -- it was this list's private word, appearing nowhere
+# else in the game, and a bare TRK-068 already says we have no identity for it.
+# An entry always names a vessel here, so the classification argument is fixed.
 func entry_header_text(e: Dictionary) -> String:
-	var name_part: String = " \"%s\"" % e["name"] if e["name"] != "" else ""
-	var flag_part: String = e["flag"] if e["flag"] != "" else "dark"
-	return "%s%s — %s" % [e["c_id"], name_part, flag_part]
+	return Utils.entity_label(e["c_id"], e["name"], e["flag"], "UNIDENTIFIED VESSEL")
 
 func _update_vessel_list() -> void:
 	if hails_vbox == null:
@@ -540,37 +589,59 @@ func _update_vessel_list() -> void:
 		current_state.get("transponders", {}),
 		current_state.get("last_hails", []),
 		current_state.get("sent_hails", []),
-		selected_contact_id, my_iid)
+		selected_contact_id, my_iid, _docked_host_iid(), _demander_iid())
 	if entries != _last_entries_rendered:
 		_last_entries_rendered = entries.duplicate(true)
 		_rebuild_vessel_list(entries)
-	# Dock-state can change with an unchanged entry list (e.g. capture
-	# completes while nothing is selected) -- keep the fallback-parked
-	# control's Undock face live every tick, not just on rebuilds.
+	# Dock-state can change with an unchanged entry list -- keep the
+	# fallback-parked control's Undock face live every tick, not just on
+	# rebuilds. (With the docked host now carrying its own entry the fallback
+	# is a rare path, but the invariant still has to hold if we ever park
+	# there: the Undock face must never vanish mid-dock.)
 	if _hosted_docking != null and _hosted_docking.get_parent() == _docking_fallback_row:
-		var my_ship_dock = _get_my_ship()
-		_hosted_docking.visible = my_ship_dock != null and my_ship_dock.get("docking_bay") != null
+		_hosted_docking.visible = _docked_host_iid() != -1
+
+# Whoever is currently holding us, or demanding something of us -- the ship the
+# banner is ABOUT, and therefore the row it belongs on. A hold outranks a
+# pending demand, matching _update_hail_banner's own precedence.
+func _demander_iid() -> int:
+	var compelled: Dictionary = current_state.get("compelled_stop", {})
+	if not compelled.is_empty():
+		return compelled.get("issuer_iid", -1)
+	return current_state.get("pending_demand", {}).get("sender_iid", -1)
+
+# The station/hull our bay is attached to, or -1 when free-flying. The bay's
+# PARENT is the host (same relationship Ship.is_docked_at tests), which is what
+# the vessel list keys its docked entry on.
+func _docked_host_iid() -> int:
+	var my_ship = _get_my_ship()
+	if my_ship == null:
+		return -1
+	var bay = my_ship.get("docking_bay")
+	if bay == null or not is_instance_valid(bay):
+		return -1
+	var host = bay.get_parent()
+	return host.get_instance_id() if host != null else -1
 
 func _rebuild_vessel_list(entries: Array) -> void:
-	# The hosted docking control survives rebuilds by reparenting -- pull it
-	# out BEFORE the children are freed.
+	# The hosted docking control and the demand banner both survive rebuilds by
+	# reparenting -- pull them out BEFORE the children are freed.
 	if _hosted_docking != null and _hosted_docking.get_parent() != null:
 		_hosted_docking.get_parent().remove_child(_hosted_docking)
+	if hail_banner != null and hail_banner.get_parent() != null:
+		hail_banner.get_parent().remove_child(hail_banner)
 	for child in hails_vbox.get_children():
 		child.queue_free()
 	_entry_nodes.clear()
 
-	var my_ship = _get_my_ship()
-	var is_docked: bool = my_ship != null and my_ship.get("docking_bay") != null
+	var is_docked: bool = _docked_host_iid() != -1
 	var docking_hosted := false
+	var banner_hosted := false
 
-	if entries.is_empty():
-		var none = Label.new()
-		none.text = "(no vessels -- select one in CONTACTS, or await a hail)"
-		none.add_theme_font_size_override("font_size", 12)
-		none.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-		hails_vbox.add_child(none)
-
+	# No empty-state placeholder. An empty list is an empty list -- the section
+	# header is already there saying what would be in it, and a line of text
+	# announcing "nothing here" costs the same vertical space as a real entry
+	# while carrying none of the information. Same rule as CONTRACTS.
 	for e in entries:
 		# Playtest C3: the hails list follows the tactical contacts' visual
 		# language -- a bordered row per vessel, the selected one filled, and
@@ -582,12 +653,11 @@ func _rebuild_vessel_list(entries: Array) -> void:
 		var row_color: Color = Utils.contact_color(e_contact) if not e_contact.is_empty() else Color(0.7, 0.7, 0.7)
 
 		var entry_panel = PanelContainer.new()
-		var e_style = StyleBoxFlat.new()
-		e_style.bg_color = Utils.ROW_BG_SELECTED if e["selected"] else Utils.ROW_BG
-		e_style.border_color = row_color
-		e_style.set_border_width_all(1)
-		e_style.set_content_margin_all(4)
-		entry_panel.add_theme_stylebox_override("panel", e_style)
+		# Same row shape as the tactical contacts list -- a 4px left tab, not a
+		# full box. See the style guide's §2.6 for why the tab is the one that
+		# scales.
+		entry_panel.add_theme_stylebox_override("panel",
+			UIStyle.row_style(row_color, e["selected"]))
 		hails_vbox.add_child(entry_panel)
 
 		var entry_box = VBoxContainer.new()
@@ -599,12 +669,22 @@ func _rebuild_vessel_list(entries: Array) -> void:
 		header.add_theme_color_override("font_color", row_color)
 		entry_box.add_child(header)
 
+		# THE BANNER RIDES THE SHIP IT IS ABOUT. It used to sit in a fixed red bar
+		# at the top of the panel, arbitrarily far from the vessel that issued the
+		# demand -- so with two ships listed, ACKNOWLEDGE gave no indication of who
+		# it was answering, while the demand itself appeared as one more
+		# indistinguishable "< DEMAND(STOP)" line further down (playtest
+		# 2026-07-27). Directly under the header, above that vessel's own traffic.
+		if e["demanding"] and hail_banner != null:
+			entry_box.add_child(hail_banner)
+			banner_hosted = true
+
 		var traffic_labels: Array = []
 		for line in e["traffic"]:
 			var lbl = Label.new()
 			lbl.text = "  " + line
 			lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-			lbl.add_theme_font_size_override("font_size", 12)
+			lbl.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 			lbl.add_theme_color_override("font_color", Color(1.0, 0.6, 0.6) if line.begins_with("<") else Color(0.7, 0.85, 1.0))
 			entry_box.add_child(lbl)
 			traffic_labels.append(lbl)
@@ -631,9 +711,14 @@ func _rebuild_vessel_list(entries: Array) -> void:
 		b_stop.pressed.connect(func(): emit_signal("demand_requested", c_id, Hail.RUNG_STOP))
 		actions.add_child(b_stop)
 
-		# The docking control rides the SELECTED vessel's row (it targets the
-		# selected station via terminal_display's _update_docking_control).
-		if e["selected"] and _hosted_docking != null:
+		# The docking control rides ONE row. While docked that is the host we
+		# are berthed at -- the button reads "Undock" and ignores target_station
+		# entirely (docking_control.gd's _is_docked branch), so parking it on
+		# whatever happens to be selected would offer to undock an unrelated
+		# ship. Free-flying it rides the SELECTED vessel, whose station it would
+		# request a berth from (terminal_display's _update_docking_control).
+		var hosts_docking: bool = e["docked"] if is_docked else e["selected"]
+		if hosts_docking and _hosted_docking != null:
 			actions.add_child(_hosted_docking)
 			_hosted_docking.visible = true
 			docking_hosted = true
@@ -647,6 +732,14 @@ func _rebuild_vessel_list(entries: Array) -> void:
 	if _hosted_docking != null and not docking_hosted:
 		_docking_fallback_row.add_child(_hosted_docking)
 		_hosted_docking.visible = is_docked
+
+	# No row claimed the banner. Reason (e) guarantees the demander HAS a row
+	# whenever a demand or hold is live, so in practice this is the "nothing is
+	# demanding anything" case and the banner is hidden anyway -- but it must
+	# still be parented somewhere, or _update_hail_banner would be writing into
+	# an orphan and a live demand could go unannounced.
+	if hail_banner != null and not banner_hosted:
+		_banner_fallback_row.add_child(hail_banner)
 
 # M49 -- SOS nature pick: UNDER_ATTACK if we hold any fresh HOSTILE contact,
 # else DISABLED, using the same FIRE_STALENESS_MAX freshness gate against
@@ -677,8 +770,12 @@ func _update_missions_list() -> void:
 	if missions_label == null:
 		return
 	var missions: Array = current_state.get("missions", [])
+	# An empty list is an empty list -- no "(no active contracts)" placeholder.
+	# The label hides entirely so the section collapses to just its header
+	# rather than reserving a line to announce that it has nothing to say.
+	missions_label.visible = not missions.is_empty()
 	if missions.is_empty():
-		missions_label.text = "(no active contracts)"
+		missions_label.text = ""
 		return
 	var lines: Array = []
 	for m in missions:

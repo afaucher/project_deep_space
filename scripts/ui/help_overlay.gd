@@ -1,5 +1,7 @@
 extends Control
 
+
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 # M13b: F1 controls overlay. Toggled by terminal_display on the `help_toggle` action.
 # v1 is the glyph-rich reference list (keyboard glyph(s) + generic gamepad glyph + label);
 # anchored callouts drawn over the live UI controls are the planned follow-up (per-panel
@@ -43,23 +45,14 @@ func _ready() -> void:
 	add_child(center)
 
 	var panel := PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.07, 0.09, 0.98)
-	style.border_color = Color(0.3, 0.6, 0.9)
-	style.set_border_width_all(2)
-	style.set_content_margin_all(18)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.add_theme_stylebox_override("panel", UIStyle.modal_frame())
 	center.add_child(panel)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 6)
 	panel.add_child(vbox)
 
-	var title := Label.new()
-	title.text = "CONTROLS"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
-	vbox.add_child(title)
+	vbox.add_child(UIStyle.panel_title("CONTROLS", UIStyle.ACCENT_MODAL))
 	vbox.add_child(HSeparator.new())
 
 	var grid := GridContainer.new()
@@ -91,7 +84,7 @@ func _ready() -> void:
 	vbox.add_child(HSeparator.new())
 	var footer := Label.new()
 	footer.text = "Mouse: drag the helm dial to steer  -  click a contact to target  -  F1 to close"
-	footer.add_theme_font_size_override("font_size", 12)
+	footer.add_theme_font_size_override("font_size", UIStyle.FONT_DETAIL)
 	footer.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
 	vbox.add_child(footer)
 

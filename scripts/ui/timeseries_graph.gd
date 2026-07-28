@@ -1,5 +1,8 @@
 extends Control
+
 class_name TimeSeriesGraph
+
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 
 # Rolling history of a target's OBSERVED heat/EM signature -- i.e. whatever
 # push_sample() is fed (the caller's own sensor-fused, lerp-smoothed contact
@@ -49,7 +52,7 @@ func _draw() -> void:
 	var origin_y = size.y - margin_bottom
 
 	var default_font = ThemeDB.fallback_font
-	var font_size = 9
+	var font_size = UIStyle.FONT_CANVAS_TINY
 
 	draw_rect(Rect2(margin_left, margin_top, plot_w, plot_h), Color(0.05, 0.05, 0.05, 0.5))
 

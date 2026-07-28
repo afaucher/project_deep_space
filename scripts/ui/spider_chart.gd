@@ -1,5 +1,8 @@
 extends Control
+
 class_name SpiderChart
+
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
 
 # Display ceilings for each axis (values clamp/scale against these, they
 # don't change the underlying signature). EM was raised from its original
@@ -31,7 +34,7 @@ func _draw() -> void:
 	var angle_step = (PI * 2.0) / 4.0
 	
 	var default_font = ThemeDB.fallback_font
-	var font_size = 10
+	var font_size = UIStyle.FONT_CANVAS_TINY
 	
 	# Draw concentric rings
 	for r in range(1, ring_count + 1):

@@ -1,5 +1,7 @@
 extends Control
 
+const UIStyle = preload("res://scripts/ui/ui_style.gd")
+
 signal contact_selected(c_id: String)
 signal toggle_changed(s_id: String, is_active: bool)
 
@@ -141,11 +143,11 @@ func _draw() -> void:
 				var text_pos = center + Vector2(radius + 20, 0).rotated(a)
 				text_pos.y += 4
 				text_pos.x -= 8
-				draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.2, 0.5, 0.2, 0.8))
+				draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, UIStyle.FONT_CANVAS_TINY, Color(0.2, 0.5, 0.2, 0.8))
 			draw_line(p1, p2, tick_color, 1.0)
 			
 	# Name label
-	draw_string(font, Vector2(10, 20), sensor_id.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.GREEN)
+	draw_string(font, Vector2(10, 20), sensor_id.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, UIStyle.FONT_CANVAS_LARGE, Color.GREEN)
 	
 	# Bins
 	var bin_angle = sensor_arc_width / float(num_bins)
@@ -191,4 +193,4 @@ func _draw() -> void:
 
 	var text = "Range: %s" % Utils.format_dist(sensor_range)
 	var text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_RIGHT, -1, 12)
-	draw_string(font, size - Vector2(text_size.x + 10, 10), text, HORIZONTAL_ALIGNMENT_RIGHT, -1, 14, Color.GRAY)
+	draw_string(font, size - Vector2(text_size.x + 10, 10), text, HORIZONTAL_ALIGNMENT_RIGHT, -1, UIStyle.FONT_CANVAS, Color.GRAY)
