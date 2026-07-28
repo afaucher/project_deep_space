@@ -127,6 +127,7 @@ func setup(main) -> void:
 
 	await _phase_left_comms_range(station, patrol, patrol_tree)
 	await _phase_ignored_in_range(station, patrol, patrol_tree)
+	await _phase_asks_once(station, patrol, patrol_tree)
 
 	_finish()
 
@@ -305,6 +306,126 @@ func _phase_ignored_in_range(station: Node, patrol: Node, patrol_tree: Node) -> 
 			% _find_contact(patrol, ignorer).get("standing", ""))
 
 	_free_ship(ignorer)
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- REGRESSION GUARD: ASK ONCE, THEN ESCALATE.
+#
+# Playtest 2026-07-27: "we periodically get re-hailed while sitting with comms
+# off" -- eleven identical DEMAND(IDENTIFY) lines from one patrol in the HAILS
+# panel, still climbing.
+#
+# The loop was self-driving. _check_windows convicts an unanswered challenge by
+# posting a NO_ID warrant and erasing the `challenged` entry; a NO_ID warrant
+# resolves to CAUTION; and Standing.CAUTION IS Standing.UNREPORTED (one string,
+# the rename still deferred). So the scan re-read the patrol's OWN verdict as
+# fresh evidence of silence and asked again, every window, forever.
+#
+# Nothing downstream could have caught it -- each re-ask carried a genuinely new
+# seq, so ship.gd's heartbeat-refresh suppression correctly let every one
+# through, and post_warrant is keyed by (offense, subject) so the warrant
+# quietly overwrote itself while only the UI grew.
+#
+# The assertion is a COUNT over several windows, not a state check: the bug
+# produced perfectly valid state at every instant and was only visible as
+# repetition over time.
+# ---------------------------------------------------------------------------
+const WINDOW_FRAMES := 1200 # ChallengeLeaf.CHALLENGE_WINDOW_FRAMES
+
+# Counted on the RECEIVING ship's last_hails -- the same ring the comms panel
+# renders its "< DEMAND(IDENTIFY)" lines from, so this counts exactly what the
+# playtest saw pile up. (The sender's own sent_hails is not usable here: it is
+# only written by Ship's own demand path, not by an AI leaf calling Hail.send
+# directly, so a challenge never appears in it.)
+func _identify_hails_to(sender: Node, subject: Node) -> int:
+	var n: int = 0
+	for h in subject.last_hails:
+		if h.get("sender_iid", -1) == sender.get_instance_id() and h.get("rung", "") == Hail.RUNG_IDENTIFY:
+			n += 1
+	return n
+
+func _phase_asks_once(_unused_station: Node, _unused_patrol: Node, _unused_tree: Node) -> void:
+	print("--- Phase 6: a permanently dark ship is asked ONCE, not once per window ---")
+
+	# A FRESH patrol and station, far from the others, rather than reusing the
+	# one the earlier phases have been driving.
+	#
+	# Not fastidiousness -- the shared patrol cannot run this phase. By the end
+	# of phase 5 it holds a conviction and is interdicting, and ChallengeLeaf
+	# sits behind that in the tree, so it stops being ticked at all (observed
+	# directly: challenge_last_scan_frame froze ~900 frames before this phase
+	# began). A "no repeat hails" assertion against a patrol that has stopped
+	# challenging anything would have passed for entirely the wrong reason,
+	# which is exactly the failure this guard exists to prevent.
+	var origin := Vector2(100000, 0)
+	var station2 = _make_ship("Station6", 610, origin, ["TEAM_CONTROL6"])
+	station2.port_zone = {"radius": 8000.0, "authority": "TestControl6"}
+
+	var home: Vector2 = origin + Vector2(3000, 2000)
+	var patrol = _make_ship("Patrol6", 611, home, ["TEAM_PATROL6"])
+	var patrol_tree: Node = AITreeFactory.build_patrol()
+	patrol.add_child(patrol_tree)
+
+	var mute = _make_ship("PermanentlyDark", 612, home + Vector2(400, 200), ["TEAM_MUTE"])
+	mute.set_transponder_active(false)
+	var trk: String = _trk_for(mute)
+
+	# Wait for the first challenge to be issued.
+	var asked := false
+	for i in range(900):
+		await main_node.get_tree().physics_frame
+		if _identify_hails_to(patrol, mute) > 0:
+			asked = true
+			break
+	_assert(asked, "phase 6: the dark ship is challenged at least once")
+	var after_first: int = _identify_hails_to(patrol, mute)
+
+	# Wait for conviction, then run through TWO more full windows. Under the bug
+	# this produced a fresh DEMAND(IDENTIFY) per window; the ship never relights,
+	# so nothing legitimately changes and there is nothing new to ask about.
+	var convicted := false
+	for i in range(WINDOW_FRAMES + 600):
+		await main_node.get_tree().physics_frame
+		if patrol_tree.blackboard.get_value("challenge_ignored", {}).has(trk):
+			convicted = true
+			break
+	_assert(convicted, "phase 6: the unanswered challenge is convicted (the escalation the re-ask was standing in for)")
+
+	for i in range(WINDOW_FRAMES * 2):
+		await main_node.get_tree().physics_frame
+
+	# NON-VACUITY. "No new hails" is also what a patrol that drifted out of range,
+	# lost the track, or died would produce. Prove the patrol could still have
+	# asked and chose not to, or this guard is worthless.
+	var view: Dictionary = _find_contact(patrol, mute)
+	_assert(not view.is_empty(), "phase 6 (non-vacuity): the patrol still holds the track")
+	var link: float = min(patrol.get_comms_range(), mute.get_comms_range())
+	var gap: float = patrol.position.distance_to(mute.position)
+	_assert(gap <= link,
+		"phase 6 (non-vacuity): still inside comms link (%.0fu apart, link %.0fu) -- silence here is a CHOICE, not deafness" % [gap, link])
+	_assert(view.get("standing", "") == Standing.UNREPORTED,
+		"phase 6 (non-vacuity): and still reads caution-tier (got '%s') -- the exact state the loop kept re-reading as fresh" % view.get("standing", ""))
+
+	var total: int = _identify_hails_to(patrol, mute)
+	_assert(total == after_first,
+		"phase 6: still %d DEMAND(IDENTIFY) after two more windows, not %d -- a refusal escalates, it is not re-asked"
+			% [after_first, total])
+	_assert(total == 1,
+		"phase 6: and that count is exactly 1 (got %d)" % total)
+
+	# The conviction is not permanent deafness: answering clears it, so a LATER
+	# dark period is a new offense and gets asked about properly.
+	mute.set_transponder_active(true)
+	var forgiven := false
+	for i in range(900):
+		await main_node.get_tree().physics_frame
+		if not patrol_tree.blackboard.get_value("challenge_ignored", {}).has(trk):
+			forgiven = true
+			break
+	_assert(forgiven, "phase 6: relighting clears the conviction, so going dark again would be a fresh offense")
+
+	_free_ship(mute)
+	_free_ship(patrol)
+	_free_ship(station2)
 
 func _free_ship(s: Node) -> void:
 	spawned.erase(s)

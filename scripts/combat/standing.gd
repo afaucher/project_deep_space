@@ -53,6 +53,28 @@ const HOSTILE := "HOSTILE"
 # isolated commit. New code should say CAUTION.
 const CAUTION := UNREPORTED
 
+# What a transponder broadcasts for its name when the operator has switched
+# Share Name off. It still transmits -- presence, flag, optionally position --
+# it just declines to say who it is. Drift's anonymous homes use this
+# deliberately (test_drift_residents), so it is a supported broadcast, not an
+# error value. ship.gd's get_active_transponder_data writes it.
+const NAME_WITHHELD := "UNKNOWN"
+
+# Does this transponder actually IDENTIFY its owner? Broadcasting is not
+# identifying -- the two were conflated, and the difference is exactly what the
+# player noticed (2026-07-27): switching Share Name off changed nothing, only
+# switching Broadcast Active off did, because every reader tested
+# `not transponder.is_empty()`. A hull can broadcast a flag while refusing to
+# name itself, and that refusal is the whole point of the control.
+#
+# This is the one place that question gets answered, so the challenge ladder,
+# compute_standing and port control cannot drift apart on it.
+static func identifies(transponder: Dictionary) -> bool:
+	if transponder.is_empty():
+		return false
+	var n: String = transponder.get("name", "")
+	return n != "" and n != NAME_WITHHELD
+
 const FLAG_PIRATE := "JOLLY_ROGER"
 const FLAG_DRIFT := "SOVEREIGN_DRIFT"     # home faction / militia
 const FLAG_CIVILIAN := "DRIFT_CIVILIAN"   # mobile homes, independents
@@ -237,12 +259,24 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	# This comment used to point at a wanted-names registry as that
 	# patrol-assessment input; that registry was deleted 2026-07-26 (see the
 	# note where it used to live) because nothing ever read it.
-	if has_transponder:
+	#
+	# IDENTIFYING, not merely broadcasting. This tested `has_transponder` alone,
+	# which meant a hull with Broadcast Active on and Share Name OFF -- literally
+	# transmitting the string "UNKNOWN" where its name goes -- read as NEUTRAL,
+	# "reporting clean". Only killing the transponder outright made any
+	# difference, which is what the player observed: the Share Name switch did
+	# nothing. See Standing.identifies().
+	if Standing.identifies(transponder):
 		return {"standing": NEUTRAL, "reason": "reporting clean"}
 
-	# 5. no name+flag ever received for this track -> UNREPORTED. A location-
-	# independent fact; enforcement response to it is location-dependent
-	# (later milestone), the judgment itself is not.
+	# 5. no name ever received for this track -> UNREPORTED (the caution tier).
+	# Covers both "silent" and "broadcasting but withholding its name" -- the
+	# reason distinguishes them, the tier does not, because from here they are
+	# the same problem: we cannot say who that is. A location-independent fact;
+	# enforcement response to it is location-dependent (later milestone), the
+	# judgment itself is not.
+	if has_transponder:
+		return {"standing": UNREPORTED, "reason": "withholding name"}
 	return {"standing": UNREPORTED, "reason": "not reporting"}
 
 # --- Is this TRACK a coherent thing to shoot at? -----------------------------

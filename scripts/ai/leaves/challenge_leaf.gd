@@ -45,14 +45,49 @@ func tick(actor: Node, blackboard) -> int:
 	# How long a track must stay UNREPORTED before it is worth asking. See
 	# SILENT_GRACE_FRAMES.
 	var silent_since: Dictionary = blackboard.get_value("challenge_silent_since", {})
+	# Tracks we have ALREADY convicted (see _check_windows). Read here so a
+	# conviction stops the questioning -- see the skip below.
+	var ignored: Dictionary = blackboard.get_value("challenge_ignored", {})
 
 	for c_id in actor.active_contacts:
 		if challenged.has(c_id):
 			continue
 		var c: Dictionary = actor.active_contacts[c_id]
 		if c.get("standing", "") != Standing.UNREPORTED:
-			# Reporting (or judged some other way) -- forget any silence timer.
+			# Reporting (or judged some other way) -- forget any silence timer,
+			# and forget the conviction too. A hull that relit has answered the
+			# question; if it goes dark again later that is a NEW offense and it
+			# deserves to be asked again rather than being permanently mute to us.
 			silent_since.erase(c_id)
+			ignored.erase(c_id)
+			continue
+
+		# ASK ONCE, THEN ESCALATE -- never ask again.
+		#
+		# This is the playtest's "we periodically get re-hailed while sitting
+		# with comms off", and it is a feedback loop the patrol drives against
+		# ITSELF. _check_windows convicts an unanswered challenge by posting a
+		# NO_ID warrant and then ERASING the `challenged` entry (deliberately --
+		# a challenge voided by the subject leaving must be re-issuable when it
+		# returns). But a NO_ID warrant resolves to standing CAUTION, and
+		# Standing.CAUTION IS Standing.UNREPORTED -- the same string, since the
+		# rename is still deferred. So one scan later this loop re-reads the
+		# subject as "not reporting", its silence timer is long expired, and it
+		# fires an identical DEMAND(IDENTIFY) with a fresh seq. Twenty seconds
+		# later it convicts again, and so on forever.
+		#
+		# Nothing downstream could catch it: the seq is genuinely new every
+		# time, so ship.gd's refresh suppression correctly lets each one
+		# through, and post_warrant is keyed by (offense, subject) so the
+		# warrant silently overwrote itself while the HAILS list grew without
+		# bound. Eleven identical DEMAND(IDENTIFY) lines from one patrol in the
+		# playtest capture, still climbing.
+		#
+		# The ladder already has an answer for a refusal, and it is not asking
+		# louder: the warrant is posted, InterdictLeaf owns the subject, and
+		# DEMAND(STOP) is the next rung. Re-asking is both spam and wrong
+		# fiction -- we already ruled on this ship.
+		if ignored.has(c_id):
 			continue
 
 		# A FRESHLY ACQUIRED TRACK IS NOT A SILENT ONE. Every contact begins
@@ -103,6 +138,7 @@ func tick(actor: Node, blackboard) -> int:
 
 	blackboard.set_value("challenge_silent_since", silent_since)
 	blackboard.set_value("challenged", challenged)
+	blackboard.set_value("challenge_ignored", ignored)
 	return FAILURE
 
 # Per-tick window bookkeeping over already-issued challenges: a track that

@@ -451,8 +451,12 @@ func issue_docking_grant(ship, verbose: bool = false) -> Variant:
 	# own comms and you may berth unidentified. You also lose hailing, the
 	# datalink, and every dialogue -- an expensive way to stay anonymous, and a
 	# far better story than a repair deadlock.
+	# Standing.identifies, not "is the dict non-empty": port_control.dialogue's
+	# own refusal line is "We do not berth a hull we cannot name", and a ship
+	# broadcasting with Share Name off is exactly that -- transmitting, but
+	# declining to say who it is. The non-empty test let it berth anyway.
 	if ship.has_method("get_active_transponder_data") and ship.has_method("get_comms_range") \
-			and ship.get_comms_range() > 0.0 and ship.get_active_transponder_data().is_empty():
+			and ship.get_comms_range() > 0.0 and not Standing.identifies(ship.get_active_transponder_data()):
 		if verbose:
 			print("[PORT] %s: DENIED %s -- has a radio and is not reporting" % [
 				zone.get("authority", "?"), ship.name])
@@ -1650,7 +1654,7 @@ func get_active_transponder_data() -> Dictionary:
 				"flag": c.get("transponder_flag", "")
 			}
 			if not c.get("transponder_share_name", true):
-				data["name"] = "UNKNOWN"
+				data["name"] = Standing.NAME_WITHHELD
 			if c.get("transponder_share_location", false):
 				data["pos"] = position
 				

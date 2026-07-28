@@ -86,6 +86,39 @@ func setup(_main) -> void:
 		{}, observer_a, Standing.UNREPORTED, "not reporting"
 	])
 
+	# 7b. BROADCASTING IS NOT IDENTIFYING (playtest 2026-07-27: "Share Name
+	# doesn't by itself trigger stop identify -- only Broadcast Active to off
+	# does"). A transponder with Share Name switched off still transmits: a
+	# flag, presence, optionally position. It just declines to say WHO. Every
+	# reader tested `not transponder.is_empty()`, so that hull read NEUTRAL /
+	# "reporting clean" while broadcasting the literal string "UNKNOWN" where
+	# its name goes, and the Share Name switch had no observable effect on any
+	# demand, challenge or docking decision.
+	cases.append([
+		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
+		{"name": Standing.NAME_WITHHELD, "flag": "SOVEREIGN_DRIFT"}, observer_a,
+		Standing.UNREPORTED, "withholding name"
+	])
+
+	# 7c. ...and a transponder with no name field at all is the same judgment.
+	# Withholding by omission is still withholding.
+	cases.append([
+		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
+		{"flag": "SOVEREIGN_DRIFT"}, observer_a, Standing.UNREPORTED, "withholding name"
+	])
+
+	# 7d. But a KNOWN-ENEMY FLAG still lands, name or no name. Rule 3 sits above
+	# this one deliberately: a pirate flag means the same thing whether or not
+	# the hull flying it introduces itself, and anonymity must not be a way to
+	# downgrade yourself from red to yellow.
+	var observer_hates_roger := _make_observer(["TEAM_A"])
+	observer_hates_roger.known_enemy_flags = [Standing.FLAG_PIRATE]
+	cases.append([
+		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
+		{"name": Standing.NAME_WITHHELD, "flag": Standing.FLAG_PIRATE}, observer_hates_roger,
+		Standing.HOSTILE, "flying " + Standing.FLAG_PIRATE
+	])
+
 	# 8. Precedence: crypto beats even a matching warrant (order 1 before 2).
 	var observer_warrant_crypto := _make_observer(["TEAM_A"])
 	observer_warrant_crypto.warrant_index = {
