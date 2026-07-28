@@ -12,7 +12,7 @@ extends Node
 #      build_vessel_entries can never display them, evicting the player's own
 #      hail history from an 8-slot ring.
 #   3. ChallengeLeaf had no minimum silence, so at campaign start -- when every
-#      contact is briefly UNREPORTED because the datalink has not delivered
+#      contact is briefly CAUTION because the datalink has not delivered
 #      transponders yet -- a patrol challenged EVERYTHING at once, including
 #      the station it guards.
 #

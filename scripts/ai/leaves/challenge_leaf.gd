@@ -1,14 +1,14 @@
 extends "res://addons/beehave/nodes/leaves/action.gd"
 
 # M49 -- patrol challenge (design_ideas/comms_verbs.md's "Patrol" policy):
-# DEMAND(IDENTIFY) any fresh, UNREPORTED vessel contact found inside
+# DEMAND(IDENTIFY) any fresh, CAUTION vessel contact found inside
 # controlled space (a station's port zone) and within comms-link range.
 # Inserted in build_patrol AFTER Engage, BEFORE FollowRoute
 # (ai_tree_factory.gd) -- cheap side-effect work that ALWAYS returns FAILURE
 # so the tree still falls through to FollowRoute, same "leaf that never
 # claims the tick" shape broadcast_transponder_leaf.gd uses in build_station.
 #
-# Perf: the discovery scan (fresh UNREPORTED contacts x zone membership x
+# Perf: the discovery scan (fresh CAUTION contacts x zone membership x
 # comms range) is gated to run every SCAN_INTERVAL_TICKS physics ticks, not
 # every tick -- the only new periodic work this milestone adds (per the
 # roadmap's perf guardrail). Window bookkeeping for already-challenged tracks
@@ -42,7 +42,7 @@ func tick(actor: Node, blackboard) -> int:
 		return FAILURE
 
 	var challenged: Dictionary = blackboard.get_value("challenged", {})
-	# How long a track must stay UNREPORTED before it is worth asking. See
+	# How long a track must stay CAUTION before it is worth asking. See
 	# SILENT_GRACE_FRAMES.
 	var silent_since: Dictionary = blackboard.get_value("challenge_silent_since", {})
 	# Tracks we have ALREADY convicted (see _check_windows). Read here so a
@@ -53,7 +53,7 @@ func tick(actor: Node, blackboard) -> int:
 		if challenged.has(c_id):
 			continue
 		var c: Dictionary = actor.active_contacts[c_id]
-		if c.get("standing", "") != Standing.UNREPORTED:
+		if c.get("standing", "") != Standing.CAUTION:
 			# Reporting (or judged some other way) -- forget any silence timer,
 			# and forget the conviction too. A hull that relit has answered the
 			# question; if it goes dark again later that is a NEW offense and it
@@ -69,12 +69,21 @@ func tick(actor: Node, blackboard) -> int:
 		# ITSELF. _check_windows convicts an unanswered challenge by posting a
 		# NO_ID warrant and then ERASING the `challenged` entry (deliberately --
 		# a challenge voided by the subject leaving must be re-issuable when it
-		# returns). But a NO_ID warrant resolves to standing CAUTION, and
-		# Standing.CAUTION IS Standing.UNREPORTED -- the same string, since the
-		# rename is still deferred. So one scan later this loop re-reads the
-		# subject as "not reporting", its silence timer is long expired, and it
-		# fires an identical DEMAND(IDENTIFY) with a fresh seq. Twenty seconds
-		# later it convicts again, and so on forever.
+		# returns). But a NO_ID warrant itself resolves to standing CAUTION --
+		# the same tier a silent hull already sits in -- so one scan later this
+		# loop re-read the patrol's OWN verdict as fresh evidence of silence,
+		# found the silence timer long expired, and fired an identical
+		# DEMAND(IDENTIFY) with a new seq. Twenty seconds later it convicted
+		# again, and so on forever.
+		#
+		# The tier was spelled UNREPORTED at the time, which is why nobody saw
+		# it: the loop read "UNREPORTED" and understood "has never identified
+		# itself", when what the string actually meant by then was "there is
+		# something here I cannot resolve" -- including a warrant this very
+		# patrol had just written. Renaming it to CAUTION (2026-07-27) makes the
+		# misreading visible, but does NOT make it impossible, which is why this
+		# guard stays: a conviction is still caution-tier, and caution-tier is
+		# still what a challenge looks for.
 		#
 		# Nothing downstream could catch it: the seq is genuinely new every
 		# time, so ship.gd's refresh suppression correctly lets each one
@@ -91,7 +100,7 @@ func tick(actor: Node, blackboard) -> int:
 			continue
 
 		# A FRESHLY ACQUIRED TRACK IS NOT A SILENT ONE. Every contact begins
-		# UNREPORTED and only becomes NEUTRAL once the datalink relay actually
+		# CAUTION and only becomes NEUTRAL once the datalink relay actually
 		# delivers a transponder (DATALINK_RELAY_HZ, with a per-ship phase
 		# offset), so at campaign start a patrol sees EVERYTHING as unreporting
 		# for a moment -- the player, the haulers, and the station it is
@@ -144,7 +153,7 @@ func tick(actor: Node, blackboard) -> int:
 # Per-tick window bookkeeping over already-issued challenges: a track that
 # relights (standing goes NEUTRAL) within the window resolves quietly
 # (recorded in challenge_resolved -- testable state, see test_patrol_
-# challenge.gd); one that's still UNREPORTED when the window expires is
+# challenge.gd); one that's still CAUTION when the window expires is
 # recorded in challenge_ignored -- the M52 assessment input (no standing
 # change, no engagement in M49).
 func _check_windows(actor: Node, blackboard) -> void:
@@ -193,13 +202,13 @@ func _check_windows(actor: Node, blackboard) -> void:
 				var our_r: float = actor.get_comms_range()
 				if their_r > 0.0 and our_r > 0.0:
 					still_in_comms = actor.position.distance_to(subject_node.position) <= min(our_r, their_r)
-			if standing == Standing.UNREPORTED and still_in_comms:
+			if standing == Standing.CAUTION and still_in_comms:
 				ignored[trk] = true
 				# M52 -- suspicion assessment folded into the warrant pipeline
 				# (implementation_plans/m52_patrol_interdiction.md item 3): an
 				# ignored IDENTIFY challenge posts a NO_ID warrant against
 				# whatever this actor could actually see (claimed name is
-				# empty for a true UNREPORTED contact -- subject_key falls
+				# empty for a true CAUTION contact -- subject_key falls
 				# back to the signature). Closes the loop end to end: next
 				# fusion tick's compute_standing reads it via warrant_index ->
 				# HOSTILE -> InterdictLeaf picks it up.

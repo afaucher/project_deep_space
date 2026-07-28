@@ -187,7 +187,7 @@ static func build_station() -> Node:
 #
 # M49 -- Challenge (design_ideas/comms_verbs.md's "Patrol" policy): sits AFTER
 # Engage, BEFORE FollowRoute. It always returns FAILURE (cheap side-effect
-# work -- DEMAND(IDENTIFY) any fresh UNREPORTED contact in controlled space),
+# work -- DEMAND(IDENTIFY) any fresh CAUTION contact in controlled space),
 # so it never actually claims the tick; a hostile still preempts everything
 # via Engage above it, and with no challenge to send the tree falls straight
 # through to FollowRoute exactly as before M49.
@@ -206,7 +206,7 @@ static func build_station() -> Node:
 #   |-- JobRunner (ticks the demand job Interdict just assigned; FAILURE if no job)
 #   |-- Engage (acquire -> steer -> fire; a hostile preempts the patrol)
 #   |-- SOSResponse (fly toward a heard SOS's marker; FAILURE when none/arrived/stale)
-#   |-- Challenge (DEMAND(IDENTIFY) UNREPORTED contacts in controlled space; always FAILURE)
+#   |-- Challenge (DEMAND(IDENTIFY) CAUTION contacts in controlled space; always FAILURE)
 #   |-- FollowRoute (cruise the waypoints; SUCCESS while patrolling)
 #   +-- Idle (no route -> hold heading)
 static func build_patrol() -> Node:

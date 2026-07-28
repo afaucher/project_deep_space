@@ -7,7 +7,7 @@ extends Node
 # contact reads NEUTRAL; a dark contact OUTSIDE any zone is never challenged
 # at all. No standing change from the challenge itself (IDENTIFY is never
 # coercion, per comms_verbs.md's "one rule that keys on the rung"), and no
-# shooting (an UNREPORTED contact was never a valid Engage target anyway).
+# shooting (an CAUTION contact was never a valid Engage target anyway).
 #
 # `await get_tree().physics_frame` live-ship style, same as test_drift_
 # residents.gd/test_honored_stop.gd -- settle loops with generous timeouts,
@@ -89,8 +89,8 @@ func setup(main) -> void:
 	_assert(challenged, "in-zone dark contact gets a DEMAND(IDENTIFY) from the patrol within the timeout (pending_demand=%s)" % str(dark_ship.pending_demand))
 
 	var patrol_view: Dictionary = _find_contact(patrol, dark_ship)
-	_assert(patrol_view.get("standing", "") == Standing.UNREPORTED,
-		"IDENTIFY never changes standing -- patrol still reads the dark ship as UNREPORTED (got '%s')" % patrol_view.get("standing", ""))
+	_assert(patrol_view.get("standing", "") == Standing.CAUTION,
+		"IDENTIFY never changes standing -- patrol still reads the dark ship as CAUTION (got '%s')" % patrol_view.get("standing", ""))
 
 	var ammo_after: int = 0
 	for w in patrol.get_components_by_type("weapons"):
@@ -152,10 +152,10 @@ func _noid_warrants(observer: Node) -> int:
 #
 # THE BAND IS THE WHOLE TEST. Comms reach is deliberately shorter than sensor
 # reach (test_patrol_id_read measures both), and parking the subject between
-# the two is what makes this guard non-vacuous: it stays a live, UNREPORTED
+# the two is what makes this guard non-vacuous: it stays a live, CAUTION
 # contact the patrol can SEE, so the buggy code would post, and only the range
 # check stops it. Teleport it out of SENSOR range too and the track is dropped
-# entirely -- standing goes "" rather than UNREPORTED, the old code would not
+# entirely -- standing goes "" rather than CAUTION, the old code would not
 # have posted either, and the test passes against the very bug it exists to
 # catch.
 #
@@ -212,14 +212,14 @@ func _phase_left_comms_range(station: Node, patrol: Node, patrol_tree: Node) -> 
 	var still_open: bool = patrol_tree.blackboard.get_value("challenged", {}).has(trk)
 	_assert(not still_open, "phase 4: the challenge window closed (entry voided, not left pending)")
 
-	# Non-vacuity: the patrol must still SEE it, and still read it UNREPORTED.
+	# Non-vacuity: the patrol must still SEE it, and still read it CAUTION.
 	# If either fails, the guard proves nothing and says so.
 	var view: Dictionary = _find_contact(patrol, leaver)
 	var gap: float = patrol.position.distance_to(leaver.position)
 	_assert(not view.is_empty(),
 		"phase 4 (non-vacuity): the leaver is STILL a live contact at %.0fu -- seen but unheard, the band this guard needs" % gap)
-	_assert(view.get("standing", "") == Standing.UNREPORTED,
-		"phase 4 (non-vacuity): and still reads UNREPORTED (got '%s') -- so the old code WOULD have posted" % view.get("standing", ""))
+	_assert(view.get("standing", "") == Standing.CAUTION,
+		"phase 4 (non-vacuity): and still reads CAUTION (got '%s') -- so the old code WOULD have posted" % view.get("standing", ""))
 
 	_assert(_noid_warrants(patrol) == noid_before,
 		"phase 4: NO NO_ID warrant against a hull that was out of comms range when the window lapsed -- silence we cannot hear is not evidence")
@@ -316,7 +316,7 @@ func _phase_ignored_in_range(station: Node, patrol: Node, patrol_tree: Node) -> 
 #
 # The loop was self-driving. _check_windows convicts an unanswered challenge by
 # posting a NO_ID warrant and erasing the `challenged` entry; a NO_ID warrant
-# resolves to CAUTION; and Standing.CAUTION IS Standing.UNREPORTED (one string,
+# resolves to CAUTION; and Standing.CAUTION IS Standing.CAUTION (one string,
 # the rename still deferred). So the scan re-read the patrol's OWN verdict as
 # fresh evidence of silence and asked again, every window, forever.
 #
@@ -402,7 +402,7 @@ func _phase_asks_once(_unused_station: Node, _unused_patrol: Node, _unused_tree:
 	var gap: float = patrol.position.distance_to(mute.position)
 	_assert(gap <= link,
 		"phase 6 (non-vacuity): still inside comms link (%.0fu apart, link %.0fu) -- silence here is a CHOICE, not deafness" % [gap, link])
-	_assert(view.get("standing", "") == Standing.UNREPORTED,
+	_assert(view.get("standing", "") == Standing.CAUTION,
 		"phase 6 (non-vacuity): and still reads caution-tier (got '%s') -- the exact state the loop kept re-reading as fresh" % view.get("standing", ""))
 
 	var total: int = _identify_hails_to(patrol, mute)

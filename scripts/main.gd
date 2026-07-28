@@ -504,7 +504,7 @@ func _spawn_sensor_drone() -> void:
 	add_child(ship)
 	players[drone_id] = ship
 	# M48 -- a friendly scout flies the home flag so non-crypto-linked home
-	# ships read it as home rather than UNREPORTED (it's already FRIENDLY to
+	# ships read it as home rather than CAUTION (it's already FRIENDLY to
 	# the player via shared TEAM_PLAYER tags).
 	ship.set_transponder_flag(Standing.FLAG_DRIFT)
 

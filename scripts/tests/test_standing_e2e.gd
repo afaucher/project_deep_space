@@ -178,9 +178,9 @@ func _tick_scenario_a() -> int:
 	if c.get("standing", "") == Standing.HOSTILE:
 		printerr("  ASSERT FAILED: a dark, non-reporting stranger should never read HOSTILE, got standing=", c.get("standing", ""))
 		return 0
-	if c.get("standing", "") != Standing.UNREPORTED:
+	if c.get("standing", "") != Standing.CAUTION:
 		return -1 # let a couple more ticks settle it
-	print("  [PASS] dark stranger tracked as UNREPORTED (not engaged): reason='", c.get("standing_reason", ""), "'")
+	print("  [PASS] dark stranger tracked as CAUTION (not engaged): reason='", c.get("standing_reason", ""), "'")
 	return 1
 
 # --- Scenario B: pirate-flagged ship engaged --------------------------------

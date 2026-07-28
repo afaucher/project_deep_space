@@ -74,12 +74,12 @@ func setup(_main) -> void:
 	_assert(s3.get("standing", "") == Standing.FRIENDLY,
 		"an observer sharing TEAM_PLAYER WOULD read the player FRIENDLY (the old bug -- proves the tag share was the cause)")
 
-	# 4. A DARK player (transponder off) reads UNREPORTED to home, not FRIENDLY --
+	# 4. A DARK player (transponder off) reads CAUTION to home, not FRIENDLY --
 	# going dark in controlled space is what draws patrol challenges; it must
 	# never fall back to friendly just because the hull used to be crypto-kin.
 	var s4: Dictionary = Standing.compute_standing(player_contact, {}, home_observer)
-	_assert(s4.get("standing", "") == Standing.UNREPORTED,
-		"a dark (no-transponder) player reads UNREPORTED to home, not FRIENDLY (got '%s')" % s4.get("standing", ""))
+	_assert(s4.get("standing", "") == Standing.CAUTION,
+		"a dark (no-transponder) player reads CAUTION to home, not FRIENDLY (got '%s')" % s4.get("standing", ""))
 
 	if failures.is_empty():
 		print(">>> [TEST PASSED] test_player_neutral_to_home <<<")

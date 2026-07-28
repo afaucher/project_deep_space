@@ -4112,13 +4112,13 @@ func _physics_process(delta: float) -> void:
 					# A "severity compare-and-copy" used to sit here, adopting a
 					# peer's standing whenever it was more severe than ours.
 					#
-					# IT WAS ACTIVELY WRONG. _SEVERITY ranks UNREPORTED(1) above
+					# IT WAS ACTIVELY WRONG. _SEVERITY ranks CAUTION(1) above
 					# NEUTRAL(0), so a peer merely OUT OF COMMS RANGE with a
 					# ship -- honestly reading it as unreporting -- relayed that
 					# over every other peer's CORRECT NEUTRAL. Measured against
 					# the live campaign: Patrol Alpha held the player's
 					# transponder and recomputed NEUTRAL on every sample, while
-					# its cached standing sat at UNREPORTED because this line
+					# its cached standing sat at CAUTION because this line
 					# kept overwriting it, so it re-challenged the player
 					# forever. That was the playtest's repeated
 					# DEMAND(IDENTIFY); no fix inside ChallengeLeaf could reach

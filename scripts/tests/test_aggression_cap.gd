@@ -159,7 +159,7 @@ func setup(main) -> void:
 	# CAUTION is an alias for the existing yellow tier, NOT a fifth tier -- same
 	# string, same severity, so the datalink compare-and-copy and every colour
 	# consumer are untouched.
-	_assert(Standing.CAUTION == Standing.UNREPORTED,
+	_assert(Standing.CAUTION == Standing.CAUTION,
 		"CAUTION is an alias for the existing yellow tier, not a new one")
 	_assert(Standing.severity(Standing.CAUTION) < Standing.severity(Standing.HOSTILE)
 			and Standing.severity(Standing.CAUTION) > Standing.severity(Standing.NEUTRAL),

@@ -113,13 +113,13 @@ func setup(_main) -> void:
 	# --- Case 3: the reverse direction stays closed -------------------------
 	# A name-keyed warrant must NOT be reachable by signature. Broadening that
 	# way would let a warrant against one hull apply to every ship sharing its
-	# tags and cross-section, and it is also the designed UNREPORTED rule: you
+	# tags and cross-section, and it is also the designed CAUTION rule: you
 	# cannot enforce a name warrant on a hull you have not identified.
 	print("\n--- a NAME-keyed warrant is not reachable by signature (going dark still works) ---")
 	var obs_named := _observer_holding(Standing.OFF_ASSAULT, "Known Offender")
 	var gone_dark: Dictionary = Standing.compute_standing(_contact(), {}, obs_named)
-	_assert(gone_dark.get("standing", "") == Standing.UNREPORTED,
-		"a hull that goes dark is UNREPORTED, not HOSTILE-by-signature (got '%s')" % gone_dark.get("standing", ""))
+	_assert(gone_dark.get("standing", "") == Standing.CAUTION,
+		"a hull that goes dark is CAUTION, not HOSTILE-by-signature (got '%s')" % gone_dark.get("standing", ""))
 
 	_finish()
 

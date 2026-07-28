@@ -254,19 +254,31 @@ change.
 appeared nowhere else in the game, and a bare `TRK-068` already says we hold no
 identity for it.
 
-### 2.8 Standing display names
+### 2.8 Fix the name, don't map around it
 
-`Utils.standing_display()`. The wire constant `UNREPORTED` was reaching the
-player as *"Standing: UNREPORTED -- demanding a stop of Patrol Alpha"* — a line
-that names a cause having nothing to do with transponders, because
-`UNREPORTED` stopped being the category and became one of several causes of the
-yellow tier. The displayed name is the **tier** name (`CAUTION`), which
-`Utils._STANDING_TIERS` already holds; no second mapping was introduced.
+The wire constant `UNREPORTED` was reaching the player as *"Standing:
+UNREPORTED -- demanding a stop of Patrol Alpha"* — a tier name naming a cause
+that has nothing to do with transponders, because not-reporting had stopped
+being the category and become one of several causes of the yellow tier.
 
-Presentation only. The wire value is untouched, so the datalink
-compare-and-copy, every `== Standing.UNREPORTED` test and the saved-state
-format keep working — and the constant rename stays the isolated commit
-`standing.gd` asks for.
+The first fix was a display mapping, `Utils.standing_display()`, translating
+the wire value to the tier name for the UI. It worked, and it was the wrong
+shape: it left two names for one thing and put the honest one only on screen.
+
+**Both are gone. The constant is `CAUTION` now** (2026-07-27), so the wire
+value *is* what the player reads, and `standing_display()` — which the rename
+made the identity function for every input — went with it.
+
+Worth stating as a rule, because the alias was not free while it lasted. Two
+names for one string caused two bugs in a single day: `ChallengeLeaf` read a
+contact's caution standing (produced by a warrant the patrol had itself just
+posted) as "still not reporting" and re-demanded identification forever; and a
+hull broadcasting with Share Name off was invisible as a distinct case, because
+"withholding its name" and "holding a warrant" collapsed into the same word.
+Both readings were defensible — that is exactly what an alias buys you.
+
+If a value ever again needs a different name on screen than on the wire, the
+honest fix is the same one: **change the name.**
 
 ### 2.9 State, not inputs — counter-detection
 

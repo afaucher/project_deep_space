@@ -54,23 +54,34 @@ func setup(_main) -> void:
 	print("=== test_contact_tier: one tier table drives colour AND section (playtest A2) ===")
 
 	# --- The structural invariant: no tier can define one and not the other ---
+	#
+	# Every STANDING is driven from Standing.* and every expectation from
+	# Utils.TIER_*, so a rename of either that the other does not follow fails
+	# here. The duplication audit (design_ideas/2026-07-27-duplication_audit.md
+	# §5) flagged that the old form left FRIENDLY uncovered -- its case set
+	# sos:true and resolved TIER_SOS, never exercising the FRIENDLY row at all,
+	# so renaming Standing.FRIENDLY would have greyed out every friendly contact
+	# in the game with nothing failing. SOS is now its own case precisely because
+	# it is the one tier with NO standing behind it.
 	print("\n--- every tier resolves to both a colour and a real section ---")
-	for tier in [Utils.TIER_SOS, Utils.TIER_HOSTILE, Utils.TIER_CAUTION,
-			Utils.TIER_FRIENDLY, Utils.TIER_NEUTRAL]:
-		var c: Dictionary = {"classification": "UNIDENTIFIED VESSEL"}
-		if tier == Utils.TIER_SOS:
-			c["sos"] = true
-		else:
-			c["standing"] = Utils.TIER_CAUTION if tier == Utils.TIER_CAUTION else tier
-		# CAUTION's standing string is still spelled UNREPORTED (the rename is
-		# deferred to its own commit) -- go through Standing so this keeps
-		# working after it lands.
-		if tier == Utils.TIER_CAUTION:
-			c["standing"] = Standing.CAUTION
-		_assert(Utils.contact_tier(c) == tier,
-			"a contact carrying %s resolves to that tier" % tier)
+	var standing_tiers: Array = [
+		[Standing.HOSTILE, Utils.TIER_HOSTILE],
+		[Standing.CAUTION, Utils.TIER_CAUTION],
+		[Standing.FRIENDLY, Utils.TIER_FRIENDLY],
+		[Standing.NEUTRAL, Utils.TIER_NEUTRAL],
+	]
+	for pair in standing_tiers:
+		var c: Dictionary = {"classification": "UNIDENTIFIED VESSEL", "standing": pair[0]}
+		_assert(Utils.contact_tier(c) == pair[1],
+			"standing %s resolves to tier %s" % [pair[0], pair[1]])
 		_assert(Utils.CONTACT_SECTIONS.has(Utils.contact_section(c)),
-			"%s files under a section that actually exists (got '%s')" % [tier, Utils.contact_section(c)])
+			"%s files under a section that actually exists (got '%s')" % [pair[1], Utils.contact_section(c)])
+
+	# SOS: a tier with no standing behind it, so it gets its own case.
+	var sos_only: Dictionary = {"classification": "UNIDENTIFIED VESSEL", "sos": true}
+	_assert(Utils.contact_tier(sos_only) == Utils.TIER_SOS, "an SOS contact resolves to the SOS tier")
+	_assert(Utils.CONTACT_SECTIONS.has(Utils.contact_section(sos_only)),
+		"SOS files under a section that actually exists (got '%s')" % Utils.contact_section(sos_only))
 
 	# --- A2 itself -----------------------------------------------------------
 	print("\n--- Ironhold: identified, reporting, NEUTRAL ---")
@@ -119,13 +130,21 @@ func setup(_main) -> void:
 	# Both of these came out of the 2026-07-27 playtest and both are one-liners
 	# over tables that already existed -- pinned here so a future edit to the
 	# tier table can't silently change what a player reads.
-	print("\n--- standing display names ---")
-	_assert(Utils.standing_display(Standing.UNREPORTED) == "CAUTION",
-		"the wire constant UNREPORTED is SHOWN as CAUTION -- 'not reporting' is one cause of the tier, not the tier")
-	_assert(Utils.standing_display(Standing.HOSTILE) == "HOSTILE",
-		"every other tier shows under its own name")
-	_assert(Utils.standing_display("") == "",
-		"no standing displays as nothing, not as a fabricated tier")
+	# The yellow tier's constant is CAUTION, not UNREPORTED. That name shipped as
+	# an alias (`const CAUTION := UNREPORTED`) and the two-names-one-string state
+	# caused two bugs in a day -- the patrol re-hail loop and the invisible
+	# Share-Name case -- so it is pinned here rather than left to a comment.
+	# There is no display-name mapping any more: the wire value IS what the
+	# player reads, which is the point of getting the name right.
+	print("\n--- the tier's name ---")
+	# (That UNREPORTED is GONE rather than kept as a second name needs no
+	# assertion: the constant no longer exists, so any surviving reference to it
+	# is a parse error, and GDScript parse errors take the whole dependent script
+	# down. The compiler is a stricter guard than this test could be.)
+	_assert(Standing.CAUTION == "CAUTION",
+		"the yellow tier is spelled CAUTION on the wire, not UNREPORTED")
+	_assert(Utils.contact_tier({"standing": Standing.CAUTION}) == Utils.TIER_CAUTION,
+		"a CAUTION standing still resolves to the caution tier after the rename")
 
 	print("\n--- entity labels: one naming grammar for every list ---")
 	_assert(Utils.entity_label("TRK-068", "", "", "UNIDENTIFIED VESSEL") == "TRK-068",

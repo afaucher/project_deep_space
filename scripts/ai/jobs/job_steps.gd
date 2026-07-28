@@ -921,7 +921,7 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 			continue
 		all_fresh_vessels.append(c)
 
-	# Viable prey: NEUTRAL or UNREPORTED (never FRIENDLY-crypto, never
+	# Viable prey: NEUTRAL or CAUTION (never FRIENDLY-crypto, never
 	# HOSTILE), and not currently complied (already someone else's mark --
 	# the one ship-knowable proxy for "already being robbed/inspected").
 	# M52a failure memory: skip a victim we recently failed on (job[
@@ -933,7 +933,7 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 	var candidates: Array = []
 	for c in all_fresh_vessels:
 		var standing: String = c.get("standing", "")
-		if standing != Standing.NEUTRAL and standing != Standing.UNREPORTED:
+		if standing != Standing.NEUTRAL and standing != Standing.CAUTION:
 			continue
 		if c.get("complied_stop", false):
 			continue

@@ -110,7 +110,7 @@ func _guidance_tick(delta: float) -> void:
 			# M48 -- a missile is COMMITTED ORDNANCE, and the Missile hull has
 			# no comms component: it can never receive a transponder flag, so
 			# it can never independently compute Standing.HOSTILE (a re-sensed
-			# target reads UNREPORTED to it). Its LAUNCHER already made the
+			# target reads CAUTION to it). Its LAUNCHER already made the
 			# hostile judgment at fire time -- the missile inherits that lock
 			# at launch. So reacquisition keys on CLASSIFICATION (any
 			# non-friendly vessel is a valid re-lock for a dumb weapon already

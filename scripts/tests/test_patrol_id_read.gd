@@ -19,7 +19,7 @@ extends Node
 #
 # while a SENSOR contact forms on its own, separate reach. Wherever sensor reach
 # exceeds comms reach there is a band in which a patrol holds a solid track on a
-# hull it cannot identify -- which is UNREPORTED, which is exactly what a
+# hull it cannot identify -- which is CAUTION, which is exactly what a
 # DEMAND{IDENTIFY} is for. Nobody has ever calibrated the two against each
 # other.
 #
@@ -156,7 +156,7 @@ func _report() -> void:
 	#
 	# So the property under test is not that the band is absent. It is that the
 	# band is HONEST: inside comms a reporting hull reads NEUTRAL, outside it
-	# reads UNREPORTED, and -- the part that actually bit -- being unheard out
+	# reads CAUTION, and -- the part that actually bit -- being unheard out
 	# there must never be treated as EVIDENCE. See challenge_leaf's expiry path:
 	# a NO_ID warrant may only be posted against a contact still inside comms
 	# range, because otherwise the silence is our deafness, not their refusal.
@@ -165,8 +165,8 @@ func _report() -> void:
 			% [seen_max, heard_max])
 	for r in rows:
 		if r["seen"] and not r["heard"]:
-			_assert(r["standing"] == Standing.UNREPORTED,
-				"at %.0f, seen but out of comms, the honest read is UNREPORTED (got '%s')"
+			_assert(r["standing"] == Standing.CAUTION,
+				"at %.0f, seen but out of comms, the honest read is CAUTION (got '%s')"
 					% [r["dist"], r["standing"]])
 
 	# Wherever both hold, the campaign's own identity setup must resolve to

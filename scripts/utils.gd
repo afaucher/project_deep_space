@@ -117,20 +117,23 @@ const _TIERS := {
 	TIER_NEUTRAL:  {"color": Color(0.85, 0.85, 0.85),     "section": "All Contacts"},
 }
 
-# Standing string -> tier. Standing.UNREPORTED is the yellow CAUTION tier (it
-# means "cannot resolve from here" -- not reporting, OR holding a warrant, OR
-# demanding our submission); see standing.gd's CAUTION alias.
-# Keyed on Standing's CONSTANTS, not bare literals. This was the one file
-# outside standing.gd spelling them out -- and standing.gd has a rename of
-# UNREPORTED -> CAUTION already planned, which would have made this lookup
-# miss, contact_tier return "", and every non-reporting vessel fall through to
+# Standing string -> tier. Keyed on Standing's CONSTANTS, not bare literals.
+# This file was the one place outside standing.gd that spelled them out, and
+# standing.gd had a rename scheduled -- which would have made this lookup miss,
+# contact_tier return "", and every caution-tier vessel fall through to
 # classification_color -> RED. That is playtest A2, rebuilt by a refactor the
-# codebase had already scheduled. Preloads are constant expressions so a const
-# Dictionary can use them, and standing.gd does not depend on utils.gd, so
-# there is no cycle.
+# codebase had already planned. The rename landed 2026-07-27 and this table did
+# not notice, which is the whole argument for keying on constants.
+#
+# The four entries now map each standing to an identically-spelled tier, which
+# looks redundant and is not: this table also DEFINES THE DOMAIN. A standing
+# absent from it (or "") resolves to no tier at all, which is how non-vessels
+# fall through to the classification layer, and TIER_SOS exists with no standing
+# behind it at all. Preloads are constant expressions so a const Dictionary can
+# use them, and standing.gd does not depend on utils.gd, so there is no cycle.
 const _STANDING_TIERS := {
 	Standing.HOSTILE: TIER_HOSTILE,
-	Standing.UNREPORTED: TIER_CAUTION,
+	Standing.CAUTION: TIER_CAUTION,
 	Standing.NEUTRAL: TIER_NEUTRAL,
 	Standing.FRIENDLY: TIER_FRIENDLY,
 }
@@ -226,20 +229,13 @@ static func entity_label(track_id: String, name: String, flag: String, classific
 		s += " [%s]" % classification
 	return s
 
-# What to CALL a standing on screen. The wire constant is `UNREPORTED`, which
-# leaked into the weapons panel's readout as "Standing: UNREPORTED -- demanding
-# a stop of Patrol Alpha" -- a line that names a cause ("demanding a stop")
-# which has nothing to do with reporting, because UNREPORTED stopped being the
-# category and became one of several causes of the yellow tier (see standing.gd's
-# CAUTION note). The player-facing name is the TIER name, which this table
-# already holds; no second mapping is introduced.
-#
-# This is presentation only. The wire value is untouched, so the datalink
-# compare-and-copy, every `== Standing.UNREPORTED` test and the saved-state
-# format all keep working -- and the eventual constant rename stays the
-# isolated commit standing.gd asks for.
-static func standing_display(standing: String) -> String:
-	return _STANDING_TIERS.get(standing, standing)
+# (standing_display() lived here: a wire-value -> display-name mapping added
+# when the yellow tier's constant still read UNREPORTED and leaked to the player
+# as "Standing: UNREPORTED -- demanding a stop of Patrol Alpha". It existed
+# purely to paper over that name. The 2026-07-27 rename made it the identity
+# function for every input, so it is gone and callers print the standing
+# directly. If a standing ever again needs a different name on screen than on
+# the wire, the honest fix is the same one: change the name.)
 
 static func contact_color(c: Dictionary) -> Color:
 	var tier: String = contact_tier(c)

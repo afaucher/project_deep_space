@@ -110,6 +110,16 @@ failure is invisible.
 
 ## 5. `Utils._STANDING_TIERS` is keyed on bare literals — a booby trap on a scheduled rename
 
+> **RESOLVED 2026-07-27.** The table was re-keyed onto `Standing.*` before the
+> rename, and the rename then landed: `UNREPORTED` → `CAUTION`, with the
+> `const CAUTION := UNREPORTED` alias deleted rather than kept. The booby trap
+> this entry predicted did not fire — `_STANDING_TIERS` did not notice the
+> rename at all, which is the entry's own argument, demonstrated.
+>
+> The alias was not harmless while it lasted: two names for one string caused
+> the patrol re-hail loop and hid the Share-Name-off case, both the same day.
+> The FRIENDLY coverage gap called out below is still open.
+
 `utils.gd:110-115` keys the tier table on `"HOSTILE"`/`"UNREPORTED"`/etc. rather
 than `Standing.*`. It is the **only** file outside `standing.gd` that spells
 those literally; every other consumer is disciplined.

@@ -527,16 +527,17 @@ func _update_standing_row(c: Dictionary) -> void:
 	# already cache-stamps contact["standing_reason"] with this text
 	# (standing.gd/ship.gd), it just had zero UI consumers until now.
 	var reason: String = c.get("standing_reason", "") if is_vessel else ""
-	# Utils.standing_display, not the raw constant -- the wire value UNREPORTED
-	# reads as a claim about transponders, which is only one of the yellow
-	# tier's causes and usually not the one in `reason`.
-	var standing_text: String = Utils.standing_display(standing)
+	# Printed straight through. This briefly went via a Utils.standing_display()
+	# mapping, because the yellow tier's constant read UNREPORTED and produced
+	# lines like "Standing: UNREPORTED -- demanding a stop of Patrol Alpha",
+	# where the tier name contradicted the reason beside it. The constant is
+	# CAUTION now, so there is nothing left to translate.
 	if standing == "":
 		standing_label.text = ""
 	elif reason != "":
-		standing_label.text = "Standing: %s -- %s" % [standing_text, reason]
+		standing_label.text = "Standing: %s -- %s" % [standing, reason]
 	else:
-		standing_label.text = "Standing: %s" % standing_text
+		standing_label.text = "Standing: %s" % standing
 
 	# M52 -- SOS as a generic contact attribute (calling session, 2026-07-23,
 	# implementation_plans/m52_sos_passive_sync.md): same source

@@ -5,7 +5,7 @@ class_name Standing
 # on the observer ship's own contact records (contact["standing"]/
 # ["standing_reason"]/["aggro_hits"], see ship.gd).
 #
-# Standing is FOUR tiers -- FRIENDLY / NEUTRAL / UNREPORTED / HOSTILE -- the
+# Standing is FOUR tiers -- FRIENDLY / NEUTRAL / CAUTION / HOSTILE -- the
 # dispositions that mean the SAME thing to every observer holding them, so
 # they can ride the datalink and paint the contacts panel. "Suspicious" is
 # deliberately NOT a standing: it has no shared meaning (a patrol's "acting
@@ -24,34 +24,37 @@ class_name Standing
 # three angle rules: assistance exemption, authority flags, attribution
 # confidence gate) for the rule rationale this module implements.
 
-const FRIENDLY := "FRIENDLY"
-const NEUTRAL := "NEUTRAL"
-const UNREPORTED := "UNREPORTED"
-const HOSTILE := "HOSTILE"
-
-# The yellow tier is CAUTION -- "what your ship can determine without knowing
-# more" -- and `UNREPORTED` is only ONE of its causes, not the category.
-# The four tiers are really epistemic states:
+# The four tiers are epistemic states -- what THIS observer can establish:
 #
 #   FRIENDLY  you know (crypto IFF handshake, unforgeable)
 #   NEUTRAL   reporting, and you hold nothing against them
 #   CAUTION   you have something you cannot resolve on your own
 #   HOSTILE   you have determined they are an enemy
 #
-# Causes of CAUTION now include: no transponder ever received (who are you?),
-# a demand for your submission (police, or a pirate in colors? -- you cannot
-# tell from here), and a warrant for an offense below your escalation
-# threshold. contact["standing_reason"] carries WHICH, so widening the tier
-# loses nothing.
+# CAUTION was called UNREPORTED until 2026-07-27, and the name outlived its
+# accuracy. Not-reporting was once the tier's only cause; it is now one of
+# several, alongside a demand for your submission (police, or a pirate in
+# colours? -- you cannot tell from here), a warrant below your escalation
+# threshold, and a hull that broadcasts while withholding its name.
+# contact["standing_reason"] carries WHICH, so the tier does not need to.
 #
-# CAUTION is an ALIAS, not a new tier: same string, same severity, same color,
-# no datalink or UI change. The rename of the constant itself is deliberately
-# NOT done here -- "UNREPORTED" is a string used as a color-dict key, in the
-# datalink compare-and-copy and across many call sites, and CLAUDE.md is
-# emphatic about multi-site mechanical rewrites cascading into failures that
-# surface nowhere near the cause. Behaviour first; the rename is its own
-# isolated commit. New code should say CAUTION.
-const CAUTION := UNREPORTED
+# The rename was deferred once as "behaviour first, rename later", and shipped
+# as `const CAUTION := UNREPORTED` -- two names, one string. That alias then
+# caused two bugs in a single day:
+#
+#   * ChallengeLeaf read a contact's CAUTION standing -- produced by the NO_ID
+#     warrant the patrol had ITSELF just posted -- as "still not reporting",
+#     and re-demanded identification every 20s forever.
+#   * A hull broadcasting with Share Name off was invisible as a distinct case,
+#     because "withholding its name" and "holding a warrant" collapse to the
+#     same string.
+#
+# Both were readable as either meaning, which is exactly what an alias buys
+# you. One name now.
+const FRIENDLY := "FRIENDLY"
+const NEUTRAL := "NEUTRAL"
+const CAUTION := "CAUTION"
+const HOSTILE := "HOSTILE"
 
 # What a transponder broadcasts for its name when the operator has switched
 # Share Name off. It still transmits -- presence, flag, optionally position --
@@ -128,7 +131,7 @@ static func is_vessel(classification: String) -> bool:
 const _SEVERITY := {
 	"": -1,
 	NEUTRAL: 0,
-	UNREPORTED: 1,
+	CAUTION: 1,
 	HOSTILE: 2,
 }
 
@@ -202,7 +205,7 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	# Deliberately ONE-DIRECTIONAL. The reverse case -- a warrant filed under
 	# `name:` and looked up by signature after the subject goes dark -- is left
 	# alone: that is designed behaviour (you cannot enforce a name warrant on a
-	# hull you have not identified, matching the UNREPORTED/yellow rule), and
+	# hull you have not identified, matching the CAUTION/yellow rule), and
 	# broadening name-keyed warrants to match by signature would let a warrant
 	# against one ship apply to any hull sharing its tags and cross-section.
 	#
@@ -212,7 +215,7 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	# `sig:` BY DEFINITION (the subject was not reporting a name; that IS the
 	# offense), and warrants.md's taxonomy says it "resolves itself the moment
 	# the subject reports a transponder -- compute_standing already flips them
-	# off UNREPORTED on its own, so there is no separate revocation path to
+	# off CAUTION on its own, so there is no separate revocation path to
 	# build for it." That self-resolution worked precisely because the `name:`
 	# lookup missed the `sig:`-keyed record. Falling back unconditionally would
 	# have turned the cluster's most common, most forgivable offense into a
@@ -269,15 +272,15 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	if Standing.identifies(transponder):
 		return {"standing": NEUTRAL, "reason": "reporting clean"}
 
-	# 5. no name ever received for this track -> UNREPORTED (the caution tier).
+	# 5. no name ever received for this track -> CAUTION.
 	# Covers both "silent" and "broadcasting but withholding its name" -- the
 	# reason distinguishes them, the tier does not, because from here they are
 	# the same problem: we cannot say who that is. A location-independent fact;
 	# enforcement response to it is location-dependent (later milestone), the
 	# judgment itself is not.
 	if has_transponder:
-		return {"standing": UNREPORTED, "reason": "withholding name"}
-	return {"standing": UNREPORTED, "reason": "not reporting"}
+		return {"standing": CAUTION, "reason": "withholding name"}
+	return {"standing": CAUTION, "reason": "not reporting"}
 
 # --- Is this TRACK a coherent thing to shoot at? -----------------------------
 # The universal half of "may I fire on this", shared by the AI and the player's
@@ -444,7 +447,7 @@ const _RESPONSE_SEVERITY := {RESPONSE_INTERCEPT: 1, RESPONSE_MAX: 2}
 # design doc's taxonomy table; NO_ID is self-resolving (not clock-based, see
 # the doc) so it carries no clock expiry here either -- -1 means "never
 # expires on its own clock", not "never resolved" (NO_ID still resolves via
-# compute_standing's existing UNREPORTED-clearing rule, unrelated to this
+# compute_standing's existing CAUTION-clearing rule, unrelated to this
 # table).
 #
 # `self_resolves_on_id` marks an offense whose whole content is "you were not

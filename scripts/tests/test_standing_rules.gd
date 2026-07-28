@@ -80,10 +80,10 @@ func setup(_main) -> void:
 		{"name": "Trader One", "flag": ""}, observer_a, Standing.NEUTRAL, ""
 	])
 
-	# 7. No transponder received at all -> UNREPORTED ("not reporting").
+	# 7. No transponder received at all -> CAUTION ("not reporting").
 	cases.append([
 		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
-		{}, observer_a, Standing.UNREPORTED, "not reporting"
+		{}, observer_a, Standing.CAUTION, "not reporting"
 	])
 
 	# 7b. BROADCASTING IS NOT IDENTIFYING (playtest 2026-07-27: "Share Name
@@ -97,14 +97,14 @@ func setup(_main) -> void:
 	cases.append([
 		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
 		{"name": Standing.NAME_WITHHELD, "flag": "SOVEREIGN_DRIFT"}, observer_a,
-		Standing.UNREPORTED, "withholding name"
+		Standing.CAUTION, "withholding name"
 	])
 
 	# 7c. ...and a transponder with no name field at all is the same judgment.
 	# Withholding by omission is still withholding.
 	cases.append([
 		{"classification": "UNIDENTIFIED VESSEL", "signature": {"iff_tags": []}},
-		{"flag": "SOVEREIGN_DRIFT"}, observer_a, Standing.UNREPORTED, "withholding name"
+		{"flag": "SOVEREIGN_DRIFT"}, observer_a, Standing.CAUTION, "withholding name"
 	])
 
 	# 7d. But a KNOWN-ENEMY FLAG still lands, name or no name. Rule 3 sits above
@@ -204,7 +204,7 @@ func setup(_main) -> void:
 	Standing.reset()
 
 	# --- severity ordering ---------------------------------------------------
-	var order = ["", Standing.NEUTRAL, Standing.UNREPORTED, Standing.HOSTILE]
+	var order = ["", Standing.NEUTRAL, Standing.CAUTION, Standing.HOSTILE]
 	var order_ok = true
 	for i in range(order.size() - 1):
 		if not (Standing.severity(order[i]) < Standing.severity(order[i + 1])):
@@ -215,7 +215,7 @@ func setup(_main) -> void:
 	else:
 		failed += 1
 
-	if Standing.is_more_severe(Standing.HOSTILE, Standing.UNREPORTED) and not Standing.is_more_severe(Standing.NEUTRAL, Standing.HOSTILE) and not Standing.is_more_severe(Standing.UNREPORTED, Standing.UNREPORTED):
+	if Standing.is_more_severe(Standing.HOSTILE, Standing.CAUTION) and not Standing.is_more_severe(Standing.NEUTRAL, Standing.HOSTILE) and not Standing.is_more_severe(Standing.CAUTION, Standing.CAUTION):
 		passed += 1
 	else:
 		failed += 1
