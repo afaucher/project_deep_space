@@ -61,7 +61,36 @@ Write-Host "GDScript syntax validation passed." -ForegroundColor Green
 # test and printed one at a time afterward so it stays readable instead of
 # interleaving across processes.
 Write-Host "Running automated test suite (parallel)..." -ForegroundColor Cyan
-$testFiles = Get-ChildItem -Path "$PSScriptRoot\scripts\tests\*.gd" -Exclude "test_asteroid.gd"
+$allTestFiles = Get-ChildItem -Path "$PSScriptRoot\scripts\tests\*.gd" -Exclude "test_asteroid.gd"
+
+# PERF TESTS RUN ALONE, AFTER EVERYTHING ELSE (2026-07-27).
+#
+# These measure physics-step wall time. Run inside the parallel batch they
+# measure however much CPU they happened to get, i.e. the SCHEDULER rather than
+# the game -- which made them worse than useless: two gates tonight failed on
+# margins of hundredths of a millisecond while the code was demonstrably fine.
+# Measured the same evening, same commit:
+#
+#   in-gate (12-way parallel)   avg ~15.1 ms   (failed the 16 ms budget twice)
+#   solo, 3 runs                avg 10.1 / 9.8 / 9.5 ms
+#   committed baseline          avg 10.48 ms
+#
+# So the code was slightly FASTER than baseline the whole time, and the "gate
+# is a lie" figure was contention. A perf test that mostly reports how busy the
+# box is will train everyone to ignore it, which costs the one real regression
+# it exists to catch.
+#
+# Serialised here rather than deleted or budget-inflated, because the budget
+# should keep meaning what it says. Cost is a few extra seconds of wall clock:
+# these are ~22s each and there are two.
+#
+# NOTE the tail is STILL not trustworthy even solo: Performance.TIME_PHYSICS_
+# PROCESS holds stale readings across frames, so p95 == max is common and means
+# held values dominated the tail (CLAUDE.md documents this at length). Trust
+# `avg`; treat p95/max as "did a spike happen", never as a distribution.
+$perfTestNames = @("test_perf_baseline", "test_pd_kill_wave_perf")
+$testFiles = $allTestFiles | Where-Object { $perfTestNames -notcontains $_.BaseName }
+$perfTestFiles = $allTestFiles | Where-Object { $perfTestNames -contains $_.BaseName }
 $testsPassed = $true
 
 # Start-Process -PassThru's returned object doesn't reliably expose ExitCode
@@ -133,6 +162,46 @@ foreach ($r in $runners) {
     }
     if ($r.Process.ExitCode -ne 0) {
         $testsPassed = $false
+    }
+}
+
+# --- Perf tests, SERIALISED, with the box otherwise idle ---------------------
+# See the note at $perfTestNames. Everything above has exited by now (the wait
+# loop is a barrier), so these get the machine to themselves and measure the
+# game rather than the scheduler.
+if ($perfTestFiles.Count -gt 0) {
+    Write-Host "`nRunning perf tests serially (contention would make these meaningless)..." -ForegroundColor Cyan
+    foreach ($file in $perfTestFiles) {
+        $runnerLog = "$PSScriptRoot\test_logs\$($file.BaseName).runner.log"
+        $runnerErr = "$PSScriptRoot\test_logs\$($file.BaseName).runner.err.log"
+        if (Test-Path $runnerLog) { Remove-Item $runnerLog -Force }
+        if (Test-Path $runnerErr) { Remove-Item $runnerErr -Force }
+
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\test_runner.ps1`" -TestName $($file.BaseName)"
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        [void]$proc.Start()
+        $so = $proc.StandardOutput.ReadToEndAsync()
+        $se = $proc.StandardError.ReadToEndAsync()
+        $proc.WaitForExit()
+
+        Set-Content -Path $runnerLog -Value $so.Result
+        Set-Content -Path $runnerErr -Value $se.Result
+        Write-Host "`n========== $($file.BaseName) (serial) ==========" -ForegroundColor Cyan
+        Write-Host $so.Result
+        if ($se.Result.Trim().Length -gt 0) {
+            Write-Host "Runner stderr:"
+            Write-Host $se.Result
+        }
+        if ($proc.ExitCode -ne 0) {
+            $testsPassed = $false
+        }
     }
 }
 

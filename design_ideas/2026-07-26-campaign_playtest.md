@@ -77,7 +77,7 @@ transponder received and standing resolving NEUTRAL. The classification string
 never reflects identification — possibly A2's third colour source showing
 through. **Not yet investigated.**
 
-### A1 part two: the aggression cap exists and never reaches the trigger — *open, verified 2026-07-27*
+### A1 part two: the aggression cap exists and never reaches the trigger — *FIXED 2026-07-27, see BUILT below*
 
 Why a NO_ID warrant gets you **shot** rather than intercepted. The
 proportionality cap is authored and is enforced in exactly one place, which is
