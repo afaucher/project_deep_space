@@ -254,7 +254,17 @@ func _ready() -> void:
 		_values[key] = OPTIONS[key]["default"]
 
 func get_choice(key: String) -> int:
-	return _values.get(key, OPTIONS.get(key, {}).get("default", 0))
+	# The one-liner this replaces was `_values.get(key, OPTIONS.get(key, {}).get("default", 0))`,
+	# which reads as a cheap lookup with a fallback but is not: GDScript evaluates
+	# the default argument EAGERLY, so every call paid three dictionary lookups
+	# AND allocated a throwaway `{}` -- even on the hit path where the fallback is
+	# discarded. This is read per-ship-per-frame from hot gates (ship.gd's sensor
+	# block, the signature-merge mode inside every sweep), so the allocation was
+	# happening tens of times a frame to produce nothing.
+	if _values.has(key):
+		return _values[key]
+	var opt: Dictionary = OPTIONS.get(key, {})
+	return opt.get("default", 0)
 
 func set_choice(key: String, value: int) -> void:
 	if _values.get(key) == value:

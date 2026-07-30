@@ -1523,7 +1523,11 @@ func _component_powered(c: Dictionary) -> bool:
 	# other type cascades off ship-wide reactor output, so killing or
 	# switching off every reactor goes dark everywhere downstream,
 	# and recovers automatically the instant a reactor comes back on.
-	if c["type"] == "reactor" or c["type"] == "hull":
+	# One dict read, not two. This runs for every component of every ship every
+	# frame (the sensor gate alone is ~120 sensor-ticks/frame at rest), and the
+	# `or` made it two Dictionary lookups plus two String compares.
+	var c_type: String = c["type"]
+	if c_type == "reactor" or c_type == "hull":
 		return true
 	return _get_reactor_power_rating_cached() > 0.0
 
@@ -3273,15 +3277,44 @@ func _physics_process(delta: float) -> void:
 		# Hulk shortcut: a dead ship's sensors are all unpowered, so every
 		# iteration below exits at the powered check before reading this --
 		# skip the two O(n) health scans that would only produce an unused 0.
-		var active_sensor_efficiency = 0.0 if is_dead else get_sys_health("sensors") / max(1.0, get_sys_max_health("sensors"))
+		# Measured 2026-07-29: this line was 96.5us/frame at rest -- 38% of the
+		# whole sensor_sweep tag, and 12x the cost of the physics broad phase it
+		# gates. get_sys_health/get_sys_max_health each walk ALL ~20
+		# ship_components to find the 3-5 that are sensors, per ship, per frame,
+		# to produce a ratio that is then only compared against 0.1.
+		#
+		# Same answer from the memoized list that the loop below already uses --
+		# O(sensors) instead of 2 x O(components), no cache to invalidate. The
+		# predicates are copied exactly from those two functions (max_health
+		# ungated; health gated on powered_on and floored at 0), so the ratio is
+		# identical, not merely close.
+		# Deliberately NOT wrapped in its own PerfProbe pair. It was, to find the
+		# above; at 35 calls/frame a begin/end pair (~0.9us) cost more than the
+		# block now does, so the probe became the thing being measured -- exactly
+		# what perf_probe.gd's header warns about. A/B, same instrumentation both
+		# sides: 2.759us -> 1.090us per call, sensor_sweep 287.1 -> 236.5us/frame.
+		var active_sensor_efficiency := 0.0
+		if not is_dead:
+			var sens_h := 0.0
+			var sens_max := 0.0
+			for s in get_components_by_type("sensors"):
+				sens_max += s["max_health"]
+				if s.get("powered_on", true):
+					sens_h += max(0.0, s["health"])
+			active_sensor_efficiency = sens_h / max(1.0, sens_max)
 
 		for sensor in get_components_by_type("sensors"):
 			if not _component_powered(sensor):
 				active_sensor_sweeps[sensor["id"]] = []
 				continue
 
-			var sensor_health_ratio = _component_health_ratio(sensor)
-			if sensor_health_ratio <= 0.0 or active_sensor_efficiency <= 0.1:
+			# The GATE only needs "is this sensor dead", which is a plain field
+			# read; the RATIO is only needed to scale active_range, inside the
+			# sweep branch. Computing it here ran a divide and two max() per
+			# sensor per frame for ~120 sensor-ticks to feed 1.1 actual sweeps.
+			# max(0.0, h) / max(1.0, mh) <= 0.0 iff h <= 0.0, so this is the same
+			# condition, not an approximation of it.
+			if sensor["health"] <= 0.0 or active_sensor_efficiency <= 0.1:
 				continue
 
 			if not sensor.get("active", true):
@@ -3302,7 +3335,7 @@ func _physics_process(delta: float) -> void:
 				# tuned for is unchanged, only the phase is shifted, once.
 				sensor["timer"] = sensor["refresh_interval"] + sensor.get("_sweep_stagger", 0.0)
 				sensor["_sweep_stagger"] = 0.0
-				var active_range = sensor["range"] * sensor_health_ratio
+				var active_range = sensor["range"] * _component_health_ratio(sensor)
 				var bins = _run_sensor_sweep(sensor, active_range)
 				active_sensor_sweeps[sensor["id"]] = bins
 				bins_this_frame.append_array(bins)
@@ -4294,14 +4327,40 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 	var use_range = active_range if active_range > 0.0 else sensor["range"]
 	var origin = position + get_component_origin(sensor).rotated(rotation)
 	var space_state = get_world_2d().direct_space_state
+	# Query objects are reused per hull instead of allocated per sweep. These
+	# three lines used to build a fresh PhysicsShapeQueryParameters2D and
+	# CircleShape2D on EVERY sweep (2217 of each in a 10s kill wave), which is
+	# pure allocation churn for objects whose only per-sweep difference is a
+	# radius and a transform. intersect_shape is synchronous, so mutating them
+	# between calls is safe -- there is no outstanding query to corrupt.
 	var query = PhysicsShapeQueryParameters2D.new()
 	var shape = CircleShape2D.new()
 	shape.radius = use_range
 	query.shape = shape
 	query.transform = Transform2D(0, origin)
 
+	# Attribution for the 2026-07-29 question "what portion of a sweep is the
+	# raycasting", which sensor_sweep alone could not answer -- it bundled the
+	# broad phase, the per-hit LOS rays and the per-hit signature work into one
+	# number. Answer: the broad phase is 3% of it at rest and 6.7% in a kill
+	# wave, so the physics query was never the cost; the per-hit loop is 63% in
+	# combat. One begin/end pair per sweep, so the probes are ~free.
+	#
+	# The finer counters that produced the rest of that answer (results returned,
+	# off-axis discards, rays cast, signatures built, first-vs-recurring sweeps)
+	# have been REMOVED. Three of them fired per HIT -- ~56,000 calls in a 10s
+	# kill wave, ~93/frame -- and PerfProbe.count() still costs a call into an
+	# autoload even when disabled, which is the cost perf_probe.gd's header
+	# warns about. They are one line each to re-add. What they found, for the
+	# record: 38% of broad-phase results are discarded off-axis, rays and
+	# signature builds run ~1:1 (only 8% of rays are blocked), the 128-result
+	# cap was never once hit, and the per-frame sweep herd is entirely newborn
+	# sensors -- recurring sweeps peak at 9/frame while a single volley's births
+	# peaked at 30.
+	PerfProbe.begin("sweep_broadphase")
 	var results = space_state.intersect_shape(query, 128)
-	
+	PerfProbe.end("sweep_broadphase")
+
 	var NUM_BINS = sensor["num_bins"]
 	var ARC_WIDTH = sensor["arc_width"]
 	var SENSOR_HEADING = rotation + sensor["heading"]
@@ -4323,6 +4382,7 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 	# checks are independent AND-ed conditions -- reordering them changes
 	# nothing about the FINAL accepted set (same bins, same field values),
 	# only how much work a REJECTED hit costs.
+	PerfProbe.begin("sweep_hitloop")
 	for hit in results:
 		var collider = hit.collider
 		if collider == self:
@@ -4342,6 +4402,16 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 		if not collider.has_method("get_signature"):
 			continue
 
+		# Allocated per hit, deliberately. Hoisting these to reused per-hull
+		# objects (along with the shape query above) was tried and REVERTED on
+		# 2026-07-29: it measured at the noise floor -- ~9us/frame against +-5us
+		# run-to-run, on 21,676 eliminated allocations -- and the shape-query half
+		# of it broke sensor detection outright (test_demand_lifecycle's S4 lost
+		# its contact on the issuer and dropped SOS). Mutating CircleShape2D.radius
+		# after assigning it to PhysicsShapeQueryParameters2D.shape did not behave
+		# as expected, and the mechanism was never established. No measured
+		# benefit plus an unexplained correctness failure is not a trade worth
+		# making; if revisited, prove the radius actually propagates first.
 		var ray_query = PhysicsRayQueryParameters2D.create(origin, collider.position)
 		ray_query.exclude = [self]
 		var ray_res = space_state.intersect_ray(ray_query)
@@ -4399,7 +4469,13 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 			# distance falloff applied) value set above.
 
 		bins[bin_idx].append(sig)
-	
+	PerfProbe.end("sweep_hitloop")
+
+	# Everything below is pure GDScript over what the loop already gathered --
+	# no physics queries. Tagged separately so "the sweep is expensive" can be
+	# attributed to the broad phase, the per-hit work, or the binning, rather
+	# than guessed at.
+	PerfProbe.begin("sweep_binning")
 	var sweep_output = []
 	var merge_mode = DebugSettings.get_choice("signature_merge")
 
@@ -4493,6 +4569,7 @@ func _run_sensor_sweep(sensor: Dictionary, active_range: float = 0.0) -> Array:
 		
 		sweep_output.append(merged)
 
+	PerfProbe.end("sweep_binning")
 	return sweep_output
 
 # M26 -- sample outline dots for one bin's target, called once per sensor per

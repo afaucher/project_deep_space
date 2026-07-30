@@ -190,6 +190,13 @@ func _finish() -> void:
 			tag, d["calls"], d["avg_us_per_frame"], d["max_frame_us"],
 			(d["avg_us_per_frame"] / TICK_BUDGET_US) * 100.0])
 
+	# Work counts, not times -- the sweep attribution questions (how much of the
+	# broad phase the arc check throws away; whether sweeps herd onto the same
+	# frame) are ratios of counts and cannot be read off the timing table.
+	# Prints nothing unless someone has added a PerfProbe.count() call site --
+	# the instrument stays installed, the output stays quiet. See perf_probe.gd.
+	PerfProbe.print_counters(n)
+
 	var csv_path := "res://tactical_analysis/data/perf_baseline.csv"
 	PerfProbe.report_csv(csv_path, n)
 	print("\n  wrote ", csv_path)

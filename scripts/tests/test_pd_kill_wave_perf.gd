@@ -116,6 +116,8 @@ func _finish() -> void:
 	print("  pd_assign max_frame_us=%d (budget <%d)" % [pd_assign_max, PD_ASSIGN_MAX_US])
 	print("  weapons_pd max_frame_us=%d (budget <%d)" % [weapons_pd_max, WEAPONS_PD_MAX_US])
 
+	PerfProbe.print_counters(MEASURE_FRAMES)
+
 	var csv_path := "res://tactical_analysis/data/pd_kill_wave_perf.csv"
 	PerfProbe.report_csv(csv_path, MEASURE_FRAMES)
 	print("  wrote ", csv_path)
