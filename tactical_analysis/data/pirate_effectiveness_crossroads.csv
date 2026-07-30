@@ -1,3 +1,4 @@
 strategy,sim_minutes,haulers,members,takes,losses,returned_empty,resolved,takes_per_hour,take_rate,loss_rate,final_cap,backoff
 CROSSROADS,45,8,2,0,1,1,2,0.00,0.000,0.500,1,4.00
 CROSSROADS,60,8,3,0,0,3,3,0.00,0.000,0.000,1,8.00
+CROSSROADS,180,8,6,0,1,4,5,0.00,0.000,0.200,1,8.00
