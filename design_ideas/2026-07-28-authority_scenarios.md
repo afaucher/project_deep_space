@@ -1,10 +1,27 @@
 # Authority & enforcement — what the player actually sees
 
 **Status: OBSERVATION ONLY. Nothing here is a decision.** Written 2026-07-28
-from playtest reports that police action reads as confusing noise. Every "today"
-entry was traced in code, not recalled. The "should" column is deliberately
-absent — the overnight economy/pirate sims had not finished when this was
-written, and this is tuning, not a known-correct behaviour we failed to build.
+from playtest reports that police action reads as confusing noise. The "should"
+column is deliberately absent — this is tuning, not a known-correct behaviour we
+failed to build.
+
+**Verified 2026-07-30.** The first draft was traced from code, which is not the
+same as knowing. Every row below now carries its evidence, and the audit changed
+two things worth knowing up front:
+
+- **Most of the table was already pinned by existing tests** — considerably more
+  than the first draft credited. `test_hail_protocol` alone covers the overheard
+  witness rule, the police-stop exemption on both branches, the assistance
+  exemption and comms-range gating; `test_standing_e2e` covers the whole
+  stray-fire ladder. The doc was underselling its own foundations.
+- **The rows nothing covered are now pinned** by
+  `scripts/tests/test_authority_scenarios.gd`, written for exactly that gap. Its
+  scenario B is the important one: it proves `authority_flags` does nothing on
+  the gunfire path, which was the load-bearing inference behind §5.
+
+The only section still unverified is **§6 (jurisdiction)**, and it cannot be
+verified — the entity it describes does not exist yet. It is marked as
+hypothetical throughout.
 
 The prompting report: *"it's very confusing as a player when a station or patrol
 is enforcing a police action"*, and the suspicion that patrol RESPONSE behaviour
@@ -44,36 +61,36 @@ Player grudges cannot deputize the cluster.
 
 ## 2. You are a bystander
 
-| Scenario | What happens today |
-|---|---|
-| You are in port. A ship arrives flying the pirate flag; the station opens fire. | **Your ship files SUSTAINED_ASSAULT against the station on the 3rd hit, if you have not yet resolved the pirate as HOSTILE.** Never expires, HOSTILE, `RESPONSE_MAX`, `authorizes_force`. If you resolved the pirate first, nothing happens at all. See §5. |
-| You are in port. The station demands **ID** of another ship. | One line in your engineering log. Nothing else — the witness rule fires only on STOP, because demanding *information* is never coercion (`comms_verbs.md`). |
-| You are in port. The station demands a **STOP** of another ship. | You file ARMED_THREAT against the station. It turns yellow, moves from All Contacts to **Alerts** (adjacent to Enemies), on the map and helm dial too. 1800s, refreshed by every subsequent stop you witness. |
-| A patrol stops a ship you already read as a pirate. | Nothing. The assistance exemption fires. |
-| You watch an interdiction from outside comms range. | Nothing — the hail never reaches you. You may still watch it on sensors. |
-| You watch several stops over half an hour. | The ARMED_THREAT warrant is re-posted under the same `event_key` each time, refreshing its timestamp. In a busy port the authority is **effectively permanently yellow**. |
+| Scenario | What happens today | Evidence |
+|---|---|---|
+| You are in port. A ship arrives flying the pirate flag; the station opens fire. | **Your ship files SUSTAINED_ASSAULT against the station on the 3rd hit, if you have not yet resolved the pirate as HOSTILE.** Never expires, HOSTILE, `RESPONSE_MAX`, `authorizes_force`. If you resolved the pirate first, nothing happens at all. See §5. | `standing_e2e` C (ladder), D (exemption); `authority_scenarios` B (authority is no defence) |
+| You are in port. The station demands **ID** of another ship. | One line in your engineering log. Nothing else — the witness rule fires only on STOP, because demanding *information* is never coercion (`comms_verbs.md`). | `authority_scenarios` A |
+| You are in port. The station demands a **STOP** of another ship. | You file ARMED_THREAT against the station. It turns yellow, moves from All Contacts to **Alerts** (adjacent to Enemies), on the map and helm dial too. 1800s, refreshed by every subsequent stop you witness. | `hail_protocol` D; `contact_tier` (colour/section) |
+| A patrol stops a ship you already read as a pirate. | Nothing. The assistance exemption fires. | `hail_protocol` F; `standing_e2e` D |
+| You watch an interdiction from outside comms range. | Nothing — the hail never reaches you. You may still watch it on sensors. | `hail_protocol` A |
+| You watch several stops over half an hour. | The ARMED_THREAT warrant is re-posted under the same `event_key` each time, refreshing its timestamp. In a busy port the authority is **effectively permanently yellow**. | `authority_scenarios` D (one warrant, timestamp 318→408) |
 
 ## 3. You are the subject
 
-| Scenario | What happens today |
-|---|---|
-| You are dark. A patrol demands you identify. | Banner on that patrol's row, ACKNOWLEDGE available. The patrol stays **grey** — IDENTIFY is not coercion. |
-| You ignore it and stay in comms range. | After ~20s the patrol files NO_ID against you and (since 2026-07-27) never asks again. You are caution-tier *to them*; they remain grey *to you*. |
-| You ignore it and leave comms range. | Challenge voided, no warrant. Silence we cannot hear is not evidence. |
-| The patrol escalates to DEMAND(STOP). | **Now** you file ARMED_THREAT against it — yellow, Alerts. This is the first moment enforcement becomes visible to you as a threat. |
-| You acknowledge. | Receipt only. Does not stop your ship. Sets the AI-side compliance grace. |
-| You actually stop. | Banner reads "HELD — stopped for X". The honor rule means no leaf targets a compliant stopped ship. |
-| You keep running. | Not much. Refusing a stop never escalates you to HOSTILE, and a patrol needs HOSTILE (plus the aggression cap) to fire. |
-| You broadcast with Share Name off. | Caution-tier, reason "withholding name" (since 2026-07-27). Challengeable, and port control will refuse to berth you. |
+| Scenario | What happens today | Evidence |
+|---|---|---|
+| You are dark. A patrol demands you identify. | Banner on that patrol's row, ACKNOWLEDGE available. The patrol stays **grey** — IDENTIFY is not coercion. | `patrol_challenge` P1 |
+| You ignore it and stay in comms range. | After ~20s the patrol files NO_ID against you and (since 2026-07-27) never asks again. You are caution-tier *to them*; they remain grey *to you*. | `patrol_challenge` P5, P6 |
+| You ignore it and leave comms range. | Challenge voided, no warrant. Silence we cannot hear is not evidence. | `patrol_challenge` P4 |
+| The patrol escalates to DEMAND(STOP). | **Now** you file ARMED_THREAT against it — yellow, Alerts. This is the first moment enforcement becomes visible to you as a threat. | `hail_protocol` A, C |
+| You acknowledge. | Receipt only. Does not stop your ship. Sets the AI-side compliance grace. | `demand_lifecycle`; `honored_stop` |
+| You actually stop. | Banner reads "HELD — stopped for X". The honor rule means no leaf targets a compliant stopped ship. | `honored_stop`; `demand_lifecycle` S5 |
+| You keep running. | Not much. Refusing a stop never escalates you to HOSTILE, and a patrol needs HOSTILE (plus the aggression cap) to fire. Measured: the issuer reads a non-complying transponding hull as **NEUTRAL**, not even caution. | `authority_scenarios` C |
+| You broadcast with Share Name off. | Caution-tier, reason "withholding name" (since 2026-07-27). Challengeable, and port control will refuse to berth you. | `standing_rules` 7b–7d; `docking_permission` |
 
 ## 4. Consequences
 
-| Scenario | What happens today |
-|---|---|
-| You try to fire on a yellow patrol. | Refused — the console requires HOSTILE. You would have to MARK HOSTILE deliberately. |
-| You try to fire on the station from §2 row 1. | **Allowed.** It is already HOSTILE to you. |
-| A hauler witnesses the same police stop you did. | Same as you — haulers have no `authority_flags`. The whole civilian population reads its own police as caution-tier. |
-| A patrol witnesses another home patrol's stop. | Nothing. Patrols are the one entity type that *does* carry `authority_flags: [FLAG_DRIFT]`. |
+| Scenario | What happens today | Evidence |
+|---|---|---|
+| You try to fire on a yellow patrol. | Refused — the console requires HOSTILE. You would have to MARK HOSTILE deliberately. | `weapons_safety` |
+| You try to fire on the station from §2 row 1. | **Allowed.** It is already HOSTILE to you. | follows from the same rule |
+| A hauler witnesses the same police stop you did. | Same as you — haulers have no `authority_flags`. The whole civilian population reads its own police as caution-tier. | `authority_scenarios` E: **exactly 2 of 35 authored entities** carry it — Patrol Alpha and Bravo. 33 do not. |
+| A patrol witnesses another home patrol's stop. | Nothing. Patrols are the one entity type that *does* carry `authority_flags: [FLAG_DRIFT]`. | `hail_protocol` E (mechanism); `authority_scenarios` E (authoring) |
 
 ## 5. The pirate-in-port case, in detail
 
@@ -105,11 +122,18 @@ Two properties turn a transient misread into a permanent state:
 Net: the player's home station is red, permanently, filed under Enemies, and
 the weapons console will now permit firing on it.
 
-**The structural half:** `authority_flags` is read in exactly two places, both
-on the DEMAND(STOP) branches. The aggression-witness loop never consults it. So
-*"that is my own militia doing its job"* is **not expressible** when the
-enforcement is gunfire rather than a hail. The only protection is winning the
-relay race.
+**The structural half, now measured rather than inferred.** `authority_flags` is
+read in exactly two places, both on the DEMAND(STOP) branches. The
+aggression-witness loop never consults it. So *"that is my own militia doing its
+job"* is **not expressible** when the enforcement is gunfire rather than a hail.
+The only protection is winning the relay race.
+
+`test_authority_scenarios` scenario B pins this directly: an observer that has
+been *granted the shooter's flag as a trusted authority* still flips it to
+HOSTILE on the third stray hit and still files SUSTAINED_ASSAULT. The same test
+asserts the two properties that make it unrecoverable — `expires_after: -1` and
+`authorizes_force: true` — so if any of that changes, the test fails and this
+section needs rewriting rather than quietly going stale.
 
 The police exemption was built for the *talking* half of enforcement and never
 extended to the *shooting* half.
@@ -175,3 +199,30 @@ behaviours may be exactly right, and the jurisdictional friction in §6 may be
 desirable fiction rather than a defect. The one entry that looks unambiguously
 wrong regardless of tuning is §5's permanent HOSTILE from a relay race, because
 its consequence is unrecoverable and its cause is timing.
+
+## 9. Confidence
+
+Every row in §2–§4 cites a test. Nothing in those sections rests on reading the
+code any more, which was the point of the 2026-07-30 pass — a table you are
+about to make design decisions against needs to be a contract, not a
+description.
+
+Two things remain genuinely unverified, both flagged in place:
+
+- **§6, the jurisdiction seam.** Unverifiable as written: `_patrol()` hardcodes
+  `FLAG_DRIFT`, so no cross-flag enforcement hull exists to observe. Author a
+  Meridian patrol and the section becomes testable — including the mutual-
+  interdiction loop it predicts, which is the part most worth confirming before
+  trusting any sim result about the seam.
+- **§5's timing claim.** That the relay race is what decides whether the
+  exemption fires is inference from two proven halves (the ladder escalates; the
+  exemption needs the victim already HOSTILE). Nothing measures how often a real
+  observer loses that race in a live port. That is a frequency question, and it
+  wants the pirate-in-port scenario reproduced in a sim rather than a unit test.
+
+One caution for anyone extending this. Several rows read "nothing happens", and
+that is exactly the assertion that passes for the wrong reason — an observer with
+no track, a hail out of range, or a ship that never spawned all produce
+"nothing". Every scenario in `test_authority_scenarios` therefore asserts its own
+preconditions first (the witness *does* hold a fresh track, it *did* overhear the
+hail, the victim is *not* already HOSTILE). Keep doing that.
