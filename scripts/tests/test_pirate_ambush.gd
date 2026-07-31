@@ -30,6 +30,10 @@ const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 # that separation so the watcher's own presence never falsely trips the
 # abort during the hunt.
 const R_THIRD_PARTY := 3000.0
+# Mirrors the canonical hunt's AWAIT{track_quiet} clear_range (pirate_guild.gd).
+# The exfil geometry below has to keep the victim outside this, or the pirate
+# can never go quiet and RELIGHT is skipped.
+const TRACK_QUIET_CLEAR_RANGE := 5000.0
 
 var main_node: Node = null
 var failures: Array = []
@@ -122,8 +126,25 @@ func setup(main) -> void:
 
 	var staging_pos := Vector2(5000, 0)
 	var lane_pos := staging_pos
-	var exfil_pos := Vector2(5000, -12000)
-	var exit_pos := Vector2(5000, -15000)
+	# EXFIL OFF THE LANE, NOT ALONG IT. AWAIT{track_quiet} (job_steps.gd
+	# _track_quiet_holds) requires no fresh contact within clear_range (5000) --
+	# and it does NOT filter by classification, so the pirate's own victim
+	# counts. These used to sit at x=5000, i.e. on the lane the victim flees
+	# down: the victim spawns at y=-3000, ran to ~(5650, -9730) before the
+	# robbery, and the old exfil at (5000, -12000) was ~2270 away from it.
+	# track_quiet then could never clear, the AWAIT burned its full 180s timeout
+	# and aborted to "exit", skipping RELIGHT entirely -- which surfaced two
+	# phases later as "the observer reads CAUTION" and looked like a
+	# classification bug.
+	#
+	# Whether that happened came down to how far the victim got before being
+	# stopped, which is exactly the kind of margin that lands differently on
+	# different machines (it reportedly passed reliably on Windows). Offsetting
+	# LATERALLY makes the separation independent of how far down the lane the
+	# chase ran: the victim tracks the lane at x~5000, so ~9000 of lateral
+	# clearance holds wherever on it the robbery ends up.
+	var exfil_pos := Vector2(14000, -12000)
+	var exit_pos := Vector2(17000, -12000)
 
 	var pirate = _make_ship(ArmedPinnace, "Pirate", 700, Vector2.ZERO, ["PIRATE_700"])
 	# Cover identity on spawn (the spawner's job in M50; the guild director's
@@ -203,6 +224,17 @@ func setup(main) -> void:
 
 	# --- Phase 4: exfil dark, launder wait, relight under a NEW name. -------
 	print("\n--- Phase 4: exfil dark -> AWAIT track_quiet -> RELIGHT (new name) ---")
+
+	# Guard the geometry invariant the rest of this phase depends on, at the
+	# point where the chase has actually finished and the victim's final
+	# position is known. If the exfil is not clear of the victim, track_quiet
+	# can never go true, the AWAIT burns its whole timeout and skips RELIGHT --
+	# and every downstream symptom shows up somewhere else entirely. Assert it
+	# here so the test says so directly instead of leaving it to be inferred.
+	var victim_to_exfil: float = exfil_pos.distance_to(victim.position) if is_instance_valid(victim) else INF
+	_assert(victim_to_exfil > TRACK_QUIET_CLEAR_RANGE,
+		"the exfil point is clear of the robbed victim (%.0f u, needs > %.0f) -- otherwise AWAIT{track_quiet} can never succeed" % [
+			victim_to_exfil, TRACK_QUIET_CLEAR_RANGE])
 	var relit := false
 	# 200s, raised from 60. Measured, not guessed: the exfil completes at ~113s
 	# now that a post-take pirate is thermally throttled (it just ran an
@@ -215,6 +247,22 @@ func setup(main) -> void:
 		exfil_frames = i + 1
 		if not is_instance_valid(pirate):
 			break
+		# Record what is actually blocking track_quiet, so a future failure of
+		# this leg names the ship responsible instead of leaving it to be
+		# reconstructed from an aborted job two phases later.
+		if i % 1800 == 0:
+			var _blockers: Array = []
+			for c_id in pirate.active_contacts:
+				var _c: Dictionary = pirate.active_contacts[c_id]
+				var _d: float = pirate.position.distance_to(_c.get("pos", pirate.position))
+				if Ship.contact_age(_c) <= pirate.FIRE_STALENESS_MAX and _d <= TRACK_QUIET_CLEAR_RANGE:
+					var _iid: int = _c.get("instance_id", -1)
+					var _who = instance_from_id(_iid) if _iid != -1 else null
+					_blockers.append("%s (d=%.0f)" % [
+						str(_who.name) if is_instance_valid(_who) else c_id, _d])
+			if not _blockers.is_empty():
+				print("  [dbg] phase4 t=%.0fs: track_quiet blocked by %s" % [
+					exfil_frames / 60.0, ", ".join(_blockers)])
 		if job.get("current", -1) >= idx_exit:
 			relit = true
 			break
