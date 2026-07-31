@@ -1,0 +1,7 @@
+delay_frames,delay_seconds,bystanders,saw_station,resolved_at_shot,marked_own_station
+0,0.000,4,4,1,1
+15,0.250,4,4,2,1
+30,0.500,4,4,3,1
+60,1.000,4,4,3,1
+120,2.000,4,4,3,1
+240,4.000,4,4,3,1

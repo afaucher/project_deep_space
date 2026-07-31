@@ -104,6 +104,16 @@ enum StationEconomyLog { OFF, ON }
 # line instead of four separate greps.
 enum RoutePlannerLog { OFF, ON }
 
+# Patrol enforcement log. Defaults ON for the same reason both pirate logs do:
+# the 2026-07-28 overnight sims could not answer "are patrols abandoning their
+# routes to chase administrative offences" AT ALL, because challenge_leaf and
+# interdict_leaf contained no print statements -- not one line about patrol
+# activity appeared in 2,079 lines of log, so the question had to be inferred
+# from hauler delivery counts. That analysis's own recommendation was to add
+# this. One line per enforcement TRANSITION (challenge issued, conviction,
+# interdiction start/end), not per tick.
+enum PatrolLog { OFF, ON }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -244,6 +254,14 @@ const OPTIONS := {
 			"On (one line per best_route() call: postings/eligibility/best candidate)",
 		],
 		"default": RoutePlannerLog.OFF,
+	},
+	"patrol_log": {
+		"label": "Patrol enforcement log",
+		"choices": [
+			"Off",
+			"On (default -- one line per challenge/conviction/interdiction transition)",
+		],
+		"default": PatrolLog.ON,
 	},
 }
 

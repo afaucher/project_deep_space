@@ -76,6 +76,10 @@ func tick(actor: Node, blackboard) -> int:
 			actor.assignment = {}
 			refused.erase(yielded_iid)
 			blackboard.set_value("interdict_refused", refused)
+			# The priority rule firing: yellow administrative work dropped for
+			# something redder. Logged because "did the patrol go back to its
+			# route" is the whole question this instrumentation exists for.
+			_log(actor, "INTERDICT yield %s (outranked by red work)" % Ship.track_id(yielded_iid))
 		# Either way: a job is (or was just) running -- never stomp it here.
 		return FAILURE
 
@@ -180,6 +184,13 @@ func tick(actor: Node, blackboard) -> int:
 	}
 	actor.assignment = job
 
+	# One line per interdiction START. The tier is the interesting field: yellow
+	# (CAUTION) work is administrative -- a NO_ID or ARMED_THREAT warrant -- and
+	# is exactly the kind the 2026-07-28 sims could not tell us patrols were or
+	# were not abandoning their routes for.
+	_log(actor, "INTERDICT start -> %s (tier %s, patience %.0fs)" % [
+		Ship.track_id(target_iid), job["interdict_tier"], patience])
+
 	# Stamp refusal memory NOW (assign-once-per-standing-color), not on the
 	# eventual abort -- see header.
 	refused[target_iid] = true
@@ -225,3 +236,8 @@ func _outranked(actor: Node) -> bool:
 			continue
 		return true
 	return false
+
+# See challenge_leaf.gd's _log -- same knob, same "transitions only" rule.
+static func _log(actor: Node, msg: String) -> void:
+	if DebugSettings and DebugSettings.get_choice("patrol_log") == DebugSettings.PatrolLog.ON:
+		print("[Patrol] %s: %s" % [actor.debug_label(), msg])

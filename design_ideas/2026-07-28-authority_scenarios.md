@@ -103,14 +103,33 @@ player lawfully engaging a marked pirate"). For a transponding pirate that
 exemption should always apply, since `known_enemy_flags` defaults to
 `[FLAG_PIRATE]`.
 
-It fails when the observer has not resolved the pirate **yet**:
+It fails when the observer has not resolved the pirate.
 
-1. The station resolves `JOLLY_ROGER` and opens fire immediately.
-2. The player's own read depends on the pirate's transponder reaching *them*
-   (datalink relay, per-ship phase offset) or their own sensors correlating it.
-3. Every hit landing inside that gap is, from the player's point of view, their
-   station shooting a stranger.
-4. `STRAY_HITS_TO_HOSTILE` is **3**. A burst covers that easily.
+**Corrected 2026-07-30 — it is not a race.** The original text here said the
+observer had not resolved the pirate *yet*, and blamed relay timing. The
+`port_defence` sim was built to measure how often that race is lost, and found
+something else: mis-filing tracks **"cannot resolve"**, not **"has not resolved
+yet"**.
+
+Sweeping the grace period between the pirate appearing and the first shot from
+0 to 4 seconds, the count of bystanders that mark their own station is
+**identical at every delay** — and the one that does it is not the furthest
+away. Every mis-filing bystander is one that never resolves the pirate *at all*,
+at any delay; every one that resolves it is safe. Grace changes how many have
+resolved by shot time (1 of 4 → 3 of 4) and changes the outcome not at all.
+
+In the sim the blocked observer's line of sight to the pirate passes through
+another hull, so it never holds the track that `known_enemy_flags` needs. That
+specific geometry is incidental. The general shape is not: **any observer that
+cannot see the victim will mark the shooter**, permanently, and no amount of
+waiting fixes it — because the assistance exemption requires a track on the
+victim that it will never acquire.
+
+That is worse than a race in one way and better in another. Worse: it cannot be
+tuned away with a delay, and an obstructed hull is a normal thing to be. Better:
+it is a *condition*, not a coin-flip, so it is diagnosable.
+
+1. `STRAY_HITS_TO_HOSTILE` is **3**. A burst covers that easily.
 
 Two properties turn a transient misread into a permanent state:
 
@@ -214,11 +233,21 @@ Two things remain genuinely unverified, both flagged in place:
   Meridian patrol and the section becomes testable — including the mutual-
   interdiction loop it predicts, which is the part most worth confirming before
   trusting any sim result about the seam.
-- **§5's timing claim.** That the relay race is what decides whether the
-  exemption fires is inference from two proven halves (the ladder escalates; the
-  exemption needs the victim already HOSTILE). Nothing measures how often a real
-  observer loses that race in a live port. That is a frequency question, and it
-  wants the pirate-in-port scenario reproduced in a sim rather than a unit test.
+- ~~**§5's timing claim.**~~ **Resolved 2026-07-30, and the claim was wrong.**
+  `tactical_analysis/sim_runners/port_defence.gd` reproduces the scenario and
+  sweeps the grace period. Mis-filing is invariant to delay and tracks *cannot
+  resolve the victim* rather than *has not resolved yet*. §5 rewritten. What is
+  still unmeasured is the **rate in a real cluster** — how often a hull is
+  actually obstructed or otherwise unable to resolve a pirate during a defence.
+  That wants the scenario inside `economy_traffic`-style traffic, not four
+  parked frigates.
+
+- **Patrol route abandonment** — still open, but now *observable*. The
+  2026-07-28 overnight run could not speak to it because `challenge_leaf` and
+  `interdict_leaf` printed nothing. Both now log one line per enforcement
+  transition (CHALLENGE / RESOLVED / VOID / CONVICT / INTERDICT start / yield)
+  under `DebugSettings.patrol_log`, default ON. The next long run can answer it
+  directly instead of inferring from hauler delivery counts.
 
 One caution for anyone extending this. Several rows read "nothing happens", and
 that is exactly the assertion that passes for the wrong reason — an observer with

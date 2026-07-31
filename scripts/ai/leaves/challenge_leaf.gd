@@ -135,6 +135,7 @@ func tick(actor: Node, blackboard) -> int:
 
 		Hail.send(actor, target_node, {"verb": Hail.VERB_DEMAND, "rung": Hail.RUNG_IDENTIFY})
 		challenged[c_id] = {"expire_frame": frame + CHALLENGE_WINDOW_FRAMES}
+		_log(actor, "CHALLENGE %s (in zone, %.0fu)" % [c_id, actor.position.distance_to(target_node.position)])
 
 	# Drop silence timers for tracks we no longer hold at all, so a re-acquired
 	# contact starts its grace afresh rather than inheriting an old timestamp.
@@ -170,6 +171,7 @@ func _check_windows(actor: Node, blackboard) -> void:
 		var standing: String = c.get("standing", "")
 		if standing == Standing.NEUTRAL:
 			resolved[trk] = true # relit within the window -- resolved
+			_log(actor, "RESOLVED %s (relit inside the window)" % trk)
 			to_erase.append(trk)
 			continue
 		if frame >= entry.get("expire_frame", 0):
@@ -214,6 +216,9 @@ func _check_windows(actor: Node, blackboard) -> void:
 				# HOSTILE -> InterdictLeaf picks it up.
 				var claimed_name: String = actor.active_transponders.get(c.get("instance_id", -1), {}).get("name", "")
 				actor.post_warrant(Standing.OFF_NO_ID, claimed_name, c.get("signature", {}), "ignored identify challenge")
+				_log(actor, "CONVICT %s (NO_ID -- challenge ignored, still in comms range)" % trk)
+			else:
+				_log(actor, "VOID %s (window lapsed out of comms range -- no warrant)" % trk)
 			to_erase.append(trk)
 	for trk in to_erase:
 		challenged.erase(trk)
@@ -251,3 +256,14 @@ func _resolve_track_node(actor: Node, trk_id: String) -> Node:
 		if Ship.track_id(s.get_instance_id()) == trk_id:
 			return s
 	return null
+
+# One line per enforcement TRANSITION -- never per tick. Gated on the patrol_log
+# knob (DebugSettings), default ON, because the 2026-07-28 overnight sims could
+# not answer "are patrols neglecting their routes" at all: this leaf and
+# interdict_leaf printed nothing, so the question had to be inferred from hauler
+# delivery counts. Uses debug_label() per CLAUDE.md -- a Cluster_<id> name and a
+# claimed transponder name are otherwise two unrelated-looking strings for the
+# same hull.
+static func _log(actor: Node, msg: String) -> void:
+	if DebugSettings and DebugSettings.get_choice("patrol_log") == DebugSettings.PatrolLog.ON:
+		print("[Patrol] %s: %s" % [actor.debug_label(), msg])

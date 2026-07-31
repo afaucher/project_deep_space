@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dwg5sjl831dam"
+
+[deps]
+
+files=["res://tactical_analysis/data/port_defence.delay.translation", "res://tactical_analysis/data/port_defence.bystanders.translation", "res://tactical_analysis/data/port_defence.saw.translation", "res://tactical_analysis/data/port_defence.resolved.translation", "res://tactical_analysis/data/port_defence.marked.translation"]
+
+source_file="res://tactical_analysis/data/port_defence.csv"
+dest_files=["res://tactical_analysis/data/port_defence.delay.translation", "res://tactical_analysis/data/port_defence.bystanders.translation", "res://tactical_analysis/data/port_defence.saw.translation", "res://tactical_analysis/data/port_defence.resolved.translation", "res://tactical_analysis/data/port_defence.marked.translation"]
+
+[params]
+
+compress=true
+delimiter=0
