@@ -6,7 +6,6 @@
 
 # Build output
 build/
-export_presets.cfg
 *.tmp
 *.bak
 *.sav

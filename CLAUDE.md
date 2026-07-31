@@ -56,6 +56,26 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   ordering), even with the RNG seeded + a fixed delta. A long combat sim's exact
   outcome jitters — assert *robustly* (margins/majorities, e.g. test_ai_duel),
   not on an exact frame or a unanimous sweep.
+- **But a margin-shaped failure is NOT automatically jitter or contention —
+  check before you assume it.** The note above plus the contention notes make
+  "missed a margin" read as noise, and that inference is wrong often enough to
+  cost a real diagnosis. Observed 2026-07-31 on the Linux gate:
+  `test_dock_approach` failed `should complete 30 dock cycles within 600s
+  (managed 27)` — exactly 27 both in-gate under 12-way contention AND solo on
+  an otherwise idle box. Same number, so the shortfall is deterministic and
+  belongs to the game, not the scheduler. (Two runs, one of each condition —
+  enough to rule contention out, not enough to call 27 a fixed constant.)
+  Contrast `test_pirate_ambush` in the same gate, which failed three discrete
+  behavioural assertions (contact read `NEUTRAL`, cover name vs. new claimed
+  name, `EXIT_AT` despawn) — obviously a logic fault. Both are "a sim test
+  failed"; they are not the same class of problem. **Rule: re-run the one test
+  solo and compare the NUMBER. Identical → deterministic, debug it. Different →
+  then it is jitter.** That is one cheap run, versus tuning a budget that was
+  never the cause.
+- **Benign shutdown noise pollutes every `.err.log`** — `Can't send message. No
+  active debugger` and `Capture not registered: 'beehave'` appear on PASSING
+  tests too (beehave's debugger teardown). Don't read them as the cause of a
+  failure; scan for `ASSERT FAILED` / `Parse Error` instead.
 - **Kill stragglers** if a run hangs: `taskkill //F //IM Godot_v4.4.1-stable_win64.exe`.
 - **`Performance.TIME_PHYSICS_PROCESS` HOLDS stale readings across frames** —
   it refreshes on its own cadence, so one slow frame's value is re-read for

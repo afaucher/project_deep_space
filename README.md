@@ -4,21 +4,47 @@ A Godot 4.4.1 game.
 
 ## Requirements
 
-- Windows with PowerShell (uses bundled `Godot_v4.4.1-stable_win64.exe`)
-- Building (`build.ps1`) is Windows-only. Linux support is currently limited to running the headless test suite — see "Running tests" below.
+- **Windows:** PowerShell, using the bundled `Godot_v4.4.1-stable_win64.exe`.
+- **Linux:** bash plus the 4.4.1-stable Linux Godot binary at the project root (see "Running tests" for the one-time download).
+
+Both platforms can build the game; Linux can additionally cross-build the Windows release.
 
 ## Building
+
+### Windows
 
 ```powershell
 .\build.ps1
 ```
 
-This runs the full test suite first (aborting the build on any failure), downloads export templates if missing, then exports a release build to `build\windows\ProjectDeepSpace.exe` and zips it to `build\ProjectDeepSpace_Windows.zip`.
+### Linux
+
+```bash
+./build.sh                  # both targets
+./build.sh --target linux   # or: --target windows
+```
+
+Either script runs the full test suite first and aborts the build on any failure (`-Force` / `--force` overrides), downloads the ~1.2 GB export templates if they are missing, then exports and packages:
+
+| target | binary | archive |
+|---|---|---|
+| Windows | `build/windows/ProjectDeepSpace.exe` | `build/ProjectDeepSpace_Windows_v<version>.zip` |
+| Linux | `build/linux/ProjectDeepSpace.x86_64` | `build/ProjectDeepSpace_Linux_v<version>.tar.gz` |
+
+The Linux build is packaged as `.tar.gz` rather than `.zip` because zip does not preserve the executable bit — a zipped Linux build extracts non-executable and will not launch.
+
+**Cross-building Windows from Linux needs no wine.** Godot's exporter appends the project `.pck` to a prebuilt `windows_release_x86_64.exe` template, and GodotSteam ships binaries for every platform, so the exporter selects the right `steam_api` automatically.
+
+`export_presets.cfg` is committed. It used to be gitignored, which meant a fresh clone had no export presets and the build died with `This project doesn't have an export_presets.cfg file at its root`. The preset names (`Windows Desktop`, `Linux`) are what the build scripts pass to `--export-release`, so renaming them breaks the build.
 
 ## Running the game
 
 ```powershell
 .\build\windows\ProjectDeepSpace.exe
+```
+
+```bash
+./build/linux/ProjectDeepSpace.x86_64
 ```
 
 ## Running tests
