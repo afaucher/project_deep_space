@@ -219,18 +219,59 @@ if (-not $testsPassed) {
 # 3. Check and Install Export Templates
 $templateDir = "$env:APPDATA\Godot\export_templates\4.4.1.stable"
 if (-not (Test-Path "$templateDir\windows_release_x86_64.exe")) {
-    Write-Host "Export templates for 4.4.1.stable not found. Downloading..." -ForegroundColor Cyan
-    $tpzPath = "$PSScriptRoot\export_templates.tpz"
-    Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz" -OutFile $tpzPath
-    
-    Write-Host "Extracting templates..." -ForegroundColor Cyan
-    Expand-Archive -Path $tpzPath -DestinationPath "$PSScriptRoot\temp_templates" -Force
-    
-    New-Item -ItemType Directory -Force -Path $templateDir | Out-Null
-    Copy-Item -Path "$PSScriptRoot\temp_templates\templates\*" -Destination $templateDir -Recurse -Force
-    
-    Remove-Item $tpzPath -Force
-    Remove-Item "$PSScriptRoot\temp_templates" -Recurse -Force
+    Write-Host "Export templates for 4.4.1.stable not found. Downloading (~1.2 GB)..." -ForegroundColor Cyan
+
+    # DOWNLOAD AS .zip, NOT .tpz. A .tpz IS an ordinary zip archive -- but
+    # Expand-Archive validates the FILE EXTENSION rather than the contents and
+    # accepts only ".zip", so handing it the upstream ".tpz" name fails with:
+    #   ".tpz is not a supported archive file format. .zip is the only
+    #    supported archive file format."
+    # The extraction then leaves no temp_templates\templates dir, so the
+    # Copy-Item below failed too and the build limped on to die at the export
+    # step. Renaming on download is the whole fix; the archive itself is fine
+    # and still unpacks to a top-level templates/ folder.
+    $tpzPath = "$PSScriptRoot\export_templates.zip"
+    $tempExtract = "$PSScriptRoot\temp_templates"
+
+    # PS 5.1 (the Windows 10 default) does not negotiate TLS 1.2 on every box,
+    # and GitHub requires it -- force it or the download can fail outright.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    # -ErrorAction Stop on every step: these cmdlets raise NON-terminating
+    # errors by default, which is why the original failure printed two red
+    # blocks and then carried on regardless -- straight past "installed
+    # successfully" and into an export that never had a chance. Without this,
+    # the try/catch below would not catch them either.
+    try {
+        # Invoke-WebRequest's progress bar makes a 1.2 GB download roughly an
+        # order of magnitude slower in PS 5.1. Suppress it for the transfer.
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz" -OutFile $tpzPath -ErrorAction Stop
+        $ProgressPreference = $oldProgress
+
+        Write-Host "Extracting templates..." -ForegroundColor Cyan
+        if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force }
+        Expand-Archive -Path $tpzPath -DestinationPath $tempExtract -Force -ErrorAction Stop
+
+        New-Item -ItemType Directory -Force -Path $templateDir | Out-Null
+        Copy-Item -Path "$tempExtract\templates\*" -Destination $templateDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Host "BUILD ABORTED: could not install export templates. $_" -ForegroundColor Red
+        Write-Host "Install them manually via the Godot editor (Editor > Manage Export Templates)." -ForegroundColor Yellow
+        exit 1
+    } finally {
+        if (Test-Path $tpzPath) { Remove-Item $tpzPath -Force }
+        if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force }
+    }
+
+    # Verify rather than assume -- the old code printed "installed successfully"
+    # unconditionally, which is why the real failure above scrolled past as two
+    # red blocks followed by a success message.
+    if (-not (Test-Path "$templateDir\windows_release_x86_64.exe")) {
+        Write-Host "BUILD ABORTED: export templates did not install to $templateDir." -ForegroundColor Red
+        exit 1
+    }
     Write-Host "Export templates installed successfully." -ForegroundColor Green
 }
 
