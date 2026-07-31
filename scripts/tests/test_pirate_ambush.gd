@@ -209,38 +209,117 @@ func setup(main) -> void:
 	# intercept and a take, so it is hot exactly when it wants to leave). Margin
 	# per CLAUDE.md -- physics is not bit-deterministic run to run, so this is a
 	# budget with headroom, not a figure fitted to one observation.
+	var exfil_frames := 0
 	for i in range(12000): # up to 200s -- exfil leg + the 3s track_quiet wait
 		await main_node.get_tree().physics_frame
+		exfil_frames = i + 1
 		if not is_instance_valid(pirate):
 			break
 		if job.get("current", -1) >= idx_exit:
 			relit = true
 			break
-	_assert(relit, "job reached EXIT_AT (RELIGHT completed, current=%d)" % job.get("current", -1))
+	# The AWAIT's own timeout is 180s. Printing when this leg ended separates
+	# "the exfil got slower again" from "track_quiet never clears" -- the two
+	# have the same symptom (abort -> RELIGHT skipped) and different fixes.
+	print("  [dbg] phase4: exfil+await leg ended at %.1fs (AWAIT timeout is 180s)" % (exfil_frames / 60.0))
+	_assert(relit, "job reached EXIT_AT (current=%d)" % job.get("current", -1))
 	_assert(is_instance_valid(pirate), "pirate is still alive/valid right after relighting (hasn't despawned yet)")
+
+	# "current >= idx_exit" does NOT mean RELIGHT ran. The AWAIT before it
+	# carries on_abort:"exit", so a timeout JUMPS to the EXIT_AT label and
+	# satisfies the index check having skipped RELIGHT entirely -- the exact
+	# regression pirate_guild.gd:495-501 documents (it was why raising the AWAIT
+	# timeout 60 -> 180 was needed). Asserting the index alone made that a silent
+	# pass, and pushed the damage into Phase 5 where it surfaced as two
+	# unrelated-looking read failures against a pirate that had never relit.
+	#
+	# Assert RELIGHT's own postcondition on the SHIP instead. Not job
+	# ["_abort_reason"]: job_runner_leaf._abort_reason() erases the key as it
+	# logs it, so it is always gone by the time a test could read it.
+	var comms_active := false
+	var comms_name := ""
+	if is_instance_valid(pirate):
+		for c in pirate.ship_components:
+			if c.get("type", "") == "comms":
+				comms_active = c.get("transponder_active", false)
+				comms_name = str(c.get("transponder_custom_name", ""))
+				break
+	_assert(comms_active and comms_name == "Silent Drifter",
+		"RELIGHT actually ran -- pirate is broadcasting its new papers (active=%s, name='%s')" % [
+			comms_active, comms_name])
 
 	# --- Phase 5: a FRESH observer, placed near the exit point, reads the
 	# relit pirate as NEUTRAL again (new claimed name, civilian flag). -------
 	print("\n--- Phase 5: a fresh observer reads the relit pirate as NEUTRAL ---")
 	var fresh_observer = _make_ship(Frigate, "FreshObserver", 703, exit_pos, ["TEAM_FRESH"])
+	var contact_seen := false
 	var reads_neutral_again := false
 	var saw_new_name := false
 	var despawned := false
-	for i in range(1800): # up to 30s -- EXIT_AT still has to close the final leg
+	var despawned_mid_read := false
+	var closest_approach := INF
+	var frames_waited := 0
+	# What the observer ACTUALLY read, for the failure message. Knowing the
+	# contact exists but reads HOSTILE is a different bug from it not existing.
+	var last_standing: Variant = null
+	var last_claimed_name := ""
+
+	# BOTH reads are downstream of one physical precondition: the pirate has to
+	# get close enough for this observer to sense it at all. When that does not
+	# happen, asserting the reads directly produces two failures that both point
+	# at classification/transponder logic and neither of which is the cause --
+	# observed 2026-07-31, where all of Phase 5 failed and the actual state was
+	# that the pirate had not arrived. So: track whether ANY contact ever
+	# appeared, and report that first.
+	#
+	# The cap is a CAP, not a budget fitted to an observation -- the loop leaves
+	# the moment both reads land, so raising it costs nothing on a passing run
+	# and only buys headroom on a slow one (CLAUDE.md: physics is not
+	# bit-deterministic run to run, so exact-frame expectations are wrong here).
+	for i in range(6000): # up to 100s -- EXIT_AT still has to close the final leg
 		await main_node.get_tree().physics_frame
+		frames_waited = i + 1
+		# The despawn is a RACE against the reads, not an ordering guarantee:
+		# EXIT_AT can free the pirate while this loop is still waiting. Breaking
+		# here without recording why would fail the two read assertions for a
+		# reason that has nothing to do with what they test.
 		if not is_instance_valid(pirate):
 			despawned = true
+			despawned_mid_read = not (reads_neutral_again and saw_new_name)
 			break
+		closest_approach = min(closest_approach,
+			fresh_observer.global_position.distance_to(pirate.global_position))
 		var c: Dictionary = _find_contact(fresh_observer, pirate)
+		if not c.is_empty():
+			contact_seen = true
+			last_standing = c.get("standing", null)
 		if c.get("standing", "") == Standing.NEUTRAL:
 			reads_neutral_again = true
 		var t: Dictionary = fresh_observer.active_transponders.get(pirate.get_instance_id(), {})
+		if not t.is_empty():
+			last_claimed_name = str(t.get("name", ""))
 		if t.get("name", "") == "Silent Drifter":
 			saw_new_name = true
 		if reads_neutral_again and saw_new_name:
 			break
-	_assert(reads_neutral_again, "the fresh observer read the relit pirate as NEUTRAL")
-	_assert(saw_new_name, "the fresh observer received the pirate's NEW claimed name ('Silent Drifter'), not the cover name")
+
+	print("  [dbg] phase5: waited %.1fs  closest_approach=%s  contact_seen=%s  despawned=%s  last_standing=%s  last_claimed_name='%s'" % [
+		frames_waited / 60.0,
+		("%.0f u" % closest_approach) if closest_approach < INF else "n/a",
+		contact_seen, despawned, last_standing, last_claimed_name])
+
+	# Precondition first, and the reads only if it held -- one accurate failure
+	# beats three misleading ones.
+	if not contact_seen:
+		_assert(false, "the fresh observer never got ANY contact for the pirate (closest approach %s over %.1fs) -- the reads below cannot be evaluated" % [
+			("%.0f u" % closest_approach) if closest_approach < INF else "n/a",
+			frames_waited / 60.0])
+	elif despawned_mid_read:
+		_assert(false, "the pirate despawned after %.1fs, before the observer finished reading it (neutral=%s, new_name=%s)" % [
+			frames_waited / 60.0, reads_neutral_again, saw_new_name])
+	else:
+		_assert(reads_neutral_again, "the fresh observer read the relit pirate as NEUTRAL (read %s instead)" % last_standing)
+		_assert(saw_new_name, "the fresh observer received the pirate's NEW claimed name ('Silent Drifter'), not the cover name (received '%s')" % last_claimed_name)
 
 	# --- Phase 6: EXIT_AT despawns the pirate. ---
 	if not despawned:
