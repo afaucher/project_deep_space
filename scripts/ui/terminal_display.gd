@@ -8,6 +8,7 @@ const WeaponsPanel = preload("res://scripts/ui/weapons_panel.gd")
 const EngineeringPanel = preload("res://scripts/ui/engineering_panel.gd")
 const CommsPanel = preload("res://scripts/ui/comms_panel.gd")
 const HelpOverlay = preload("res://scripts/ui/help_overlay.gd")
+const HintBar = preload("res://scripts/ui/hint_bar.gd")
 const DockingControl = preload("res://scripts/ui/docking_control.gd")
 const PortRules = preload("res://scripts/port/port_rules.gd")
 const ZoneBanner = preload("res://scripts/port/zone_banner.gd")
@@ -21,6 +22,7 @@ var weapons_panel: Control
 var eng_panel: Control
 var comms_panel: Control
 var help_overlay: Control
+var hint_bar: Label
 var sensor_container: PanelContainer
 var docking_control: DockingControl
 
@@ -432,15 +434,16 @@ func _ready() -> void:
 	# Bottom bar: help hint on the left, live perf readout on the right.
 	var bottom_bar := HBoxContainer.new()
 
-	var help_hint := Label.new()
 	var version_text := ""
 	if FileAccess.file_exists("res://version.txt"):
 		var f := FileAccess.open("res://version.txt", FileAccess.READ)
 		version_text = "  |  " + f.get_as_text().strip_edges()
-	help_hint.text = "F1  Controls" + version_text
-	help_hint.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
-	help_hint.add_theme_font_size_override("font_size", UIStyle.FONT_BODY)
-	bottom_bar.add_child(help_hint)
+	# Was a static "F1  Controls" label -- tells a cold player that help exists,
+	# but not what to do. HintBar keeps that prefix and appends the next step of
+	# the core loop (m13's "persistent one-liner"). Styling lives in hint_bar.gd.
+	hint_bar = HintBar.new()
+	hint_bar.set_version_suffix(version_text)
+	bottom_bar.add_child(hint_bar)
 
 	var bottom_spacer := Control.new()
 	bottom_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -454,6 +457,21 @@ func _ready() -> void:
 
 	main_vbox.add_child(bottom_bar)
 
+
+# Feeds hint_bar.gd's rule table. Everything is guarded and optional: a missing
+# ship or panel just makes the corresponding key absent, and hint_for() treats
+# absent as "don't know", so this can never assert a wrong next step.
+func _update_hint_bar() -> void:
+	if not is_instance_valid(hint_bar):
+		return
+	var state := {}
+	var ship = _get_my_ship()
+	state["has_ship"] = ship != null
+	if ship != null:
+		state["contact_count"] = ship.active_contacts.size() if "active_contacts" in ship else 0
+	if is_instance_valid(contacts_panel) and contacts_panel.has_method("get_selected_contact_id"):
+		state["has_selection"] = contacts_panel.get_selected_contact_id() != ""
+	hint_bar.refresh(state)
 
 func _get_my_ship() -> Node:
 	var ship_node_name = "Ship_" + str(multiplayer.get_unique_id())
@@ -777,6 +795,7 @@ func _update_perf_readout() -> void:
 
 func _process(delta: float) -> void:
 	_update_perf_readout()
+	_update_hint_bar()
 
 	# Coolant fan: ramp volume + pitch with heat fraction above the floor, silence below.
 	if _heat_fraction > FAN_HEAT_FLOOR:

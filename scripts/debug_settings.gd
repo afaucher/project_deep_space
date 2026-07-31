@@ -114,6 +114,12 @@ enum RoutePlannerLog { OFF, ON }
 # interdiction start/end), not per tick.
 enum PatrolLog { OFF, ON }
 
+# M13b/M13c -- the bottom-bar one-liner. ON (default) makes it state-aware so a
+# cold player is told the next step of the core loop; OFF restores the static
+# "F1  Controls" nudge. Player-facing rather than a debug knob, but it lives
+# here because this registry already builds its own menu entry -- see hint_bar.gd.
+enum HintBar { ON, OFF }
+
 # key -> { label, choices (display strings, index == stored value), default }
 const OPTIONS := {
 	"missile_cleanup": {
@@ -262,6 +268,14 @@ const OPTIONS := {
 			"On (default -- one line per challenge/conviction/interdiction transition)",
 		],
 		"default": PatrolLog.ON,
+	},
+	"hint_bar": {
+		"label": "Bottom-bar hint",
+		"choices": [
+			"On (default -- contextual next step: throttle / target / fire)",
+			"Off (static \"F1  Controls\" only)",
+		],
+		"default": HintBar.ON,
 	},
 }
 
