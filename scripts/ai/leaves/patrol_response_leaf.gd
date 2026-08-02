@@ -81,6 +81,10 @@ func tick(actor: Node, _blackboard) -> int:
 		return FAILURE
 
 	actor.assign_job({
+		# Marker so an instrument can tell a lane sweep apart from an Interdict
+		# demand -- both land in the same assignment slot, and a funnel that
+		# counted "patrol has an assignment" would silently conflate them.
+		"sweep": true,
 		"steps": [
 			{"verb": "GO_TO", "pos": hot["pos"]},
 			# clear_range 0 makes this a pure timer: loiter, sweep, then done.

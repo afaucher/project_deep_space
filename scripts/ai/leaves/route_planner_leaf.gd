@@ -35,6 +35,7 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
 const Mailbag = preload("res://scripts/mail/mailbag.gd")
+const DecisionProbe = preload("res://scripts/instrumentation/decision_probe.gd")
 
 # Real-seconds between re-evaluations of an ALREADY-running route plan. Cheap
 # to check (RoutePlanner.best_route is at most a few hundred dict reads), but
@@ -72,6 +73,18 @@ func _heard_incidents(actor: Node, cluster) -> Array:
 		return []
 	return Mailbag.read_incidents(cluster, actor.get_mailbag())
 
+# M59 instrumentation. Free when the probe is off (one static bool read); when
+# a sim turns it on, re-scores the SAME world with this hull's heard news
+# removed, so "risk changed this decision" is MEASURED rather than inferred
+# from a traffic histogram after the fact -- the inference that already went
+# wrong once on the ore shortage, where a starving consumer and a backed-up
+# producer turned out to be the same curve seen from two ends.
+func _probe(actor: Node, cluster, heard: Array, chosen: Dictionary) -> void:
+	if not DecisionProbe.enabled:
+		return
+	var blind: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), [])
+	DecisionProbe.record(actor.name, chosen, blind, heard.size())
+
 func tick(actor: Node, _blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
@@ -92,7 +105,9 @@ func tick(actor: Node, _blackboard) -> int:
 		if not _due_for_check(job):
 			return FAILURE
 		job["_replan_check_frame"] = Engine.get_physics_frames()
-		var candidate: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), _heard_incidents(actor, cluster))
+		var heard_re: Array = _heard_incidents(actor, cluster)
+		var candidate: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), heard_re)
+		_probe(actor, cluster, heard_re, candidate)
 		if candidate.is_empty():
 			return FAILURE
 		var remaining: float = RoutePlanner.remaining_value(actor.position, job)
@@ -113,7 +128,9 @@ func tick(actor: Node, _blackboard) -> int:
 	if not _due_for_empty_search():
 		return FAILURE
 	_last_empty_search_frame = Engine.get_physics_frames()
-	var route: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), _heard_incidents(actor, cluster))
+	var heard_new: Array = _heard_incidents(actor, cluster)
+	var route: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), heard_new)
+	_probe(actor, cluster, heard_new, route)
 	if route.is_empty():
 		return FAILURE # nothing viable anywhere right now -- Idle (below JobRunner) picks this up
 	actor.set_default_job(RoutePlanner.route_itinerary(route))

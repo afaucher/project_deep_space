@@ -311,6 +311,12 @@ static func _score_pair(pickup_rec, dropoff_rec, commodity: String, from_pos: Ve
 		"dropoff_id": dropoff_rec.id, "dropoff_pos": dropoff_rec.pos, "dropoff_name": dropoff_rec.name,
 		"pickup_accept": accept_pickup, "dropoff_accept": accept_dropoff,
 		"amount": amount, "score": score,
+		# M59 -- the risk component, broken out rather than only folded into
+		# `score`. An instrument cannot otherwise tell "this lane lost on price"
+		# from "this lane lost on danger", which is the whole question the risk
+		# term exists to answer. Costs one dict entry on a value that is already
+		# computed.
+		"risk": risk,
 	}
 
 # ---------------------------------------------------------------------------
