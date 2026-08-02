@@ -128,6 +128,35 @@ hours stale (`FileAccess.open(WRITE)` returns null when another Godot process
 holds it, so `_sample_trace` silently skipped). The unconditional heartbeat now
 prints `game-minute N / TOTAL` on a path no game state can gate, and it works.
 
+### RE-BASELINE, clean build, 30 game-min (2026-08-02)
+
+```
+1. robberies completed             : 1  (live hulls 1, ledger 0)
+2. incidents recorded              : 1
+3. stations holding foreign news   : 0 of 13
+   robbery 9504:1: 127,758u from nearest station (comms reach 30,000u)
+>>> CHAIN BREAKS AT STAGE 3
+```
+
+**Encounter survived the keep-away rise.** 1 take / 30 min against 2 / 60 min
+before — the same rate. Raising `_R_STATION_AVOID` to 60,000 and filtering
+un-huntable lanes did NOT undo the passive array's gain. That was the open risk;
+it is closed.
+
+**The ledger disagreed with ground truth again** (`takes 0` vs 1 real robbery) —
+the cash-out mis-booking, caught only because the funnel prints both.
+
+**Stage 4 -> stage 3 is PROGRESS, not regression.** The robbery happened
+**127,758u from the nearest station** against a 30,000u comms reach. Previously
+robberies happened INSIDE the station envelope, which is why a station once
+"learned in 0.1s" and the chain reached stage 4 — that reach was partly an
+artifact of pirates working within earshot of help. D12 removed the shortcut, so
+the news must now genuinely travel by hull.
+
+**The open question is now the right one:** has a courier ever actually
+completed the delivery? Nothing has yet been observed carrying a robbery report
+to a port. A 60-game-minute run is in flight to find out.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than
