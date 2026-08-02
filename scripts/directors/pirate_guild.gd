@@ -431,7 +431,35 @@ const _R_THIRD_PARTY := 6000.0
 # nothing kept the rolled points away from them). Station positions are
 # PUBLIC geometry (the same records the lanes come from), so avoiding them
 # is honest guild knowledge, not omniscience.
-const _R_STATION_AVOID := 25000.0
+# 2026-08-02 -- RAISED 25,000 -> 60,000, with buffer, because the original
+# number did not clear the thing it was keeping away from.
+#
+# The keep-away was added after a playtest where "a pirate lurked, robbed and
+# went dark ON Drift Market's doorstep". That fixed PHYSICAL proximity. RADIO
+# proximity did not matter until M58, and at 25,000 a pirate sat 5,000u INSIDE
+# a station's 30,000u comms envelope -- so the victim's mailbag relayed the
+# robbery to the station in a single 15Hz tick. Measured: a station learned of
+# a robbery 0.1 game-seconds after it happened.
+#
+# Sized against the MAIL channel, deliberately, because that is the one that
+# carries NAMEABLE evidence:
+#   * link_range is min(victim_comms, station_comms) = 30,000 today;
+#   * 60,000 is 2x that, leaving headroom for comms upgrades without another
+#     silent mismatch.
+#
+# NOT sized to defeat a future station PASSIVE array, and that is a decision
+# rather than an oversight: passive_em erases cross_section/heat/density
+# (ship.gd), so a station with one detects PRESENCE, never identity. "Something
+# is out there" is not a report that can be notarized, and a pirate should not
+# be able to hide from a big listening station anyway -- it should only be able
+# to avoid being NAMED.
+#
+# The cost is real and is arguably the point: lanes TERMINATE at stations, so a
+# larger keep-away pushes hunting into the deep middle of a lane, far from
+# help. It will also REDUCE encounter rate -- the variable the passive-array
+# A/B just improved -- so the two interact and the combined effect wants
+# measuring rather than assuming.
+const _R_STATION_AVOID := 60000.0
 # M52a (H2): the beacon road is the WORST place to hunt -- beacons are EM-loud
 # sensor+comms relays that see and report, the road carries the most traffic
 # (more witnesses), and patrols work it. Beacons stay honest witnesses in the
@@ -604,7 +632,17 @@ static var hunt_strategy: int = HuntStrategy.CROSSROADS
 # hazard check anyway); past ~2.5 the traffic has dispersed and it stops being
 # a funnel.
 const _APPROACH_RING_INNER := 1.15
-const _APPROACH_RING_OUTER := 2.5
+# 2026-08-02 -- 2.5 -> 1.6, because these are multiples of _R_STATION_AVOID and
+# that base moved 25,000 -> 60,000. The band was 28,750-62,500 from a hub; at
+# the new base an outer of 2.5 put it at 69,000-150,000, which on a ~300,000u
+# lane is PAST THE MIDPOINT -- so points stopped landing in the funnel at all
+# and test_pirate_targeting caught it (plausible-trade-line coverage fell to
+# 46% against a 50% floor). 1.35 keeps the band at 69,000-81,000: just outside
+# the keep-away, still inside the convergence zone the strategy exists to work.
+#
+# The lesson is the coupling, not the number: a constant expressed as a multiple
+# of another constant silently re-tunes when its base moves.
+const _APPROACH_RING_OUTER := 1.35
 
 # CROSSROADS: how many chord points to sample, how near a chord counts as
 # "carried by" it, and how many of the best-scoring candidates to pick among.
@@ -701,12 +739,40 @@ func _dist_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
 	var t: float = clampf((p - a).dot(ab) / len_sq, 0.0, 1.0)
 	return p.distance_to(a + ab * t)
 
+# A lane can contain a point that clears BOTH its endpoints only if the hubs
+# are more than two keep-aways apart. Any closer and the stations' envelopes
+# meet: every point on that chord is inside somebody's comms range, so a
+# robbery there is overheard live and relayed in one 15Hz tick regardless of
+# where the pirate sits.
+#
+# This matters because _away_from_hazards degrades to LEAST BAD rather than
+# failing -- after 8 rolls it returns a point inside the keep-away. Without
+# this filter the guild happily picks an unworkable lane, the pirate lurks
+# inside the envelope anyway, and the hunt is compromised before it starts.
+# Better to never choose the lane.
+const _MIN_HUNTABLE_LANE := _R_STATION_AVOID * 2.0
+
+# Same discipline as _away_from_hazards: bounded retries, and degrade to the
+# WIDEST pair found rather than crashing or looping if the cluster is so
+# cramped that nothing qualifies. A guild with no workable lane still has to
+# return something; it just returns the least-bad one.
 func _random_hub_pair(hubs: Array) -> Array:
-	var i: int = randi() % hubs.size()
-	var j: int = randi() % hubs.size()
-	while j == i:
-		j = randi() % hubs.size()
-	return [hubs[i], hubs[j]]
+	var best_i: int = 0
+	var best_j: int = 0
+	var best_d: float = -1.0
+	for _attempt in range(8):
+		var i: int = randi() % hubs.size()
+		var j: int = randi() % hubs.size()
+		while j == i:
+			j = randi() % hubs.size()
+		var d: float = hubs[i].distance_to(hubs[j])
+		if d > best_d:
+			best_d = d
+			best_i = i
+			best_j = j
+		if d > _MIN_HUNTABLE_LANE:
+			break
+	return [hubs[best_i], hubs[best_j]]
 
 func _station_positions(cluster) -> Array:
 	var out: Array = []

@@ -1677,8 +1677,37 @@ static func classify_contact(signature: Dictionary, observer_iff_tags: Array) ->
 	#   cold inactive (no EM, cooled)     -> wreckage / rock
 	#   hot  inactive (no EM, still hot)  -> wreckage / rock  (was mis-read as a vessel)
 	if em > ACTIVE_EM_THRESHOLD:
-		# Active: size splits ordnance from vessel.
-		if cs < ORDNANCE_CS_THRESHOLD:
+		# Active: size splits ordnance from vessel -- but ONLY when size was
+		# actually measured.
+		#
+		# 2026-08-02 -- a passive_em sensor ERASES cross_section from the
+		# signature (it senses emissions, not shape), and this line used to
+		# default a missing one to 0.0. Zero is not "unknown", it is a
+		# MEANINGFUL value meaning "tiny", so every passive-only contact
+		# classified as INCOMING ORDNANCE -- and _process_point_defense() fires
+		# at exactly that classification. Giving the pirate a passive array made
+		# its point-defence open fire on ordinary ships (test_pirate_abort
+		# caught it: a laser that must never fire, fired).
+		#
+		# `density` two lines up already had this right via
+		# UNKNOWN_DENSITY_DEFAULT; cross_section was the asymmetry. An
+		# unmeasured hull must not be shot at for being small.
+		#
+		# LONG-STANDING, AND OBSERVED IN PLAY -- not a regression introduced by
+		# the pirate's array. The Frigate has carried passive_em at 80,000
+		# against active at 40,000 since M27, so its 40k-80k band has always
+		# produced ordnance-classified SHIPS, and a player reported seeing it
+		# (2026-08-02). The usual visible symptom is the tactical display: a
+		# distant contact reads INCOMING ORDNANCE and then "corrects itself" to
+		# a vessel as it closes inside active sensor range and a real
+		# cross_section arrives.
+		#
+		# What was new was PD actually FIRING on it: point defence only engages
+		# inside laser range (1200-3600u), and until a pirate carried passive
+		# 45,000 against active 20,000 and met a hull at ~700u, nothing was both
+		# passive-only and that close. So the misclassification was visible for
+		# a long time and the shooting was not.
+		if signature.has("cross_section") and cs < ORDNANCE_CS_THRESHOLD:
 			return "FRIENDLY ORDNANCE" if is_friendly else "INCOMING ORDNANCE"
 		return "FRIENDLY VESSEL" if is_friendly else "UNIDENTIFIED VESSEL"
 
