@@ -81,14 +81,14 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 
 ---
 
-## Paused 2026-08-02 — where to pick up
+## In progress 2026-08-02
 
-**Blocked on nothing; stopped deliberately.** The next action is a funnel
-re-baseline: three geometry changes and a classification fix landed AFTER the
-last measurement, so the "0 -> 2 takes" result is stale and nothing downstream
-can be trusted until it is re-established.
+**Current action: funnel re-baseline.** Three geometry changes and a
+classification fix landed AFTER the last measurement, so the "0 -> 2 takes"
+result is stale and nothing downstream can be trusted until it is
+re-established.
 
-### The finding that stopped play: the sim got expensive
+### Deferred, NOT being worked: the sim got expensive
 
 A 60-game-minute run at 6-8 pirates / 10 haulers consumed **4,665 CPU-seconds
 over 78 wall-minutes and did not finish**. Earlier runs of the same shape
@@ -108,9 +108,13 @@ mine:
 
 **NOT MEASURED — this is a hypothesis, not a diagnosis.** The A/B was never run.
 
-**D21 (OPEN): how expensive is a pirate allowed to be to simulate?** This is a
-real constraint on the long-horizon goal, not a tuning detail: the deliverable
-IS a long sim, and the encounter fix made that sim materially more costly.
+**D21 (OPEN, DEFERRED BY DECISION): how expensive is a pirate allowed to be to
+simulate?** A real constraint on the long-horizon goal rather than a tuning
+detail — the deliverable IS a long sim, and the encounter fix made that sim
+materially more costly. **Deliberately not being optimised now**: chasing it
+before the re-baseline would mean tuning against numbers we have not measured,
+and it would stack a second variable onto the geometry changes already in
+flight.
 
 Levers if confirmed, cheapest-fidelity-cost first:
 
