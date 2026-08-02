@@ -49,6 +49,7 @@ class_name RoutePlanner
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 const StationEconomy = preload("res://scripts/directors/station_economy.gd")
 const Commodity = preload("res://scripts/economy/commodity.gd")
+const RiskMap = preload("res://scripts/mail/risk_map.gd")
 
 # One hauler-trip (design doc: "a lot must stay small relative to a need...
 # several ships can work the same run"). Refinery Prime's ORE deficit alone
@@ -198,8 +199,16 @@ const DROPOFF_LEG_START := 3
 # stranding the cargo.
 const MIN_VIABLE_SCORE := 0.0
 
-static func best_route(cluster, from_pos: Vector2, ship_flag: String) -> Dictionary:
+# `known_incidents` is the CALLER's heard news (RoutePlannerLeaf passes
+# Mailbag.read_incidents(cluster, actor.get_mailbag())). Defaulting to empty
+# keeps every existing caller and test on today's behaviour -- no knowledge,
+# no risk -- so the fog is opt-in per reader rather than global truth.
+static func best_route(cluster, from_pos: Vector2, ship_flag: String,
+		known_incidents: Array = []) -> Dictionary:
 	var best: Dictionary = {}
+	# Sampled ONCE per search, not per pair: _score_pair runs stations^2 x
+	# commodities times, and recency only needs to be consistent within a search.
+	var now: int = Engine.get_physics_frames()
 	var best_score: float = -INF
 	var pairs_scored := 0
 	for pickup_rec in cluster.records:
@@ -209,7 +218,7 @@ static func best_route(cluster, from_pos: Vector2, ship_flag: String) -> Diction
 			if dropoff_rec == pickup_rec or dropoff_rec.kind != ClusterEntity.Kind.STATION:
 				continue
 			for commodity in Commodity.ALL:
-				var route: Dictionary = _score_pair(pickup_rec, dropoff_rec, commodity, from_pos, ship_flag)
+				var route: Dictionary = _score_pair(pickup_rec, dropoff_rec, commodity, from_pos, ship_flag, known_incidents, now)
 				if route.is_empty():
 					continue
 				pairs_scored += 1
@@ -264,7 +273,8 @@ static func _diag_report(cluster, from_pos: Vector2, ship_flag: String, pairs_sc
 # has no open posting this ship is eligible for (StationEconomy.get_posting's
 # own `eligible` field folds in export-control restrictions -- e.g. Coldreach
 # VOLATILES, home_cluster.gd -- with no separate check needed here).
-static func _score_pair(pickup_rec, dropoff_rec, commodity: String, from_pos: Vector2, ship_flag: String) -> Dictionary:
+static func _score_pair(pickup_rec, dropoff_rec, commodity: String, from_pos: Vector2, ship_flag: String,
+		known_incidents: Array = [], now: int = 0) -> Dictionary:
 	var pickup_posting: Dictionary = StationEconomy.get_posting(pickup_rec, "self", commodity, ship_flag)
 	if pickup_posting.is_empty() or pickup_posting["direction"] != "EXPORT" or not pickup_posting["eligible"]:
 		return {}
@@ -292,7 +302,7 @@ static func _score_pair(pickup_rec, dropoff_rec, commodity: String, from_pos: Ve
 	# payout scales with the load while cost does not. See the constant's own
 	# comment for what that broke.
 	var travel_cost: float = TRAVEL_COST_PER_UNIT * amount * (deadhead + haul)
-	var risk: float = _risk_estimate(pickup_rec, dropoff_rec)
+	var risk: float = _risk_estimate(pickup_rec, dropoff_rec, known_incidents, now)
 	var score: float = payout - travel_cost - risk
 
 	return {
@@ -303,14 +313,57 @@ static func _score_pair(pickup_rec, dropoff_rec, commodity: String, from_pos: Ve
 		"amount": amount, "score": score,
 	}
 
-# Risk term hook -- design doc: "risk comes from HEARD news, which is what
-# lets a hauler fly into an ambush the player already knows about." That
-# requires the fog/heard-news substrate (Mail phase 2-3, Phase E) which is
-# explicitly out of scope for M53c Phase C. Zero for now, kept as its own
-# named function (not inlined into _score_pair's score line) so the seam is
-# obvious and a later phase changes exactly one function, not every call site.
-static func _risk_estimate(_pickup_rec, _dropoff_rec) -> float:
-	return 0.0
+# ---------------------------------------------------------------------------
+# M59 -- the risk term. The seam M53c left ("risk comes from HEARD news, which
+# is what lets a hauler fly into an ambush the player already knows about")
+# now has the substrate it was waiting on: M57 incidents, carried by M58
+# mailbags. As promised, exactly one function changed.
+#
+# THE INPUT IS HEARD NEWS, NOT TRUTH. `known_incidents` is whatever the READER
+# has been told -- Mailbag.read_incidents() clamped to its delivered version --
+# so two haulers with different travel histories price the same lane
+# differently, and a hull fresh out of a port that has heard nothing prices
+# every lane at zero risk and flies straight into it. That is the feature.
+#
+# Three weights, each with a reason rather than a taste:
+#
+#   PER LOT. Scores are amount-proportional, and route_planner has already been
+#   bitten by an absolute-units constant silently mis-scaling when LOT_SIZE
+#   moved (see HYSTERESIS_MARGIN_PER_LOT's comment, which explicitly warns that
+#   "anything else expressed in absolute score units needs the same
+#   treatment"). This is that anything else.
+#
+#   CORRIDOR, not endpoints. Distance is measured to the pickup->dropoff
+#   SEGMENT, because a robbery happens out on a lane, nowhere near either
+#   station -- scoring against endpoints would miss precisely the incidents
+#   that matter. RISK_CORRIDOR_RADIUS is the pirate detection radius from the
+#   viability work: beyond it, an incident says nothing about this lane.
+#
+#   RECENCY. Halved every RISK_HALF_LIFE_FRAMES. This is the damping term for
+#   the predator-prey oscillation the design doc predicts (cargo leaves,
+#   pirates starve, patrols relax, cargo returns) -- its half-life is the main
+#   dial for how fast that cycle runs, which is why it is a named constant and
+#   not an inline 0.5.
+#
+# Deliberately NOT weighted by incident kind. An OVERDUE (a hull that stopped
+# reporting, culprit unknown) counts the same as a witnessed ARMED_ROBBERY.
+# Weighting them differently is a policy judgement, and the whole point of the
+# verdict/evidence split is that a consumer owns its own policy -- so when
+# there is a reason to separate them, it belongs here, visibly, rather than
+# baked into the record.
+# The weighting itself lives in scripts/mail/risk_map.gd, shared with the
+# patrol side -- so "cargo avoids dangerous lanes and patrols prefer them" is
+# one function consulted twice rather than two that happen to agree. Only the
+# per-lot scaling is ours: scores here are amount-proportional, and this file
+# has already been bitten by an absolute-units constant silently mis-scaling
+# when LOT_SIZE moved (see HYSTERESIS_MARGIN_PER_LOT, which warns in as many
+# words that "anything else expressed in absolute score units needs the same
+# treatment"). This is that anything else.
+const RISK_CORRIDOR_RADIUS := RiskMap.RISK_CORRIDOR_RADIUS
+const RISK_HALF_LIFE_FRAMES := RiskMap.RISK_HALF_LIFE_FRAMES
+
+static func _risk_estimate(pickup_rec, dropoff_rec, known_incidents: Array, now: int) -> float:
+	return RiskMap.lane_risk(pickup_rec.pos, dropoff_rec.pos, known_incidents, now) * LOT_SIZE
 
 # ---------------------------------------------------------------------------
 # route_itinerary() -- turns a best_route() result into a job dict for

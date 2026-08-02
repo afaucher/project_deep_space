@@ -34,6 +34,7 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # only replaced once it empties, same as any other job.
 
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
+const Mailbag = preload("res://scripts/mail/mailbag.gd")
 
 # Real-seconds between re-evaluations of an ALREADY-running route plan. Cheap
 # to check (RoutePlanner.best_route is at most a few hundred dict reads), but
@@ -58,6 +59,19 @@ const REPLAN_CHECK_INTERVAL := 10.0
 # has-a-job path.
 var _last_empty_search_frame: int = -1
 
+# M59 -- what THIS hull has actually heard, clamped to its delivered version
+# (that clamp is the fog). Read once per search, since best_route scores
+# stations^2 x commodities pairs against it.
+#
+# Note the honest consequence: a hull straight out of a port that has heard
+# nothing prices every lane at zero risk and flies into whatever is out there.
+# Two haulers with different travel histories will disagree about the same
+# lane, and neither is wrong -- they were told different things.
+func _heard_incidents(actor: Node, cluster) -> Array:
+	if not actor.has_method("get_mailbag"):
+		return []
+	return Mailbag.read_incidents(cluster, actor.get_mailbag())
+
 func tick(actor: Node, _blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
@@ -78,7 +92,7 @@ func tick(actor: Node, _blackboard) -> int:
 		if not _due_for_check(job):
 			return FAILURE
 		job["_replan_check_frame"] = Engine.get_physics_frames()
-		var candidate: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor))
+		var candidate: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), _heard_incidents(actor, cluster))
 		if candidate.is_empty():
 			return FAILURE
 		var remaining: float = RoutePlanner.remaining_value(actor.position, job)
@@ -99,7 +113,7 @@ func tick(actor: Node, _blackboard) -> int:
 	if not _due_for_empty_search():
 		return FAILURE
 	_last_empty_search_frame = Engine.get_physics_frames()
-	var route: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor))
+	var route: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), _heard_incidents(actor, cluster))
 	if route.is_empty():
 		return FAILURE # nothing viable anywhere right now -- Idle (below JobRunner) picks this up
 	actor.set_default_job(RoutePlanner.route_itinerary(route))

@@ -294,7 +294,59 @@ M58 would be claiming a fix for a problem that has not started happening.
 - **M58d** — notarization: a station issues an own-flag warrant from a received
   incident.
 
-## M59 — Risk-aware routing, and the patrol director
+## M59 — Risk-aware routing, and the patrol director — **BUILT 2026-08-02**
+
+Delivered: `scripts/mail/risk_map.gd` (`lane_risk` / `hotspot`, shared);
+`RoutePlanner._risk_estimate` given a body and `known_incidents` threaded
+through `best_route`/`_score_pair`; `RoutePlannerLeaf` reading its own mailbag;
+`scripts/ai/leaves/patrol_response_leaf.gd` wired into `build_patrol` ahead of
+JobRunner; `test_risk_routing.gd` (7 sections). C1's tripwire updated in the
+same commit, exactly as its header said it should be.
+
+**The measurement that reshaped this milestone.** The open question was whether
+a station's notarized warrant can reach a patrol. It can: patrol orbit is
+`12000 * SCALE` = **24,000u**, and MediumStation and LightAttackCraft both carry
+**30,000u** comms, so `link_range = min(both)` = 30,000u and a patrol on station
+sits inside the relay. That does not solve the problem, it *relocates* it — the
+patrol holds a valid warrant and never ENCOUNTERS the subject, because piracy
+happens ~300,000u out on the lanes. **The warrant was never the missing piece;
+a reason to leave the orbit was.** Hence a lane-response leaf rather than more
+transport work.
+
+**One map, two signs — literally one function.** `risk_map.gd` is consulted by
+both sides (`lane_risk` subtracted from a route's payout, `hotspot` sought by a
+patrol) specifically so they cannot drift apart. Two separate implementations
+would eventually have a patrol sweeping somewhere cargo was never afraid of, and
+the loop would stop closing without anything looking broken.
+
+**Two choices worth not re-deriving:**
+
+- *The sweep rides the `assignment` slot, never `default_job`.* JobRunner's
+  two-slot model already means "an overriding mission pre-empts the standing
+  duty, and the duty resumes". Overwriting `default_job` would destroy a
+  patrol's authored route permanently — invisible in a test, ruinous an hour
+  into a campaign.
+- *The patrol is under the same fog as cargo.* It stays on station when it has
+  heard nothing, even though the incident log is sitting right there on the
+  record. Asserted, because "the director can see it" is exactly the failure
+  this whole vertical exists to remove.
+
+**The acceptance test is section [5]**, and it is the one that decides whether
+risk-aware routing is a feature or a trap: identical danger, identical news,
+only the destination's hunger changes — and the abandoned lane comes back.
+Risk is priced, not absolute, so abandonment is not terminal.
+
+*(Test-design note, since it cost a cycle: the first version of that test held
+two assertions in tension — 2 incidents were required to beat a stock-10
+destination's urgency while 3 had to lose to a stock-0 one, which are nearly the
+same urgency. The constant was fine; the test was contradictory.)*
+
+Still open, deliberately: nothing yet *verifies the three-way loop in motion*
+(cargo flees → pirates follow → patrols follow → pirates leave → cargo returns).
+That needs a long sim, not a unit test, and it is the natural first task of M60
+once pirates have a positioned feed to react with.
+
+### Original plan, as written before the above
 
 The payoff milestone: the same map, read with opposite signs.
 

@@ -49,9 +49,35 @@ func setup(_main) -> void:
 # routing shipped without the transport that makes it honest, which is the
 # failure mode the seam's own comment was written to prevent.
 func _c1_risk_seam() -> void:
-	print("[C1] RoutePlanner._risk_estimate is still a stub")
-	_assert(RoutePlanner._risk_estimate(null, null) == 0.0,
-		"_risk_estimate returns 0.0 -- risk-aware routing is NOT live yet (M59 flips this)")
+	print("[C1] RoutePlanner._risk_estimate is LIVE (M59 flipped this, as designed)")
+	# This assertion used to be `_risk_estimate(null, null) == 0.0`, and its
+	# failing was the documented signal that M59 had landed. It did; this is the
+	# updated claim, made in the same commit as the change per the file header.
+	var a = ClusterEntity.new(); a.pos = Vector2.ZERO
+	var b = ClusterEntity.new(); b.pos = Vector2(300000, 0)
+
+	_assert(RoutePlanner._risk_estimate(a, b, [], 0) == 0.0,
+		"a hull that has HEARD NOTHING still prices every lane at zero risk -- the fog default")
+
+	var on_lane := [{"pos": Vector2(150000, 0), "stamp": 0}]
+	var fresh: float = RoutePlanner._risk_estimate(a, b, on_lane, 0)
+	_assert(fresh > 0.0, "a fresh incident ON the corridor costs the route something (%.1f)" % fresh)
+
+	var far := [{"pos": Vector2(150000, RoutePlanner.RISK_CORRIDOR_RADIUS * 2.0), "stamp": 0}]
+	_assert(RoutePlanner._risk_estimate(a, b, far, 0) == 0.0,
+		"an incident well off the corridor costs it nothing")
+
+	# Recency is the damping term for the predator-prey cycle -- assert it
+	# actually decays rather than trusting the constant.
+	var aged: float = RoutePlanner._risk_estimate(a, b, on_lane, int(RoutePlanner.RISK_HALF_LIFE_FRAMES))
+	_assert(aged < fresh and aged > 0.0,
+		"and one half-life later the same incident weighs about half (%.1f vs %.1f)" % [aged, fresh])
+
+	# Off the END of a lane, not off its side: point-to-SEGMENT, never
+	# point-to-line, or an incident far past the dropoff reads as "on the lane".
+	var past_end := [{"pos": Vector2(600000, 0), "stamp": 0}]
+	_assert(RoutePlanner._risk_estimate(a, b, past_end, 0) == 0.0,
+		"an incident far beyond the dropoff is not on this lane (segment, not infinite line)")
 
 # --- C3: the relay gate is crypto-kin only. ---------------------------------
 # The whole two-tier transport model (and M61's competing bands under one flag)

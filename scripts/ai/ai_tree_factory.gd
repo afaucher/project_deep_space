@@ -37,6 +37,7 @@ const ChallengeLeaf = preload("res://scripts/ai/leaves/challenge_leaf.gd")
 const JobRunnerLeaf = preload("res://scripts/ai/jobs/job_runner_leaf.gd")
 const RoutePlannerLeaf = preload("res://scripts/ai/leaves/route_planner_leaf.gd")
 const InterdictLeaf = preload("res://scripts/ai/leaves/interdict_leaf.gd")
+const PatrolResponseLeaf = preload("res://scripts/ai/leaves/patrol_response_leaf.gd")
 const SOSResponseLeaf = preload("res://scripts/ai/leaves/sos_response_leaf.gd")
 
 static func build_default() -> Node:
@@ -234,6 +235,15 @@ static func build_patrol() -> Node:
 	var interdict = InterdictLeaf.new()
 	interdict.name = "Interdict"
 	root.add_child(interdict)
+
+	# M59 -- the lane response, AHEAD of JobRunner for the same reason
+	# RoutePlannerLeaf sits ahead of it in build_civilian_job: a planning leaf
+	# that always returns FAILURE, deciding what the runner will find rather
+	# than claiming the tick itself. AFTER Interdict, so a live hostile in
+	# front of the patrol always beats a report about somewhere else.
+	var patrol_response = PatrolResponseLeaf.new()
+	patrol_response.name = "PatrolResponse"
+	root.add_child(patrol_response)
 
 	var job_runner = JobRunnerLeaf.new()
 	job_runner.name = "JobRunner"
