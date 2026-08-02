@@ -219,3 +219,49 @@ crosses in ~11s, so a successful robbery books as `presumed LOST`. Filed as
 accounting; it is also an **information** failure — a pirate that never cashes
 out never delivers its hunt outcome and never picks up a fresh map. It is the
 guild's only sync point, because a pirate guild has no station.
+
+## 2026-08-02 — why campaign takes are zero, measured rather than guessed
+
+`information_loop` at 6-8 concurrent pirates, 10 haulers, 60 game-minutes:
+**15 hunts, 0 takes** (12 returned_empty, 3 lost). Six times the authored
+pressure changed nothing, so this is not a volume problem.
+
+Reconciling with `pirate_scenarios`' 26/36: that harness pre-positions a pirate
+at the midpoint of a **14,000u** lane with a victim inbound. It measures
+CAPABILITY. The campaign has **~300,000u** lanes against a 20,000u detection
+radius, and measures ENCOUNTER RATE. Both numbers are right; a harness that
+supplies the encounter cannot discover that encounters do not happen.
+
+Breakdown from the abort reasons (`JOB_LOG=1`, 25-min run):
+
+| Failure | Evidence | n |
+|---|---|---|
+| Never found prey | `hunt time budget (Ns) spent` | **8** |
+| Witness present at the take | `TAKE_ALONGSIDE ABORT (third_party_in_range; witness at 6000) -> exfil` | 2 |
+| Victim bolted mid-hold | `TAKE_ALONGSIDE ABORT; victim bolted (complied_stop cleared)` | 1 |
+| Ran out of attempts | `hunt budget spent (N attempts)` | **0** |
+
+**SPEED IS NOT THE CAUSE, and that is worth recording because it is the
+intuitive suspect.** ArmedPinnace is `max_speed 2000` against CargoShuttle's
+`1000`. The low observed capabilities in the comply-or-run log (287, 299) are
+the pirate CRUISING at 300 inside `SELECT_VICTIM`, not its capability -- and
+M52a's overtaken-check demonstrably works: a hauler ran, was overtaken at 700,
+and complied. Tuning speed would move a number that is not binding.
+
+Two distinct fixes, in priority order:
+
+1. **Encounter (dominant).** 8 of ~13 hunts ended having seen nobody. This is
+   geometry: a 20,000u detection radius on a 300,000u lane. Lurk placement,
+   detection range, or lane-adjacency are the levers -- not hunt duration, which
+   the earlier A/B already pushed to 900s for one take.
+2. **The witness rule at the take.** TWO pirates reached `DEMAND_STOP done`
+   (actual compliance) and still lost it to a third party within
+   `_R_THIRD_PARTY` (~6000u). With 10 haulers, 2 patrols and 13 stations in one
+   cluster, a pirate working a lane is rarely alone at that radius. Worth asking
+   whether "alone" should scale with how far from traffic the pirate has pulled
+   its victim, rather than being a fixed ring.
+
+Everything in M57-M59 is downstream of a robbery, so until (1) is addressed the
+incident/mail/risk chain cannot be exercised in a campaign at all -- `risk p95`
+was 0.0 across 5,206 routing decisions, which is the same fact from the other
+end.

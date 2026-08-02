@@ -114,6 +114,16 @@ func setup(main) -> void:
 		sim_minutes, NUM_HAULERS])
 	if DebugSettings:
 		DebugSettings.set_choice("station_economy_log", DebugSettings.StationEconomyLog.OFF)
+		# JOB_LOG=1 turns on the pirate job narration. Off by default because a
+		# long run drowns in it, but it carries the ONE thing the funnel cannot
+		# derive from counters: WHY stage 1 is empty. step_select_victim aborts
+		# with two distinct reasons -- "hunt time budget (Ns) spent" (never found
+		# prey: an ENCOUNTER problem, fixed by geometry//lurk placement) versus
+		# "hunt budget spent (N attempts, nothing taken)" (found prey and could
+		# not land it: an EXECUTION problem, fixed by speed/patience/tactics).
+		# Those need opposite fixes, and "takes 0" alone cannot tell them apart.
+		if _envf("JOB_LOG", 0.0) > 0.0:
+			DebugSettings.set_choice("job_log", DebugSettings.JobLog.ON)
 	ThreatResponseLeaf.sos_chance = 0.6
 
 	var cfg: Dictionary = _guild_config()
