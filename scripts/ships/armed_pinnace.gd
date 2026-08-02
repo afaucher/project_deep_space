@@ -23,6 +23,47 @@ const Parts = preload("res://scripts/components/parts_catalog.gd")
 static func design() -> Array:
 	var comps: Array = Pinnace.design()
 	comps.append(Parts.make("laser", ComponentSpec.Tier.LIGHT, Parts.Mark.COMPACT, Vector2(-35, 12), {"id": "hp_dorsal_laser", "heading": PI / 2.0}))
+	# 2026-08-02 -- a listening array, the refit's second illegal addition.
+	#
+	# WHY: measured, campaign piracy lands ZERO takes, and the dominant failure
+	# is ENCOUNTER -- 8 of ~13 hunts ended having seen nobody
+	# (implementation_plans/m51_pirate_guild_design.md). The stock pinnace's
+	# only sensor is an active 20,000u omni, which is WORSE than the
+	# CargoShuttle's 22,000: the predator could not see as far as its prey, on
+	# ~300,000u lanes. That is the binding constraint, not speed (the hull does
+	# 2000 against a shuttle's 1000) and not hunt duration (already A/B'd to
+	# 900s for a single take).
+	#
+	# WHY PASSIVE specifically, rather than a bigger active dish:
+	#   * It fits the tradecraft. A hull whose whole method is going dark should
+	#     LISTEN, not ping.
+	#   * It is self-limiting in exactly the right way. passive_em fires only
+	#     when received EM clears PASSIVE_EM_NOISE_FLOOR after directional and
+	#     distance falloff, so it hears a loud target (a hauler running an
+	#     active dish, a transponder and a reactor) a long way off and CANNOT
+	#     see a dark ship at all. The prey's own noise is what betrays it --
+	#     which hands haulers a real counter-tactic instead of handing pirates
+	#     omniscience.
+	#   * It reads less, not just further: ship.gd erases cross_section, heat
+	#     and density from a passive contact. The pirate learns something is
+	#     out there, not precisely what.
+	#
+	# RANGE sits deliberately between the tiers: civilians carry no passive at
+	# all, the Frigate carries 80,000. Half a warship's reach is the "better
+	# than a hauler, not a warship" band.
+	#
+	# em 0.0 -- listening does not emit. Placed at the mirror of the dorsal
+	# laser, sharing rcs_main's y=-12 edge by the same free-slot reasoning as
+	# the laser above (see header).
+	comps.append({
+		"id": "passive_array", "type": "sensors", "rect": Rect2(-35, -16, 4, 4),
+		"health": 25.0, "max_health": 25.0, "density": 20.0, "heat": 0.0,
+		"base_em_emission": 0.0, "em_emission": 0.0,
+		"switchable": true, "powered_on": true,
+		"sensor_type": "passive_em", "active": true, "range": 45000.0,
+		"arc_width": TAU, "num_bins": 180, "refresh_interval": 1.0,
+		"timer": 0.0, "heading": 0.0,
+	})
 	return comps
 
 func _init() -> void:

@@ -265,3 +265,118 @@ Everything in M57-M59 is downstream of a robbery, so until (1) is addressed the
 incident/mail/risk chain cannot be exercised in a campaign at all -- `risk p95`
 was 0.0 across 5,206 routing decisions, which is the same fact from the other
 end.
+
+### Proposed: LANE_RUN — the posture that was named but never built
+
+`_roll_posture()` picks `dark_lurk` or `false_flag_cruise`, and the header
+describes the latter as *"one more freighter closing to demand range"*. But the
+posture only changes whether `AWAIT{clear}->GO_DARK` runs before the hunt —
+**both postures then execute the same `SELECT_VICTIM`, which HOLDS STATION**
+inside a 2,500u lurk radius (`_hold_station` once within `lurk_radius`). The
+"cruise" is the staging approach, not the search. Nothing in the game runs a
+lane.
+
+That matters because ENCOUNTER is the measured dominant failure. A parked hull
+covers `2 * detection / lane_length` of a lane — even with the new 45,000u
+passive array that is ~30% of a 300,000u lane, and only while prey happens to
+pass. A hull that TRANSITS the lane sweeps all of it per pass.
+
+**The trade, which is what makes it a posture rather than a straight upgrade:**
+running the lane means running LIT under a cover identity — visible, identified,
+and repeatedly logged by everything it passes (the beacon road is explicitly the
+EM-loud "sees and reports" corridor, `_R_STATION_AVOID` exists because lane
+endpoints are stations). Dark lurking is invisible but nearly blind; lane
+running sees everything and is itself seen.
+
+**Every piece of the risk model already exists:**
+
+- the cover identity is transponder name + flag;
+- `Standing.subject_key` keys warrants on `name:` when a name is claimed, so a
+  REPORTED cover name is precisely what becomes wanted;
+- **M58's notarization is what burns it** — a victim carries the cover name to
+  port, an authority co-signs, and that identity is now enforceable by everyone
+  flying that flag;
+- `Ship.identity_documents` is a FINITE array, and `step_relight`'s `from_kit`
+  draws the next unused paper and ABORTS when the kit is empty.
+
+So the loop closes without inventing anything: **run the lane → get seen → get
+reported → the name burns → spend a document → the kit runs out.** That gives
+M58's notarization its first real consequence (today a notarized warrant has
+nowhere to bite) and turns identity papers from flavour into a metered resource.
+
+Open questions, deliberately not decided here:
+
+- Does the runner flip on ANY viable prey, or only when alone? The witness rule
+  already costs takes at 6000u; a lane-runner is by definition in traffic.
+- Does being *scanned* burn a name, or only being *robbed while wearing it*?
+  Only the latter creates evidence, and the former would make the posture
+  unplayable.
+- Should the kit's size be the real dial on pirate aggression, rather than
+  `hunt_seconds`?
+
+**Sequence AFTER the passive-array A/B reports.** Both changes attack ENCOUNTER,
+and landing them together would make the measurement unattributable — the exact
+mistake that made the LOT_SIZE regression hard to read.
+
+#### LANE_RUN refined: stalk, then decide what to leave behind
+
+**Flip only when ALONE.** The runner shadows prey at the edge of its own
+sensors and waits for third parties to clear, rather than closing immediately.
+Mechanically this INVERTS a check that already exists: `_third_party_in_range`
+is currently an ABORT condition, and here it becomes a WAIT condition. That
+turns the two measured witness-aborts (pirates that reached `DEMAND_STOP done`
+and lost the take to a contact at 6000u) from failures into patience, which is
+the more interesting behaviour anyway — a predator that waits reads as competent
+where one that flees reads as broken.
+
+Following at sensor limit is also what the new passive array is FOR: it hears a
+loud hauler without emitting, so trailing is possible without being the reason
+the victim runs.
+
+**Destruction is the pirate's counter-move to the information economy.** This
+is the consequence worth being deliberate about, because it is a systems
+interaction rather than a flavour choice:
+
+- a victim that SURVIVES carries its incident to port, where M58 notarizes it —
+  the pirate's cover name burns and a warrant becomes enforceable flag-wide;
+- a victim that is DESTROYED files nothing. Its `incident_log` lives on its own
+  ClusterEntity record, and that record is erased with the hull.
+
+So killing the witness is genuinely effective, and it SHOULD be — but it does
+not buy silence, because `TrafficGuild._resolve_overdue` records its OVERDUE
+incident on the GUILD's own log *before* calling `_erase_record`. The signal
+degrades rather than vanishing:
+
+| Victim | What the world learns |
+|---|---|
+| Survives | who (cover name), where, notarized, enforceable |
+| Destroyed | "a hull stopped arriving, last seen near here" |
+
+That is exactly the property M57 claimed for OVERDUE — "the only intelligence
+signal that survives a pirate killing the sole witness" — and it lands here
+without anything new being built.
+
+**Log-wiping interacts with tier-1 relay, and the interaction is free.** An
+incident is written to the victim's record, but if the victim was within comms
+range of ANY crypto-kin when it happened, the mailbag relay already carried it
+at 15Hz. So wiping or destroying only suppresses the report when the victim was
+ISOLATED — which is the same condition the pirate already needs in order to
+strike. **Being alone protects both the robbery and the cover-up**, from one
+geometric fact, with no special-casing.
+
+**Escalation ladder (future, not scoped here).** Each rung has a different cost
+and a different economic footprint:
+
+- **Prize** — take the hull. `Ship.hulk()` already exists as the state, and
+  design_ideas/hulk_revival_contract.md is the natural home.
+- **Destroy outright** — no loot, maximum silence, and it removes a hauler from
+  the economy permanently rather than taxing it. This is the rung that turns
+  piracy from something an economy absorbs into something that depopulates it,
+  so it wants to be rare and expensive.
+- **Kill the crew / take the crew** — depends on the human-space axis (crew
+  derived from `living_quarters`); taking crew makes people a cargo type and so
+  depends on M55a manifests.
+
+The severity ladder should also feed `Standing`: robbery and murder are not the
+same offense, and the existing `_OFFENSE_TABLE` already grades response class
+and `authorizes_force` per offense — so escalation has somewhere to land.

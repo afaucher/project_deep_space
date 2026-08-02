@@ -417,6 +417,13 @@ const EXPECTED_LAYOUT_WARNINGS := {
 		{"component_id": "engine_main", "field": "hull_coverage"},
 		{"component_id": "engine_main", "field": "hull_coverage"},
 		{"component_id": "hp_dorsal_laser", "field": "hull_coverage"},
+		# 2026-08-02 -- the passive listening array, same bolted-on-external
+		# class as hp_dorsal_laser and sensor_fwd above: an exposed face is the
+		# point of the refit, not a design fault. See armed_pinnace.gd for why
+		# the pirate needed passive detection at all (measured: campaign takes
+		# were zero and ENCOUNTER was the dominant failure).
+		{"component_id": "passive_array", "field": "hull_coverage"},
+		{"component_id": "passive_array", "field": "hull_coverage"},
 	],
 }
 

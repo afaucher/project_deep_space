@@ -90,6 +90,19 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   needed the import onto the class that already imports it (here the dock-time
   mail policy moved to `Ship.exchange_mail_on_dock()`, leaving the bay to just
   call it — a docking bay should not hold faction policy anyway).
+- **A green unit test cannot tell you the input ever arrives.** Observed three
+  times in one session (2026-08-02, see
+  `design_ideas/2026-08-02-preconditions-the-world-never-supplies.md`): a patrol
+  lane-response leaf tested by hand-setting the mailbag the world never filled;
+  `pirate_scenarios` reporting 26/36 takes because it starts the pirate at the
+  midpoint of a 14,000u lane, while the campaign's 300,000u lanes produced 0 in
+  15 hunts; and M58 shipping its dock courier without the kin-relay its own
+  spec listed. Each test verifies its mechanism correctly and none can discover
+  that nothing feeds it. **When a mechanism spans subsystems, add a
+  campaign-shaped counter — not another unit test** (`information_loop.gd` is
+  the pattern: count each stage, report where it goes to zero). And **lead such
+  a report with its own preconditions**: "0 of 5206 decisions changed" means
+  the opposite thing depending on whether the input was ever non-zero.
 - **Kill stragglers** if a run hangs: `taskkill //F //IM Godot_v4.4.1-stable_win64.exe`.
 - **`Performance.TIME_PHYSICS_PROCESS` HOLDS stale readings across frames** —
   it refreshes on its own cadence, so one slow frame's value is re-read for
