@@ -88,60 +88,45 @@ classification fix landed AFTER the last measurement, so the "0 -> 2 takes"
 result is stale and nothing downstream can be trusted until it is
 re-established.
 
-### Deferred, NOT being worked: the sim got expensive
+### RETRACTED: "the sim got expensive" was wrong three times over
 
-A 60-game-minute run at 6-8 pirates / 10 haulers consumed **4,665 CPU-seconds
-over 78 wall-minutes and did not finish**. Earlier runs of the same shape
-completed. Two changes from this session are the likely cause, and both are
-mine:
+Measured on a build that actually compiles: **10.2ms/frame — 184s for 5
+game-minutes, ~37 wall-seconds per game-minute.** A 30-game-minute run is ~18
+minutes and a 60-minute one ~37. The sim is entirely workable and **D21 is
+withdrawn.**
 
-- **The passive array.** Each pirate now sweeps a 45,000u omni `passive_em` with
-  180 bins. Sweep coverage scales with AREA, so that is ~5x the old 20,000u
-  sensor, on 6-8 hulls at once — and CLAUDE.md already records sensor sweep as
-  the dominant per-tick cost. More contacts in range also means more fusion and
-  more `compute_standing` downstream.
-- **The classification fix**, pushing the same way: passive-only contacts that
-  used to short-circuit as INCOMING ORDNANCE now classify as VESSELS, so they
-  go through standing computation and warrant-index lookups instead. The gate
-  moved 9.425 -> 9.809ms avg, small there, but the gate scenario has no
-  passive-heavy pirates in it.
+Three wrong explanations were given for the same symptom before measuring:
 
-**CORRECTED 2026-08-02, same day.** A parallel `perf_combat` run largely
-REFUTES the sensor hypothesis and undermines the framing:
+1. **The passive array** — refuted by `perf_combat`: `sensor_sweep` is 3.65% of
+   tick, nowhere near enough.
+2. **Scenario size** — plausible but never tested, and wrong.
+3. **A hang** — partly true for ONE run (a real `while j == i` infinite loop on a
+   single-hub cluster, now fixed), but used to explain runs it did not cause.
 
-- `sensor_sweep` is **3.65% of tick** (607 us/frame), about a fifth of
-  `ship_tick_total`. Multiplying one hull's sweep 5x across 6-8 pirates is worth
-  a couple of ms, not the ~27ms/frame the funnel sim runs at. Sensors are not
-  dominant enough to be the cause.
-- The real difference is SCENARIO SIZE. `perf_combat` runs 6 frigates peaking at
-  30 ships and clocks **3.6ms wall-clock/frame**. `information_loop` runs the
-  whole home cluster — 13 stations, five asteroid fields, beacons, traffic, the
-  economy and three directors. Categorically heavier, and always was.
-- **"The sim got expensive" was unsupported.** Earlier funnel runs were never
-  TIMED, so there is no before-measurement to regress against. What is actually
-  known: a 60-game-minute run at the heaviest config yet, with `JOB_LOG=1`, did
-  not finish in 78 minutes. That is evidence about the CONFIGURATION chosen, not
-  about a code change.
+The actual causes, separated:
 
-Lesson worth keeping: an unfalsifiable "it feels slower" turns into a wrong
-attribution the moment it is written down as a cause. The perf run cost ten
-minutes and killed it.
-
-**D21 (OPEN, DEFERRED — and now much weaker): how expensive is a pirate allowed
-to be to simulate?** A real constraint on the long-horizon goal rather than a tuning
-detail — the deliverable IS a long sim, and the encounter fix made that sim
-materially more costly. **Deliberately not being optimised now**: chasing it
-before the re-baseline would mean tuning against numbers we have not measured,
-and it would stack a second variable onto the geometry changes already in
-flight.
-
-Levers if confirmed, cheapest-fidelity-cost first:
-
-| Lever | Effect |
+| Run | What was really happening |
 |---|---|
-| `num_bins` 180 -> 90 | halves binning; passive yields bearing only, so resolution matters least |
-| `refresh_interval` 1.0 -> 2.0 | halves sweep frequency; a lurker does not need 1Hz |
-| range 45,000 -> 35,000 | -40% area, but directly undoes the encounter gain — try last |
+| 78-minute, 60 game-min, `JOB_LOG=1` | probably ~90% done and killed prematurely |
+| 4.5-hour, stuck at "minute 61" | the genuine `_random_hub_pair` infinite loop |
+| everything after the lane-id edit | **the build did not compile** — duplicate `pickup_pos` keys in `route_itinerary`, plus an orphaned `if` with no body in the funnel runner |
+
+That third row is the important one. **A script that fails to compile throws
+runtime errors every frame in the AI tick**, which looks exactly like "the sim is
+slow". Two of my three explanations were built on measurements of a broken
+build.
+
+**The check existed and was skipped.** `build.ps1` runs GDScript syntax
+validation as its first step. The heartbeat change was committed without gating,
+and "verified" with `test_route_planner` — which does not load sim runners, so a
+green test proved nothing about the broken file. *Sim runners are covered by no
+test; only the gate's syntax validation catches them.*
+
+Also: reading the lane trace as a progress indicator was wrong twice — it only
+writes rows while a hauler holds a planner job, AND the file being read was
+hours stale (`FileAccess.open(WRITE)` returns null when another Godot process
+holds it, so `_sample_trace` silently skipped). The unconditional heartbeat now
+prints `game-minute N / TOTAL` on a path no game state can gate, and it works.
 
 ### Queue after the re-baseline
 

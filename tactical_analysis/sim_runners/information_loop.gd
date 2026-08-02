@@ -378,7 +378,6 @@ func _report() -> void:
 	print("\n=== PRECONDITION: did risk ever matter? ===")
 	print("  routing decisions observed   : %d" % DecisionProbe.total)
 	print("  risk p95 / max               : %.1f / %.1f  (margin to beat: %.1f)" % [p95, DecisionProbe.risk_max(), margin])
-	if DecisionProbe.total == 0:
 	# CALIBRATION NOTE (2026-08-02): HYSTERESIS_MARGIN is the bar a competing
 	# route must clear to REPLAN AN EXISTING JOB -- it is NOT the bar for
 	# changing which route WINS a fresh search. Two near-equal lanes flip on a
