@@ -33,6 +33,8 @@ class_name TrafficGuild
 const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const CargoShuttle = preload("res://scripts/ships/cargo_shuttle.gd")
+const SourceLog = preload("res://scripts/mail/source_log.gd")
+const Incident = preload("res://scripts/mail/incident.gd")
 
 # Base id for spawned traffic records -- clear of every authored home_cluster
 # id (stations 1-14, homes 200-204, beacons 100-114, wormhole 500, patrols
@@ -98,6 +100,24 @@ var losses: int = 0
 var replenishments: int = 0
 var freighters_departed: int = 0
 var freighters_destroyed: int = 0
+
+# M57 -- the guild's OWN incident log. The guild is a source: OVERDUE is not
+# something it was told, it is something it CONCLUDED from its own members
+# going quiet, which is why this is honest with no transport layer built yet
+# (the design doc's "one piece that needs no mail at all"). Haulers on authored
+# lanes are the guild's own hulls, so reading their check-ins is a radio
+# report, not omniscience -- the same trick PirateGuild already uses.
+#
+# It is also the only intelligence signal in the game that SURVIVES A PIRATE
+# KILLING THE SOLE WITNESS: a robbery nobody lived to report still shows up
+# here as a hull that stopped arriving.
+#
+# Lives on the director rather than a station record because the guild has no
+# seat yet; M58 gives it one and this moves there. Storage mechanics are
+# SourceLog's, same as every other log.
+const INCIDENT_LOG_CAP := 100
+var incident_log: Array = []
+var incident_seq: int = 0
 
 var _elapsed: float = 0.0
 var _next_record_id: int = BASE_RECORD_ID
@@ -233,6 +253,14 @@ func _check_ins(cluster) -> void:
 #   below tops the COUNT back up on its own schedule.
 # ---------------------------------------------------------------------------
 
+# Appends to the guild's own source log. Mirrors Ship.record_incident() (same
+# SourceLog mechanics, same never-rewound seq, same cap) -- separate only
+# because a director is not a Node and has no cluster record to resolve to.
+func _record_incident(kind: String, subject_name: String, subject_flag: String, pos: Vector2) -> Dictionary:
+	incident_seq += 1
+	var fields: Dictionary = Incident.make(kind, subject_name, subject_flag, pos, "TrafficGuild")
+	return SourceLog.append_entry(incident_log, incident_seq, fields, INCIDENT_LOG_CAP)
+
 func _resolve_overdue(cluster, period: float) -> void:
 	var delay: float = config.get("presumed_lost_delay", 45.0)
 	var hard_cap: int = config.get("hard_cap", 999999)
@@ -246,6 +274,22 @@ func _resolve_overdue(cluster, period: float) -> void:
 			continue
 		m["state"] = MemberState.LOST
 		losses += 1
+		# M57 -- `losses` is a scoreboard: it says HOW MANY, never WHERE, so no
+		# router can act on it. The same event as a positioned incident is the
+		# cheapest real intelligence in the system.
+		#
+		# Note what the subject is here: an OVERDUE incident names the LOST
+		# HULL, not a perpetrator -- nobody saw who did it, and inventing an
+		# attacker would be exactly the omniscience this model exists to remove.
+		# Ambiguous evidence a director weighs for itself is the point.
+		#
+		# last_seen_pos is honestly "where we last heard from it" (refreshed
+		# only by check-ins on a live node), NOT where it died -- so a hull
+		# jumped further along its route reports the last place anyone knew it
+		# was fine. That understatement is correct and should not be "fixed".
+		_record_incident(Incident.KIND_OVERDUE,
+			"Cluster_%d" % record_id, m.get("flag", ""),
+			m.get("last_seen_pos", Vector2.ZERO))
 		_erase_record(cluster, record_id)
 		_event("hauler on route %s (record %d) presumed LOST (%s; losses %d)" %
 			[str(m.get("route", [])), record_id,

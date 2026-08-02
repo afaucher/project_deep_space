@@ -29,6 +29,7 @@ const Hail = preload("res://scripts/comms/hail.gd")
 # by nobody. step_dock_at now reads it. See
 # design_ideas/docking_approach_control.md.
 const PortChannel = preload("res://scripts/port/port_channel.gd")
+const Incident = preload("res://scripts/mail/incident.gd")
 
 const CONTINUE := 0
 const DONE := 1
@@ -1028,7 +1029,23 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 	var victim_iid: int = job.get("victim_iid", -1)
 	var scratch: Dictionary = step.get("scratch", {})
 
-	if step.get("show_colors", false) and not scratch.get("colors_shown", false):
+	# HOISTING COLOURS IS NOW A CHOICE, NOT A REFLEX (2026-08-01).
+	#
+	# show_colors used to fire unconditionally, which made every robbery a
+	# public declaration: FLAG_PIRATE is in everyone's default
+	# known_enemy_flags, so the instant it goes up the pirate is HOSTILE to
+	# every hull in transponder range and the only enforcement path that can
+	# touch it swings open. `colors_chance` lets a pirate run the demand under
+	# its cover identity instead -- quieter, but the victim is being leaned on
+	# by an apparent civilian rather than by an obvious pirate.
+	#
+	# Rolled ONCE per demand and remembered, not re-rolled per tick: the step
+	# runs every frame and a per-tick roll would flicker the transponder,
+	# which is both nonsense and a datalink storm.
+	if not scratch.has("colors_decided"):
+		scratch["colors_decided"] = step.get("show_colors", false) \
+			and randf() < step.get("colors_chance", 1.0)
+	if scratch["colors_decided"] and not scratch.get("colors_shown", false):
 		actor.set_transponder_flag(Standing.FLAG_PIRATE)
 		actor.set_transponder_active(true)
 		scratch["colors_shown"] = true
@@ -1037,6 +1054,32 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 	if c.is_empty():
 		job["_abort_reason"] = "victim track lost"
 		return ABORT
+
+	# REPRISAL FOR CALLING FOR HELP (2026-08-01).
+	#
+	# Until now an SOS was free: the victim broadcast, and the pirate neither
+	# knew nor cared. This gives the call a price, so a hauler's decision to
+	# shout is a gamble rather than an obvious yes.
+	#
+	# Expressed as a punitive shot rather than a switch to combat AI because a
+	# pirate has NO Engage leaf -- build_pirate is Disengage -> JobRunner ->
+	# Idle, so everything a pirate does must happen inside a job step. The hull
+	# carries one light laser; this is it being used.
+	#
+	# Rolled ONCE per demand. The victim posts its own ASSAULT warrant off the
+	# hit (take_damage's own-hit path), so the consequence propagates through
+	# the normal standing machinery rather than needing special casing.
+	var reprisal_chance: float = step.get("sos_reprisal_chance", 0.0)
+	if reprisal_chance > 0.0 and not scratch.has("reprisal_rolled") and c.get("sos", false):
+		scratch["reprisal_rolled"] = true
+		if randf() < reprisal_chance:
+			var vict = instance_from_id(victim_iid)
+			if vict != null and is_instance_valid(vict) and vict.has_method("take_damage"):
+				if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
+					print("[Job] %s: REPRISAL -- victim called for help, firing" % actor.debug_label())
+				vict.take_damage(step.get("reprisal_damage", 40.0),
+					vict.position, (vict.position - actor.position).normalized(),
+					"laser", actor.get_instance_id())
 
 	if c.get("complied_stop", false):
 		return DONE
@@ -1168,6 +1211,30 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		var pirate_c: Dictionary = victim.active_contacts.get(pirate_trk, {})
 		var pirate_claimed: String = victim.active_transponders.get(actor.get_instance_id(), {}).get("name", "")
 		victim.post_warrant(Standing.OFF_ARMED_ROBBERY, pirate_claimed, pirate_c.get("signature", {}), "took cargo")
+		# M57 -- the same event, recorded as EVIDENCE alongside the verdict.
+		# The warrant above answers "is this hull wanted" and OVERWRITES on the
+		# next offense by the same pirate; this answers "what happened, WHERE"
+		# and never does. A patrol cannot plan a route from the warrant (no
+		# position, and one record per (offense, subject) no matter how many
+		# times it happens) -- it can from these.
+		#
+		# Deliberately reusing the honest values computed just above rather than
+		# reading the pirate node: `pirate_claimed` is the victim's transponder
+		# read, so an undercover pirate is recorded under its COVER name, and a
+		# dark one as "". An incident naming the real hull would be the director
+		# cheating through a witness. Position is the VICTIM's own -- it is the
+		# reporter, and it knows where it is.
+		if victim.has_method("record_incident"):
+			var pirate_flag: String = victim.active_transponders.get(actor.get_instance_id(), {}).get("flag", "")
+			# The same signature the warrant above was keyed on, carried as
+			# EVIDENCE (a patrol director correlating sightings wants it), not
+			# as an identity. It does NOT make the record survive a rename:
+			# Standing.subject_key returns "name:<claimed>" whenever a name is
+			# present and never consults the signature, so a rename produces a
+			# new key regardless. See Ship.notarize_from for why a
+			# signature-only report is refused outright.
+			victim.record_incident(Incident.KIND_ARMED_ROBBERY, pirate_claimed, pirate_flag,
+				victim.position, "", pirate_c.get("signature", {}))
 		# Eager same-tick cache stamp (ship.gd's take_damage carries the full
 		# rationale): compute_standing only re-runs on this track's next
 		# sensor-bin update, not every physics tick, so without this the

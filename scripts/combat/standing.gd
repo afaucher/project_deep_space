@@ -75,8 +75,16 @@ const NAME_WITHHELD := "UNKNOWN"
 static func identifies(transponder: Dictionary) -> bool:
 	if transponder.is_empty():
 		return false
-	var n: String = transponder.get("name", "")
-	return n != "" and n != NAME_WITHHELD
+	return identifies_name(transponder.get("name", ""))
+
+# The same question asked of a bare name, for callers that hold a claimed_name
+# rather than a whole transponder dict -- subject_key() and Ship.notarize_from()
+# both do. Split out rather than re-tested inline so this stays "the one place
+# that question gets answered": an emptiness check at either of those sites
+# silently treats "UNKNOWN" as an identity, which is precisely the false
+# positive the 2026-08-01 subject_key fix removed.
+static func identifies_name(claimed_name: String) -> bool:
+	return claimed_name != "" and claimed_name != NAME_WITHHELD
 
 const FLAG_PIRATE := "JOLLY_ROGER"
 const FLAG_DRIFT := "SOVEREIGN_DRIFT"     # home faction / militia
@@ -221,7 +229,9 @@ static func compute_standing(contact: Dictionary, transponder: Dictionary, obser
 	# have turned the cluster's most common, most forgivable offense into a
 	# permanent HOSTILE brand that no code path can ever clear -- the exact
 	# "enemy forever" failure the warrant model was built to retire.
-	if w.is_empty() and t_name != "":
+	# identifies(), not `!= ""`: a NAME_WITHHELD subject now keys to `sig:`
+	# above, so this fallback would just re-look-up the identical key.
+	if w.is_empty() and identifies_name(t_name):
 		var sig_w: Dictionary = observer.warrant_index.get(subject_key("", sig), {})
 		if not self_resolves_on_id(sig_w.get("offense", "")):
 			w = sig_w
@@ -569,7 +579,28 @@ static func _now_frame() -> int:
 # merges." Same key shape Standing.wanted_names already uses (claimed name),
 # extended with a signature fallback for dark/unclaimed subjects.
 static func subject_key(claimed_name: String, signature: Dictionary) -> String:
-	if claimed_name != "":
+	# 2026-08-01 -- NAME_WITHHELD IS NOT A NAME. This tested `claimed_name != ""`,
+	# and get_active_transponder_data() sets name = NAME_WITHHELD ("UNKNOWN") for
+	# any hull broadcasting with share-name off. So every name-withholding ship
+	# in the cluster keyed to the SAME subject, `name:UNKNOWN` -- one warrant
+	# against one of them applied to all of them. An accidental false positive,
+	# unbounded, and on the primary branch rather than the guarded fallback.
+	#
+	# Routing it through identifies() (the same predicate that decides whether a
+	# DEMAND(IDENTIFY) is satisfied) does more than patch that: it RESTORES the
+	# intent documented below. A NO_ID warrant is supposed to be filed under
+	# `sig:` "BY DEFINITION -- the subject was not reporting a name; that IS the
+	# offense". A share-name-off hull is exactly such a subject, but it was
+	# landing on the `name:` branch, so NO_ID's self-resolution-on-ID could never
+	# fire for it. "Not reporting a name" now means one thing everywhere.
+	#
+	# What this does NOT fix, deliberately: the `sig:` branch keys on
+	# iff_tags + cross_section, and iff_tags is a crypto set SHARED BY A WHOLE
+	# BAND, so two same-band same-class hulls can still collide. That one is
+	# inherent to what a signature currently contains, it is bounded by the
+	# one-directional rule below, and closing it needs a real identity mechanic
+	# rather than a keying tweak.
+	if identifies_name(claimed_name):
 		return "name:" + claimed_name
 	var tags: Array = signature.get("iff_tags", []).duplicate()
 	tags.sort()

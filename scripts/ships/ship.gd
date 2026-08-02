@@ -18,6 +18,9 @@ const RadarCrossSection = preload("res://scripts/components/radar_cross_section.
 const PortZone = preload("res://scripts/port/port_zone.gd")
 const PortControl = preload("res://scripts/port/port_control.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
+const SourceLog = preload("res://scripts/mail/source_log.gd")
+const Incident = preload("res://scripts/mail/incident.gd")
+const Mailbag = preload("res://scripts/mail/mailbag.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
 const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
 const StationEconomy = preload("res://scripts/directors/station_economy.gd")
@@ -1225,33 +1228,16 @@ const DOCKING_REGISTRY_CAP := 200
 # issuance -- a grant can go unfulfilled, which is not the same event as a
 # dock.
 func record_docking_event(subject_name: String, flag: String, event: String) -> Dictionary:
+	# M57: the append/stamp/trim mechanics moved to SourceLog (unchanged in
+	# behaviour -- same two clocks, same cap, same never-rewound seq) so the
+	# incident log below reuses them instead of copying them a third time.
 	var rec = _resolve_cluster_record()
-	var entry: Dictionary
+	var fields := {"subject_name": subject_name, "flag": flag, "event": event}
 	if rec != null:
 		rec.registry_seq += 1
-		entry = {
-			"seq": rec.registry_seq,
-			"subject_name": subject_name,
-			"flag": flag,
-			"event": event,
-			"stamp": Engine.get_physics_frames(),
-		}
-		rec.docking_registry.append(entry)
-		if rec.docking_registry.size() > DOCKING_REGISTRY_CAP:
-			rec.docking_registry.pop_front()
-	else:
-		registry_seq += 1
-		entry = {
-			"seq": registry_seq,
-			"subject_name": subject_name,
-			"flag": flag,
-			"event": event,
-			"stamp": Engine.get_physics_frames(),
-		}
-		docking_registry.append(entry)
-		if docking_registry.size() > DOCKING_REGISTRY_CAP:
-			docking_registry.pop_front()
-	return entry
+		return SourceLog.append_entry(rec.docking_registry, rec.registry_seq, fields, DOCKING_REGISTRY_CAP)
+	registry_seq += 1
+	return SourceLog.append_entry(docking_registry, registry_seq, fields, DOCKING_REGISTRY_CAP)
 
 # Read-side counterpart to record_docking_event() above -- resolves to the
 # attached record's registry when this Ship has one, else the local fallback
@@ -1269,6 +1255,220 @@ func get_registry_seq() -> int:
 	if rec != null:
 		return rec.registry_seq
 	return registry_seq
+
+# ---------------------------------------------------------------------------
+# M57 -- incident log. THIS hull's own append-only record of what happened to
+# or near it, resolved to the cluster record when promoted and the local
+# fallback otherwise, by the exact same rule as the docking registry above.
+#
+# Note the resolver needs NO special-casing for the deep-space case, which is
+# the tell that the pattern generalizes: a station writes to its station
+# record, a promoted hauler writes to its own record (surviving demote the same
+# way its position does), and a bare Ship in a test writes locally. "Where is
+# there a station out here?" answers itself -- the victim is the source, and a
+# source always has somewhere to write.
+#
+# Cap is lower than the registry's 200: incidents are rarer per hull, and a
+# long-lived hauler holding a hundred robberies is already telling a director
+# everything it needs. seq is never rewound on trim -- see SourceLog.
+# ---------------------------------------------------------------------------
+const INCIDENT_LOG_CAP := 100
+
+var incident_log: Array = []
+var incident_seq: int = 0
+
+# Appends one incident to THIS hull's log and returns the entry.
+#
+# `subject_name`/`subject_flag` must be what the other party was PUBLICLY
+# claiming (get_active_transponder_data()), not omniscient truth -- see
+# Incident.make(). Callers that have a Ship reference should pass its
+# transponder data, never its `name` or owner_id.
+func record_incident(kind: String, subject_name: String, subject_flag: String,
+		pos: Vector2, reporter: String = "", signature: Dictionary = {}) -> Dictionary:
+	var who: String = reporter if reporter != "" else name
+	var fields: Dictionary = Incident.make(kind, subject_name, subject_flag, pos, who, signature)
+	var rec = _resolve_cluster_record()
+	if rec != null:
+		rec.incident_seq += 1
+		var entry: Dictionary = SourceLog.append_entry(rec.incident_log, rec.incident_seq, fields, INCIDENT_LOG_CAP)
+		# M58 -- a source always knows itself. Witnessing something IS your own
+		# source advancing, so keeping your own mailbag entry in step here is
+		# what makes "news reached me" and "it happened to me" one mechanism
+		# rather than two. Without it a hull could not read back its own
+		# eyewitness account (read_incidents clamps to the delivered version,
+		# and its own would sit at 0).
+		Mailbag.sync_direct(rec.mailbag, rec.id, rec.incident_seq, Engine.get_physics_frames())
+		return entry
+	incident_seq += 1
+	return SourceLog.append_entry(incident_log, incident_seq, fields, INCIDENT_LOG_CAP)
+
+# Read-side counterpart. Use this, not the bare `incident_log` field, from
+# anywhere that might be looking at a promoted hull.
+func get_incident_log() -> Array:
+	var rec = _resolve_cluster_record()
+	if rec != null:
+		return rec.incident_log
+	return incident_log
+
+func get_incident_seq() -> int:
+	var rec = _resolve_cluster_record()
+	if rec != null:
+		return rec.incident_seq
+	return incident_seq
+
+# M58 -- this hull's mailbag (source_id -> {version, confirmed_at}), resolved to
+# the record when promoted, by the same rule as the two logs above. A bare Ship
+# keeps a local one so sandbox/test hulls still work, but note that a hull with
+# no record has no source_id of its own either, so it can hold others' versions
+# while being unable to publish its own -- correct, if a little lonely.
+var mailbag: Dictionary = {}
+
+func get_mailbag() -> Dictionary:
+	var rec = _resolve_cluster_record()
+	if rec != null:
+		return rec.mailbag
+	return mailbag
+
+# This hull's own source id, or -1 if it was never promoted (so it is nobody's
+# source and cannot be cited in anyone's mailbag).
+func source_id() -> int:
+	var rec = _resolve_cluster_record()
+	if rec != null:
+		return rec.id
+	return -1
+
+# M58 -- the courier step, run ON THE STATION when `visitor` reaches DOCKED
+# (called from DockingBay's DOCKED transition -- the same convergence point the
+# docking registry uses, which both the player and NPC docking paths funnel
+# through regardless of how permission was obtained).
+#
+# ASYMMETRIC ON PURPOSE (mail_network.md, C18): **you receive freely, you give
+# deliberately.** Reading a port's public board is something you cannot un-see,
+# so the receive is unconditional -- a Meridian hauler limping into a Drift port
+# still learns what Drift knows. Contributing what YOU know is a transaction; an
+# automatic two-way merge would hand every port a free fresh picture and flatten
+# the information economy before it exists.
+#
+# The give rule here is a deliberate PLACEHOLDER: same flag gives, everyone else
+# withholds. Pricing is the eventual rule. This one is honest, partitions
+# faction knowledge without gating reads, and makes the asymmetry observable now
+# rather than merely asserted.
+#
+# Note a dark ship yields {} from get_active_transponder_data(), so it reads as
+# flagless and is given nothing. That falls out rather than being coded: a hull
+# that will not say who it is is not treated as kin.
+func exchange_mail_on_dock(visitor) -> void:
+	if visitor == null or not is_instance_valid(visitor):
+		return
+	if not visitor.has_method("get_mailbag"):
+		return
+	var now_frame: int = Engine.get_physics_frames()
+	var host_bag: Dictionary = get_mailbag()
+	var ship_bag: Dictionary = visitor.get_mailbag()
+
+	# Receive: unconditional.
+	Mailbag.deliver(ship_bag, host_bag, source_id(), get_incident_seq(), now_frame)
+
+	var own_flag: String = get_active_transponder_data().get("flag", "")
+	var visitor_flag: String = ""
+	if visitor.has_method("get_active_transponder_data"):
+		visitor_flag = visitor.get_active_transponder_data().get("flag", "")
+	if visitor_flag == "" or visitor_flag != own_flag:
+		return
+
+	# Our version of this hull BEFORE the give, so notarization sees exactly the
+	# incidents that were NEW to this port. Free dedupe -- the version vector is
+	# already tracking precisely this, so re-docking notarizes nothing twice.
+	var prev_seq: int = Mailbag.version_of(host_bag, visitor.source_id())
+	Mailbag.deliver(host_bag, ship_bag, visitor.source_id(), visitor.get_incident_seq(), now_frame)
+	if has_method("notarize_from"):
+		notarize_from(visitor, prev_seq)
+
+# M58 -- NOTARIZATION. Called on a STATION, with a hull that has just docked and
+# handed over mail. This is the missing half of the personal-origin seal.
+#
+# The problem it solves: a robbed civilian posts a warrant with warrant_authority
+# == [], so scoped_origin yields "" and the warrant is PERSONAL -- enforceable by
+# the victim alone, and explicitly refused by the relay. The victim is the only
+# entity in the universe that thinks its attacker is wanted. Transport was never
+# the gap; the report was legally inert. Here an authority re-issues it under its
+# own flag, and it becomes something a patrol can act on.
+#
+# TWO GATES, and they are deliberately different (roadmap M58, "Two gates on one
+# arriving hull"):
+#   * Recording the INCIDENT is ungated -- it is only information, useful no
+#     matter who carried it. That already happened, in the unconditional receive
+#     at the dock; nothing here repeats it.
+#   * Issuing a WARRANT is an act of authority: own flag only. A Meridian hauler
+#     limping into a Drift port gets its robbery filed and NO warrant issued.
+#     The world learns; Drift does not prosecute on Meridian's behalf.
+#
+# No new jurisdiction machinery: warrant scope here is already personal/flag-
+# based rather than territorial (the seam test_jurisdiction_seam.gd pins), and
+# scoped_origin does the actual scoping off this station's own warrant_authority
+# -- which home_cluster.gd already defaults to [flag] for every station.
+#
+# `after_seq` is the station's mailbag version for this reporter BEFORE the
+# delivery, so only genuinely NEW incidents are notarized. That is the dedupe,
+# and it costs nothing extra: the version vector is already tracking exactly
+# this. Re-docking the same hull notarizes nothing a second time.
+func notarize_from(reporter, after_seq: int) -> int:
+	if reporter == null or not is_instance_valid(reporter):
+		return 0
+	if warrant_authority.is_empty():
+		return 0 # not an authority -- nothing to co-sign with
+	var own_flag: String = get_active_transponder_data().get("flag", "")
+	if own_flag == "":
+		return 0
+	var rep_flag: String = ""
+	if reporter.has_method("get_active_transponder_data"):
+		rep_flag = reporter.get_active_transponder_data().get("flag", "")
+	if rep_flag != own_flag:
+		return 0 # gate 2: we do not prosecute on a foreign flag's behalf
+	if not reporter.has_method("get_incident_log"):
+		return 0
+
+	var issued: int = 0
+	for e in reporter.get_incident_log():
+		if int(e.get("seq", 0)) <= after_seq:
+			continue # already had this one
+		if e.get("kind", "") != Incident.KIND_ARMED_ROBBERY:
+			continue # only robbery notarizes today; OVERDUE names no culprit
+		var subject_name: String = e.get("subject_name", "")
+		var sig: Dictionary = e.get("signature", {})
+		# NAME-IDENTIFIED REPORTS ONLY. A signature is deliberately not enough to
+		# notarize, for two independent reasons -- either alone would be
+		# disqualifying:
+		#
+		#  1. It is a GROUP key, not a hull key. Standing.subject_key's fallback
+		#     is `iff_tags + cross_section`, and iff_tags is a shared crypto set
+		#     -- every member of a band carries the same one. Issuing a
+		#     FLAG-WIDE warrant off that would outlaw a whole crew on one
+		#     robbery. Before notarization existed, such a warrant could only be
+		#     personal (the victim's own, sealed, harmless to others); making it
+		#     enforceable is precisely what turns the coarseness into a problem.
+		#  2. It would not match anyway. `cross_section` is a per-tick lerp
+		#     (CONTACT_FUSION_SMOOTHING) of an angle-dependent reading, so the
+		#     key frozen on the warrant and the key compute_standing builds from
+		#     the LIVE contact are near-certain to differ.
+		#
+		# Refusing is also the better fiction: an authority cannot charge "a
+		# ship, about this big". Give it a transponder read or it files the
+		# report as evidence and issues nothing -- which keeps going dark a real
+		# defence rather than a formality, exactly as the standings design
+		# intends. The victim keeps its own personal warrant either way.
+		# Standing.identifies(), NOT `!= ""`. A pirate running with share-name
+		# off broadcasts NAME_WITHHELD ("UNKNOWN"), which is a non-empty string
+		# that identifies nobody -- so an emptiness check here would have
+		# notarized it under the shared key `name:UNKNOWN` and marked every
+		# name-withholding hull in the cluster wanted. Same predicate that
+		# decides whether a DEMAND(IDENTIFY) was satisfied.
+		if not Standing.identifies_name(subject_name):
+			continue
+		post_warrant(Standing.OFF_ARMED_ROBBERY, subject_name, sig,
+			"reported at %s by %s" % [str(e.get("pos", Vector2.ZERO)), e.get("reporter", "?")])
+		issued += 1
+	return issued
 
 # M31 -- per-tick zone membership + edge-event detection. Scans the "ships"
 # group (stations live in it too, see _ready() add_to_group("ships")) for

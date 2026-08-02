@@ -88,6 +88,44 @@ var live_node: Node = null
 var docking_registry: Array = []
 var registry_seq: int = 0
 
+# M57 -- the incident log: this entity's own append-only record of things that
+# HAPPENED TO OR NEAR IT (design_ideas/2026-08-01-patrol_director_and_reporting.md
+# §4c, "verdict vs evidence"). Same storage contract as docking_registry above
+# and for the same reasons, so read that comment first; the differences are:
+#
+#   * NOT station-only. Every entity is a source of its own experience -- a
+#     hauler robbed in deep space writes here, on its own record, because there
+#     is no station out there and the victim IS the witness. So unlike
+#     docking_registry, this is meaningful on a ship record.
+#   * ENTRIES CARRY A POSITION. That is the entire point: a warrant is a
+#     VERDICT (keyed, overwriting, O(1) for compute_standing -- leave it alone),
+#     while an incident is EVIDENCE, one immutable record per occurrence, and
+#     you can always re-derive a verdict from evidence but never recover
+#     evidence from a verdict. Aggregation/recency/clustering is the READING
+#     director's policy, never baked in here.
+#
+# Entry shape: {"seq": int, "stamp": int, "kind": String, "subject_name":
+# String, "subject_flag": String, "pos": Vector2, "reporter": String}. Written
+# only via Ship.record_incident() / SourceLog.append_entry -- see
+# scripts/mail/source_log.gd for why seq is never rewound on a trim.
+var incident_log: Array = []
+var incident_seq: int = 0
+
+# M58 -- this entity's mailbag: source_id -> {version, confirmed_at}. What it
+# KNOWS, as opposed to incident_log above, which is what it WITNESSED.
+#
+# Holds no content -- see scripts/mail/mailbag.gd. Every source's log is
+# globally reachable on its own record; this vector of integers is what clamps
+# a holder's reads of them, and that clamp is the entire fog model. So this
+# field is small and stays small: it grows with the number of sources heard of,
+# never with the number of facts.
+#
+# On the record for the same reason as the two logs above (canonical across
+# demote, readable while dormant) -- and here it matters more, because a
+# dormant station that lost its mailbag would silently re-learn the world for
+# free the moment it woke up.
+var mailbag: Dictionary = {}
+
 # M53c Phase A -- the station economy (design_ideas/station_economy.md "The
 # state"). Lives HERE for the same reason docking_registry does: the RECORD is
 # canonical across demote/promote, and under BUBBLE most stations are dormant

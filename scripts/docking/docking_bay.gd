@@ -136,6 +136,20 @@ func _physics_process(delta: float) -> void:
 						if captured.has_method("get_active_transponder_data"):
 							subject = captured.get_active_transponder_data()
 						host.record_docking_event(subject.get("name", ""), subject.get("flag", ""), "DOCKED")
+					# M58 -- THE COURIER STEP. Mail rides hulls, and this dock is where a
+					# visiting ship's mailbag and the station's meet -- the only way news
+					# crosses a gap wider than radio range. No courier NPC is needed:
+					# haulers already fly station to station as a side effect of the
+					# economy, so the carrier network IS the trade network.
+					#
+					# The policy (receive freely, give deliberately, then notarize what we
+					# have authority over) lives on Ship, NOT here. Two reasons: a bay is a
+					# mechanism and should not hold faction policy, and preloading the mail
+					# module here re-entered the ship.gd <-> docking_bay.gd class cycle
+					# (ship.gd already preloads DockingBay), which surfaces as an
+					# unresolvable `Ship` and HANGS the test rather than failing it.
+					if host != null and host.has_method("exchange_mail_on_dock"):
+						host.exchange_mail_on_dock(captured)
 					# M53c Phase C -- the delivery seam: settle whatever cargo
 					# transaction the ship staged for THIS stop (design doc:
 					# "a delivery is an EVENT (a dock), not a cargo transfer").
