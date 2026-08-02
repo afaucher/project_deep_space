@@ -32,6 +32,7 @@ extends Node
 
 const SimHarness = preload("res://tactical_analysis/sim_runners/sim_harness.gd")
 const PirateGuild = preload("res://scripts/directors/pirate_guild.gd")
+const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
 
 # Hours, not minutes. A single interception is a multi-minute affair -- transit
 # to the hunting ground, lurk for a victim, intercept, demand, hold alongside,
@@ -51,6 +52,21 @@ const NUM_HAULERS := 8
 # window yields dozens of arrivals on its own, so the compression buys nothing
 # and costs realism. Empty = PirateGuild.DEFAULT_CONFIG untouched.
 const GUILD_CONFIG := {}
+
+# Hunt budget sweep (2026-08-01). The default 150s was measured to be shorter
+# than the cluster's own timescale -- a hauler round trip is ~900s and the
+# pirate can see 13% of a lane -- so this exists to test that diagnosis
+# directly rather than argue about it. $env:PIRATE_HUNT_SECONDS="900"
+# Generic env float, for the tradecraft sweep below.
+static func _envf(key: String, dflt: float) -> float:
+	var raw: String = OS.get_environment(key).strip_edges()
+	return float(raw) if raw.is_valid_float() else dflt
+
+static func _hunt_seconds() -> float:
+	var raw: String = OS.get_environment("PIRATE_HUNT_SECONDS").strip_edges()
+	if raw.is_valid_float() and float(raw) > 0.0:
+		return float(raw)
+	return 150.0
 
 # Per-strategy path so the three arms can run CONCURRENTLY without racing each
 # other's appends -- three processes appending to one file interleave rows and
@@ -91,7 +107,15 @@ func setup(main) -> void:
 	if DebugSettings:
 		DebugSettings.set_choice("station_economy_log", DebugSettings.StationEconomyLog.OFF)
 
-	guild = PirateGuild.new(GUILD_CONFIG)
+	var cfg: Dictionary = GUILD_CONFIG.duplicate(true)
+	cfg["hunt_seconds"] = _hunt_seconds()
+	cfg["colors_chance"] = _envf("PIRATE_COLORS_CHANCE", 1.0)
+	cfg["sos_reprisal_chance"] = _envf("PIRATE_SOS_REPRISAL", 0.0)
+	ThreatResponseLeaf.sos_chance = _envf("VICTIM_SOS_CHANCE", 1.0)
+	print("    hunt=%.0fs colors_chance=%.2f sos_reprisal=%.2f victim_sos_chance=%.2f" % [
+		cfg["hunt_seconds"], cfg["colors_chance"], cfg["sos_reprisal_chance"],
+		ThreatResponseLeaf.sos_chance])
+	guild = PirateGuild.new(cfg)
 	manager = SimHarness.build_live_home_cluster(main, [guild])
 	SimHarness.spawn_planner_haulers(manager, NUM_HAULERS)
 	clock = SimHarness.Clock.new(SETTLE_MINUTES, sim_minutes)

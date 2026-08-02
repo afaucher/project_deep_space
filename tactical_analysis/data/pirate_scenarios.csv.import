@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://obb8svtres14"
+
+[deps]
+
+files=["res://tactical_analysis/data/pirate_scenarios.speed.translation", "res://tactical_analysis/data/pirate_scenarios.trial.translation", "res://tactical_analysis/data/pirate_scenarios.took.translation", "res://tactical_analysis/data/pirate_scenarios.seconds.translation", "res://tactical_analysis/data/pirate_scenarios.pirate.translation", "res://tactical_analysis/data/pirate_scenarios.victim.translation", "res://tactical_analysis/data/pirate_scenarios.reached.translation"]
+
+source_file="res://tactical_analysis/data/pirate_scenarios.csv"
+dest_files=["res://tactical_analysis/data/pirate_scenarios.speed.translation", "res://tactical_analysis/data/pirate_scenarios.trial.translation", "res://tactical_analysis/data/pirate_scenarios.took.translation", "res://tactical_analysis/data/pirate_scenarios.seconds.translation", "res://tactical_analysis/data/pirate_scenarios.pirate.translation", "res://tactical_analysis/data/pirate_scenarios.victim.translation", "res://tactical_analysis/data/pirate_scenarios.reached.translation"]
+
+[params]
+
+compress=true
+delimiter=0

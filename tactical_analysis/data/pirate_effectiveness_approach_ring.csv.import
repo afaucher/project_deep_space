@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b1mjjtpeggnb"
+
+[deps]
+
+files=["res://tactical_analysis/data/pirate_effectiveness_approach_ring.sim.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.haulers.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.members.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.losses.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.returned.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.resolved.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.take.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.loss.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.final.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.backoff.translation"]
+
+source_file="res://tactical_analysis/data/pirate_effectiveness_approach_ring.csv"
+dest_files=["res://tactical_analysis/data/pirate_effectiveness_approach_ring.sim.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.haulers.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.members.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.losses.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.returned.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.resolved.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.take.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.loss.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.final.translation", "res://tactical_analysis/data/pirate_effectiveness_approach_ring.backoff.translation"]
+
+[params]
+
+compress=true
+delimiter=0

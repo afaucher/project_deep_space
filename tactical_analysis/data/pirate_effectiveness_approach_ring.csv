@@ -1,0 +1,2 @@
+strategy,sim_minutes,haulers,members,takes,losses,returned_empty,resolved,takes_per_hour,take_rate,loss_rate,final_cap,backoff
+APPROACH_RING,60,8,3,0,1,1,2,0.00,0.000,0.500,1,4.00

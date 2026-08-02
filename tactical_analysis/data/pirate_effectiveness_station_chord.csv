@@ -1,0 +1,3 @@
+strategy,sim_minutes,haulers,members,takes,losses,returned_empty,resolved,takes_per_hour,take_rate,loss_rate,final_cap,backoff
+STATION_CHORD,60,8,3,0,0,2,2,0.00,0.000,0.000,1,4.00
+STATION_CHORD,120,8,4,0,0,3,3,0.00,0.000,0.000,1,8.00

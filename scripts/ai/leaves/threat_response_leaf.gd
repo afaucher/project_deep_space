@@ -35,6 +35,12 @@ const Steering = preload("res://scripts/ai/steering.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
 
+# Probability a threatened hull actually broadcasts SOS. STATIC so a sim can
+# sweep it without touching authored ship data -- same shape as
+# PirateGuild.hunt_strategy. Defaults to 1.0: today's behaviour, unchanged
+# unless something deliberately dials it down.
+static var sos_chance: float = 1.0
+
 const RUN_SPEED_RATIO := 1.3              # my max_speed must exceed threat speed x this to run
 const RUN_SPEED_RATIO_PIRATE_FLAG := 1.6  # shown pirate colors weigh toward compliance
 const RUN_SPEED := 900.0
@@ -158,7 +164,19 @@ func tick(actor: Node, blackboard) -> int:
 	# involved. The track-lost/overtaken cleanups above and the was_held/
 	# compelled_stop-lapse check at the top of this function (on a LATER
 	# tick) turn it back off once the incident genuinely resolves.
-	if actor.has_method("set_sos_active"):
+	# CALLING FOR HELP IS ALSO A CHOICE (2026-08-01). This fired
+	# unconditionally, which made every incident a broadcast and meant the
+	# pirate's own risk calculus never varied. A hauler might stay quiet: the
+	# nearest patrol is often far outside its 30,000u comms reach anyway, and
+	# a pirate that hears the call may take it badly (see the reprisal roll in
+	# job_steps' TAKE_ALONGSIDE).
+	#
+	# Decided ONCE per incident and remembered on the blackboard -- this leaf
+	# ticks continuously, and a per-tick roll would strobe the distress badge
+	# on every observer's contact list.
+	if not blackboard.has_value("sos_decided"):
+		blackboard.set_value("sos_decided", randf() < sos_chance)
+	if blackboard.get_value("sos_decided", true) and actor.has_method("set_sos_active"):
 		actor.set_sos_active(true, Hail.NATURE_UNDER_ATTACK)
 
 	if will_run:

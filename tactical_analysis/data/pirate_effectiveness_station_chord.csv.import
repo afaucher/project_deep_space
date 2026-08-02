@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dowic80d0ewiw"
+
+[deps]
+
+files=["res://tactical_analysis/data/pirate_effectiveness_station_chord.sim.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.haulers.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.members.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.losses.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.returned.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.resolved.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.take.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.loss.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.final.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.backoff.translation"]
+
+source_file="res://tactical_analysis/data/pirate_effectiveness_station_chord.csv"
+dest_files=["res://tactical_analysis/data/pirate_effectiveness_station_chord.sim.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.haulers.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.members.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.losses.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.returned.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.resolved.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.takes.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.take.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.loss.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.final.translation", "res://tactical_analysis/data/pirate_effectiveness_station_chord.backoff.translation"]
+
+[params]
+
+compress=true
+delimiter=0

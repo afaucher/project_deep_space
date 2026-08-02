@@ -50,6 +50,38 @@ const DEFAULT_CONFIG := {
 	"takes_per_cap_raise": 2,
 	"losses_per_cap_cut": 2,
 	"cashin_radius": 8000.0,
+	# How long a member may lurk before withdrawing empty. A tunable rather
+	# than a literal because it is the dominant term in whether piracy works at
+	# all, and the default is measurably too small (2026-08-01):
+	#
+	#   station-to-station leg   ~300,000u at 700u/s cruise  = ~430s
+	#   round trip incl. docking                             = ~900s
+	#   pirate detection radius  20,000u (pinnace sensor_fwd, its only one)
+	#   -> the pirate can see 13% of a lane, for 17% of a hauler's round trip
+	#
+	# That predicts roughly one sighting per 3-6 hunts, and the three targeting
+	# strategies measured 1 sighting across 6 hunts -- so repositioning cannot
+	# help, the budget is simply shorter than the cluster's natural timescale.
+	# A hunt must also cover EXECUTION after a sighting: intercept, 25s of
+	# DEMAND_STOP patience, then an 8-12s hold, so ~60-90s of the budget is
+	# spoken for before the search even succeeds.
+	"hunt_seconds": 150.0,
+	# Tradecraft dials (2026-08-01), all defaulting to today's behaviour so
+	# nothing changes until a sim deliberately sweeps them.
+	#
+	# colors_chance -- how often a demand is made under hoisted pirate colours.
+	# A REAL tradeoff, not a free choice: FLAG_PIRATE is in everyone's default
+	# known_enemy_flags, so hoisting turns the pirate HOSTILE to every hull in
+	# transponder range and opens the only enforcement path that can touch it
+	# -- but threat_response_leaf already weighs shown colours toward
+	# compliance (RUN_SPEED_RATIO_PIRATE_FLAG 1.6 vs 1.3), so staying dark buys
+	# concealment at the cost of being taken less seriously.
+	#
+	# sos_reprisal_chance -- how often a pirate that notices its victim
+	# broadcasting punishes it. Gives the victim's call a price; see the
+	# reprisal block in job_steps' DEMAND_STOP.
+	"colors_chance": 1.0,
+	"sos_reprisal_chance": 0.0,
 	"hull_mix": [PirateOreShuttle, ArmedPinnace],
 	# Identity generation (the back channels). Names are GENERATED (first x
 	# second part), not drawn from a fixed pool, and a name once issued is
@@ -459,10 +491,12 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 		# victim-engagement cycles with nothing taken, SELECT_VICTIM aborts
 		# to "exit" (withdraw alive via the wormhole -> RETURNED_EMPTY),
 		# rather than thrashing the same lane until a patrol kills it.
-		{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY, "max_attempts": 4, "max_hunt_seconds": 150.0, "on_abort": "exit"},
+		{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY, "max_attempts": 4, "max_hunt_seconds": config.get("hunt_seconds", 150.0), "on_abort": "exit"},
 		{"verb": "INTERCEPT", "on_abort": "hunt",
 			"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"}, {"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
 		{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0, "on_abort": "hunt",
+			"colors_chance": config.get("colors_chance", 1.0),
+			"sos_reprisal_chance": config.get("sos_reprisal_chance", 0.0),
 			"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
 		{"verb": "TAKE_ALONGSIDE", "hold_time": 12.0, "range": 200.0, "on_abort": "hunt",
 			"abort_when": [{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
