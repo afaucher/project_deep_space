@@ -380,3 +380,107 @@ and a different economic footprint:
 The severity ladder should also feed `Standing`: robbery and murder are not the
 same offense, and the existing `_OFFENSE_TABLE` already grades response class
 and `authorizes_force` per offense — so escalation has somewhere to land.
+
+#### Prize-taking: the hull leaves under one of the pirate's clean IDs
+
+Definition (2026-08-02): a prize is not salvage. The captured hull receives a
+clean identity from the pirate's kit and **exits under pirate control**.
+
+**The architecture already fits.** Allegiance is a RECORD property applied at
+promotion — `cluster_manager.gd` does `if rec.behavior.get("pirate", false):
+add_child(AITreeFactory.build_pirate())`, and the papers ride the same record
+via `rec.behavior.get("identity_kit", [])`. So capture is *editing the victim's
+record*: set the pirate behavior, hand it a document, re-crew on the next
+promote. That is the same "the record is canonical" pattern the incident log,
+the mailbag and the docking registry all follow. No ownership concept to invent.
+
+**The kit becomes the single currency for both pirate behaviours, which is what
+makes it a real decision.** `Ship.identity_documents` is finite and
+`step_relight`'s `from_kit` ABORTS when exhausted. Under LANE_RUN a document is
+armour for yourself; under prize-taking it is a disguise for a stolen hull.
+Every clean ID is one or the other, never both — so kit size, not
+`hunt_seconds`, is plausibly the honest dial on pirate aggression.
+
+**The prize is self-incriminating, and this was designed in before anyone
+proposed prizes.** `identity_documents`' own comment: *"The documents stay
+aboard (used or not): a future ship-search mechanic reads THIS array and
+cross-references the wanted-names registry — a hold full of papers, some of them
+confirmed pirate names, IS the evidence."* M55e's boarding/inspection is exactly
+that reader. So the very document that lets a prize fly is what convicts it when
+a patrol boards. The counter-play is obvious and costly: run the prize with a
+thin kit aboard, or accept the risk.
+
+**A prize also inherits its victim's `incident_log` and `mailbag`** — including
+the incident naming its own captor. Capturing a hull means capturing the
+evidence against you, which is what makes the log-wiping idea a real chore
+rather than flavour, and it stacks with the papers: wiping the log does not
+remove the documents.
+
+**Economically the three rungs are different in kind, not degree:**
+
+| Rung | Effect on the traffic pool |
+|---|---|
+| Rob | a **tax** — the hull returns to service |
+| Destroy | a **deletion** — hull gone, replacement scheduled by the guild |
+| **Prize** | a **transfer** — hull leaves the economy AND joins the other side |
+
+Transfer is the strongest of the three and should be rarest. It also compounds:
+a prize given the band's `iff_tags` joins the tier-1 relay net, so a captured
+hull becomes a node in the pirate information network — the mail model's own
+mechanics applied to a stolen ship, again with nothing new built.
+
+Depends on: crew disposition (a prize with its original crew aboard is
+incoherent), so this sits behind the human-space axis and the kill/take-crew
+rungs.
+
+### RESULT: the passive array works (A/B, 2026-08-02)
+
+Identical config both sides — 6-8 concurrent pirates, arrivals 20-60s, hunt
+300s, 10 haulers, 60 game-minutes. One variable changed: ArmedPinnace gains a
+45,000u `passive_em` array.
+
+| | before | after |
+|---|---|---|
+| robberies completed | 0 | **2** |
+| incidents recorded | 0 | 2 |
+| stations holding foreign news | 0 of 13 | **7 of 13** |
+| patrols holding foreign news | 0 of 2 | **2 of 2** |
+| risk p95 / max | 0.0 / 0.0 | 4.6 / 5.3 |
+| decisions changed by risk | 0 of 5206 | **250 of 5199** |
+| chain breaks at | stage 1 | **stage 4** |
+
+Encounter was the binding constraint, as diagnosed. The chain now runs four
+stages deep.
+
+**Two things previously unverifiable are now confirmed in a live campaign:**
+
+- **Tier-1 mailbag relay works.** Patrols hold foreign news 2 of 2, and the
+  authored patrol never docks — so that news arrived by radio. This is the M58
+  half that was missing entirely, verified end to end rather than by a test that
+  hand-set the mailbag.
+- **Cargo actually reroutes.** 250 of 5,199 decisions differ from their
+  risk-blind counterfactual.
+- **Latency, measured**: a station learned in ~0.1s (kin relay), a patrol in
+  ~1005s (~17 min). "Information has a position and a velocity", as a number.
+
+**Stage 4 is probably CORRECT behaviour, not a break.** The comply-or-run log
+shows `x1.6` ratios — pirates demanding under the PIRATE flag — and pirates run
+`GO_DARK`, so the victim holds no transponder record, `pirate_claimed` is `""`,
+and `notarize_from` refuses. That is the deliberate 2026-08-01 rule: an
+authority cannot charge "a ship, about this big". **Going dark defeats
+notarization by design.** Two hulls were also lost, so a victim may not have
+survived to report. The instrument cannot yet separate those two causes — it
+should record WHY notarization declined.
+
+**Instrument bug found by this run.** The precondition line printed "RISK NEVER
+GOT BIG ENOUGH ... UNTESTED" while the counterfactual showed 250 changed
+decisions. `HYSTERESIS_MARGIN` is the bar for RE-PLANNING AN EXISTING JOB, not
+for changing which route wins a fresh search; near-equal lanes flip on a few
+points. Recalibrated: the check now only distinguishes "risk was literally
+always zero" from "risk existed — read the counterfactual", because the
+counterfactual is the direct measurement and the margin comparison was giving
+exactly the wrong verdict.
+
+Still open: takes remain rare (2 in 60 min at 6-8x authored pressure), 17 hunts
+still ended finding nobody, and `returned_empty` is 14. Encounter is improved,
+not solved — which is what LANE_RUN is for.

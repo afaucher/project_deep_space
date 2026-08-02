@@ -340,12 +340,21 @@ func _report() -> void:
 	print("  routing decisions observed   : %d" % DecisionProbe.total)
 	print("  risk p95 / max               : %.1f / %.1f  (margin to beat: %.1f)" % [p95, DecisionProbe.risk_max(), margin])
 	if DecisionProbe.total == 0:
+	# CALIBRATION NOTE (2026-08-02): HYSTERESIS_MARGIN is the bar a competing
+	# route must clear to REPLAN AN EXISTING JOB -- it is NOT the bar for
+	# changing which route WINS a fresh search. Two near-equal lanes flip on a
+	# few points. A run measured p95 4.6 against margin 60 while the
+	# counterfactual showed 250 of 5199 decisions changed, so comparing to the
+	# margin gave exactly the wrong verdict. THE COUNTERFACTUAL IS THE DIRECT
+	# MEASUREMENT; this line only distinguishes 'risk was literally always zero'
+	# (nothing to measure) from 'risk existed' (read the counterfactual).
+	if DecisionProbe.total == 0:
 		print("  >>> NO DECISIONS OBSERVED -- haulers never replanned; nothing below is measurable")
-	elif p95 < margin:
-		print("  >>> RISK NEVER GOT BIG ENOUGH -- the cargo half of M59 is UNTESTED by this run,")
-		print("      whatever the traffic did. Raise pirate pressure or run longer.")
+	elif DecisionProbe.risk_max() <= 0.0:
+		print("  >>> RISK WAS ALWAYS ZERO -- the cargo half of M59 is UNTESTED by this run,")
+		print("      whatever the traffic did. No robberies fed it. Raise pressure or run longer.")
 	else:
-		print("  >>> risk cleared the margin -- diversion was possible, so the counts below mean something")
+		print("  >>> risk was non-zero -- the counterfactual below is the real answer")
 
 	print("\n=== COUNTERFACTUAL: did risk change any decision? ===")
 	print("  decisions changed by risk    : %d of %d" % [DecisionProbe.changed_by_risk, DecisionProbe.total])
