@@ -210,9 +210,17 @@ func _sample_chain() -> void:
 				continue
 			var key := "%d:%d" % [rec.id, int(e.get("seq", 0))]
 			if not _chain.has(key):
+				# Distance to the nearest station AT THE ROBBERY. Without it a
+				# latency figure is uninterpretable: a 0.1s "station learned"
+				# reads as absurd until you know the victim was inside a
+				# station's 30,000u comms envelope, in which case one 15Hz relay
+				# tick explains it exactly. Measured, not inferred from
+				# constants -- the guild's _R_STATION_AVOID is 25,000, i.e.
+				# SMALLER than the radio range it is meant to keep clear of.
 				_chain[key] = {"t_robbery": int(e.get("stamp", frame)),
 					"t_station": -1, "t_patrol": -1, "t_sweep": -1,
-					"src": rec.id, "seq": int(e.get("seq", 0))}
+					"src": rec.id, "seq": int(e.get("seq", 0)),
+					"station_dist": _nearest_station_dist(e.get("pos", Vector2.ZERO))}
 	for key in _chain:
 		var c: Dictionary = _chain[key]
 		if c["t_station"] >= 0 and c["t_patrol"] >= 0:
@@ -226,6 +234,13 @@ func _sample_chain() -> void:
 			elif _is_patrol_rec(rec2):
 				if c["t_patrol"] < 0:
 					c["t_patrol"] = frame
+
+func _nearest_station_dist(p: Vector2) -> float:
+	var best: float = INF
+	for rec in manager.records:
+		if _is_station(rec):
+			best = minf(best, p.distance_to(rec.pos))
+	return best
 
 func _is_patrol_rec(rec) -> bool:
 	var n = rec.live_node
@@ -369,8 +384,15 @@ func _report() -> void:
 			lat_patrol.append((c["t_patrol"] - c["t_robbery"]) / 60.0)
 	print("\n=== LATENCY (game-seconds from robbery to knowing) ===")
 	print("  robberies tracked            : %d" % _chain.size())
-	print("  reached a station            : %d  (median %s s)" % [lat_station.size(), _median(lat_station)])
-	print("  reached a patrol             : %d  (median %s s)" % [lat_patrol.size(), _median(lat_patrol)])
+	print("  reached a station            : %d  (median %s s%s)" % [
+		lat_station.size(), _median(lat_station), " -- N=1, NOT a distribution" if lat_station.size() == 1 else ""])
+	print("  reached a patrol             : %d  (median %s s%s)" % [
+		lat_patrol.size(), _median(lat_patrol), " -- N=1, NOT a distribution" if lat_patrol.size() == 1 else ""])
+	# The number that makes a latency figure interpretable at all.
+	for key in _chain:
+		var cc: Dictionary = _chain[key]
+		print("    robbery %s: %.0fu from nearest station (station comms reach 30,000u)" % [
+			key, cc.get("station_dist", -1.0)])
 
 	print("\n=== SWEEP OUTCOMES (motion vs effect) ===")
 	print("  sweeps started               : %d" % sweeps_started)

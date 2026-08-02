@@ -484,3 +484,43 @@ exactly the wrong verdict.
 Still open: takes remain rare (2 in 60 min at 6-8x authored pressure), 17 hunts
 still ended finding nobody, and `returned_empty` is 14. Encounter is improved,
 not solved — which is what LANE_RUN is for.
+
+### Tradecraft flaw: the station keep-away is smaller than station RADIO range
+
+Surfaced by the latency instrument on 2026-08-02, and it is the kind of thing
+only a latency measurement can surface — a counter would never have shown it.
+
+The A/B reported a station learning of a robbery **0.1 game-seconds** after it
+happened. Nothing should learn that fast unless the robbery occurred effectively
+at a station. The arithmetic:
+
+| | |
+|---|---|
+| `PirateGuild._R_STATION_AVOID` | **25,000u** |
+| Station comms range | **30,000u** |
+| `DATALINK_RELAY_HZ` | 15 → one tick ≈ 0.067s |
+
+**A pirate lurking at the minimum legal keep-away sits 5,000u INSIDE a
+station's radio envelope.** The victim is a Drift hauler sharing `HOME_IFF` with
+a Drift station, so its mailbag relays to that station in a single tick. 0.1s is
+not a bug in the measurement; it is the correct consequence of a keep-away that
+does not clear the thing it is keeping away from.
+
+The constant's own comment explains why: it was added after a playtest where "a
+pirate lurked, robbed, and went dark ON Drift Market's doorstep". It fixed
+PHYSICAL proximity. **Radio proximity did not matter until M58 existed** — the
+information economy it now defeats was not built when the number was chosen.
+
+**Proposed:** `_R_STATION_AVOID` must exceed the link range a victim can hold
+with a station (`min(victim_comms, station_comms)` = 30,000 today), with margin
+— so 35,000+. Note the cost is real and is arguably the point: lanes TERMINATE
+at stations, so a bigger keep-away pushes pirates into the middle of a lane,
+far from help, which is exactly the fiction wanted.
+
+**NOT changed yet, deliberately.** It moves encounter geometry, which is the
+variable the passive-array A/B just measured; stacking them would make neither
+attributable.
+
+**Instrument updated** so this is measured rather than inferred from constants:
+the latency chain now records distance-to-nearest-station at the moment of each
+robbery, and the report no longer calls a single sample a "median".
