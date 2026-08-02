@@ -36,7 +36,7 @@ resting on it needs rethinking, so they are written down to be re-checkable.
 | C9 | Pirate cash-out needs a 10s check-in inside an 8000u ring — crossed in ~11s at exit speed | `pirate_guild.gd:45` `policy_period`, `:52` `cashin_radius`, `:229` `vanished_near_wormhole` | ✅ |
 | C10 | Guild learning is **global, no spatial axis** | `pirate_guild.gd:134–135` `profitless_streak` / `backoff_factor` | ✅ |
 | C11 | `victim.looted` is **write-only** — set once, no reader outside tests | `job_steps.gd:1201` (sole write) | ✅ |
-| C12 | Cargo capacity is computed for **validation only**, nothing reads it at runtime | `component_spec.gd:12`, `ship_design_validator.gd:162` | ✅ |
+| C12 | *(corrected 2026-08-02)* `cargo_capacity` is **dead code** — assigned at `ship_design_validator.gd:162` and read by nothing, not even the validator that computes it (the next line tests `human_capacity`). The earlier wording "validation only" was too generous. Note the COMPONENT is fully live: it contributes mass via `ship.gd`'s `area * density` loop, plus health, collision and silhouette — so authoring a bay changes a hull's speed | `component_spec.gd:12`, `ship_design_validator.gd:162`, `ship.gd:1895` | ✅ |
 | C13 | **The docking registry already lives on the station RECORD, not on a director**, and already survives promote/demote | `cluster_entity.gd:88` `docking_registry`; `test_registry_survives_demote.gd` | ✅ |
 | C14 | The registry has **no consumer** — written on DOCKED, read only by its own tests | `docking_bay.gd:134–138` (write); readers: tests only | ✅ |
 | C15 | `station_economy` walks all records **deliberately** — it is bookkeeping, not an observer | `station_economy.gd:75–79` + comment | ✅ |

@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://c4sivvh640fpx"
+
+[deps]
+
+files=["res://tactical_analysis/data/information_loop.takes.translation", "res://tactical_analysis/data/information_loop.incidents.translation", "res://tactical_analysis/data/information_loop.stations.translation", "res://tactical_analysis/data/information_loop.stations.translation", "res://tactical_analysis/data/information_loop.notarized.translation", "res://tactical_analysis/data/information_loop.patrols.translation", "res://tactical_analysis/data/information_loop.patrols.translation", "res://tactical_analysis/data/information_loop.sweeps.translation", "res://tactical_analysis/data/information_loop.haulers.translation"]
+
+source_file="res://tactical_analysis/data/information_loop.csv"
+dest_files=["res://tactical_analysis/data/information_loop.takes.translation", "res://tactical_analysis/data/information_loop.incidents.translation", "res://tactical_analysis/data/information_loop.stations.translation", "res://tactical_analysis/data/information_loop.stations.translation", "res://tactical_analysis/data/information_loop.notarized.translation", "res://tactical_analysis/data/information_loop.patrols.translation", "res://tactical_analysis/data/information_loop.patrols.translation", "res://tactical_analysis/data/information_loop.sweeps.translation", "res://tactical_analysis/data/information_loop.haulers.translation"]
+
+[params]
+
+compress=true
+delimiter=0

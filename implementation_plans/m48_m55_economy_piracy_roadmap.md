@@ -421,6 +421,38 @@ what this milestone was missing.
   stations do, so the primary hauler needs a design change plus
   `test_ship_designs` revalidation), and area-units need calibrating into lots.
   This is what makes *which hull you fly* an economic decision.
+- **M55f -- the validator learns what a hauler is.** The CargoShuttle shipped
+  with NO cargo bay and validated clean, because `if not has_cargo_bay` sits
+  inside the STRUCTURE-tier branch -- the one rule that would have caught a
+  cargo ship with no cargo hold applies only to stations. Fixing the shuttle
+  without fixing this just waits for the next hull.
+
+  The catch, and it is the interesting part: `validate(ship)` keys on
+  `ship.ship_tier`, and **no role metadata exists** -- tier is a size/capability
+  band, not a purpose. So this cannot be inferred from the parts. A validator
+  can check that a hull's components are mutually CONSISTENT; it cannot check
+  them against an intent nobody stated. "This ship is meant to haul" is the one
+  thing "a ship is its parts" genuinely cannot express, because it is about
+  purpose rather than construction.
+
+  So the hull must declare it. Scope, deliberately narrow:
+  - a declared role/capability on Ship (set before `super()`, same idiom as
+    `ship_tier`), defaulting to none so every existing hull is unaffected;
+  - validator rule: a hull declaring itself a hauler MUST have a `cargo_bay`,
+    and its derived capacity must clear a floor -- no vestigial bays;
+  - **the same rule for crew**: a hull declaring itself crewed MUST have
+    `living_quarters`. Every warship in the fleet currently has NONE, by the
+    identical STRUCTURE-tier oversight -- see "The human axis" below. Build the
+    rule for both axes at once or it gets written twice;
+  - authored on CargoShuttle, Freighter and the M55d mid-tier;
+  - a `test_ship_designs` case that FAILS on a hauler with no bay, which is the
+    assertion whose absence let this through.
+
+  Keep it a declaration, not a taxonomy. A full role enum invites behaviour to
+  start keying off it, and that is a much larger change than this milestone
+  wants. Sequence it AFTER M55c authors the bays, or the rule fails the catalog
+  on its first run.
+
 - **M55d -- a mid-tier hull.** The roster is a cliff: a small shuttle and the
   largest hull in the fleet, nothing between. Content, fully separable.
 - **M55e -- boarding/inspection.** The alongside-hold formalized: patrols and the
@@ -430,6 +462,224 @@ what this milestone was missing.
   hubs consume, pirates leak it.
 - Tests: manifest conservation across load/theft/unload; a robbed hauler cannot
   deliver what it no longer has; inspection reads.
+
+### The volume ratios, measured 2026-08-02
+
+**Capacity TODAY is flat.** `_score_pair` computes
+`amount = min(LOT_SIZE, min(pickup_qty, dropoff_qty))`, so **every hull carries
+up to 4.0 lots** and nothing reads `cargo_bay` at runtime. A CargoShuttle and
+the Freighter haul identically. That is the baseline any proposal is measured
+against, not the validator formula below.
+
+**What the validator's formula WOULD give**
+(`capacity = cargo_area / ComponentSpec.CARGO_AREA_PER_UNIT`, constant 10.0):
+
+| Hull | cargo rect(s) | area | formula | today |
+|---|---|---|---|---|
+| **CargoShuttle** | *none authored* | 0 | **0** | 4.0 |
+| Freighter | `Rect2(9,25,52,36)` x2 mirrored | 3,744 | 374 | 4.0 |
+| SmallStation | `Rect2(-20,20,40,100)` | 4,000 | 400 | n/a (bins) |
+| MediumStation | `Rect2(-50,20,100,160)` | 16,000 | 1,600 | n/a (bins) |
+| AsteroidStation | `Rect2(-30,-15,25,30)` | 750 | 75 | n/a (bins) |
+| DefencePod | `Rect2(0,-65,15,10)` | 150 | 15 | n/a (bins) |
+
+Against Refinery Prime's entire ORE bin of **39.6 lots**, the formula would give
+a Freighter 374 lots -- 9.5x a whole refinery bin. Two orders of magnitude out,
+because `CARGO_AREA_PER_UNIT = 10` is a VALIDATION constant ("is capacity
+non-zero?") and was never economic.
+
+**The CargoShuttle is simply MISAUTHORED, and the validator aimed its check at
+the wrong tier.** `if not has_cargo_bay` lives inside the STRUCTURE-tier branch;
+CargoShuttle is `Tier.LIGHT`. So the one rule that would have caught a cargo
+ship with no cargo bay applies only to stations. Fixing the hull is easy; **M55f above is
+the change that stops it recurring**, and it is part of this milestone.
+
+**Both the geometry and the constant are free parameters**, so any target ratio
+is reachable -- this is a design choice, not a discovered constraint. The real
+question is what stays fictionally coherent: a visibly small shuttle must not
+out-carry a freighter, and the ladder wants shuttle < mid-tier < freighter with
+the lower rungs small enough that several ships still work one run (the design
+doc's "a lot must stay small relative to a need"). That is what makes **M55d's
+mid-tier hull load-bearing rather than optional** -- with only two rungs, any
+calibration that keeps a shuttle useful makes the freighter enormous.
+
+**Stations must NOT use this rule, and the reason is cleaner than "different
+units": a station bin is POLICY, not physical space.** It is how much of a
+commodity that holder is willing to hold, authored from throughput
+(`rate_hint * hours`, floored at `MIN_BIN_LOTS`); when it is full the station
+simply stops accepting. So bins have no obligation to sum to a station's
+`cargo_bay` area, and the apparent over-subscription (5+ commodities against
+~128 geometric lots) is not a conflict at all -- it was a category error in an
+earlier draft of this section.
+
+That also settles what a station's `cargo_bay` component IS: structure. Mass,
+hitpoints, something to shoot off. It carries no capacity meaning, and
+`CARGO_AREA_PER_UNIT` should never be applied to one.
+
+The refusal is already built and already honest: `deliver()` clamps to the bin,
+and `fulfill()` returns the ACTUAL delta with payout computed on what landed,
+never on what was asked. Keep cargo-bay-derived capacity for SHIPS only.
+
+**Consequence for M55a, worth deciding now rather than discovering.** Today a
+partial delivery just means a smaller payout -- the ship holds nothing, so there
+is no remainder to strand. Once cargo is a physical manifest, **a clamped
+delivery leaves the hauler holding the difference**, which is a state that does
+not exist anywhere in the game today. A hauler can arrive at a bin that filled
+while it was in transit and be left with lots it cannot sell here.
+
+Preferred answer: hold the remainder and re-plan (the planner already searches
+for an open IMPORT posting; a laden hull just constrains its next search to its
+own manifest). It is nearly free, and it makes the risk term more interesting
+rather than less -- a laden hauler avoiding a lane has more to lose. It needs
+ONE escape hatch, though, or a hull can hold an unwanted commodity forever:
+dump after N failed re-plans, or a forced sale at a discount. Pick one in M55a;
+do not leave it undefined, because "hauler idles laden, permanently" reads
+exactly like the job-runner bug class that has already cost this project a
+faction.
+
+### Precisely what does and does not read `cargo_bay`
+
+Stated exactly, because an earlier draft of this section said "nothing reads
+cargo_bay" and that is wrong in both directions.
+
+**The COMPONENT is fully live.** `ship.gd`'s mass loop is
+`total += area * c["density"] * MASS_SCALE` over every component, so a cargo bay
+contributes **mass**. It also carries health (damage model), a rect (collision,
+silhouette, overlap and connectivity validation) and its own `COMPONENT_BANDS`
+entry. It behaves like any other part.
+
+**The CAPACITY is dead code.** `ship_design_validator.gd:162` assigns
+`var cargo_capacity = total_cargo_area / CARGO_AREA_PER_UNIT` and **nothing
+reads it** -- not the economy, and not even the validator that computes it (the
+line below tests `human_capacity`). The comment above it, "log a warning if
+capacity is unusually small (e.g. 0)", describes a check that exists for people
+and was never written for cargo. That is the actual state: not "validation
+only", but computed and discarded.
+
+**Consequence, and it widens the sim requirement.** Because mass derives from
+component area, **authoring a cargo bay onto the CargoShuttle makes it heavier
+and therefore slower.** The shuttle's entire hull is ~1,100 area units; a bay
+big enough to matter is a large fraction of that, so this is a double-digit
+percentage mass change, not a rounding error.
+
+That lands directly on a measured relationship: `pirate_scenarios` rates takes
+against victim speed, and the designed curve is "slow prey always caught, prey
+faster than the pirate always escapes". Making the primary hauler heavier moves
+it along that curve. So M55c needs **fresh piracy runs as well as fresh economic
+ones** -- and the two interact, because slower haulers also mean longer transit
+and therefore different throughput on every lane.
+
+### Cargo volume is PHYSICAL; person-area is a STANDARD OF LIVING
+
+The two constants look like the same mechanism and must not be treated the same
+way:
+
+- **`CARGO_AREA_PER_UNIT` stays ONE global constant.** A lot of ore occupies the
+  same space in a shuttle's hold as in a freighter's. Capacity must relate to
+  the authored bay volume consistently across every hull -- no per-class fudge
+  factor, because there is no fiction that justifies one. Recalibrate the single
+  number; do not band it.
+- **`AREA_PER_PERSON` SHOULD band by class.** Space per person is comfort, not
+  volume: a marine hot-bunking, a merchant officer and a station resident
+  legitimately differ several-fold. `COMPONENT_BANDS` is already tier-keyed, so
+  this is an existing idiom rather than a new mechanism.
+
+Getting this backwards in either direction is the trap. Banding cargo would let
+a hull cheat physics; refusing to band people forces a warship berth and a
+civilian apartment to be the same room.
+
+### The warship catalog predates cargo AND crew -- revisit, do not patch
+
+Frigate, LightAttackCraft, ArmedPinnace and CargoShuttle were all authored
+before either system existed, which is why they have neither quarters nor bays.
+So the right move is a deliberate catalog design pass (M9c-shaped work), not a
+minimal component bolted on to satisfy a new validator rule.
+
+**This widens the re-baseline requirement again, and this time onto combat.**
+Mass derives from component area, so adding quarters to a Frigate or an
+ArmedPinnace makes it heavier and slower -- and pirate-vs-prey outcomes are
+explicitly a speed relationship (`pirate_scenarios` asserts "slow prey caught,
+fast prey escapes"). A catalog pass therefore moves:
+
+- every economy number (haul capacity, transit time) -> re-run `economy_traffic`
+- every piracy number (chase outcomes) -> re-run `pirate_scenarios`
+- combat-outcome tests that assert margins (`test_ai_duel` and friends), which
+  CLAUDE.md already warns are jitter-sensitive -- expect to re-check those
+  specifically, and re-run a failure SOLO to compare the NUMBER before assuming
+  contention.
+
+Sequence the catalog pass as its own step with its own gate, rather than folding
+it into a milestone that also changes economic semantics. Two variables at once
+is how the LOT_SIZE regression became hard to read.
+
+### The human axis -- same machinery, same gap, deliberately its own milestone
+
+`AREA_PER_PERSON := 40.0` is the exact parallel of `CARGO_AREA_PER_UNIT`, and
+`living_quarters` is already authored across the fleet. Implied crew today:
+
+| Hull | living area | crew @ 40 |
+|---|---|---|
+| MediumStation | 4,000 + 16,000 = **20,000** | **500** |
+| SmallStation | 4,000 | 100 |
+| Pinnace | 3 x 400 = 1,200 | 30 |
+| AsteroidStation | 540 | 13.5 |
+| Freighter | 460 | 11.5 |
+| DefencePod | 120 | 3 |
+| MobileHome | 50 | 1.3 |
+| **Frigate / CargoShuttle / LAC / ArmedPinnace** | **none** | **0** |
+
+Two findings:
+
+**Every warship has zero crew space**, for the identical reason the CargoShuttle
+has no cargo bay -- the `living_quarters` requirement lives in the same
+STRUCTURE-tier branch, so it only ever applied to stations. **M55f therefore
+generalizes**: a hull declares its role, and the validator checks
+role-appropriate components. A hauler needs a bay; a crewed ship needs quarters.
+One rule, both axes -- do not build it cargo-only.
+
+**A MediumStation's habitat (20,000) EXCEEDS its cargo bay (16,000).** It is
+already authored as a town of ~500 people, not a warehouse. That is a large
+existing asset nothing currently reads.
+
+**Why 40 is wrong as a universal**, which is the actual design question: one
+number is currently serving a marine's bunk, a merchant's cabin and a civilian
+apartment. Those plausibly differ by 5-10x. The fix uses machinery that already
+exists -- `COMPONENT_BANDS` in `component_spec.gd` is already tier-keyed, so
+per-class person-area is the same idiom, not a new mechanism. Rough shape:
+warship berthing (cramped, hot-bunking) well under 40, merchant crew at ~40 as
+the anchor, passenger accommodation above it, station habitation highest.
+
+Two payoffs worth naming, because they connect to work already scoped:
+
+- **Marines gate boarding (M55e).** A warship's quarters bound how many boarders
+  it can put across. That turns the human axis from flavour into the input of a
+  mechanic this milestone already contains.
+- **Station population could drive CIVILIAN demand** -- but keep the split clean,
+  and it follows directly from "bins are policy": industrial converter
+  consumption stays authored (it is about machines), while civilian consumption
+  (food, GOODS) could derive from population. That gives those commodities a
+  demand driver tied to something physical, destroyable and defensible, without
+  overriding the industrial rates that have been measured.
+
+**Scope note: this is a SIBLING milestone, not part of M55.** It shares the
+machinery (area -> capacity via a per-class constant) and the validator fix, so
+M55f should be built to cover both. Everything else here -- per-class banding,
+marines, population-driven demand -- is its own vertical and would balloon a
+milestone that is already a hull-authoring task plus two sim re-baselines.
+
+### Any capacity change REQUIRES fresh economic sim runs
+
+Non-negotiable, and it is the main cost of this milestone rather than the code.
+`LOT_SIZE` is the binding constraint on the whole cluster economy -- at 1.0 it
+starved Refinery Prime while ore piled up unsold at every mine, and the 4.0
+value was arrived at by measuring 180 sim-minutes, not by taste. Replacing one
+flat number with per-hull capacity moves that constraint for every lane at once.
+
+So M55c is not done when the code compiles. It is done when `economy_traffic`
+AND `pirate_scenarios` have been re-run and the producer side checked (authored rates, never measured
+ones -- backpressure makes a healthy source read as a weak one, which is how
+the original diagnosis went wrong). Expect to re-baseline; treat a moved number
+as a new measurement, not a regression.
 
 ### M55 and M59 are two halves of one loop
 
