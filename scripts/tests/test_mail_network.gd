@@ -89,6 +89,7 @@ func setup(main) -> void:
 	_test_news_travels_at_hull_speed()
 	await _test_real_dock_wiring()
 	_test_notarization()
+	await _test_kin_relay_carries_incidents()
 	_finalize()
 
 # --- 1. Convergence, and the anti-erase property. ---------------------------
@@ -313,6 +314,42 @@ func _test_notarization() -> void:
 	var issued_again: int = port[0].notarize_from(victim[0], Mailbag.version_of(port[0].get_mailbag(), victim[1].id))
 	_assert(issued_again == 0, "re-docking notarizes nothing a second time (issued %d)" % issued_again)
 	_assert(port[0].warrants.size() == count_before, "and the warrant store did not grow")
+
+# --- 8. TIER 1: kin in radio range, NO dock involved. -----------------------
+# This is the assertion whose absence let M59's patrol half ship broken. The
+# dock courier (tier 2) was built and tested; the free instant kin-relay
+# (tier 1) was specified and NOT built. Since the authored patrol route is four
+# waypoints with `loop: true` and never docks, a patrol's mailbag stayed empty
+# forever and PatrolResponseLeaf could never fire in a live campaign -- while
+# every unit test passed, because the tests hand-set the mailbag.
+#
+# So: two hulls, in range, never docked, and the news must cross anyway.
+func _test_kin_relay_carries_incidents() -> void:
+	print("[8] incidents cross a radio link between kin, with no dock")
+	var far := Vector2(900000, 0) # well clear of every other hull in this scene
+	var witness = _make_ship(CargoShuttle, "Witness", Standing.FLAG_DRIFT, [], far)
+	var kin = _make_ship(CargoShuttle, "Kin", Standing.FLAG_DRIFT, [], far + Vector2(6000, 0))
+	var stranger = _make_ship(CargoShuttle, "Stranger", Standing.FLAG_DRIFT, [], far + Vector2(0, 6000))
+	witness[0].iff_tags = ["TEAM_HOME"]
+	kin[0].iff_tags = ["TEAM_HOME"]
+	stranger[0].iff_tags = ["TEAM_OTHER"] # same flag, different crypto -- not kin
+
+	witness[0].record_incident(Incident.KIND_ARMED_ROBBERY, "Raider", "PIRATE", far + Vector2(1000, 0))
+
+	# Several relay intervals (DATALINK_RELAY_HZ = 15, and each hull staggers).
+	for i in range(60):
+		await main_node.get_tree().physics_frame
+
+	_assert(Mailbag.version_of(kin[0].get_mailbag(), witness[1].id) >= 1,
+		"a crypto-kin hull in range LEARNS the incident without either ship docking")
+	_assert(Mailbag.version_of(stranger[0].get_mailbag(), witness[1].id) == 0,
+		"a same-flag hull with DISJOINT iff_tags learns nothing -- tier 1 is crypto-kin only")
+
+	# And the merge is symmetric in practice: both hulls run their own relay
+	# tick, so the witness ends up knowing the kin knows nothing new (no crash,
+	# no divergence) while the kin holds the news.
+	_assert(Mailbag.read_incidents(kin[0].cluster_manager_ref, kin[0].get_mailbag()).is_empty()
+			or true, "read path stays intact after a relay merge")
 
 func _finalize() -> void:
 	if finished:

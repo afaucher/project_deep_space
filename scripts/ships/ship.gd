@@ -4124,6 +4124,30 @@ func _physics_process(delta: float) -> void:
 			if not _has_los(s):
 				continue # Line of sight blocked
 
+			# M59 fix -- MAILBAG RELAY: tier 1 of the two-tier transport
+			# (design_ideas/mail_network.md), which M58 specified and did not
+			# build. Incidents moved ONLY on a dock, and the authored patrol
+			# route is four waypoints with `loop: true` and no DOCK verb -- so a
+			# patrol's mailbag stayed empty for an entire campaign and
+			# PatrolResponseLeaf bailed on its first guard every tick. Warrants
+			# relayed by radio; the map they would be acted on did not.
+			#
+			# Same link, same gates, same "one direction per call" rule as the
+			# warrant merge below: every hull runs its own relay tick, so kin in
+			# mutual range converge symmetrically without anyone doing a two-way
+			# merge. (The dock exchange stays deliberately asymmetric -- that is
+			# a transaction between strangers; this is your own crypto-kin.)
+			#
+			# Guarded on has_news_for(), which is an allocation-free O(sources)
+			# scan, because deliver() allocates per source and this loop runs at
+			# DATALINK_RELAY_HZ per candidate. The overwhelmingly common case is
+			# "nothing new", and it now costs a compare.
+			if s.has_method("get_mailbag"):
+				var their_bag: Dictionary = s.get_mailbag()
+				var my_bag: Dictionary = get_mailbag()
+				if Mailbag.has_news_for(their_bag, my_bag):
+					Mailbag.deliver(my_bag, their_bag, s.source_id(), s.get_incident_seq(), Engine.get_physics_frames())
+
 			# M52b -- warrant relay: same link as the contact merge below, own
 			# merge rule (latest-timestamp/highest-status wins on event_key --
 			# Standing.merge_warrant, not the severity compare-and-copy
