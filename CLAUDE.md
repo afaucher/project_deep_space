@@ -76,6 +76,20 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   active debugger` and `Capture not registered: 'beehave'` appear on PASSING
   tests too (beehave's debugger teardown). Don't read them as the cause of a
   failure; scan for `ASSERT FAILED` / `Parse Error` instead.
+- **Adding a `preload` const can create a CLASS CYCLE that HANGS the test, not
+  fails it.** Observed 2026-08-01: `ship.gd` already does
+  `const DockingBay = preload(".../docking_bay.gd")`, and `docking_bay.gd`
+  refers to `Ship` by global class name — fine, because a bare `class_name`
+  reference resolves lazily. Adding *any* `const X = preload(...)` to
+  `docking_bay.gd` forces that script to resolve earlier and closes the loop:
+  the errors read `Parse Error: Could not resolve class "Ship"` followed by a
+  cascade of `Could not resolve script ".../docking_bay.gd"`, and the run wedges
+  rather than reporting a failure. **If a test that passed a minute ago now
+  hangs, suspect a newly-added preload before suspecting the sim.** The fix is
+  usually structural rather than a forward-declare dodge: move the logic that
+  needed the import onto the class that already imports it (here the dock-time
+  mail policy moved to `Ship.exchange_mail_on_dock()`, leaving the bay to just
+  call it — a docking bay should not hold faction policy anyway).
 - **Kill stragglers** if a run hangs: `taskkill //F //IM Godot_v4.4.1-stable_win64.exe`.
 - **`Performance.TIME_PHYSICS_PROCESS` HOLDS stale readings across frames** —
   it refreshes on its own cadence, so one slow frame's value is re-read for

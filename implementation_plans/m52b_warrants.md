@@ -546,3 +546,26 @@ insufficient in play.
    (aggro_hits feeds a different offense, `SUSTAINED_ASSAULT`, orthogonal to
    the `OPERATOR_FLAGGED` warrant UNMARK resolves). No test depended on the
    old coupling; noted here in case it surprises anyone.
+
+## 2026-08-01 — warrants stay a VERDICT store, deliberately
+
+A later design pass (`design_ideas/2026-08-01-patrol_director_and_reporting.md`
+§4c) proposed annotating warrants with a position and a re-post counter, to build
+a lane-contention map for patrol routing. **That was rejected**, and the reason
+belongs here so it is not re-proposed:
+
+A warrant is a *verdict* — keyed `(offense, subject)`, overwriting, answering
+"is this hull wanted right now". That shape is correct for its consumer:
+`compute_standing` does a plain O(1) `warrant_index` lookup per contact per
+fusion tick (`standing.gd:173–181`), and the overwrite is load-bearing in the
+re-post and `SUSTAINED_ASSAULT` escalation paths this milestone built.
+
+Bolting a counter on would bake ONE consumer's aggregation policy into a store
+every consumer shares, and would still discard the position of every earlier
+occurrence. Aggregation, weighting and recency are the *reading* director's
+policy, not the record's semantics.
+
+Evidence gets a **separate, additive** record — the incident log in M57
+(`m57_m61_information_economy_roadmap.md`). Nothing in this milestone changes.
+The asymmetry that settles it: a verdict can always be re-derived from evidence;
+evidence can never be recovered from a verdict.

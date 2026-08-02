@@ -195,3 +195,27 @@ migration (M53). Story-phase config-table swaps + player consequences of
 "held" (M54). Physical cargo/economy (M55). Fixing the death gap for
 non-pirate traffic (filed as a separate task). Pirates operating in force
 / crypto-linked pirate wings (arrival-mix option, later).
+
+## 2026-08-01 — the omniscience objection now has an honest answer
+
+The standing objection to this director is that it sees the cluster. Verified
+against the tree 2026-08-01: it does not need to. `step_select_victim` already
+produces, from the hunting pirate's OWN sensors at a known `lane_pos`, every
+input a target-selection map needs — `all_fresh_vessels` is a prey-and-witness
+count at that position (`job_steps.gd:915`), and the step's two abort reasons
+already separate the two failures that matter: *no prey here*
+(`job_steps.gd:891`, time budget) versus *prey here, couldn't land it*
+(`:898`, attempts).
+
+So the guild needs its returning members' hunt outcomes recorded **with
+position** — not a wider view. Scheduled as M60
+(`m57_m61_information_economy_roadmap.md`), which also gives
+`profitless_streak`/`backoff_factor` (`pirate_guild.gd:134–135`) a spatial axis:
+"that lane is finished, try the other one" instead of "the guild is discouraged".
+
+That milestone also re-files the cash-out bug. `vanished_near_wormhole` needs a
+`policy_period` 10s check-in inside a `cashin_radius` 8000u ring the pirate
+crosses in ~11s, so a successful robbery books as `presumed LOST`. Filed as
+accounting; it is also an **information** failure — a pirate that never cashes
+out never delivers its hunt outcome and never picks up a fresh map. It is the
+guild's only sync point, because a pirate guild has no station.

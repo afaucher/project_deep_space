@@ -430,3 +430,21 @@ Belongs with Mail phase 2–3, listed here so the dependency is visible.
 - Physical cargo manifests (M55).
 - A `Party` base class. Commit to the posting shape, not the hierarchy.
 - Starvation consequences — clamps mean nothing bad happens at the boundaries.
+
+## 2026-08-01 — two known seams, both now scheduled
+
+- **`_risk_estimate()` gets its body in M59.** The stub (`route_planner.gd:312`,
+  one call site at `:295`) was left as its own named function precisely so a
+  later phase changes one function and not every call site. Because risk is
+  subtracted from a payout, "avoid the lane" and "price the lane higher" are the
+  same mechanism — no design fork.
+- **Mid-flight re-planning is currently omniscient** (`route_planner_leaf.gd:81`
+  — fires on a timer from `actor.position` against the live cluster). Tolerable
+  for prices, arguably a market feed. NOT tolerable once risk is real: a hauler
+  would divert because it learned the lane ahead went bad, which inverts the very
+  fiction the stub was written for. M58 closes it with a snapshot stamped onto
+  the job at dock, so mid-flight reads what the ship carried out of port.
+
+Both in `m57_m61_information_economy_roadmap.md`. Expect the snapshot change to
+move existing traffic-sim numbers — re-baseline rather than treating it as a
+regression.

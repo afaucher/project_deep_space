@@ -389,15 +389,65 @@ The player enters the loop.
 
 Upgrades the abstract take into stuff.
 
-- `cargo_bay` manifests (units of ore/goods); stations load/unload on dock
-  (CargoRunLeaf's existing dock cycle gets content); pirate TAKE transfers
-  manifest instead of scoring abstractly; guild ledgers count real units.
-- Boarding = the alongside-hold formalized as a reusable mechanic
-  (inspection: "does this hold look like stolen loot?" — patrols and the
-  player can check a surrendered ship's manifest).
-- Mining outposts generate ore over time → the economy becomes a real flow:
-  outposts fill, haulers move it, hubs consume, pirates leak it.
-- Tests: manifest conservation across load/theft/unload; inspection reads.
+### Scoped 2026-08-01 -- the previous version conflated two separable things
+
+**Where it stands today, verified.** A robbery moves nothing. `Ship.loot_takes`
+counts completed 8-second alongside holds, and the pirate guild's ledger `loot`
+is *that same counter* (`pirate_guild.gd:231` reads `last_loot_takes`). A robbed
+hauler continues to its destination and **delivers in full** --
+`serve_posting(ship, acceptance, amount)` hands `amount` straight to
+`StationEconomy.fulfill()` with nothing checking that the hull possesses
+anything. Piracy is invisible to the economy, and it comes down to that one
+unchecked argument.
+
+**The scoping error to fix:** the old bullet list mixed *cargo existing as an
+object* with *capacity varying by hull*. Those are independent, and only the
+first is needed for pirates to affect the economy. Separating them is most of
+what this milestone was missing.
+
+- **M55a -- the manifest.** A hauler holds `{commodity, lots}` from pickup dock
+  to dropoff dock; `serve_posting` requires and consumes it. Flat `LOT_SIZE`
+  (4.0) still applies. This alone makes cargo a real object.
+- **M55b -- theft moves goods.** `TAKE_ALONGSIDE` transfers the manifest; the
+  guild ledger counts units instead of holds. Fencing needs no new mechanism --
+  the existing wormhole cash-out already converts a successful exit into guild
+  income, so stolen goods leave the cluster permanently and the pirate is paid
+  in proportion to what it actually took. *(Axis worth deciding here rather than
+  drifting into: theft that DIVERTS supply via a fence is richer than theft that
+  destroys it, but diverting needs a sink -- and cash-out already is one.)*
+- **M55c -- capacity from parts.** `cargo_bay` -> capacity, replacing flat
+  `LOT_SIZE`, per "a ship is its parts". Two blockers, both still true:
+  **CargoShuttle authors no `cargo_bay` at all** (only Freighter and the
+  stations do, so the primary hauler needs a design change plus
+  `test_ship_designs` revalidation), and area-units need calibrating into lots.
+  This is what makes *which hull you fly* an economic decision.
+- **M55d -- a mid-tier hull.** The roster is a cliff: a small shuttle and the
+  largest hull in the fleet, nothing between. Content, fully separable.
+- **M55e -- boarding/inspection.** The alongside-hold formalized: patrols and the
+  player read a surrendered ship's manifest and ask "does this look like stolen
+  loot?" Needs M55a; nothing else needs it.
+- Mining outposts generating ore over time -> outposts fill, haulers move it,
+  hubs consume, pirates leak it.
+- Tests: manifest conservation across load/theft/unload; a robbed hauler cannot
+  deliver what it no longer has; inspection reads.
+
+### M55 and M59 are two halves of one loop
+
+| Cause | Consequence |
+|---|---|
+| **M59** -- cargo *avoids* the lane out of fear | nothing delivered -> urgency rises -> price rises |
+| **M55** -- cargo *flies* the lane and is robbed | nothing delivered -> urgency rises -> price rises |
+
+Identical economic signature, opposite causes -- which hands the information
+economy a genuinely good hook: **the price tells a player something is wrong on
+that lane; only the mail tells them whether it is fear or theft.** A lane
+everyone is avoiding and a lane being harvested look the same on the board.
+
+Not a hard dependency either way: M59 is self-consistent without M55, because
+avoidance alone stops deliveries. What M55 adds is that piracy becomes
+**materially** rather than merely **psychologically** costly. M55a+M55b are
+cheap, blocked by nothing, and are the largest fidelity gain per unit of work
+in this roadmap.
 
 ## The Mail Network (named vertical — its own design doc)
 
@@ -416,6 +466,17 @@ source-log design merges on a per-source sequence number, not an observation
 stamp; M56 stays a contact cleanup whose frame-stamp idiom the mail age-display
 borrows.) Full ambition sits after M55; phase 1 (the registry) is cheap and
 seeded during M53.
+
+**Phased execution now lives in
+[m57_m61_information_economy_roadmap.md](m57_m61_information_economy_roadmap.md)**
+(M57 incidents → M58 transport → M59 risk-aware routing + patrol director →
+M60 pirate information economy → M61 competing bands). Two facts verified
+2026-08-01 vindicate the registry-first instinct and cut M57's risk sharply:
+`docking_registry` **already lives on the `ClusterEntity` record** (not on a
+director) and already survives promote/demote — so "the map belongs on the
+station" needs no new architecture — and it currently has **no consumer at all**
+outside its own tests. The signal is already being written in the right place,
+at the right lifetime, and nothing reads it.
 
 ## Later (designed for, not scoped)
 
