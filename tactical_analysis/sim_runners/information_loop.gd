@@ -37,6 +37,7 @@ const Incident = preload("res://scripts/mail/incident.gd")
 const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
 const DecisionProbe = preload("res://scripts/instrumentation/decision_probe.gd")
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
+const RiskMap = preload("res://scripts/mail/risk_map.gd")
 
 var NUM_HAULERS: int = 8
 const SETTLE_MINUTES := 2.0
@@ -166,6 +167,16 @@ func _run() -> void:
 			_patrols_sweeping_last.clear()
 		if phase == "done":
 			break
+		# UNCONDITIONAL heartbeat, once per game-minute. The lane trace is NOT a
+		# progress indicator -- it only writes rows when some hauler holds a
+		# planner job, so a frozen file is ambiguous between "hung" and "nobody
+		# is hauling". This line always prints, so a stalled run is obvious
+		# instead of being mistaken for a slow one (2026-08-02: a sim sat one
+		# minute from its finish line for 4.5 hours, burning CPU inside a single
+		# frame, and nothing said so).
+		if clock.frames % 3600 == 0:
+			print("[heartbeat] game-minute %d / %d" % [
+				clock.frames / 3600, clock.total_frames / 3600])
 		_sample_sweeps()
 		_sample_chain()
 		_sample_trace()
@@ -255,6 +266,11 @@ func _sample_trace() -> void:
 	_sample_accum = 0.0
 	var minute: float = clock.frames / 3600.0
 	var lanes: Dictionary = {}
+	var lane_risk: Dictionary = {}
+	var all_incidents: Array = []
+	for rec_i in manager.records:
+		for e_i in rec_i.incident_log:
+			all_incidents.append(e_i)
 	for rec in manager.records:
 		var n = rec.live_node
 		if n == null or not is_instance_valid(n):
@@ -264,8 +280,16 @@ func _sample_trace() -> void:
 			continue
 		var lane := "%s>%s" % [str(job.get("pickup_id", "?")), str(job.get("dropoff_id", "?"))]
 		lanes[lane] = int(lanes.get(lane, 0)) + 1
+		# TRUE danger on this lane, from every incident that exists -- not from
+		# any one hull's heard news. Divergence between this and where the
+		# traffic actually goes IS the fog, and is the thing the oscillation
+		# claim needs: a lane can be genuinely dangerous while nobody has heard.
+		if not lane_risk.has(lane):
+			lane_risk[lane] = RiskMap.lane_risk(
+				job.get("pickup_pos", Vector2.ZERO), job.get("dropoff_pos", Vector2.ZERO),
+				all_incidents, Engine.get_physics_frames())
 	for lane in lanes:
-		_trace.store_line("%.1f,%s,%d,%.2f" % [minute, lane, lanes[lane], 0.0])
+		_trace.store_line("%.1f,%s,%d,%.2f" % [minute, lane, lanes[lane], lane_risk.get(lane, 0.0)])
 	_trace.flush() # store_line BUFFERS -- a crash three hours in must not lose the run
 
 func _is_station(rec) -> bool:

@@ -267,3 +267,17 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   scratch files to the repo root. Durable artifacts are the exception and are
   named explicitly: test logs → `test_logs/` (also gitignored), tactical-sim
   results → `tactical_analysis/data/*.csv` (tracked on purpose).
+- **A reject-sampling `while` is an infinite loop waiting for a degenerate
+  input.** `PirateGuild._random_hub_pair` picked a second index with
+  `while j == i: j = randi() % hubs.size()` — which never terminates when the
+  array has ONE element. It burns CPU *inside a single physics frame*, so the
+  sim stops advancing while the process looks perfectly busy: observed
+  2026-08-02, a 60-game-minute run sat one minute from its finish line for 4.5
+  hours at ~1.2 cores. Prefer an offset pick (`j = (i + 1 + randi() % (n-1)) % n`)
+  that cannot collide, and guard `n < 2` explicitly.
+- **A sim needs an UNCONDITIONAL heartbeat, or you cannot tell hung from slow.**
+  `information_loop`'s per-minute lane trace looked like a progress bar and was
+  not one — it only writes rows while some hauler holds a planner job, so a
+  frozen file could mean "hung" or "nobody is hauling". Diagnosing that cost
+  hours. Print a plain `game-minute N / TOTAL` line every game-minute, on a path
+  no game state can gate.

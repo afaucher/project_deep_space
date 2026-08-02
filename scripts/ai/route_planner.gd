@@ -403,6 +403,15 @@ static func route_itinerary(route: Dictionary) -> Dictionary:
 		"route_score": route["score"],
 		"pickup_pos": route["pickup_pos"],
 		"dropoff_pos": route["dropoff_pos"],
+		# Lane identity, carried onto the JOB rather than left only on the
+		# search result. An instrument watching traffic has the job (it is on the
+		# hull) and not the route, so without these a lane-occupancy trace records
+		# "?>?" forever -- which is exactly what happened. Cheap, and a job that
+		# knows which lane it serves is independently useful.
+		"pickup_id": route["pickup_id"],
+		"dropoff_id": route["dropoff_id"],
+		"pickup_pos": route["pickup_pos"],
+		"dropoff_pos": route["dropoff_pos"],
 		"pickup_accept": route["pickup_accept"],
 		"dropoff_accept": route["dropoff_accept"],
 		"amount": route["amount"],

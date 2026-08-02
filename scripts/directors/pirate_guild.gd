@@ -760,11 +760,18 @@ func _random_hub_pair(hubs: Array) -> Array:
 	var best_i: int = 0
 	var best_j: int = 0
 	var best_d: float = -1.0
+	# HANG FIX 2026-08-02. This used to reject-sample j with `while j == i`,
+	# which spins FOREVER when hubs.size() == 1 -- i and j are both always 0.
+	# It burns CPU inside a single physics frame, so the sim stops advancing
+	# while the process looks busy: a 60-game-minute run sat one minute from
+	# its finish line for 4.5 hours. Pick j by OFFSET instead, which cannot
+	# collide and cannot loop.
+	if hubs.size() < 2:
+		var only = hubs[0] if hubs.size() == 1 else Vector2.ZERO
+		return [only, only] # zero-length lane -- callers already treat it as unusable
 	for _attempt in range(8):
 		var i: int = randi() % hubs.size()
-		var j: int = randi() % hubs.size()
-		while j == i:
-			j = randi() % hubs.size()
+		var j: int = (i + 1 + (randi() % (hubs.size() - 1))) % hubs.size()
 		var d: float = hubs[i].distance_to(hubs[j])
 		if d > best_d:
 			best_d = d
