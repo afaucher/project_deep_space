@@ -106,10 +106,29 @@ mine:
   moved 9.425 -> 9.809ms avg, small there, but the gate scenario has no
   passive-heavy pirates in it.
 
-**NOT MEASURED — this is a hypothesis, not a diagnosis.** The A/B was never run.
+**CORRECTED 2026-08-02, same day.** A parallel `perf_combat` run largely
+REFUTES the sensor hypothesis and undermines the framing:
 
-**D21 (OPEN, DEFERRED BY DECISION): how expensive is a pirate allowed to be to
-simulate?** A real constraint on the long-horizon goal rather than a tuning
+- `sensor_sweep` is **3.65% of tick** (607 us/frame), about a fifth of
+  `ship_tick_total`. Multiplying one hull's sweep 5x across 6-8 pirates is worth
+  a couple of ms, not the ~27ms/frame the funnel sim runs at. Sensors are not
+  dominant enough to be the cause.
+- The real difference is SCENARIO SIZE. `perf_combat` runs 6 frigates peaking at
+  30 ships and clocks **3.6ms wall-clock/frame**. `information_loop` runs the
+  whole home cluster — 13 stations, five asteroid fields, beacons, traffic, the
+  economy and three directors. Categorically heavier, and always was.
+- **"The sim got expensive" was unsupported.** Earlier funnel runs were never
+  TIMED, so there is no before-measurement to regress against. What is actually
+  known: a 60-game-minute run at the heaviest config yet, with `JOB_LOG=1`, did
+  not finish in 78 minutes. That is evidence about the CONFIGURATION chosen, not
+  about a code change.
+
+Lesson worth keeping: an unfalsifiable "it feels slower" turns into a wrong
+attribution the moment it is written down as a cause. The perf run cost ten
+minutes and killed it.
+
+**D21 (OPEN, DEFERRED — and now much weaker): how expensive is a pirate allowed
+to be to simulate?** A real constraint on the long-horizon goal rather than a tuning
 detail — the deliverable IS a long sim, and the encounter fix made that sim
 materially more costly. **Deliberately not being optimised now**: chasing it
 before the re-baseline would mean tuning against numbers we have not measured,
