@@ -80,8 +80,17 @@ static func record(actor_name: String, chosen: Dictionary, blind: Dictionary, he
 		# "urgent routes still risked" means the payout was worth it.
 		risked_anyway += 1
 		risked_score_sum += float(chosen.get("score", 0.0))
-	if risk > 0.0:
-		risk_values.append(risk)
+	# SAMPLE WHAT THE SEARCH SAW, NOT WHAT SURVIVED IT (2026-08-03). This
+	# appended `chosen.risk` -- the WINNER's risk -- to answer the precondition
+	# "did risk ever get large enough to matter". A lane rejected BECAUSE it was
+	# risky is by construction not the winner, so the sample was systematically
+	# ~0: the funnel printed "RISK WAS ALWAYS ZERO -- the cargo half of M59 is
+	# UNTESTED" for the very runs in which risk had just changed 1614 of 6685
+	# decisions. The banner contradicted the counterfactual ten lines below it,
+	# and the banner was the wrong one.
+	var seen: float = maxf(risk, float(chosen.get("max_risk_seen", 0.0)))
+	if seen > 0.0:
+		risk_values.append(seen)
 	decisions.append({
 		"frame": Engine.get_physics_frames(),
 		"hauler": actor_name,

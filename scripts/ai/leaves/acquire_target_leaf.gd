@@ -89,6 +89,6 @@ func _force_authorized(actor: Node, contact: Dictionary) -> bool:
 	var claimed_name: String = actor.active_transponders.get(contact.get("instance_id", -1), {}).get("name", "")
 	var skey: String = Standing.subject_key(claimed_name, contact.get("signature", {}))
 	var w: Dictionary = actor.warrant_index.get(skey, {})
-	if w.is_empty():
-		return true   # flag-declared enemy / eager stamp -- uncapped, see tick()
-	return Standing.authorizes_force(w.get("offense", ""))
+	# Standing.force_authorized_by is the single statement of this rule -- see
+	# its comment for why an EMPTY warrant means uncapped rather than capped.
+	return Standing.force_authorized_by(w)

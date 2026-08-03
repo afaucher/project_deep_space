@@ -211,6 +211,7 @@ static func best_route(cluster, from_pos: Vector2, ship_flag: String,
 	var now: int = Engine.get_physics_frames()
 	var best_score: float = -INF
 	var pairs_scored := 0
+	var max_risk_seen: float = 0.0
 	for pickup_rec in cluster.records:
 		if pickup_rec.kind != ClusterEntity.Kind.STATION:
 			continue
@@ -222,11 +223,25 @@ static func best_route(cluster, from_pos: Vector2, ship_flag: String,
 				if route.is_empty():
 					continue
 				pairs_scored += 1
+				# SURVIVORSHIP FIX (2026-08-03). DecisionProbe sampled only the
+				# WINNER's risk to answer "did risk ever matter", and a lane
+				# rejected BECAUSE it was dangerous is by definition not the
+				# winner -- so the sample was systematically ~0 and the funnel
+				# printed "RISK WAS ALWAYS ZERO -- UNTESTED" for runs in which
+				# risk had just changed 1614 decisions. The honest sample is the
+				# risk the SEARCH SAW, not the risk the survivor carried.
+				max_risk_seen = maxf(max_risk_seen, float(route.get("risk", 0.0)))
 				if route["score"] > best_score:
 					best_score = route["score"]
 					best = route
 	if not best.is_empty() and best_score <= MIN_VIABLE_SCORE:
 		best = {}   # nothing worth flying -- idle rather than burn a hull on a loss
+	# Stamped on the RESULT rather than returned separately, so it survives the
+	# `best = {}` reset above (a search where every viable lane was scored down
+	# to nothing is exactly the case worth seeing) without changing the
+	# function's shape for its three existing callers.
+	if not best.is_empty():
+		best["max_risk_seen"] = max_risk_seen
 	if _diag_enabled():
 		_diag_report(cluster, from_pos, ship_flag, pairs_scored, best)
 	return best

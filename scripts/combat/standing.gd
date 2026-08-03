@@ -562,6 +562,29 @@ static func escalates_to_hostile(offense: String) -> bool:
 static func authorizes_force(offense: String) -> bool:
 	return _OFFENSE_TABLE.get(offense, {}).get("authorizes_force", false)
 
+# THE WHOLE RULE, in one place, because two copies of it already disagreed.
+#
+# A HOSTILE contact reaches weapons/seizure through one of two doors, and the
+# no-warrant door is the counter-intuitive one:
+#
+#   * NO matching warrant -> UNCAPPED. Two live paths get here: a known-enemy
+#     flag (compute_standing rule 3 -- a declared pirate is engageable on sight)
+#     and the eager same-tick cache stamp in take_damage, which posts its
+#     warrant in the same breath. Returning false here would spare exactly the
+#     self-declared pirate, which is the one case nobody doubts.
+#   * A warrant -> its offence decides, via authorizes_force.
+#
+# Extracted 2026-08-03 after D33's HULK_PRIZE gate reimplemented this as a bare
+# `authorizes_force(w.get("offense", ""))`, which returns FALSE for an empty
+# warrant and so inverted the first branch: patrols released colour-flying
+# pirates they were entitled to seize, while AcquireTargetLeaf a few nodes away
+# would have shot the same hull. Same A2 four-copies lesson acquire_target's own
+# comment cites -- if two places must agree, there should only be one place.
+static func force_authorized_by(w: Dictionary) -> bool:
+	if w.is_empty():
+		return true
+	return authorizes_force(w.get("offense", ""))
+
 static func response_class(offense: String) -> String:
 	return _OFFENSE_TABLE.get(offense, {}).get("response", RESPONSE_INTERCEPT)
 

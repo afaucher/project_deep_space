@@ -781,6 +781,165 @@ but `max_speed` is a flat authored field, never derived. Drive damage cuts
 ACCELERATION only, which does bite in an oscillating chase but can never make a
 pinnace slower than 2000.
 
+### D35 — hulking a prize, and why CREW is what makes the incentive honest
+
+**Built (short term): `HULK_PRIZE`.** A third step on the interdiction job that
+destroys a captured hull, appended by `InterdictLeaf` **only when
+`Standing.authorizes_force(offence)`** — the same column the aggression cap
+already uses to decide whether a refused demand may reach weapons. No new
+machinery at all: `Ship.hulk()` exists, and `fire_opportunity`, `flee`,
+`interdict`, `sos_response` and `Standing.track_engageable` each already skip a
+WRECKAGE contact.
+
+**It feeds a governor that already exists**, which is the real reason this is a
+good shortcut rather than a stopgap: a hulked pirate books LOST, driving
+`losses` and `loss_streak`; at `losses_per_cap_cut` (2) the guild CUTS ITS CAP
+and raises `backoff_factor`. Enforcement thins the ranks and slows arrivals
+instead of merely deleting one hull. The lane gets safer through the director's
+own feedback loop.
+
+**The tension it creates, stated plainly:** hulking on capture makes surrender
+strictly worse than fleeing — and D32 has just taught pirates to surrender when
+they cannot shake pursuit. They would comply into destruction. It is harmless
+TODAY only because the outlaw's decision has no term for it.
+
+**And CREW is the resolution, not a patch.** The value at risk differs by layer:
+
+| | runs and is caught | heaves to |
+|---|---|---|
+| **hull** | hulked | hulked |
+| **crew** | may die in the fight | survives |
+
+Once crew is simulated, surrender is the CREW-preserving move even though the
+ship is lost either way, so heaving to becomes rational again on its own terms.
+The outlaw's decision gains a second term — *can I outrun this* AND *what
+happens to my people if I cannot* — and that is a better decision than the pure
+speed race it is today.
+
+It also gives the patrol's side real weight, and makes the earlier "if we are
+not committed to killing them we might let them get away" concrete: hulking a
+SURRENDERED ship kills nobody, while firing on a FLEEING one might. The
+escalation ladder stops being about damage numbers and starts being about who
+dies.
+
+**Interim gate meanwhile:** hulking is tied to the OFFENCE, not to compliance,
+so an armed robber loses its hull and a NO_ID or ARMED_THREAT hull that complies
+is released. Severity of the act decides the consequence, not whether the
+subject was polite about it — which keeps the incentive from inverting for the
+capped tiers even before crew exists.
+
+Prerequisite already scoped: `m48_m55_economy_piracy_roadmap.md` carries
+`living_quarters` across the fleet and lists "boarding depth (crew, capture-the-
+hull — ties into hulk revival contract)" as open. **Every warship currently has
+ZERO crew space**, which that roadmap already flags as a catalog problem
+predating both cargo and crew — so crew lands there, not here.
+
+### Criterion (3) resolved into its two halves (2026-08-03)
+
+**A fourth instrument bug, and this one was actively lying.** The funnel printed
+both of these in the same report:
+
+```
+risk p95 / max            : 0.0 / 0.0
+>>> RISK WAS ALWAYS ZERO -- the cargo half of M59 is UNTESTED by this run
+decisions changed by risk : 1614 of 6685
+```
+
+Both cannot be true. `DecisionProbe` sampled `chosen.risk` — the WINNER's risk —
+to answer "did risk ever get large enough to matter". **A lane rejected BECAUSE
+it was dangerous is by construction not the winner**, so the sample was
+systematically zero: survivorship bias in the metric whose entire job was to
+validate the rest of the report. The banner is the first thing the funnel tells
+you to read, and its own comment says a zero "means something completely
+different depending on this number" — it was the number that was broken.
+
+Fixed by sampling what the SEARCH SAW: `best_route` now stamps `max_risk_seen`
+over every scored candidate, and the probe records that. Re-measured:
+
+| seed | risk p95 / max (margin 60) | decisions changed | risked anyway |
+|---|---|---|---|
+| 22222 | 0.0 / 0.0 → correctly UNTESTED | 0 of 6714 | 0 |
+| 33333 | **69.1 / 82.8** | **460** of 6701 | 0 |
+| 55555 | **78.2 / 96.1** | **1614** of 6685 | 0 |
+
+Self-consistent now: where risk is non-zero decisions change, where it is zero
+none do. Seed 22222 — whose news never reached any station — is the control, and
+it correctly reports UNTESTED instead of tarring all three.
+
+**First half PROVEN.** "The information economy actually driving route planning"
+is measured, not inferred: risk clears the hysteresis margin and redirects
+hundreds of decisions per run, and the counterfactual re-scores the same world
+with the reader's own news removed, so it cannot be confused with a traffic
+histogram.
+
+**Second half FAILS.** `risked_anyway = 0` in every run ever recorded. No hauler
+has ever knowingly flown a lane it heard was dangerous. That is exactly the
+failure `DecisionProbe`'s own header named in advance: *"a risk term that ONLY
+ever makes haulers flee would strangle the lanes it was added to make
+interesting… a veto is the failure mode."*
+
+**D36 (OPEN): risk is subtracted, but nothing pays for danger.** RoutePlanner
+subtracts risk from score and no term scales the REWARD with it, so a risky lane
+can only ever lose. "Urgent routes still being risked" needs the payout side
+that D26 (mail urgency) was going to supply — urgency has to be able to outweigh
+risk, or the fog makes cargo uniformly timid rather than interestingly greedy.
+Criterion (3) cannot complete without it.
+
+### D37 — what the hulk decision is actually keyed on (settled 2026-08-03: keep as-is for now)
+
+`InterdictLeaf` appends `HULK_PRIZE` when `Standing.force_authorized_by(w)`:
+
+| matched warrant | result |
+|---|---|
+| has one | `authorizes_force(offence)` — ARMED_ROBBERY yes, ARMED_THREAT / NO_ID no |
+| **empty** | **true — uncapped** |
+
+So the WARRANT decides when there is one; when there is not, the FLAG decides
+(a hull reaches HOSTILE with no warrant via `known_enemy_flags` — a declared
+pirate, engageable on sight).
+
+**The asymmetry this produces, accepted deliberately:** no warrant -> hulked,
+caution-grade warrant -> released. Lesser paperwork protects you MORE than none.
+That is well-argued for weapons (`acquire_target_leaf`: the two no-warrant paths
+are a self-declared enemy and a same-tick warrant stamp at most one tick behind)
+and weaker for SEIZURE, which is deliberate and permanent rather than a reflex
+in a firefight. Reviewed and kept for now — tightening it to "hulk only on an
+actual force-authorizing warrant, never on the bare flag" is a one-line change
+at the `InterdictLeaf` call site, leaving `force_authorized_by` untouched for
+weapons.
+
+**Why this is the interesting split rather than an implementation detail:**
+
+* **Overt pirate** (colours up) — caught on the FLAG, no warrant required,
+  hulked on sight.
+* **Covert pirate** (cover identity, running dark) — never reads HOSTILE by
+  flag, so it can only be hulked if a **notarized ARMED_ROBBERY warrant** has
+  reached that patrol. That is the whole D29 chain: victim records the incident
+  -> courier carries it -> own-flag station notarizes -> the warrant relays to
+  the patrol.
+
+Flying colours costs you your hull on sight; running covert makes you catchable
+ONLY through the information economy. **Criterion (4) sits downstream of the
+mail network for exactly the pirates the mail network exists to track** — which
+is the loop this whole milestone set was aiming at.
+
+### The bug this nearly hid, worth keeping as a method note
+
+The first hulk gate was written as `Standing.authorizes_force(w.get("offense",
+""))`, which returns FALSE for an empty warrant — inverting the no-warrant
+branch and sparing precisely the colour-flying pirate nobody doubts. Patrols
+released hulls that `AcquireTargetLeaf`, a few nodes away, would have shot.
+
+It was caught because `losses` (PirateGuild's ledger) and `complied`
+(EngagementProbe) are produced by DIFFERENT subsystems: 4 stops with 0 losses is
+a contradiction, where either number alone reads as success. A `JOB_LOG=1` run
+then confirmed `HULKED` fired 0 times with the old gate.
+
+Note also that the missing `HULKED` log line was NOT evidence by itself — it
+sits behind a debug toggle the funnel leaves off. **Absence of a gated log is
+not absence of the event.** The cross-subsystem disagreement was the real
+signal, same shape as `outpaced 0` being the tell in D28.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

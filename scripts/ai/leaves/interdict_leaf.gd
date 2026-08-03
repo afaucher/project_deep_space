@@ -172,11 +172,30 @@ func tick(actor: Node, blackboard) -> int:
 	if not w.is_empty() and Standing.response_class(w.get("offense", "")) == Standing.RESPONSE_MAX:
 		patience = PATIENCE_MAX
 
+	# D33 -- a caught pirate now HAS a consequence. The step is appended only
+	# when the matched warrant's offence authorizes force, which is the same
+	# column the aggression cap uses to decide whether a refused demand may fall
+	# through to weapons. So an armed robber loses its hull and a NO_ID or
+	# ARMED_THREAT hull that heaves to is inspected and released.
+	#
+	# Gating on the OFFENCE rather than on compliance is deliberate: hulking
+	# anything that surrenders would make surrender strictly worse than running,
+	# and D32 has just taught pirates to surrender once they cannot shake
+	# pursuit. The severity of what you did decides what happens to you, not
+	# whether you were polite about it.
+	var steps: Array = [
+		{"verb": "INTERCEPT"},
+		{"verb": "DEMAND_STOP", "show_colors": false, "patience": patience, "on_abort": ""},
+	]
+	# Standing.force_authorized_by, NOT authorizes_force directly: an EMPTY
+	# warrant means UNCAPPED (a colour-flying pirate is seizable on sight), and
+	# calling authorizes_force("") returns false, which spared exactly the hull
+	# nobody doubts. Same predicate AcquireTargetLeaf gates weapons on, so a
+	# patrol cannot be entitled to shoot something it is not entitled to seize.
+	if Standing.force_authorized_by(w):
+		steps.append({"verb": "HULK_PRIZE", "on_abort": ""})
 	var job := {
-		"steps": [
-			{"verb": "INTERCEPT"},
-			{"verb": "DEMAND_STOP", "show_colors": false, "patience": patience, "on_abort": ""},
-		],
+		"steps": steps,
 		"current": 0,
 		"victim_iid": target_iid,
 		# What this job is WORTH, so the priority rule at the top of tick() can

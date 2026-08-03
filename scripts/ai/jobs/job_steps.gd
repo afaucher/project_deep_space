@@ -168,6 +168,8 @@ static func execute(verb: String, actor, step: Dictionary, job: Dictionary) -> i
 			return step_demand_stop(actor, step, job)
 		"TAKE_ALONGSIDE":
 			return step_take_alongside(actor, step, job)
+		"HULK_PRIZE":
+			return step_hulk_prize(actor, step, job)
 		_:
 			push_error("JobSteps.execute: unknown verb '%s'" % verb)
 			return ABORT
@@ -1206,6 +1208,63 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 		return ABORT
 
 	return CONTINUE
+
+# ---------------------------------------------------------------------------
+# HULK_PRIZE -- D33. What a patrol DOES with a pirate it has actually caught.
+#
+# Until now: nothing. DEMAND_STOP returned DONE, the two-step job completed, the
+# slot cleared, the patrol flew home, the demand stopped being refreshed, the
+# hold lapsed on the ~6s heartbeat, and the pirate resumed its hunt with an
+# undischarged warrant. The pirate's version of the same manoeuvre
+# (TAKE_ALONGSIDE) loots cargo and records an incident -- its stop changed the
+# world, the patrol's changed nothing.
+#
+# This is the SHORT-TERM answer and is labelled as such. It needs no new
+# machinery whatsoever: `Ship.hulk()` already exists, and every consumer already
+# handles the result -- a hulk classifies WRECKAGE (EM-dark), and
+# fire_opportunity, flee, interdict, sos_response and Standing.track_engageable
+# each already skip one. Nothing new to teach the world.
+#
+# IT ALSO FEEDS A GOVERNOR THAT ALREADY EXISTS. PirateGuild books the hull as
+# LOST, which increments `losses` and `loss_streak`; at `losses_per_cap_cut`
+# (2) consecutive profitless resolutions the guild CUTS ITS CAP and raises
+# `backoff_factor`. So enforcement genuinely thins the ranks and slows arrivals
+# rather than only removing one hull -- the lane gets safer by a mechanism the
+# director was already built around.
+#
+# GATED ON authorizes_force, NOT ON COMPLIANCE, and that gate is the whole
+# design. Hulking everything that heaves to would make surrender strictly worse
+# than running -- and D32 just taught pirates to surrender when they cannot
+# shake pursuit, so they would be complying into destruction. Tying it to the
+# OFFENCE instead means an armed robber loses its hull and a NO_ID or
+# ARMED_THREAT hull that complies is released, which is exactly the ladder
+# acquire_target_leaf already describes ("a NO_ID hull gets chased and hailed
+# and refused docking, never shot"). InterdictLeaf appends this step only when
+# the matched warrant authorizes force.
+#
+# WHAT IT IS NOT: an arrest. There is no crew, no impound, no prize crew, no
+# recovered cargo, and the hull is destroyed rather than seized. Those are the
+# real M63 questions; this buys a working consequence in the meantime so that
+# "stop rate" stops being a number with nothing behind it.
+# ---------------------------------------------------------------------------
+
+static func step_hulk_prize(actor, step: Dictionary, job: Dictionary) -> int:
+	var victim_iid: int = job.get("victim_iid", -1)
+	var victim = instance_from_id(victim_iid) if victim_iid != -1 else null
+	if victim == null or not is_instance_valid(victim) or victim.is_dead:
+		return DONE # already gone -- nothing to do, and not a failure
+	# Must still be held. A hull that bolted between DEMAND_STOP completing and
+	# this step running was never actually captured, and hulking it anyway would
+	# turn "it complied for one frame" into a death sentence.
+	var c: Dictionary = _contact_for_instance(actor, victim_iid)
+	if not c.get("complied_stop", false):
+		job["_abort_reason"] = "prize bolted before it could be secured"
+		return ABORT
+	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
+		print("[Patrol] %s: HULKED %s -- prize taken under warrant" % [
+			actor.debug_label(), victim.debug_label()])
+	victim.hulk()
+	return DONE
 
 # ---------------------------------------------------------------------------
 # TAKE_ALONGSIDE {hold_time=12.0, range=200.0} -- M52c robbery theater
