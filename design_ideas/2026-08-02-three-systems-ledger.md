@@ -557,10 +557,38 @@ The patrol is FASTER than both pirate hulls. It loses the chase because
 the fleeing pirate runs at `RUN_SPEED` 900 and upward. The patrol pursues at
 under a fifth of the speed it owns.
 
-This never mattered before because the subject never ran. Same shape as D28 and
-D29: **a default that was harmless only because the mechanism upstream of it was
-dead.** Fixing it is a separate measurement — changing the pursuit speed in the
-same run as adding the handler would stack two variables.
+This never mattered before because the subject never ran.
+
+### D30 REFUTED, same day, by its own measurement — and the change reverted
+
+I set both steps' `cruise` to `actor.max_speed` and re-ran the same 5 seeds.
+The funnel came back **bit-identical** — every seed, every stage, including the
+RNG-sensitive robbery counts. By CLAUDE.md's own rule (identical number =
+deterministic, not jitter) that is not a weak effect, it is NO effect: the code
+path never behaved differently, so `cruise` was never the binding constraint.
+
+Reading `_pace_at_offset` properly instead of reasoning from the call site:
+
+```gdscript
+catchup     = clampf(sqrt(2.0 * accel_max * SAFETY * dist), 0.0, cruise)
+desired_vel = target_vel + avoided.normalized() * catchup   # <-- target_vel!
+```
+
+`cruise` caps only the CATCHUP term, which is added ON TOP of the target's own
+velocity. It was never an absolute speed cap, so "the patrol chases at 400"
+was simply false. And since raising the cap changed nothing at all, `catchup`
+never reached even the old 400 — the pursuit is **acceleration**-limited, well
+below where either cap bites.
+
+**The change was reverted.** A no-op carrying a comment that claims to fix a
+chase is worse than no change: the next reader inherits a confident wrong
+mechanism. D30's diagnosis is withdrawn; only the observation survives.
+
+**Why "outpaced" actually happens is now UNMEASURED**, and this is the second
+time in two days that reasoning from the shape of the code produced a confident
+wrong cause (CLAUDE.md already records the `heat_em_component_loop` pair). The
+next step is instrumentation of an actual chase — patrol speed, subject speed,
+separation, per second — not a third guess.
 
 ### Queue after the re-baseline
 
