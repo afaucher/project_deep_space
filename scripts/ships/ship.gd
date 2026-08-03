@@ -1376,13 +1376,17 @@ func exchange_mail_on_dock(visitor) -> void:
 	if visitor_flag == "" or visitor_flag != own_flag:
 		return
 
-	# Our version of this hull BEFORE the give, so notarization sees exactly the
-	# incidents that were NEW to this port. Free dedupe -- the version vector is
-	# already tracking precisely this, so re-docking notarizes nothing twice.
-	var prev_seq: int = Mailbag.version_of(host_bag, visitor.source_id())
 	Mailbag.deliver(host_bag, ship_bag, visitor.source_id(), visitor.get_incident_seq(), now_frame)
-	if has_method("notarize_from"):
-		notarize_from(visitor, prev_seq)
+
+	# Notarize everything this port now HOLDS, not merely what this hull
+	# witnessed personally (D29). The visitor's own log is a subset of what just
+	# landed in the bag, so this strictly supersedes the old notarize_from(visitor)
+	# call -- and it finally covers the ordinary case where a courier brings news
+	# of somebody else's robbery. Dedupe is notarize_held's own per-source
+	# high-water mark, so re-docking still notarizes nothing twice.
+	var cluster = get("cluster_manager_ref")
+	if cluster != null and is_instance_valid(cluster):
+		notarize_held(cluster)
 
 # M58 -- NOTARIZATION. Called on a STATION, with a hull that has just docked and
 # handed over mail. This is the missing half of the personal-origin seal.
@@ -1428,10 +1432,78 @@ func notarize_from(reporter, after_seq: int) -> int:
 	if not reporter.has_method("get_incident_log"):
 		return 0
 
-	var issued: int = 0
+	var fresh: Array = []
 	for e in reporter.get_incident_log():
-		if int(e.get("seq", 0)) <= after_seq:
-			continue # already had this one
+		if int(e.get("seq", 0)) > after_seq:
+			fresh.append(e)
+	return _notarize_entries(fresh)
+
+# D29 (2026-08-03) -- NOTARIZE WHAT YOU HOLD, not what walked in the door.
+#
+# MEASURED FAILURE. Across ten funnel runs, 18-31 stations HELD robbery news and
+# issued ZERO warrants, every time. notarize_from() above walks the DOCKING
+# hull's own incident log, so a warrant could only ever be issued when the VICTIM
+# PERSONALLY survived and docked at an own-flag port. News carried by a courier
+# -- the normal case, and the entire purpose of the mail network -- was
+# structurally unnotarizable. The patrol half of the loop could not start.
+#
+# The rule that fixes it is a sentence: **an authority acts on evidence it holds,
+# regardless of who carried it.** A constable does not refuse a report because
+# the witness sent it by post.
+#
+# THE TWO GATES ARE UNCHANGED IN MEANING, only in where they read from:
+#   * Recording the incident stays ungated -- already done by the receive.
+#   * A warrant stays own-flag only. That gate now tests the SOURCE's flag
+#     (`rec.transponder_flag`, whose log this evidence came out of) rather than
+#     the courier's. That is the right subject: the question is whose citizen was
+#     robbed, never who happened to carry the letter. A Drift port still refuses
+#     to prosecute a Meridian hauler's robbery -- and now it also correctly
+#     prosecutes a Drift victim's robbery reported by a Drift courier, which is
+#     the case that was silently impossible.
+#
+# DEDUPE is a per-source high-water mark rather than the caller's `after_seq`,
+# because there is no longer a single "reporter" to take a version from. It is
+# the same monotonic-integer idea the mailbag itself uses, kept locally: a
+# station notarizes each source's log once, at most, up to its delivered version.
+# Bounded by delivered version on purpose -- notarizing past the clamp would read
+# evidence this station has not been told, which is exactly the omniscience the
+# whole model exists to remove.
+var _notarized_seq: Dictionary = {}   # source_id -> highest seq notarized
+
+func notarize_held(cluster) -> int:
+	if cluster == null or not is_instance_valid(cluster):
+		return 0
+	if warrant_authority.is_empty():
+		return 0
+	var own_flag: String = get_active_transponder_data().get("flag", "")
+	if own_flag == "":
+		return 0
+	var bag: Dictionary = get_mailbag()
+	var issued: int = 0
+	for rec in cluster.records:
+		var v: int = Mailbag.version_of(bag, rec.id)
+		if v <= 0:
+			continue # never heard of this source -- invisible, per the fog
+		var after: int = int(_notarized_seq.get(rec.id, 0))
+		if v <= after:
+			continue # nothing new since we last read this log
+		_notarized_seq[rec.id] = v
+		if rec.transponder_flag != own_flag:
+			continue # gate 2, on the SOURCE: not our citizen, not our warrant
+		var fresh: Array = []
+		for e in rec.incident_log:
+			var seq: int = int(e.get("seq", 0))
+			if seq > after and seq <= v:
+				fresh.append(e)
+		issued += _notarize_entries(fresh)
+	return issued
+
+# The judgement itself, shared by both entry points above so the filters cannot
+# drift apart -- which they would, since one is fed by a live hull's log and the
+# other by a cluster record's.
+func _notarize_entries(entries: Array) -> int:
+	var issued: int = 0
+	for e in entries:
 		if e.get("kind", "") != Incident.KIND_ARMED_ROBBERY:
 			continue # only robbery notarizes today; OVERDUE names no culprit
 		var subject_name: String = e.get("subject_name", "")

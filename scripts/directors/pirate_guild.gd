@@ -515,7 +515,21 @@ func _roll_posture() -> String:
 #
 # LANE_RUN_ENABLED lets an A/B turn it off without touching the posture roll, so
 # the comparison changes exactly one thing: whether the false-flag pirate moves.
-static var lane_run_enabled: bool = true
+#
+# D27 (2026-08-03) -- DEFAULT FLIPPED TO OFF, on the A/B it was built for.
+# Five seed-matched pairs, 60 game-minutes, 12-15 pirates, 14 haulers:
+#
+#   robberies  10 -> 9    (2 seeds up, 3 down -- no encounter benefit at all)
+#   diverted 3161 -> 1457 (5 seeds down, 0 up -- the ONLY clean signal)
+#
+# So it does not buy takes, and it HALVES the cargo fleet's awareness at the
+# same incident count. Suppressing the information economy is the opposite of
+# what this milestone is for, so it stays available and stays off.
+#
+# The MECHANISM for the propagation loss is NOT established, and is deliberately
+# not guessed at here -- a plausible story written into a comment is how a wrong
+# cause becomes repo canon. Same incidents, far less news, five for five.
+static var lane_run_enabled: bool = false
 
 func _select_victim_step(posture: String, lane_pos: Vector2, seg_a: Vector2, seg_b: Vector2) -> Dictionary:
 	var step: Dictionary = {

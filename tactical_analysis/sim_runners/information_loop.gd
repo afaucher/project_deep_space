@@ -142,7 +142,7 @@ func setup(main) -> void:
 	# LANE_RUN=0 disables the lane-transit posture without touching the posture
 	# roll, so an A/B changes exactly one thing: whether a false-flag pirate
 	# MOVES along its lane or parks on it.
-	PirateGuild.lane_run_enabled = _envf("LANE_RUN", 1.0) > 0.0
+	PirateGuild.lane_run_enabled = _envf("LANE_RUN", 0.0) > 0.0  # D27: off by default, matches the shipped default
 	var cfg: Dictionary = _guild_config()
 	print("    LANE_RUN=%s" % ("on" if PirateGuild.lane_run_enabled else "OFF"))
 	print("    pirates: base_cap=%d max_cap=%d arrival=%s hunt=%.0fs | victim_sos=%.2f" % [
@@ -338,9 +338,11 @@ func _report() -> void:
 	var stations := 0
 	var stations_holding_news := 0
 	var notarized := 0
+	var stations_with_warrant := 0
 	var patrol_like := 0
 	var patrols_holding_news := 0
 	var haulers_holding_news := 0
+	var hauler_like := 0
 
 	for rec in manager.records:
 		incidents_recorded += rec.incident_seq
@@ -363,10 +365,13 @@ func _report() -> void:
 				stations_holding_news += 1
 			var node = rec.live_node
 			if node != null and is_instance_valid(node):
+				var had: int = notarized
 				for wkey in node.warrants:
 					var w: Dictionary = node.warrants[wkey]
 					if w.get("origin_flag", "") != "" and w.get("offense", "") == Standing.OFF_ARMED_ROBBERY:
 						notarized += 1
+				if notarized > had:
+					stations_with_warrant += 1
 		else:
 			var node2 = rec.live_node
 			# `.get()` on a node without the property yields Nil, and `and` does
@@ -380,8 +385,18 @@ func _report() -> void:
 				patrol_like += 1
 				if foreign > 0:
 					patrols_holding_news += 1
-			elif foreign > 0:
-				haulers_holding_news += 1
+			else:
+				# COUNT THE DENOMINATOR THE SAME WAY AS THE NUMERATOR
+				# (2026-08-03). This read `%d of %d` against NUM_HAULERS and
+				# printed "33 of 14" -- because the numerator counts every
+				# non-station non-authority RECORD (pirates, guild-spawned
+				# traffic, anything the cluster made) while the denominator was
+				# the authored hauler count. A ratio whose two halves count
+				# different populations is not a ratio, and this one exceeded
+				# 100% without anybody noticing for ten runs.
+				hauler_like += 1
+				if foreign > 0:
+					haulers_holding_news += 1
 
 	# GROUND TRUTH, not the ledger. PirateGuild books a completed robbery as
 	# `presumed LOST` when the cash-out check-in misses (an 8000u ring the
@@ -468,10 +483,17 @@ func _report() -> void:
 		robbery_incidents, takes, ledger_takes])
 	print("  2. incidents recorded (all logs)  : %d" % incidents_recorded)
 	print("  3. stations holding foreign news  : %d of %d" % [stations_holding_news, stations])
-	print("  4. notarized ARMED_ROBBERY warrants: %d" % notarized)
+	# SUMMED ACROSS STATIONS, and the label has to say so (2026-08-03). Each
+	# authority issues its OWN warrant on the same subject, so 2 robberies
+	# legitimately reads 10 -- one verdict held at five ports, not ten
+	# prosecutions. That is correct behaviour and a misleading number; the first
+	# D29 run would otherwise have read as a 5x over-count of its own robberies.
+	# `stations_with_warrant` is the honest denominator-free version.
+	print("  4. notarized ARMED_ROBBERY warrants: %d (summed over %d of %d stations holding one)" % [
+		notarized, stations_with_warrant, stations])
 	print("  5. patrols holding foreign news   : %d of %d" % [patrols_holding_news, patrol_like])
 	print("  6. patrol lane sweeps STARTED     : %d (peak concurrent %d)" % [sweeps_started, peak_sweeps_seen])
-	print("     haulers holding foreign news   : %d of %d" % [haulers_holding_news, NUM_HAULERS])
+	print("     haulers holding foreign news   : %d of %d civilian hulls (%d authored)" % [haulers_holding_news, hauler_like, NUM_HAULERS])
 	print("  (guild LEDGER: takes %d, losses %d, returned_empty %d)" % [
 		ledger_takes, guild.losses, guild.returned_empty])
 	if ledger_takes != takes:

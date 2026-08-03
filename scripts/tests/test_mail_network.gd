@@ -51,6 +51,7 @@ var main_node: Node = null
 var failures: Array = []
 var finished: bool = false
 var _next_rec_id: int = 5000
+var _cluster := FakeCluster.new()   # shared by every hull _make_ship builds
 
 func _assert(condition: bool, msg: String) -> void:
 	if not condition:
@@ -76,7 +77,16 @@ func _make_ship(script, nm: String, flag: String, authority: Array = [],
 	var rec = ClusterEntity.new()
 	rec.id = _next_rec_id
 	_next_rec_id += 1
+	# The record carries the flag too. notarize_held's own-flag gate reads the
+	# SOURCE record's flag (whose citizen was robbed), not the courier's, so a
+	# record left flagless would make every port refuse to prosecute anything.
+	rec.transponder_flag = flag
 	s.cluster_record_ref = weakref(rec)
+	# Every hull in this file shares one cluster, so a station can actually READ
+	# the logs its mailbag entitles it to. Without this a promoted authority holds
+	# versions pointing at records it cannot reach.
+	_cluster.records.append(rec)
+	s.cluster_manager_ref = _cluster
 	return [s, rec]
 
 func setup(main) -> void:
@@ -89,6 +99,7 @@ func setup(main) -> void:
 	_test_news_travels_at_hull_speed()
 	await _test_real_dock_wiring()
 	_test_notarization()
+	_test_notarize_from_carried_news()
 	await _test_kin_relay_carries_incidents()
 	_finalize()
 
@@ -309,11 +320,69 @@ func _test_notarization() -> void:
 	_assert(port[0].warrants.size() == before_withheld,
 		"a robbery by a NAME-WITHHOLDING hull notarizes nothing -- 'UNKNOWN' is not an identity")
 
-	# Re-docking must not re-issue: the mailbag version is the dedupe.
+	# Re-docking must not re-issue: the per-source high-water mark is the dedupe.
 	var count_before: int = port[0].warrants.size()
-	var issued_again: int = port[0].notarize_from(victim[0], Mailbag.version_of(port[0].get_mailbag(), victim[1].id))
+	var issued_again: int = port[0].notarize_held(port[0].cluster_manager_ref)
 	_assert(issued_again == 0, "re-docking notarizes nothing a second time (issued %d)" % issued_again)
 	_assert(port[0].warrants.size() == count_before, "and the warrant store did not grow")
+
+# --- 7b. D29: the case that was STRUCTURALLY IMPOSSIBLE until 2026-08-03. ----
+#
+# Measured across ten funnel runs: 18-31 stations HELD robbery news and issued
+# ZERO warrants, every single time. notarize_from() walked the DOCKING HULL's
+# own log, so a warrant required the VICTIM to personally survive and reach an
+# own-flag port. News carried by a courier -- the ordinary case, and the entire
+# reason the mail network exists -- could never become enforceable.
+#
+# The victim here NEVER docks anywhere and never meets the port. That is the
+# point: an authority must act on evidence it HOLDS, not on who carried it.
+func _test_notarize_from_carried_news() -> void:
+	print("[7b] a port notarizes news a COURIER brought -- the victim never docks")
+	var port = _make_ship(MediumStation, "RelayPort", Standing.FLAG_DRIFT, [Standing.FLAG_DRIFT], Vector2(1200000, 0))
+	var victim = _make_ship(CargoShuttle, "FarVictim", Standing.FLAG_DRIFT, [], Vector2(1200000, 4000))
+	var courier = _make_ship(CargoShuttle, "Courier", Standing.FLAG_DRIFT, [], Vector2(1200000, 8000))
+	var foreign = _make_ship(CargoShuttle, "MeridianFar", Standing.FLAG_MERIDIAN, [], Vector2(1200000, 12000))
+
+	var sig := {"iff_tags": ["TEAM_PIRATE"], "hull": "pinnace"}
+	victim[0].record_incident(Incident.KIND_ARMED_ROBBERY, "Long Shadow", "PIRATE",
+		Vector2(40000, 0), "", sig)
+	foreign[0].record_incident(Incident.KIND_ARMED_ROBBERY, "Other Shadow", "PIRATE",
+		Vector2(41000, 0), "", sig)
+
+	# The courier learns both, by whatever means -- here a direct sync, standing
+	# in for the relay/dock hops it would take in a live run. It witnessed
+	# nothing itself; its OWN incident log stays empty for the whole test.
+	var cb: Dictionary = courier[0].get_mailbag()
+	Mailbag.sync_direct(cb, victim[1].id, victim[1].incident_seq, 100)
+	Mailbag.sync_direct(cb, foreign[1].id, foreign[1].incident_seq, 100)
+	_assert(courier[0].get_incident_log().is_empty(),
+		"the courier witnessed nothing itself -- it is carrying, not reporting")
+
+	port[0].exchange_mail_on_dock(courier[0])
+
+	var key: String = Standing.OFF_ARMED_ROBBERY + "|" + Standing.subject_key("Long Shadow", sig)
+	_assert(port[0].warrants.has(key),
+		"the port issued a warrant off news it was HANDED -- this is D29, and it was 0 before")
+	if port[0].warrants.has(key):
+		_assert(Standing.warrant_enforceable_by(port[0].warrants[key], [Standing.FLAG_DRIFT], 999),
+			"and it is enforceable by any Drift patrol -- the seal is broken by post")
+
+	# Gate 2 still holds, and now it reads the SOURCE's flag rather than the
+	# courier's. Same Drift courier, same dock, same bag -- the Meridian
+	# victim's robbery must NOT be prosecuted by a Drift port.
+	var foreign_key: String = Standing.OFF_ARMED_ROBBERY + "|" + Standing.subject_key("Other Shadow", sig)
+	_assert(not port[0].warrants.has(foreign_key),
+		"but a MERIDIAN victim's robbery in the same bag is still refused -- gate 2 moved, it did not weaken")
+
+	# And the fog is intact: evidence the port has NOT been delivered stays
+	# unreadable even though the record is right there in the same cluster.
+	var unheard = _make_ship(CargoShuttle, "Unheard", Standing.FLAG_DRIFT, [], Vector2(1200000, 16000))
+	unheard[0].record_incident(Incident.KIND_ARMED_ROBBERY, "Never Told", "PIRATE",
+		Vector2(42000, 0), "", sig)
+	var before: int = port[0].warrants.size()
+	port[0].notarize_held(port[0].cluster_manager_ref)
+	_assert(port[0].warrants.size() == before,
+		"a robbery nobody has told this port about notarizes nothing -- the clamp is still the fog")
 
 # --- 8. TIER 1: kin in radio range, NO dock involved. -----------------------
 # This is the assertion whose absence let M59's patrol half ship broken. The

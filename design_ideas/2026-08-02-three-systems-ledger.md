@@ -384,7 +384,10 @@ prioritises an empty queue.
 | **diverted (cargo)** | 3161 -> **1457** | **0 up / 5 down** |
 | notarized | 0 -> 0 | — |
 
-**D27 (decided): LANE_RUN stays OFF by default.** No encounter benefit, and the
+**D27 (decided, BUILT 2026-08-03): LANE_RUN stays OFF by default.**
+`pirate_guild.gd:lane_run_enabled` now defaults `false`, and the funnel's
+`LANE_RUN` env default moved to 0 to match -- a sim whose default differs from
+the shipped default measures a configuration nobody plays. No encounter benefit, and the
 only clean 5-of-5 signal is that it HALVES cargo's awareness — same incident
 count, far less propagation. Lane-running suppresses the information economy
 without buying takes. `lane_run_enabled` remains available; the mechanism for
@@ -430,12 +433,78 @@ warrants. `Ship.notarize_from(visitor, prev_seq)` walks
 VICTIM PERSONALLY docks at an own-flag station. News carried by a courier — the
 normal case, and the whole point of the mail network — is unnotarizable.
 
-An authority should act on evidence it HOLDS, regardless of who carried it. The
-fix is to notarize from the station's own readable incidents
-(`Mailbag.read_incidents`) rather than the visitor's log.
+An authority should act on evidence it HOLDS, regardless of who carried it.
+
+**BUILT 2026-08-03** -- `Ship.notarize_held(cluster)` walks every source the
+station's mailbag entitles it to read, clamped to the delivered version, with a
+per-source high-water mark (`_notarized_seq`) as the dedupe. `notarize_from` and
+`notarize_held` now share one `_notarize_entries()` judgement so the filters
+cannot drift.
+
+**Gate 2 moved rather than weakened**, and this is the part worth remembering:
+own-flag now tests the SOURCE record's flag -- whose citizen was robbed -- not
+the courier's. The question was never who carried the letter. A Drift port still
+refuses a Meridian victim's robbery out of the same bag, in the same dock, from
+the same Drift courier; `test_mail_network` [7b] pins exactly that pair.
+
+The fog survives the change: a robbery on a record the port has never been told
+about notarizes nothing, even though the record sits in the same cluster.
 
 **All three findings are the same shape**: a mechanism that cannot fire,
 invisible until something counted OUTCOMES rather than attempts.
+
+### D29 measured — the verdict branch closes for the first time (2026-08-03)
+
+Same 5 seeds as the LANE_RUN A/B's OFF column, D29 the only change:
+
+| seed | robberies | stations w/ news | **notarized** | patrols informed | sweeps | verdict branch |
+|---|---|---|---|---|---|---|
+| 11111 | 2 | 7/13 | **10** | 2/2 | 13 | CLOSED |
+| 22222 | 1 | 0/13 | 0 | 0/2 | 11 | evidence never reached a station |
+| 33333 | 2 | 8/13 | **7** | 2/2 | 18 | CLOSED |
+| 44444 | 1 | 8/13 | **5** | 2/2 | 19 | CLOSED |
+| 55555 | 2 | 8/13 | 0 | 2/2 | 14 | pirate ran DARK — correct refusal |
+
+Was 0 in all ten prior runs. **3 of 5 seeds now close end to end**, and both
+zeros are explained rather than unexplained: 22222's news never reached any
+station at all (stage 3, upstream of notarization), and 55555's robber was
+unidentified — an authority refusing to charge "a ship, about this big" is the
+designed behaviour, not a failure.
+
+**Read the warrant count correctly**: it is SUMMED ACROSS STATIONS. Two
+robberies reading 10 is one verdict held at five ports, each authority issuing
+its own — correct, and a genuinely misleading number. The instrument now prints
+`(summed over N of M stations holding one)`.
+
+### Two instrument bugs found while reading the above
+
+Both were in the funnel itself — the thing every claim in this ledger rests on.
+
+1. **`haulers holding foreign news: 33 of 14`.** The numerator counted every
+   non-station non-authority RECORD (pirates, guild-spawned traffic, anything
+   the cluster made); the denominator was the authored hauler count. A ratio
+   whose halves count different populations is not a ratio, and this one
+   exceeded 100% for ten runs without being questioned.
+2. **The warrant sum read as a per-robbery count** (above).
+
+Neither changes a conclusion already drawn, but the corrected hauler figure
+changes a PICTURE. Seed 11111 now reads:
+
+```
+notarized : 10 (summed over 5 of 13 stations holding one)   <- 2 each = the 2 robberies
+haulers   : 33 of 131 civilian hulls (14 authored)          <- 25%, not "236%"
+```
+
+So the cluster runs ~131 civilian hulls and roughly a QUARTER of them hold any
+foreign news at all. "33 of 14" read like saturation; 25% is a sparse
+information economy, and criterion (3) has to be judged against that.
+
+Both bugs are the same failure the preconditions doc is about: an instrument
+nobody audits becomes the evidence.
+
+Re-running seed 11111 after the fixes reproduced it exactly -- 2 robberies,
+7/13 stations, 10 warrants, 13 sweeps -- so `seed()` is doing its job and these
+comparisons are real A/Bs rather than dice.
 
 ### Queue after the re-baseline
 
