@@ -447,18 +447,52 @@ func _report() -> void:
 		print("  !! ledger disagrees with ground truth (%d vs %d) -- the cash-out mis-booking" % [
 			ledger_takes, takes])
 
-	# Name the first empty stage rather than leaving a reader to scan the table.
-	var stage := ""
-	if robbery_incidents == 0 and takes == 0: stage = "1 -- no robbery ever completed, so nothing downstream can be measured"
-	elif incidents_recorded == 0: stage = "2 -- robberies happen but no incident is recorded"
-	elif stations_holding_news == 0: stage = "3 -- incidents exist but never reach a station"
-	elif notarized == 0: stage = "4 -- stations have the news but issue no warrant"
-	elif patrols_holding_news == 0: stage = "5 -- patrols never receive the map"
-	elif sweeps_started == 0: stage = "6 -- patrols have the map but never act on it"
-	if stage != "":
-		print("\n  >>> CHAIN BREAKS AT STAGE %s" % stage)
+	# TWO BRANCHES, NOT ONE CHAIN (corrected 2026-08-02). An earlier version
+	# walked stages 1-6 linearly and reported the first zero, which called a
+	# healthy run broken: notarization read 0 while patrols were informed 2/2
+	# and 23 sweeps had fired. Notarization is NOT on the path to a sweep.
+	#
+	# This is D1's verdict/evidence split surfacing in the instrument:
+	#   EVIDENCE  incident -> stations -> patrols -> sweeps   (mailbags)
+	#   VERDICT   incident -> notarized warrant               (warrant store)
+	# They share a root and then diverge. A zero on one says nothing about the
+	# other, and collapsing them into one ladder misattributes the failure.
+	var ev := ""
+	if robbery_incidents == 0 and takes == 0:
+		ev = "no robbery ever completed -- nothing downstream is measurable"
+	elif incidents_recorded == 0:
+		ev = "robberies happen but no incident is recorded"
+	elif stations_holding_news == 0:
+		ev = "incidents exist but never reach a station"
+	elif patrols_holding_news == 0:
+		ev = "stations know but patrols never receive the map"
+	elif sweeps_started == 0:
+		ev = "patrols hold the map but never act on it"
+
+	var vd := ""
+	if incidents_recorded == 0:
+		vd = "no incident to notarize"
+	elif notarized == 0:
+		vd = "stations have the news but issue no warrant (EXPECTED when the pirate ran dark -- an authority cannot charge an unidentified hull)"
+
+	print("
+=== WHERE EACH BRANCH STANDS ===")
+	print("  EVIDENCE (incident -> stations -> patrols -> sweeps): %s" % (
+		"CLOSED end to end" if ev == "" else "breaks -- " + ev))
+	print("  VERDICT  (incident -> notarized warrant)            : %s" % (
+		"CLOSED end to end" if vd == "" else "breaks -- " + vd))
+	# Kept for instruments that grep it, but now reports the EVIDENCE branch
+	# only, which is the one a sweep depends on.
+	if ev != "":
+		print("
+  >>> CHAIN BREAKS AT STAGE %d -- %s" % [
+			1 if (robbery_incidents == 0 and takes == 0) else
+			(2 if incidents_recorded == 0 else
+			(3 if stations_holding_news == 0 else
+			(5 if patrols_holding_news == 0 else 6))), ev])
 	else:
-		print("\n  >>> the chain closed end to end")
+		print("
+  >>> the evidence chain closed end to end")
 
 	var path := "res://tactical_analysis/data/information_loop.csv"
 	SimHarness.append_row(path,

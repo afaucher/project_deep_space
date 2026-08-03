@@ -899,11 +899,45 @@ static func step_select_victim(actor, step: Dictionary, job: Dictionary) -> int:
 			job["_abort_reason"] = "hunt budget spent (%d attempts, nothing taken) -- withdrawing" % (job["hunt_attempts"] - 1)
 			return ABORT
 
-	var to_lane: Vector2 = lane_pos - actor.position
-	if to_lane.length() > lurk_radius:
-		_cruise_toward(actor, lane_pos, null, 300.0)
+	# LANE_RUN (2026-08-02) -- if the step carries lane ENDPOINTS, transit the
+	# lane instead of parking on it.
+	#
+	# WHY: encounter is the measured dominant failure (8 of ~13 hunts ended
+	# having seen nobody). A parked hull covers `2 * detection / lane_length` of
+	# a lane -- even with the 45,000u passive array that is ~30% of a 300,000u
+	# lane, and only while prey happens to pass. A hull that TRANSITS sweeps all
+	# of it per pass.
+	#
+	# This is not a new posture. `false_flag_cruise` already existed and its own
+	# header describes "one more freighter closing to demand range" -- but both
+	# postures then ran the same SELECT_VICTIM, which HELD STATION. The cruise
+	# was the staging approach, never the search. This makes it do what it says.
+	#
+	# The trade is real, which is what keeps it a choice rather than a straight
+	# upgrade: a runner is LIT under a cover identity, moving through traffic,
+	# repeatedly seen and logged. Dark lurking is invisible but nearly blind.
+	# Cruise speed defaults to traffic speed -- a "freighter" drifting at 300
+	# while everything else does 700 is itself a tell.
+	var run_a = step.get("run_a", null)
+	var run_b = step.get("run_b", null)
+	if run_a != null and run_b != null:
+		var target: Vector2 = scratch.get("run_target", run_b)
+		if actor.position.distance_to(target) <= lurk_radius:
+			# Reached this end -- turn around and sweep back.
+			target = run_a if target == run_b else run_b
+			scratch["run_target"] = target
+		elif not scratch.has("run_target"):
+			# First tick: head for whichever end is FARTHER, so the first pass
+			# covers the most lane rather than turning around immediately.
+			target = run_b if actor.position.distance_to(run_b) > actor.position.distance_to(run_a) else run_a
+			scratch["run_target"] = target
+		_cruise_toward(actor, target, null, step.get("run_speed", 700.0))
 	else:
-		_hold_station(actor)
+		var to_lane: Vector2 = lane_pos - actor.position
+		if to_lane.length() > lurk_radius:
+			_cruise_toward(actor, lane_pos, null, 300.0)
+		else:
+			_hold_station(actor)
 
 	var frame := Engine.get_physics_frames()
 	var last_scan: int = scratch.get("last_scan_frame", -SELECT_VICTIM_SCAN_INTERVAL)

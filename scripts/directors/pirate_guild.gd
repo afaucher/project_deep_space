@@ -197,6 +197,21 @@ func _check_ins(cluster) -> void:
 			else:
 				m["last_seen_pos"] = node.position
 				m["last_loot_takes"] = node.loot_takes
+				# CASH-OUT LATCH (2026-08-02). The exit test used to be evaluated
+				# at RESOLVE time against last_seen_pos -- a sample taken every
+				# `policy_period` (10s). A pirate leaving at ~700u/s crosses the
+				# 8,000u cash-in ring in ~11s, so whether the ring was ever
+				# sampled was close to a coin flip, and a COMPLETED ROBBERY could
+				# book as `presumed LOST`. Measured by the funnel, which prints
+				# the guild ledger beside ground truth: ledger 0 takes against 1
+				# real robbery.
+				#
+				# Latching removes the race: the moment ANY check-in sees this
+				# hull inside the ring it has reached the exit, and no later
+				# sample can un-see it. Monotonic, like every other
+				# "did it happen" flag in this file.
+				if node.position.distance_to(_wormhole_pos(cluster)) <= float(config.get("cashin_radius", 8000.0)):
+					m["reached_exit"] = true
 		else:
 			m["state"] = MemberState.OVERDUE
 			m["overdue_since"] = 0.0
@@ -226,8 +241,12 @@ func _resolve_overdue(cluster, period: float) -> void:
 		if m["overdue_since"] < delay:
 			continue
 
+		# Reads the LATCH set during check-ins, not a 10s-cadence position sample.
+		# last_seen_pos is kept as a fallback for a hull that vanished having never
+		# been sampled inside the ring at all.
 		var vanished_near_wormhole: bool = (not m.get("observed_dead", false)) \
-			and m.get("last_seen_pos", wormhole_pos).distance_to(wormhole_pos) <= cashin_radius
+			and (m.get("reached_exit", false) \
+				or m.get("last_seen_pos", wormhole_pos).distance_to(wormhole_pos) <= cashin_radius)
 		var loot: int = m.get("last_loot_takes", 0)
 
 		if vanished_near_wormhole and loot > 0:
@@ -485,6 +504,34 @@ const FALSE_FLAG_CRUISE_CHANCE := 0.4
 func _roll_posture() -> String:
 	return POSTURE_FALSE_FLAG_CRUISE if randf() < FALSE_FLAG_CRUISE_CHANCE else POSTURE_DARK_LURK
 
+# LANE_RUN (2026-08-02). A false_flag_cruise pirate now TRANSITS its lane
+# instead of parking on it -- see job_steps.step_select_victim for why (encounter
+# is the measured dominant failure, and a parked hull covers ~30% of a lane even
+# with the new passive array).
+#
+# This is not a third posture. `false_flag_cruise` already existed and its header
+# already promised "one more freighter closing to demand range"; both postures
+# then ran the same station-holding search. This makes the name true.
+#
+# LANE_RUN_ENABLED lets an A/B turn it off without touching the posture roll, so
+# the comparison changes exactly one thing: whether the false-flag pirate moves.
+static var lane_run_enabled: bool = true
+
+func _select_victim_step(posture: String, lane_pos: Vector2, seg_a: Vector2, seg_b: Vector2) -> Dictionary:
+	var step: Dictionary = {
+		"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos,
+		"lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY,
+		"max_attempts": 4, "max_hunt_seconds": config.get("hunt_seconds", 150.0),
+		"on_abort": "exit",
+	}
+	# Only the LIT posture runs the lane. A dark_lurk pirate cruising a lane at
+	# traffic speed with its transponder off would be the most conspicuous thing
+	# in the cluster -- the whole point of going dark is to sit still and listen.
+	if lane_run_enabled and posture == POSTURE_FALSE_FLAG_CRUISE:
+		step["run_a"] = seg_a
+		step["run_b"] = seg_b
+	return step
+
 func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 	var stations: Array = _station_positions(cluster)
 	var beacons: Array = _beacon_positions(cluster)
@@ -519,7 +566,7 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 		# victim-engagement cycles with nothing taken, SELECT_VICTIM aborts
 		# to "exit" (withdraw alive via the wormhole -> RETURNED_EMPTY),
 		# rather than thrashing the same lane until a patrol kills it.
-		{"verb": "SELECT_VICTIM", "label": "hunt", "lane_pos": lane_pos, "lurk_radius": 2500.0, "witness_range": _R_THIRD_PARTY, "max_attempts": 4, "max_hunt_seconds": config.get("hunt_seconds", 150.0), "on_abort": "exit"},
+		_select_victim_step(posture, lane_pos, seg_a, seg_b),
 		{"verb": "INTERCEPT", "on_abort": "hunt",
 			"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"}, {"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
 		{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0, "on_abort": "hunt",

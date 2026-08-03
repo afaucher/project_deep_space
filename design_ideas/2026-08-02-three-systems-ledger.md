@@ -236,6 +236,144 @@ and neither was a patrol's home station, so the patrols legitimately knew
 nothing. Station-to-station needs a courier. That is the mail model working, and
 it means patrol delivery depends on WHICH station happens to hear.
 
+### FIVE-SEED VARIANCE BATCH (2026-08-02) — the sample-size answer
+
+Heavy chain-test config (12-15 pirates, 14 haulers, 60 game-min), five seeds:
+
+| seed | robberies | stations | patrols | sweeps | contacts | risk-changed |
+|---|---|---|---|---|---|---|
+| 11111 | 2 | 8 | 2 | **52** | **20** | 0 |
+| 20260802 | 1 | 5 | 2 | 23 | 1 | 0 |
+| 22222 | **0** | 0 | 0 | 0 | 0 | 0 |
+| 33333 | 1 | 2 | 0 | 0 | 0 | 155 |
+| 44444 | 1 | 0 | 0 | 0 | 0 | 2 |
+
+**D23 (NEW): five seeds at 60 game-minutes is NOT enough to A/B anything.**
+Robberies range 0-2 (median 1) and one run produced none at all; sweeps 0-52;
+risk-changed decisions 0-155. Any comparison at this scale compares noise. The
+fix is LENGTH, not width: 60 game-min yields 0-2 robbery events, so every
+downstream stage is a near-binary draw. A 3-game-hour run should give 3-6
+events, and five seeds of THAT is a usable sample.
+
+**Patrols receiving news is close to a coin flip** — 2 of 5 — and it is BINARY
+(0 or 2, never 1). Both patrols share crypto-kin and orbit near stations, so
+once a nearby station knows, both learn together.
+
+**When patrols ARE informed, the mechanism works well.** Seed 11111: 52 sweeps
+and **20 hostile contacts**. The patrol half is not weak; it is starved. What
+gates it is whether news reaches a patrol at all.
+
+**Notarization was 0 in ALL five runs**, consistent with D7 (an authority cannot
+charge an unidentified hull, and these pirates run dark). But it means the
+VERDICT branch is currently decorative — it has never once fired in a campaign.
+
+**Prediction to test with LANE_RUN:** a lane-runner is LIT under a cover
+identity, so `pirate_claimed` is non-empty and notarization SHOULD fire. If it
+does, LANE_RUN is what brings the warrant branch alive — and the cover identity
+starts getting burned, which is the whole risk half of that posture.
+
+### Patrol behaviour reworked: ONE weighted draw (2026-08-02)
+
+Replaces a threshold + two branches with a single mixed candidate list:
+
+```
+[{hotspot, weight = severity x proximity x recency}, ..., {station, weight = 1}, ...]
+-> one weighted draw -> GO_TO . loiter . GO_TO home
+```
+
+**D24: a sweep and a routine patrol are the SAME ACT** — go somewhere, look,
+come home — differing only in why. Expressing that as one draw deleted
+`MIN_HOTSPOT_WEIGHT` as a policy gate, the separate routine interval, and the
+"sweep or circulate" branch entirely.
+
+It also fixed the stickiness properly. Deterministic argmax parked a patrol on
+one report for its whole ~52-minute actionable life (**52 sweeps off 2
+incidents**, measured). Now a fresh incident at 25 competes against ~12 stations
+at 1, so it wins ~2/3 of draws — dominant, not absolute — and as it decays its
+share falls, so attention drifts to newer trouble or back to circulation with no
+"this is stale" rule needed. That closes the open "mark a hotspot answered"
+question without a cooldown.
+
+`STATION_WEIGHT` is now the single dial for how much patrols wander when nothing
+is happening.
+
+**Patrols are now also COURIERS.** The circuit loiters inside a neighbour
+station's 30,000u comms envelope, which ticks the tier-1 mailbag relay — so a
+circulating patrol carries news BETWEEN stations. Until now the only couriers
+were haulers, and haulers go where cargo is, which is precisely where trouble is
+not. No docking mechanics required.
+
+**Return leg is STATED**, not inherited from the diamond route resuming.
+
+### What patrols did BEFORE (for the record)
+
+`_patrol()` authors four waypoints at +/-24,000u around a centre with
+`{"route": route, "loop": true}`. They never docked and never left except on a
+sweep. Because they orbit at 24,000u inside a 30,000u station comms envelope,
+they always knew whatever their home station knew — which is why "patrols
+informed" was BINARY across seeds (0 or 2, never 1). The failure was never
+patrol connectivity; it was **their home station being ignorant**.
+
+### Population, measured (2026-08-02)
+
+| | authored campaign | heavy test config |
+|---|---|---|
+| Patrols | **2** | 2 |
+| Cargo haulers | **5 authored lanes** | +10-14 planner haulers |
+| Pirates | **base_cap 1, max_cap 3** | 6-15 |
+| Stations | 8 authored (13 station-kind records) | same |
+
+The real campaign runs **1-3 pirates against 2 patrols and ~5 haulers on
+300,000u lanes**. A low encounter rate is arithmetic, not a bug — accepted for
+now.
+
+### Economy: the shortfalls are THREE problems, not one
+
+From `economy_traffic.csv` (180 sim-min, 8 haulers, commit 05a4bf1):
+
+| Shortfall | Cause | More haulers? |
+|---|---|---|
+| VOLATILES at Drift Market + Refinery Prime (**0 deliveries**) | sole producer Coldreach is MERIDIAN-flagged; Drift haulers are INELIGIBLE | **no** |
+| VOLATILES cluster-wide | supply 0.77/hr vs demand ~2.02/hr | **no** |
+| Refinery Prime ORE (-2.56/hr, 19 deliveries) | genuine throughput gap | probably |
+
+Two of three are supply-side and immune to hauler count. Note also **Slag Bay
+ORE reads -2.90/hr and is marked `ok`** while Refinery Prime at -2.56 is
+UNDERSUPPLIED — the verdict logic is inconsistent and under-reports ORE.
+
+### D25 (OPEN): cargo evens out the network, but routing depends on mail
+
+Prices are **globally readable today** (`route_planner.gd`: "the board is
+GLOBALLY READABLE for now — fog/latency gating is Mail phase 3"), so only the
+RISK term is fogged. That is why cargo can still even things out.
+
+The moment prices go behind the fog, a feedback loop appears: **unserved ->
+fewer visits -> less mail -> postings unheard -> stays unserved.** Worse than
+cargo abandonment, which self-corrects when urgency raises price — here the
+rising price IS the thing nobody can hear.
+
+Mitigation already in the world: the **seven beacons** on the Ironhold<->Drift
+Market road are described by the pirate guild's own tradecraft as "EM-loud
+sensor+comms relays that see and report". Making the beacon road a fixed mail
+BACKBONE breaks the loop where it matters and leaves off-road genuinely dark —
+which matches the fiction and gives beacons a purpose beyond navigation.
+
+**Tuning order: keep prices global until a backbone exists**, then fog them and
+use beacon coverage as the connectivity dial.
+
+### D26 (OPEN): no mail urgency exists
+
+`StationEconomy.urgency()` is first-class for goods; the mail layer has none —
+`Mailbag.merge` treats every source identically. The only priority is accidental
+and by TYPE: warrants ride the instant radio relay, incidents ride the ~22-min
+courier.
+
+`mail_network.md` already names the target: *"Information staleness is just
+another urgency... a party's picture ages -> informational urgency climbs ->
+someone couriers."* `confirmed_at` exists to price exactly this and nothing
+reads it. Sequence AFTER M62 — urgency over an untrustworthy supply of news just
+prioritises an empty queue.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

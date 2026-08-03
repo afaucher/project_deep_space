@@ -118,3 +118,63 @@ static func hotspot(incidents: Array, now: int, from_pos: Vector2, max_range: fl
 			best_weight = weight
 			best = {"pos": p, "weight": weight, "kind": e.get("kind", ""), "subject_name": e.get("subject_name", "")}
 	return best
+
+
+# Pick a hotspot at random, WEIGHTED by severity, instead of always taking the
+# heaviest (2026-08-02).
+#
+# Why: deterministic argmax makes a patrol lock on. Measured -- one report kept
+# the same point as the winner for its whole ~52-minute actionable life, so the
+# patrol re-swept a place it was already standing every ~45-75s and never went
+# home (52 sweeps off 2 incidents in one seed). The stickiness was the argmax,
+# not the threshold.
+#
+# Weighted sampling keeps the intent -- heavier trouble is visited more often --
+# while letting attention move. It ALSO makes two patrols diverge naturally
+# instead of both converging on the same coordinates.
+#
+# Honest limit: with exactly ONE known incident this still returns that
+# incident, so it does not by itself stop a lone report holding a patrol. What
+# it fixes is the multi-incident case, and it composes with routine circulation
+# (PatrolResponseLeaf) which gives a patrol something else to do. A real
+# "this hotspot has been answered" notion is still open.
+#
+# Uses the global RNG, which sims seed -- so a run stays reproducible.
+static func pick_weighted(incidents: Array, now: int, from_pos: Vector2, max_range: float) -> Dictionary:
+	var cands: Array = []
+	var total: float = 0.0
+	for e in incidents:
+		var p: Vector2 = e.get("pos", Vector2.ZERO)
+		if from_pos.distance_to(p) > max_range:
+			continue
+		var weight: float = 0.0
+		for other in incidents:
+			var d: float = p.distance_to(other.get("pos", Vector2.ZERO))
+			if d >= RISK_CORRIDOR_RADIUS:
+				continue
+			weight += WEIGHT_PER_INCIDENT * (1.0 - d / RISK_CORRIDOR_RADIUS) * _recency(other, now)
+		if weight <= 0.0:
+			continue
+		cands.append({"pos": p, "weight": weight, "kind": e.get("kind", ""), "subject_name": e.get("subject_name", "")})
+		total += weight
+	if cands.is_empty():
+		return {}
+	var roll: float = randf() * total
+	for c in cands:
+		roll -= c["weight"]
+		if roll <= 0.0:
+			return c
+	return cands[cands.size() - 1]
+
+
+# Weight AT a position: every nearby incident's severity x proximity x recency.
+# Factored out so the patrol's candidate list and hotspot()/pick_weighted() all
+# score a place the same way -- three copies of this sum would drift.
+static func weight_at(incidents: Array, p: Vector2, now: int) -> float:
+	var w: float = 0.0
+	for other in incidents:
+		var d: float = p.distance_to(other.get("pos", Vector2.ZERO))
+		if d >= RISK_CORRIDOR_RADIUS:
+			continue
+		w += WEIGHT_PER_INCIDENT * (1.0 - d / RISK_CORRIDOR_RADIUS) * _recency(other, now)
+	return w
