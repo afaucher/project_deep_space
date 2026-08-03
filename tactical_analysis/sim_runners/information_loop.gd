@@ -541,6 +541,7 @@ func _report() -> void:
 
 	print("
 === WHERE EACH BRANCH STANDS ===")
+	_report_economy()
 	print("  EVIDENCE (incident -> stations -> patrols -> sweeps): %s" % (
 		"CLOSED end to end" if ev == "" else "breaks -- " + ev))
 	print("  VERDICT  (incident -> notarized warrant)            : %s" % (
@@ -566,3 +567,75 @@ func _report() -> void:
 			notarized, patrols_holding_news, patrol_like, sweeps_started, haulers_holding_news])
 	print("  wrote ", path)
 	get_tree().quit(0)
+
+# THE THIRD SYSTEM, WHICH THIS RUNNER HAS NEVER REPORTED ON (2026-08-03).
+#
+# The goal is "a long economy sim showing all THREE playing together", and this
+# funnel measured two of them. A long run could have shown piracy working and
+# patrols working while the economy quietly starved behind it, and the report
+# would have read as success -- the same failure shape as every instrument bug
+# found today, just with a whole subsystem missing rather than a wrong number.
+#
+# DELIBERATELY LESS THAN economy_traffic's VERDICT, and labelled so. That
+# runner's SERVED/UNSERVED/UNDERSUPPLIED/OVER_EXPORTED/REPAIR_DRAIN attribution
+# needs per-minute flow accounting this runner does not keep, and porting it
+# would be the duplication that has already bitten once today (two copies of the
+# force-authorization rule disagreeing). What IS computable from end state is
+# the one verdict economy_traffic checks FIRST and calls the case where "net
+# flow reads HEALTHY while the station is dead":
+#
+#   STARVED -- the station wants a commodity, cannot make it itself, and its bin
+#              is at the floor. Consumption has already stopped.
+#
+# So this answers "did the economy survive" and explicitly not "was it served
+# well". A clean line here does NOT mean economy_traffic would pass.
+func _report_economy() -> void:
+	var starved: Array = []
+	var watched: int = 0
+	for rec in manager.records:
+		if not _is_station(rec):
+			continue
+		var self_bins: Dictionary = rec.stocks.get("self", {})
+		for c in self_bins:
+			if not _wants(rec, c) or _makes(rec, c):
+				continue
+			watched += 1
+			var bin: Dictionary = self_bins[c]
+			var target: float = float(bin.get("target", 0.0))
+			if target <= 0.0:
+				continue
+			var stock: float = float(bin.get("stock", 0.0))
+			# Same 2% floor economy_traffic uses for `starved`.
+			if stock <= target * 0.02:
+				starved.append("%s/%s" % [rec.name, c])
+	print("")
+	print("=== ECONOMY (did the third system survive?) ===")
+	print("  imported bins watched        : %d (station wants it, cannot make it)" % watched)
+	if watched == 0:
+		print("  >>> NOTHING WATCHED -- no station imports anything, so this says nothing")
+		return
+	if starved.is_empty():
+		print("  starved bins                 : 0")
+		print("  >>> no imported bin hit the floor. NOT a SERVED verdict -- this")
+		print("      runner does not track flow rates; run economy_traffic for that.")
+	else:
+		print("  starved bins                 : %d of %d" % [starved.size(), watched])
+		for k in starved:
+			print("      STARVED %s" % k)
+		print("  >>> a starved bin means consumption has ALREADY stopped there.")
+
+func _wants(rec, commodity: String) -> bool:
+	if rec.industry.get("sinks", {}).get(commodity, 0.0) > 0.0:
+		return true
+	for conv in rec.industry.get("converters", []):
+		if conv.get("in", {}).get(commodity, 0.0) > 0.0:
+			return true
+	return false
+
+func _makes(rec, commodity: String) -> bool:
+	if rec.industry.get("sources", {}).get(commodity, 0.0) > 0.0:
+		return true
+	for conv in rec.industry.get("converters", []):
+		if conv.get("out", {}).get(commodity, 0.0) > 0.0:
+			return true
+	return false

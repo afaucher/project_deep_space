@@ -940,6 +940,54 @@ sits behind a debug toggle the funnel leaves off. **Absence of a gated log is
 not absence of the event.** The cross-subsystem disagreement was the real
 signal, same shape as `outpaced 0` being the tell in D28.
 
+### First LONG run with all three systems (2026-08-03) — 240 game-min x 4
+
+The funnel had never reported on the ECONOMY at all: the goal is "all three
+playing together" and this instrument measured two. A long run could have shown
+piracy and patrols working while the economy starved behind them and read as
+success. Added `_report_economy()` — deliberately SMALLER than
+economy_traffic's verdict and labelled so in its own output, since that runner's
+SERVED/UNDERSUPPLIED/OVER_EXPORTED attribution needs per-minute flow accounting
+this one does not keep, and porting it would repeat today's duplication bug. It
+reports the one verdict computable from end state, the one economy_traffic
+checks FIRST as the case where "net flow reads HEALTHY while the station is
+dead": **STARVED** — wants it, cannot make it, bin on the floor.
+
+| run | robberies | stops | notarized | guild losses | starved |
+|---|---|---|---|---|---|
+| authored s11111 | 1 | 0 | 5 (5/13 stations) | 0 | **0 / 24** |
+| authored s22222 | 3 | 1 | 13 (8/13) | 1 | **0 / 24** |
+| pressed s11111 | 0 | 1 | 0 | 1 | **0 / 24** |
+| pressed s22222 | 2 | 0 | 8 (8/13) | 0 | **0 / 24** |
+
+(`authored` = base_cap 1 / max 3, campaign pacing. `pressed` = 3 / 6. Labelled
+distinctly per the sim-harness rule against mixing campaign-real with
+harness-compressed config.)
+
+**ESTABLISHED — the economy survives four game-hours alongside piracy and
+patrols.** No imported bin hit the floor in any run. First time all three have
+been measured in one world. The caveat is built into the report: 0 starved is
+NOT a SERVED verdict, only "nothing has died".
+
+**ESTABLISHED — the information chain holds at long horizon.** 13 warrants
+across 8 of 13 stations off 3 robberies. Notarization, courier delivery and
+warrant relay all survive hours, not just the 60-minute window everything until
+now was tested in.
+
+**CRITERION (1) IS NOT MET, and this is the honest headline.** Piracy runs
+0-3 robberies per FOUR game-hours (~0.25-0.75/hr). One run had ZERO, which makes
+every downstream stage unmeasurable in it. "Takes and incidents surface reliably
+enough to trust in a long run" is false at authored pressure. And the dominant
+pirate outcome is not a take at all — `returned_empty` runs 5-15 per run.
+Pirates mostly go out and find nothing, which is the same ENCOUNTER problem the
+passive-array work moved once and never solved.
+
+**NOT READ, deliberately**: `pressed` produced FEWER robberies than `authored`
+in both seeds (0 vs 1, 2 vs 3). That is the shape hulking-driven cap cuts would
+make, and n=2 per config cannot distinguish it from dice. Needs seed-matched
+pairs at more seeds. Reporting dice as signal has already happened once in this
+work and is not repeating here.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than
