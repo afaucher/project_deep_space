@@ -32,7 +32,12 @@ const BlackboardScript = preload("res://addons/beehave/blackboard.gd")
 const JobSteps = preload("res://scripts/ai/jobs/job_steps.gd")
 
 const DT := 1.0 / 60.0
-const TRACE_SECONDS := 40
+# 90s is well past the 25s patience a real interdiction gets -- long enough to
+# show that the chase SETTLES rather than converging. Measured 2026-08-03:
+# separation oscillates around ~1000u indefinitely (536 @20s, 1416 @30s, 796
+# @40s, 1090 @60s, 1123 @70s) with both hulls climbing toward ~1800. It is a
+# stalemate, not a slow loss, which is why more patience alone buys nothing.
+const TRACE_SECONDS := 90
 
 var main_node: Node = null
 

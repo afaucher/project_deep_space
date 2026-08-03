@@ -53,6 +53,12 @@ const SELECT_VICTIM_SCAN_INTERVAL := 30 # ticks -- per the design doc's "~30-tic
 # keeps asserting; the victim clears it a few missed beats after the channel
 # goes quiet (Ship.HAIL_HEARTBEAT_TIMEOUT = 6s, so a 2s cadence gives ~3
 # missed beats of slack).
+# D31 -- how far outside hail range a pursuit may stray before it is genuinely
+# hopeless rather than merely out of radio contact. Was effectively 1.2, which
+# fired on healthy chases (see step_demand_stop's note). `patience` is the real
+# limiter; this only stops a patrol being towed across the cluster.
+const OUTPACED_CEILING_MULT := 4.0
+
 const DEMAND_REFRESH_FRAMES := int(2.0 * PHYSICS_HZ)
 
 # M52c -- standoff intercept + speed-match hold (implementation_plans/
@@ -1160,13 +1166,44 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 		_blacklist_victim(job, victim_iid)
 		return ABORT
 
+	# D31 (2026-08-03) -- LEAVING HAIL RANGE IS NOT LOSING THE CHASE.
+	#
+	# This used to ABORT the whole interdiction the moment the subject crossed
+	# 1.2x hail range. Measured why that was fatal: step_intercept completes at
+	# `dist <= hail_range` ON PURPOSE (its own header, 2026-07-23: "hail from
+	# farther away, fly colors, THEN get into position"), so EVERY demand opens
+	# at a sep/hail ratio of exactly 1.00 -- median 1.00, max 1.00, every seed.
+	# The chase therefore began with 20% of margin, and any subject that turned
+	# and ran spent it before the patrol could accelerate.
+	#
+	# It was also measuring the wrong thing. pursuit_trace.gd shows a HEALTHY
+	# pursuit oscillating 536 -> 1870 -> 760 while closing overall; an absolute
+	# distance test fires on the 1870 and abandons a chase the patrol is winning.
+	# The patrol out-accelerates the pirate 115.6 vs 79.8 u/s^2 and has the
+	# higher top speed -- it does not need rescuing from this fight.
+	#
+	# What crossing hail range ACTUALLY means is narrower: the demand channel
+	# cannot be refreshed, because the two hulls cannot talk. That is a reason to
+	# go quiet, not to give up -- and it is exactly the channel model
+	# test_demand_lifecycle already pins ("there is no RELEASE verb; the channel
+	# expresses that by going quiet"). The refresh above is already gated by the
+	# radio itself, so falling out of range simply stops it; the victim's own
+	# heartbeat timeout then lapses pending_demand, and closing back inside range
+	# re-asserts it.
+	#
+	# `patience` remains the real limiter -- one clock, already tuned per warrant
+	# class, already the thing the probe reports as "refused". The ceiling below
+	# is only a backstop against a patrol towed across the cluster by something
+	# genuinely faster; it is deliberately far outside the band any real pursuit
+	# oscillates through, so it cannot resume the old false-positive role.
 	var hail_range: float = _hail_range_to(actor, victim_iid)
 	var dist: float = actor.position.distance_to(c.get("pos", actor.position))
-	if hail_range > 0.0 and dist > hail_range * 1.2:
+	if hail_range > 0.0 and dist > hail_range * OUTPACED_CEILING_MULT:
 		EngagementProbe.note_outcome(job, "outpaced")
-		job["_abort_reason"] = "victim outpaced us beyond hail range (%.0f > %.0f)" % [dist, hail_range]
+		job["_abort_reason"] = "victim outpaced us beyond %.0fx hail range (%.0f > %.0f)" % [
+			OUTPACED_CEILING_MULT, dist, hail_range * OUTPACED_CEILING_MULT]
 		_blacklist_victim(job, victim_iid)
-		return ABORT # outpacing us beyond hail range -- let it go
+		return ABORT
 
 	return CONTINUE
 

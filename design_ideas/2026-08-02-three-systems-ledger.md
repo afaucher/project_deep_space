@@ -634,6 +634,67 @@ a patrol cannot chase across the cluster forever. Its own measurement, alone.
 defaults or tests that were correct only while the mechanism upstream of them
 was dead. Fixing one exposes the next.
 
+### D31 BUILT + measured (2026-08-03) — and the chase is a STALEMATE
+
+`step_demand_stop` no longer aborts when the subject crosses 1.2x hail range.
+Crossing that line means only that the two hulls cannot talk, so the demand
+channel cannot be refreshed — a reason to go quiet, not to give up, and exactly
+the channel model `test_demand_lifecycle` already pins ("no RELEASE verb; the
+channel expresses that by going quiet"). Verified rather than assumed:
+`Hail.send` computes `link_range = min(sender_range, their_range)` and skips
+receivers beyond it, so the refresh self-gates with no new plumbing. `patience`
+is now the real limiter; a 4.0x hail ceiling remains as a backstop against a
+patrol towed across the cluster.
+
+| 5 seeds | before D31 | after |
+|---|---|---|
+| outpaced | 5 | **0** |
+| refused (patience) | 4 | 11 |
+| complied | 0 | 0 |
+
+Every abandoned chase converted into a chase the patrol actually stayed with.
+The mechanism does what it was meant to. Stops are still zero.
+
+**And a 90s trace says more patience will not fix that**, because the pursuit
+does not converge — it settles:
+
+```
+t=20  sep  536   patrol 1249  pirate 1259
+t=30  sep 1416   patrol 1587  pirate 1364
+t=40  sep  796   patrol 1546  pirate 1626
+t=60  sep 1090   patrol 1698  pirate 1710
+t=70  sep 1123   patrol 1805  pirate 1826
+```
+
+Separation oscillates around ~1000u indefinitely. Both hulls climb toward
+~1800 and hold near parity. The patrol never reaches standoff; the pirate never
+escapes.
+
+**Why that yields no stop**, and it is a near miss: the pirate complies when
+`max_speed <= observed_patrol_peak * run_speed_ratio`. Its max is 2000; the
+patrol's observed peak sits ~1805, so the test reads 2000 <= 1895 — false, by
+about 5%. The pirate keeps running because on paper it IS still marginally
+faster, and it is right.
+
+### D32 (OPEN, a real design decision now — not a bug)
+
+Interdiction is currently a pure speed race that near-parity hulls cannot
+resolve. Three ways out, and they are genuinely different games:
+
+1. **Patrol hulls outclass pirate hulls** (LAC above 2200). Simplest; makes
+   fleeing pointless and interdiction near-automatic.
+2. **"You cannot shake them" beats "you are slower".** An outlaw held at close
+   range for a sustained stretch concludes the pursuit will not break and heaves
+   to, regardless of a 5% paper advantage. Better fiction, and it makes the
+   PURSUIT the thing that wins rather than the stat block.
+3. **Patrols disable rather than ask.** Weapons enter the interdiction ladder,
+   which is a much larger change and turns every stop into a fight.
+
+My recommendation is (2): it is the only one where the outcome follows from what
+happened in the chase rather than from a number chosen in advance, and it does
+not require touching hull balance or building combat machinery. It is still a
+gameplay call and is recorded here rather than made silently.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than
