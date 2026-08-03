@@ -473,6 +473,17 @@ func _report() -> void:
 	print("  outpaced the patrol          : %d" % EngagementProbe.outpaced)
 	var sr: float = EngagementProbe.stop_rate()
 	print("  stop rate                    : %s" % ("n/a -- none attempted" if sr < 0.0 else "%.0f%%" % (sr * 100.0)))
+	# WHERE the demand opened, relative to the range it must be held inside.
+	# A 1v1 trace (pursuit_trace.gd) showed the patrol out-accelerating the
+	# pirate 115.6 vs 79.8 u/s^2 and closing a 2500u gap to ~600u repeatedly --
+	# so "outpaced" is not a propulsion deficit, and this is the number that
+	# can say what it actually is.
+	var og: Dictionary = EngagementProbe.opening_summary()
+	if not og.is_empty():
+		print("  demand OPENED at sep/hail    : median %.2f, max %.2f (n=%d)" % [
+			og["median"], og["max"], og["n"]])
+		print("    already past the 1.2x line : %d of %d -- doomed before the chase began" % [
+			og["born_outpaced"], og["n"]])
 
 	print("\n=== SWEEP OUTCOMES (motion vs effect) ===")
 	print("  sweeps started               : %d" % sweeps_started)

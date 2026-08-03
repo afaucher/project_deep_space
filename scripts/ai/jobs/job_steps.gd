@@ -1142,6 +1142,13 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 		scratch["demand_sent"] = true
 		scratch["last_refresh_frame"] = frame_now
 		job["demand_seq"] = seq
+		# The geometry this interdiction OPENS at -- separation against the
+		# hail range whose 1.2x multiple is the outpaced test below. Recorded
+		# here rather than at job assignment because this is the instant that
+		# test starts applying.
+		EngagementProbe.note_demand_geometry(job,
+			actor.position.distance_to(c.get("pos", actor.position)),
+			_hail_range_to(actor, victim_iid))
 	elif frame_now - scratch.get("last_refresh_frame", 0) >= DEMAND_REFRESH_FRAMES:
 		actor.refresh_demand(victim_iid, Hail.RUNG_STOP, scratch.get("demand_seq", -1))
 		scratch["last_refresh_frame"] = frame_now

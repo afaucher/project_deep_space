@@ -590,6 +590,50 @@ wrong cause (CLAUDE.md already records the `heat_em_component_loop` pair). The
 next step is instrumentation of an actual chase — patrol speed, subject speed,
 separation, per second — not a third guess.
 
+### D31 — "outpaced" measures the wrong thing (2026-08-03)
+
+Three guesses at why patrols lose chases, all wrong, all propulsion theories:
+the `cruise` cap (D30, refuted by a bit-identical run), top speed, acceleration.
+`pursuit_trace.gd` — one patrol, one fleeing pirate, real hulls, real leaves —
+killed the whole category:
+
+```
+patrol accel 115.6 u/s^2  vs  pirate 79.8      patrol also has the higher top speed
+separation: 2481 -> 536 -> 1870 -> 760 ...     oscillates, never escapes
+hail_range 27000, abort at 32400               separation peaked at 2481
+```
+
+**In a clean 1v1 the patrol never loses.** So it is not speed, not acceleration,
+not a cap. I should have written that 40-line rig before the first guess.
+
+Instrumenting the geometry instead (`EngagementProbe.opening_summary`) gave the
+answer in one run — **median `sep/hail` = 1.00, max 1.00, across every seed.**
+
+That is not a bug, it is DESIGN. `step_intercept` completes at
+`dist <= hail_range` on purpose, from a 2026-07-23 playtest decision recorded in
+its own header: *"hail from farther away, fly colors, THEN get into position"* —
+because the previous behaviour read as "they were trying to board me before the
+hail even showed up."
+
+**The contradiction is downstream.** `step_demand_stop` aborts when
+`dist > hail_range * 1.2`. A step that deliberately opens at 1.0x leaves the
+chase exactly 20% of margin. That was invisible for as long as no subject ever
+ran — which was every day until D28 shipped.
+
+So `outpaced` currently means **"it is far away"** when it should mean **"it is
+pulling away from me."** An absolute-distance test cannot tell the 1v1 trace's
+healthy oscillation (536 -> 1870 -> 760, closing overall) from a genuine escape;
+it fires on the 1870 and abandons a chase the patrol was winning.
+
+**Proposed (not yet built): outpaced = losing ground.** Compare separation
+against its own recent minimum over a window, abort only when the subject has
+genuinely opened the gap, and keep a generous absolute ceiling as a backstop so
+a patrol cannot chase across the cluster forever. Its own measurement, alone.
+
+**The pattern, four for four**: D28, D29, D30's observation, and now D31 are all
+defaults or tests that were correct only while the mechanism upstream of them
+was dead. Fixing one exposes the next.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than
