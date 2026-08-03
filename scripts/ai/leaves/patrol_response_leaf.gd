@@ -43,9 +43,24 @@ const RESPONSE_RANGE := 220000.0
 # weights drift and never actually arrive anywhere.
 const DECIDE_INTERVAL_FRAMES := 1800   # 30s
 
-# A hotspot must outweigh this to be worth leaving station for. One stale
-# report should not pull a patrol off its post.
-const MIN_HOTSPOT_WEIGHT := 20.0
+# A hotspot must outweigh this to be worth leaving station for.
+#
+# 2026-08-02 -- was a bare 20.0, which is ~80% of ONE fresh incident
+# (RiskMap.WEIGHT_PER_INCIDENT = 25). Combined with a half-life shorter than
+# delivery latency that made it unreachable: a report arriving 22 game-minutes
+# old weighed 1.1. Measured result was patrols holding the news 2/2 and sweeping
+# ZERO times.
+#
+# Expressed as a FRACTION of WEIGHT_PER_INCIDENT rather than an absolute, so it
+# cannot silently drift when that constant moves -- the same mis-scaling that
+# bit HYSTERESIS_MARGIN when LOT_SIZE changed.
+#
+# Policy this encodes: **a single credible report is worth investigating.** A
+# robbery is rare (measured ~2 per game-hour), so requiring a CLUSTER before a
+# patrol will move means it never moves. What the threshold still rejects is a
+# report so old it has decayed past a third of its original weight -- roughly an
+# hour and a half at the current half-life.
+const MIN_HOTSPOT_WEIGHT := RiskMap.WEIGHT_PER_INCIDENT * 0.3
 
 # How long to loiter on arrival before the sweep completes and the patrol falls
 # back to its route. Long enough for the sensor sweep to actually find someone.

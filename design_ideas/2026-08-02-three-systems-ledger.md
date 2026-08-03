@@ -204,6 +204,38 @@ be set relative to the measured delivery time, never in isolation.**
 
 Not yet fixed — deliberately one variable at a time, and this is the next one.
 
+### METHOD FAILURE: the funnel sim was never seeded (fixed 2026-08-02)
+
+`pirate_scenarios` calls `seed(20260731)`. `information_loop` did not. So every
+run drew different pirate arrivals, lurk points and lanes — and with only **1-2
+robberies per game-hour**, every stage downstream is measured at **n <= 2**.
+
+Two consecutive 60-minute runs, same config:
+
+| | run A | run B |
+|---|---|---|
+| robberies | 2 | 1 |
+| stations holding news | 6 of 13 | 2 of 13 |
+| patrols holding news | 2 of 2 | **0 of 2** |
+| decisions changed by risk | 560 | 116 |
+
+I reported the delta between runs like these as signal. **It was dice.** Run B's
+patrols never received any news, so the D22 threshold change was not disproven —
+it was never exercised.
+
+Fixed: `seed(int(_envf("SEED", 20260802)))`, overridable so a sweep can vary it
+DELIBERATELY. Same seed = a true A/B of one variable. Different seeds = a sample
+of the distribution. Both are useful; mixing them silently is not.
+
+**The standing rule this adds:** with events this rare, a single run is an
+anecdote. Either fix the seed and change one variable, or run enough seeds to
+have a distribution — and say which you did.
+
+Also note run B was internally coherent, not broken: 2 of 13 stations learned,
+and neither was a patrol's home station, so the patrols legitimately knew
+nothing. Station-to-station needs a courier. That is the mail model working, and
+it means patrol delivery depends on WHICH station happens to hear.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

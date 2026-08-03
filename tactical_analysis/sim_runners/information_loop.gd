@@ -109,6 +109,17 @@ func _envf(name: String, fallback: float) -> float:
 	return float(v) if v != "" else fallback
 
 func setup(main) -> void:
+	# SEEDED, like pirate_scenarios. Without this every run draws different
+	# pirate arrivals, lurk points and lanes -- and with only 1-2 robberies per
+	# game-hour, every funnel stage downstream is measured at n<=2. Comparing
+	# two unseeded runs then reports DICE as signal, which is exactly what
+	# happened when a patrol-threshold change was "measured" against a run whose
+	# patrols never received any news at all.
+	#
+	# SEED is overridable so a sweep can vary it deliberately: same seed = a
+	# true A/B of one variable; different seeds = a sample of the distribution.
+	# Both are useful; mixing them silently is not.
+	seed(int(_envf("SEED", 20260802.0)))
 	sim_minutes = _envf("SIM_MINUTES", 60.0)
 	NUM_HAULERS = int(_envf("NUM_HAULERS", 8.0))
 	print("=== information_loop: does the chain actually close? (%.0f game-min, %d haulers) ===" % [

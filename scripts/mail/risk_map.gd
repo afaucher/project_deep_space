@@ -36,7 +36,25 @@ extends RefCounted
 # split is that policy lives in the consumer, visibly, rather than in the record.
 
 const RISK_CORRIDOR_RADIUS := 20000.0
-const RISK_HALF_LIFE_FRAMES := 18000.0   # ~5 game-minutes at 60Hz
+# 2026-08-02 -- 18,000 (5 game-min) -> 108,000 (30 game-min), set against
+# MEASURED delivery latency rather than in isolation.
+#
+# The old value was chosen as "the damping term for the predator-prey
+# oscillation" before any latency existed to compare it against. Then the
+# courier network was measured: a robbery 54-77km from any station takes ~22
+# GAME-MINUTES to reach a port. At a 5-minute half-life that is 4.5 half-lives,
+# so a fresh incident worth 25 arrives weighing 1.1 -- **news was stale before
+# it landed**, and PatrolResponseLeaf could never clear its threshold no matter
+# how much trouble there was.
+#
+# THE RULE THIS ENCODES (D22): in a world where information is CARRIED, a decay
+# constant must be set relative to measured delivery time. A half-life shorter
+# than the latency means nobody can ever act on anything.
+#
+# 30 game-min leaves a delivered report at ~0.6 of its original weight, and an
+# hour-old one at ~0.25 -- still decaying, still a damping term, but no longer
+# self-defeating.
+const RISK_HALF_LIFE_FRAMES := 108000.0  # 30 game-minutes at 60Hz
 
 # How much a single fresh incident sitting exactly on the lane weighs, before
 # the caller scales it. Cargo multiplies by lots; the patrol side uses the raw
