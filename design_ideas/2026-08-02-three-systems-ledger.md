@@ -374,6 +374,69 @@ someone couriers."* `confirmed_at` exists to price exactly this and nothing
 reads it. Sequence AFTER M62 — urgency over an untrustworthy supply of news just
 prioritises an empty queue.
 
+### LANE_RUN A/B — 5 seed pairs, 60 game-min (2026-08-03)
+
+| metric | OFF -> ON | seeds |
+|---|---|---|
+| robberies | 10 -> **9** | 2 up / 3 down |
+| stations informed | 31 -> 18 | 2 up / 3 down |
+| patrols informed | 10 -> 6 | 0 up / 2 down |
+| **diverted (cargo)** | 3161 -> **1457** | **0 up / 5 down** |
+| notarized | 0 -> 0 | — |
+
+**D27 (decided): LANE_RUN stays OFF by default.** No encounter benefit, and the
+only clean 5-of-5 signal is that it HALVES cargo's awareness — same incident
+count, far less propagation. Lane-running suppresses the information economy
+without buying takes. `lane_run_enabled` remains available; the mechanism for
+the propagation loss is NOT established and is deliberately not guessed at.
+
+**My prediction failed.** I expected a lit lane-runner under a cover identity to
+make notarization fire for the first time. It stayed 0 in all ten runs — see
+below; the cause was never the pirate's identity.
+
+### D28 (NEW, structural): pirates CANNOT comply with a demand
+
+First run of `EngagementProbe`, and it answers criterion (4) outright:
+
+```
+interdictions started : 39      COMPLIED (stopped) : 0
+refused (patience)    : 27      outpaced           : 0
+stop rate             : 0%
+```
+
+Zero outpaced means patrols KEEP UP. The subject simply never stops — because
+`ThreatResponseLeaf`, the comply-or-run handler, exists **only in
+`build_cargo`**:
+
+| tree | leaves |
+|---|---|
+| `build_cargo` | ShouldDisengage, Flee, **ThreatResponse**, CargoRun, Idle |
+| `build_pirate` | ShouldDisengage, Flee, JobRunner, Idle |
+
+A pirate receiving `DEMAND_STOP` has nothing that reads `pending_demand` at all,
+so patience expires 100% of the time BY CONSTRUCTION. "Patrols never stop
+pirates" was never a tuning problem.
+
+Open design question this forces: **what SHOULD a cornered pirate do?** Comply
+and be arrested, run, or fight? Cargo's comply-or-run compares speeds; a pirate
+weighing arrest against a firefight is a different calculation, and picking one
+is a policy decision, not a port of the cargo leaf.
+
+### D29 (NEW): notarization only reads the DOCKING hull's own log
+
+Confirmed across all ten runs: 18-31 stations HELD robbery news and issued zero
+warrants. `Ship.notarize_from(visitor, prev_seq)` walks
+`visitor.get_incident_log()`, so a warrant can only ever be issued when the
+VICTIM PERSONALLY docks at an own-flag station. News carried by a courier — the
+normal case, and the whole point of the mail network — is unnotarizable.
+
+An authority should act on evidence it HOLDS, regardless of who carried it. The
+fix is to notarize from the station's own readable incidents
+(`Mailbag.read_incidents`) rather than the visitor's log.
+
+**All three findings are the same shape**: a mechanism that cannot fire,
+invisible until something counted OUTCOMES rather than attempts.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

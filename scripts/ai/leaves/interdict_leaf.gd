@@ -34,6 +34,7 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 # unrelated HOSTILE spell against the same ship (e.g. a new warrant after a
 # long gap, once the track was re-acquired fresh) gets a fresh demand.
 const Standing = preload("res://scripts/combat/standing.gd")
+const EngagementProbe = preload("res://scripts/instrumentation/engagement_probe.gd")
 
 # RESPONSE_MAX -- "shoot-on-sight-ish, but still one demand" per warrants.md's
 # response-level framing. RESPONSE_INTERCEPT matches JobSteps' own
@@ -183,6 +184,7 @@ func tick(actor: Node, blackboard) -> int:
 		"interdict_tier": _tier_of(target_c, w),
 	}
 	actor.assignment = job
+	EngagementProbe.note_started()
 
 	# One line per interdiction START. The tier is the interesting field: yellow
 	# (CAUTION) work is administrative -- a NO_ID or ARMED_THREAT warrant -- and

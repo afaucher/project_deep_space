@@ -30,6 +30,7 @@ const Hail = preload("res://scripts/comms/hail.gd")
 # design_ideas/docking_approach_control.md.
 const PortChannel = preload("res://scripts/port/port_channel.gd")
 const Incident = preload("res://scripts/mail/incident.gd")
+const EngagementProbe = preload("res://scripts/instrumentation/engagement_probe.gd")
 
 const CONTINUE := 0
 const DONE := 1
@@ -1116,6 +1117,7 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 					"laser", actor.get_instance_id())
 
 	if c.get("complied_stop", false):
+		EngagementProbe.note_outcome(job, "complied")
 		return DONE
 
 	var victim_pos_demand: Vector2 = c.get("pos", actor.position)
@@ -1146,6 +1148,7 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 
 	var patience: float = step.get("patience", 25.0)
 	if _elapsed_seconds(scratch, "start_frame") > patience:
+		EngagementProbe.note_outcome(job, "refused")
 		job["_abort_reason"] = "patience %.0fs expired un-complied" % patience
 		_blacklist_victim(job, victim_iid)
 		return ABORT
@@ -1153,6 +1156,7 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 	var hail_range: float = _hail_range_to(actor, victim_iid)
 	var dist: float = actor.position.distance_to(c.get("pos", actor.position))
 	if hail_range > 0.0 and dist > hail_range * 1.2:
+		EngagementProbe.note_outcome(job, "outpaced")
 		job["_abort_reason"] = "victim outpaced us beyond hail range (%.0f > %.0f)" % [dist, hail_range]
 		_blacklist_victim(job, victim_iid)
 		return ABORT # outpacing us beyond hail range -- let it go

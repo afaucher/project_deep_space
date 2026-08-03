@@ -36,6 +36,7 @@ const Mailbag = preload("res://scripts/mail/mailbag.gd")
 const Incident = preload("res://scripts/mail/incident.gd")
 const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
 const DecisionProbe = preload("res://scripts/instrumentation/decision_probe.gd")
+const EngagementProbe = preload("res://scripts/instrumentation/engagement_probe.gd")
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
 const RiskMap = preload("res://scripts/mail/risk_map.gd")
 
@@ -138,12 +139,28 @@ func setup(main) -> void:
 			DebugSettings.set_choice("job_log", DebugSettings.JobLog.ON)
 	ThreatResponseLeaf.sos_chance = 0.6
 
+	# LANE_RUN=0 disables the lane-transit posture without touching the posture
+	# roll, so an A/B changes exactly one thing: whether a false-flag pirate
+	# MOVES along its lane or parks on it.
+	PirateGuild.lane_run_enabled = _envf("LANE_RUN", 1.0) > 0.0
 	var cfg: Dictionary = _guild_config()
+	print("    LANE_RUN=%s" % ("on" if PirateGuild.lane_run_enabled else "OFF"))
 	print("    pirates: base_cap=%d max_cap=%d arrival=%s hunt=%.0fs | victim_sos=%.2f" % [
 		cfg["base_cap"], cfg["max_cap"], str(cfg["arrival_window"]), cfg["hunt_seconds"],
 		ThreatResponseLeaf.sos_chance])
 	guild = PirateGuild.new(cfg)
-	manager = SimHarness.build_live_home_cluster(main, [guild])
+	# The TRADE DIRECTOR was missing from every run before now -- only
+	# StationEconomy and PirateGuild were installed, so a three-system validation
+	# was running with two of the three. Its job here is HAULER REPLACEMENT:
+	# without it, pirates thin the fleet over a long run and traffic silently
+	# decays, which would quietly suppress the encounter rate the capstone is
+	# meant to measure.
+	#
+	# Its OVERDUE incident publishing stays OFF (TrafficGuild.overdue_incidents_
+	# enabled, see M62): that detection polls live nodes with no channel, so it
+	# would be an instant cluster-wide news source bypassing the mail network.
+	var traffic := TrafficGuild.new()
+	manager = SimHarness.build_live_home_cluster(main, [guild, traffic])
 	SimHarness.spawn_planner_haulers(manager, NUM_HAULERS)
 	clock = SimHarness.Clock.new(SETTLE_MINUTES, sim_minutes)
 
@@ -151,6 +168,8 @@ func setup(main) -> void:
 	# routing decision carries its own counterfactual. Sim-only.
 	DecisionProbe.enabled = true
 	DecisionProbe.reset()
+	EngagementProbe.enabled = true
+	EngagementProbe.reset()
 
 	# Per-minute trace to tmp/ (gitignored), summary to tactical_analysis/data/
 	# -- the same split economy_traffic uses.
@@ -407,6 +426,10 @@ func _report() -> void:
 
 	print("\n=== COUNTERFACTUAL: did risk change any decision? ===")
 	print("  decisions changed by risk    : %d of %d" % [DecisionProbe.changed_by_risk, DecisionProbe.total])
+	print("  flew a KNOWN-risky lane anyway: %d%s" % [DecisionProbe.risked_anyway,
+		"" if DecisionProbe.risked_anyway == 0 else "  (mean score %.0f -- the payout that justified it)" % (DecisionProbe.risked_score_sum / DecisionProbe.risked_anyway)])
+	# A risk term that only ever makes haulers FLEE is a veto, not a price.
+	# Criterion (3) needs both numbers to be non-zero.
 
 	var lat_station: Array = []
 	var lat_patrol: Array = []
@@ -427,6 +450,14 @@ func _report() -> void:
 		var cc: Dictionary = _chain[key]
 		print("    robbery %s: %.0fu from nearest station (station comms reach 30,000u)" % [
 			key, cc.get("station_dist", -1.0)])
+
+	print("\n=== ENGAGEMENTS (did a patrol STOP anything?) ===")
+	print("  interdictions started        : %d" % EngagementProbe.started)
+	print("  subject COMPLIED (stopped)   : %d" % EngagementProbe.complied)
+	print("  refused (patience expired)   : %d" % EngagementProbe.refused)
+	print("  outpaced the patrol          : %d" % EngagementProbe.outpaced)
+	var sr: float = EngagementProbe.stop_rate()
+	print("  stop rate                    : %s" % ("n/a -- none attempted" if sr < 0.0 else "%.0f%%" % (sr * 100.0)))
 
 	print("\n=== SWEEP OUTCOMES (motion vs effect) ===")
 	print("  sweeps started               : %d" % sweeps_started)

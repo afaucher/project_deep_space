@@ -37,11 +37,24 @@ static var total: int = 0
 static var changed_by_risk: int = 0
 static var risk_values: Array = []   # every non-zero risk seen, for a p95
 
+# CRITERION (3): "urgent routes still risked". Diversion is only half the
+# claim -- a risk term that ONLY ever makes haulers flee would strangle the
+# lanes it was added to make interesting. The other half is a hauler KNOWINGLY
+# flying a lane it has heard bad news about, because the payout won anyway.
+#
+# `changed_by_risk` counts diversions. `risked_anyway` counts the opposite: the
+# chosen route carried non-zero risk and was flown regardless. Together they
+# say whether risk is a deterrent or a veto -- and a veto is the failure mode.
+static var risked_anyway: int = 0
+static var risked_score_sum: float = 0.0
+
 static func reset() -> void:
 	decisions.clear()
 	risk_values.clear()
 	total = 0
 	changed_by_risk = 0
+	risked_anyway = 0
+	risked_score_sum = 0.0
 
 static func _lane(route: Dictionary) -> String:
 	if route.is_empty():
@@ -61,6 +74,12 @@ static func record(actor_name: String, chosen: Dictionary, blind: Dictionary, he
 	total += 1
 	if c != b:
 		changed_by_risk += 1
+	if risk > 0.0 and c != "":
+		# Chose a lane it KNEW carried danger. The score is summed so a reader
+		# can see whether these were desperate scraps or genuinely fat runs --
+		# "urgent routes still risked" means the payout was worth it.
+		risked_anyway += 1
+		risked_score_sum += float(chosen.get("score", 0.0))
 	if risk > 0.0:
 		risk_values.append(risk)
 	decisions.append({

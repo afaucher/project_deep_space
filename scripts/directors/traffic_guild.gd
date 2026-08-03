@@ -115,6 +115,25 @@ var freighters_destroyed: int = 0
 # Lives on the director rather than a station record because the guild has no
 # seat yet; M58 gives it one and this moves there. Storage mechanics are
 # SourceLog's, same as every other log.
+# M62 GATE (2026-08-02). OVERDUE incident recording is OFF by default, and that
+# is deliberate rather than an oversight.
+#
+# `_check_ins` detects a loss by POLLING LIVE NODES -- no range gate, no channel
+# -- so the guild learns a hull died anywhere in the cluster within ~55s, while
+# a robbery report takes ~22 GAME-MINUTES to reach a station by hull (measured).
+# Publishing those incidents would hand every consumer a channel that is instant
+# and cluster-wide, arriving ~24x sooner than the mail it is meant to
+# complement. Patrols would look wonderfully responsive for entirely fake
+# reasons, and the M57-M58 information economy would be bypassed.
+#
+# The guild is still worth installing WITHOUT this: it replaces lost haulers, so
+# traffic does not silently decay over a long run as pirates thin the fleet.
+# That is the half that is honest today.
+#
+# Flip to true once M62 makes detection an ARRIVAL FAILURE observed at a
+# destination (implementation_plans/m62_overdue_detection.md).
+static var overdue_incidents_enabled: bool = false
+
 const INCIDENT_LOG_CAP := 100
 var incident_log: Array = []
 var incident_seq: int = 0
@@ -287,9 +306,10 @@ func _resolve_overdue(cluster, period: float) -> void:
 		# only by check-ins on a live node), NOT where it died -- so a hull
 		# jumped further along its route reports the last place anyone knew it
 		# was fine. That understatement is correct and should not be "fixed".
-		_record_incident(Incident.KIND_OVERDUE,
-			"Cluster_%d" % record_id, m.get("flag", ""),
-			m.get("last_seen_pos", Vector2.ZERO))
+		if overdue_incidents_enabled:
+			_record_incident(Incident.KIND_OVERDUE,
+				"Cluster_%d" % record_id, m.get("flag", ""),
+				m.get("last_seen_pos", Vector2.ZERO))
 		_erase_record(cluster, record_id)
 		_event("hauler on route %s (record %d) presumed LOST (%s; losses %d)" %
 			[str(m.get("route", [])), record_id,
