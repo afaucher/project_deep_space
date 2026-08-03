@@ -57,6 +57,40 @@ static var run_speed_ratio: float = 1.05
 
 const RUN_SPEED := 900.0
 
+# D32 -- "YOU CANNOT SHAKE THEM" BEATS "YOU ARE SLOWER".
+#
+# Measured 2026-08-03: interdiction was a pure speed race that near-parity hulls
+# cannot resolve. A 90s trace has the pursuit SETTLE rather than converge --
+# separation oscillating around ~1000u indefinitely, both hulls holding near
+# 1800 -- so the patrol never reaches standoff and the pirate never escapes.
+# Patrols stopped nobody, and it came down to about 5%: the outlaw heaves to when
+# `max_speed <= observed_patrol_peak * run_speed_ratio`, and 2000 <= 1895 is
+# false. The pirate kept running because on paper it was still marginally
+# faster, and it was RIGHT.
+#
+# The speed comparison is a prediction made at demand time. This is the outcome
+# actually observed: **I have been running for a while and I am no further
+# ahead.** A pirate that has burned SHAKE_OFF_SECONDS without opening the gap
+# has its answer regardless of what the stat block says, and heaving to is what
+# a crew does when the pursuit plainly will not break.
+#
+# Why this rather than making patrol hulls faster: the outcome then follows from
+# what happened during the chase instead of from a number chosen in advance, and
+# a genuinely faster pirate -- one that DOES pull away -- still gets away, so
+# this is not a surrender switch. That is the property test_outlaw_response S2
+# pins and it must keep passing.
+#
+# SHAKE_OFF_SECONDS sits below InterdictLeaf's 25s PATIENCE_INTERCEPT so the
+# decision can actually be reached before the patrol gives up. It is ABOVE the
+# 8s PATIENCE_MAX, so a shoot-on-sight-grade interdiction still expires first --
+# correct, since that tier is not asking politely for long anyway.
+const SHAKE_OFF_SECONDS := 15.0
+
+# How much further ahead the runner must be than when it started to count as
+# getting away. 1.0 would make any oscillation below the start range trigger;
+# this demands genuine, measurable gain.
+const SHAKE_OFF_GAIN := 1.5
+
 func tick(actor: Node, blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
@@ -85,10 +119,23 @@ func tick(actor: Node, blackboard) -> int:
 			blackboard.erase_value("flee_issuer_iid")
 			return FAILURE # lost them -- back to the hunt
 		var peaks: Dictionary = blackboard.get_value("contact_peaks", {})
-		if actor.max_speed <= peaks.get(issuer_iid, 0.0) * run_speed_ratio:
+		var sep: float = actor.position.distance_to(c.get("pos", actor.position))
+		var start_sep: float = blackboard.get_value("flee_start_sep", sep)
+		var fled_frames: int = Engine.get_physics_frames() - int(blackboard.get_value("flee_start_frame", 0))
+		# Two ways the run ends. The first is the PREDICTION re-checked against
+		# the live peak (M52a's overtaken rule); the second is the OUTCOME --
+		# D32's "I have been running and I am no further ahead."
+		var overtaken: bool = actor.max_speed <= peaks.get(issuer_iid, 0.0) * run_speed_ratio
+		var cannot_shake: bool = (fled_frames > int(SHAKE_OFF_SECONDS * 60.0)
+			and sep < start_sep * SHAKE_OFF_GAIN)
+		if overtaken or cannot_shake:
 			blackboard.erase_value("flee_issuer_iid")
+			blackboard.erase_value("flee_start_sep")
+			blackboard.erase_value("flee_start_frame")
 			if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
-				print("[Outlaw] %s: run lost -- heaving to" % actor.debug_label())
+				print("[Outlaw] %s: %s -- heaving to (ran %.0fs, %.0f -> %.0f)" % [
+					actor.debug_label(), "overtaken" if overtaken else "cannot shake pursuit",
+					fled_frames / 60.0, start_sep, sep])
 			if actor.has_method("engage_dead_stop"):
 				actor.engage_dead_stop()
 			return SUCCESS
@@ -126,6 +173,11 @@ func tick(actor: Node, blackboard) -> int:
 
 	if will_run:
 		blackboard.set_value("flee_issuer_iid", issuer_iid2)
+		# The baseline D32 measures gain against: how far ahead we were when we
+		# decided to run. Stored at the DECISION, not at first contact -- the
+		# question is whether running helped.
+		blackboard.set_value("flee_start_sep", actor.position.distance_to(threat_pos))
+		blackboard.set_value("flee_start_frame", Engine.get_physics_frames())
 		_run_from(actor, threat_pos)
 	elif actor.has_method("engage_dead_stop"):
 		# engage_dead_stop broadcasts ACKNOWLEDGE itself, which is what stamps

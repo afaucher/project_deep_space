@@ -695,6 +695,92 @@ happened in the chase rather than from a number chosen in advance, and it does
 not require touching hull balance or building combat machinery. It is still a
 gameplay call and is recorded here rather than made silently.
 
+### D32 BUILT + measured — criterion (4) is non-zero for the first time
+
+The comply rule was a PREDICTION made at demand time ("am I faster on paper?").
+D32 adds the OUTCOME actually observed: *I have run for SHAKE_OFF_SECONDS and I
+am no further ahead.* `SHAKE_OFF_SECONDS` 15s sits under `PATIENCE_INTERCEPT`
+(25s) so the decision is reachable, and over `PATIENCE_MAX` (8s) so a
+shoot-on-sight-grade interdiction still expires first.
+
+| seed | interdictions | complied | refused | stop rate |
+|---|---|---|---|---|
+| 11111 | 2 | 0 | 2 | 0% |
+| 22222 | 10 | **2** | 3 | 40% |
+| 33333 | 1 | **1** | 0 | 100% |
+| 44444 | 0 | — | — | n/a |
+| 55555 | 3 | **1** | 2 | 33% |
+
+**0 -> 4 stops across 3 of 5 seeds.** Not a surrender switch: `test_outlaw_
+response` S2 now runs 25s — PAST the 15s window, which the original 10s version
+never did — and asserts the runner gained more than `SHAKE_OFF_GAIN`; a
+genuinely faster pirate opens 3000 -> 11692 and never heaves to.
+
+### D33 (NEW, and it makes the number above nearly meaningless)
+
+**What does a patrol do when it actually catches a pirate? Nothing.**
+
+Traced end to end:
+
+1. `step_demand_stop` sees `complied_stop` -> `DONE`.
+2. The interdiction job is `[INTERCEPT, DEMAND_STOP]` — two steps — so DONE on
+   the last one means `current >= steps.size()` -> `_complete_job` -> the
+   assignment slot is CLEARED.
+3. The patrol resumes its route. It stops refreshing the demand, so the pirate's
+   `compelled_stop` lapses on the ~6s heartbeat timeout.
+4. The pirate resumes its hunt job and carries on.
+
+No arrest, no impound, no escort, no cargo recovery, no crew — grepped, the
+concept does not exist anywhere (the only "arrest" in the tree is a docking
+servo arresting a hull's motion). And `OFF_ARMED_ROBBERY` is
+`expires_after: -1.0` with no `self_resolves_on_id`, so **the warrant never
+clears**; being stopped does not discharge it. `InterdictLeaf`'s refusal memory
+was stamped at assignment and only clears when the track drops entirely, so the
+patrol will not even re-interdict the same hull meanwhile.
+
+**The asymmetry that names it**: the pirate's version of this exact manoeuvre,
+`TAKE_ALONGSIDE`, sets `victim.looted = true`, moves cargo, and records an
+incident. The pirate's stop changes the world. The patrol's stop changes
+nothing.
+
+**So D32's stop rate is a mechanism metric, not an outcome metric.** Optimising
+it further would raise a number while the game stayed identical — the same trap
+as the 33-of-14 hauler ratio and the summed warrant count, in a third costume.
+"Get meaningful engagements happening — THEN refine desired outcomes" turns out
+to be two pieces of work and the second is entirely unbuilt.
+
+Candidates for what a stop should MEAN, roughly by cost: cargo recovery to the
+victim's flag · a warrant that discharges on submission · escort-to-station ·
+impound (the hull stops being a pirate) · crew arrest. **Open — a gameplay
+call, deliberately not made here.**
+
+### D34 (context for the above): the escalation ladder already exists
+
+`acquire_target_leaf.gd`'s aggression cap already implements "shoot only if
+justified": *"when the ladder is refused, an uncapped offense falls through to
+Engage and a capped one does not. A NO_ID hull gets chased and hailed and
+refused docking, never shot."* `authorizes_force` is a separate column from
+`response_class` so the two can differ — ARMED_ROBBERY authorizes force,
+ARMED_THREAT and NO_ID do not.
+
+**It was structurally unreachable for piracy until D29 landed today.** A patrol
+can only shoot on a warrant it HOLDS, and notarization read 0 in every prior
+run — so no patrol ever held an enforceable armed-robbery warrant, so
+`authorizes_force` could never be true for a pirate. A complete, tested ladder
+that nothing could climb. **Fifth instance of the pattern.**
+
+This also gives going dark real teeth: an unidentified pirate cannot be
+notarized, so no warrant, so no force authorization. **Identity is what makes
+you shootable**, and criterion (4) is downstream of the information economy
+rather than beside it.
+
+Mechanical limits found while checking: no component targeting exists anywhere,
+so "aim for the engines" is new machinery, not a flag. And damage cannot slow a
+hull in a straight line — `get_ship_max_thrust()` scales with component health
+but `max_speed` is a flat authored field, never derived. Drive damage cuts
+ACCELERATION only, which does bite in an oscillating chase but can never make a
+pinnace slower than 2000.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

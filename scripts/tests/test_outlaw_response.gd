@@ -139,8 +139,14 @@ func _test_faster_pirate_runs() -> void:
 	var pirate_bb = BlackboardScript.new()
 	patrol.assignment = _interdict_job(pirate.get_instance_id())
 
+	# RUN PAST THE SHAKE-OFF WINDOW ON PURPOSE. D32 makes an outlaw heave to once
+	# it has run SHAKE_OFF_SECONDS without opening the gap. At 600 frames (10s)
+	# this scenario finished BEFORE that rule could ever fire, so it would have
+	# passed whether or not "cannot shake" was really a surrender switch. 1500
+	# frames (25s) clears the 15s window with margin, so a pirate that genuinely
+	# pulls away must still be running on the far side of it.
 	var start_dist: float = patrol.position.distance_to(pirate.position)
-	for i in range(600):
+	for i in range(1500):
 		runner.tick(patrol, patrol_bb)
 		outlaw.tick(pirate, pirate_bb)
 		await main_node.get_tree().physics_frame
@@ -148,9 +154,12 @@ func _test_faster_pirate_runs() -> void:
 	var c: Dictionary = _find_contact(patrol, pirate)
 	_assert(not c.get("complied_stop", false),
 		"S2: a pirate with the legs to escape does NOT heave to")
-	_assert(patrol.position.distance_to(pirate.position) > start_dist,
-		"S2: and it actually opened the range (%.0f -> %.0f)" % [
-			start_dist, patrol.position.distance_to(pirate.position)])
+	var end_dist: float = patrol.position.distance_to(pirate.position)
+	_assert(end_dist > start_dist,
+		"S2: and it actually opened the range (%.0f -> %.0f)" % [start_dist, end_dist])
+	_assert(end_dist > start_dist * OutlawResponseLeaf.SHAKE_OFF_GAIN,
+		"S2: past the shake-off window it has gained more than %.1fx -- so D32 is a MEASUREMENT of the run, not a surrender switch" % [
+			OutlawResponseLeaf.SHAKE_OFF_GAIN])
 
 # --- S3: the leaf is in the tree the GAME builds ----------------------------
 # The M58 lesson, asserted directly: a handler that exists but is not wired is
