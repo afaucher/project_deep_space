@@ -506,6 +506,62 @@ Re-running seed 11111 after the fixes reproduced it exactly -- 2 robberies,
 7/13 stations, 10 warrants, 13 sweeps -- so `seed()` is doing its job and these
 comparisons are real A/Bs rather than dice.
 
+### D28 BUILT + measured (2026-08-03) — and it exposed D30
+
+`OutlawResponseLeaf` sits between Disengage and JobRunner in `build_pirate`,
+the slot `ThreatResponseLeaf` holds in `build_cargo`. A separate leaf, not a
+reuse, because the two hulls answer different questions:
+
+> a hauler weighs *"can I outrun this, or do I lose the cargo?"*
+> an outlaw weighs *"can I outrun this, or do I lose the SHIP AND MY FREEDOM?"*
+
+So an outlaw runs on a thinner margin (`run_speed_ratio` 1.05 vs cargo's
+1.3/1.6). That static is THE dial for patrol effectiveness and is meant to be
+swept — but see D30 before touching it.
+
+**Deliberately not built: fight.** `build_pirate` has no Engage leaf at all
+(pirates fight through job steps), so a stand-and-fight branch is new combat
+machinery, not a policy toggle. Run-or-comply makes stops POSSIBLE, which is
+what the goal asks for first, without answering fight-or-surrender by accident.
+No SOS either: an outlaw cornered by an authority has nobody to call.
+
+| 5 seeds | before D28 | after D28 |
+|---|---|---|
+| interdictions | 39 | 12 |
+| complied | 0 | 0 |
+| refused (patience) | 27 | 4 |
+| **outpaced** | **0** | **5** |
+
+**Outpaced 0 -> 5 is the proof the handler fires.** Before, no pirate ever ran
+from a patrol; now nearly half of all interdictions end with one running and
+getting away. The mechanism works. The OUTCOME is still zero stops.
+
+**Caveat, stated because it would be easy to over-read the table**: adding a
+leaf changes `randf()` consumption order, so these runs are NOT seed-matched to
+the earlier ones (seed 55555's robberies went 2 -> 4). The outpaced signal is
+large and directional; the smaller cells are not a paired comparison.
+
+### D30 (NEW, and it is not a balance problem either)
+
+Why does a pirate outrun a patrol? It should not be able to:
+
+| hull | max_speed |
+|---|---|
+| LightAttackCraft (patrol) | **2200** |
+| ArmedPinnace (pirate) | 2000 |
+| PirateOreShuttle (pirate) | 1000 |
+
+The patrol is FASTER than both pirate hulls. It loses the chase because
+`InterdictLeaf` builds its `DEMAND_STOP` step without a `cruise`, so
+`step_demand_stop` falls through to its **default `cruise` of 400.0** — while
+the fleeing pirate runs at `RUN_SPEED` 900 and upward. The patrol pursues at
+under a fifth of the speed it owns.
+
+This never mattered before because the subject never ran. Same shape as D28 and
+D29: **a default that was harmless only because the mechanism upstream of it was
+dead.** Fixing it is a separate measurement — changing the pursuit speed in the
+same run as adding the handler would stack two variables.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

@@ -33,6 +33,7 @@ const StationKeepingLeaf = preload("res://scripts/ai/leaves/station_keeping_leaf
 const FollowRouteLeaf = preload("res://scripts/ai/leaves/follow_route_leaf.gd")
 const CargoRunLeaf = preload("res://scripts/ai/leaves/cargo_run_leaf.gd")
 const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
+const OutlawResponseLeaf = preload("res://scripts/ai/leaves/outlaw_response_leaf.gd")
 const ChallengeLeaf = preload("res://scripts/ai/leaves/challenge_leaf.gd")
 const JobRunnerLeaf = preload("res://scripts/ai/jobs/job_runner_leaf.gd")
 const RoutePlannerLeaf = preload("res://scripts/ai/leaves/route_planner_leaf.gd")
@@ -114,6 +115,18 @@ static func build_pirate() -> Node:
 	var flee = FleeLeaf.new()
 	flee.name = "Flee"
 	disengage.add_child(flee)
+
+	# D28 -- the demand handler this tree spent its whole life without. Measured
+	# 39 patrol interdictions, 0 stops, 27 patience expiries and 0 outpaced: the
+	# patrols kept up every time and the pirate had nothing that reads
+	# `pending_demand`, so refusal was structural rather than chosen. Same slot
+	# and same always-FAILURE-when-idle contract ThreatResponseLeaf holds in
+	# build_cargo, but a SEPARATE leaf -- an outlaw is weighing its ship and its
+	# freedom, not a load of cargo, and it runs on a thinner margin because of
+	# it. See outlaw_response_leaf.gd for why "fight" is not one of its options.
+	var outlaw_response = OutlawResponseLeaf.new()
+	outlaw_response.name = "OutlawResponse"
+	root.add_child(outlaw_response)
 
 	var job_runner = JobRunnerLeaf.new()
 	job_runner.name = "JobRunner"
