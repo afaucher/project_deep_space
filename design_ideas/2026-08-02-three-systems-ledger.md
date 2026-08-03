@@ -157,6 +157,53 @@ the news must now genuinely travel by hull.
 completed the delivery? Nothing has yet been observed carrying a robbery report
 to a port. A 60-game-minute run is in flight to find out.
 
+### THE COURIER NETWORK WORKS — 60 game-min, clean build (2026-08-02)
+
+```
+1. robberies completed             : 2
+2. incidents recorded              : 2
+3. stations holding foreign news   : 6 of 13
+5. patrols holding foreign news    : 2 of 2
+   reached a station : 2  (median 1343.8s = ~22 game-min)
+   robbery 9505:1: 76,950u from nearest station
+   robbery 703:1 : 53,833u from nearest station
+   decisions changed by risk : 560 of 5216
+>>> CHAIN BREAKS AT STAGE 4
+```
+
+Two of the four success criteria now have campaign-scale evidence:
+
+- **Trade/mail.** Robberies 54-77km from ANY station — far outside the 30,000u
+  comms envelope, so no radio shortcut — and the news still reached 6 stations
+  and both patrols, taking ~22 game-minutes to travel. Information genuinely has
+  a position and a velocity, measured on a run where it had to be carried.
+- **Cargo.** 560 of 5,216 routing decisions differ from their risk-blind
+  counterfactual. The information economy is driving route planning.
+
+### D22 (NEW, decided): an incident's half-life must EXCEED its delivery latency
+
+Patrols hold the news 2/2 and started **zero sweeps**. The arithmetic is exact:
+
+| | |
+|---|---|
+| `RiskMap.RISK_HALF_LIFE_FRAMES` | 18,000 frames = **5 game-min** |
+| measured delivery latency | 1,343s = **22 game-min** ~ 4.5 half-lives |
+| a fresh incident's weight | 25 |
+| its weight ON ARRIVAL | `25 x 0.5^4.5` ~ **1.1** |
+| `PatrolResponseLeaf.MIN_HOTSPOT_WEIGHT` | **20** |
+
+**News arrives already decayed below the threshold for acting on it.** The patrol
+can never sweep — not because its map is empty, but because everything in it is
+stale on arrival.
+
+This is a policy decision, not a tuning nit. The half-life was chosen as "the
+damping term for the predator-prey oscillation" BEFORE any latency existed to
+compare it against, and latency turned out to be 4x longer. The rule that
+generalises: **in a world where information is carried, any decay constant must
+be set relative to the measured delivery time, never in isolation.**
+
+Not yet fixed — deliberately one variable at a time, and this is the next one.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than
