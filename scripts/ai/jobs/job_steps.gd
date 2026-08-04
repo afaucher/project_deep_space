@@ -61,6 +61,13 @@ const OUTPACED_CEILING_MULT := 4.0
 
 const DEMAND_REFRESH_FRAMES := int(2.0 * PHYSICS_HZ)
 
+# How far INSIDE the hold radius a boarding pirate actually aims (D49). The
+# station-keeping target must sit strictly inside the ring the hold is measured
+# against, or the approach converges onto the boundary and never crosses it.
+# 0.6 leaves the pirate visibly alongside rather than grazing the limit, and is
+# well outside the collision envelope at these ranges.
+const TAKE_ALONGSIDE_ENTRY_FRACTION := 0.6
+
 # M52c -- standoff intercept + speed-match hold (implementation_plans/
 # m52c_robbery_mechanics.md items 1-2). The playtest's two failures were the
 # same missing concept: no standoff distance (INTERCEPT drove straight at the
@@ -1307,20 +1314,82 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	var range: float = step.get("range", 200.0)
 	var hold_time: float = step.get("hold_time", 12.0)
 
+	# D49 -- WHY the hold collapsed, not just that it did. Measured 2026-08-04:
+	# 6 of 9 alongside attempts died here, and it is now the ONLY stage between a
+	# complying victim and a completed robbery. Victims comply 40% of the time
+	# (17 of 49 demands) and never outpace, so this abort is the whole gap
+	# between compliance and takes.
+	#
+	# The three candidates are indistinguishable from the old message and want
+	# opposite fixes: the CONTACT dropped (a sensor problem at 200u, which would
+	# be surprising), the victim's compelled_stop LAPSED (a heartbeat problem --
+	# refresh every ~2s against a ~6s timeout should hold it, so a lapse means
+	# the refresh is not landing), or the victim genuinely re-decided.
+	#
+	# Note the abort is checked BEFORE the refresh below, so a lapse can never be
+	# repaired by the very refresh meant to prevent it -- if the numbers show
+	# lapses, that ordering is the first suspect.
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty() or not c.get("complied_stop", false):
-		job["_abort_reason"] = "victim bolted (complied_stop cleared)"
+		var held_for: float = -1.0
+		if step.get("scratch", {}).has("hold_start_frame"):
+			held_for = (Engine.get_physics_frames() - float(step["scratch"]["hold_start_frame"])) / PHYSICS_HZ
+		var vic2 = instance_from_id(victim_iid) if victim_iid != -1 else null
+		var vic_dist: float = -1.0
+		var vic_compelled: String = "?"
+		var vic_hits: int = -1
+		if vic2 != null and is_instance_valid(vic2):
+			vic_dist = actor.position.distance_to(vic2.position)
+			vic_compelled = "held" if not vic2.compelled_stop.is_empty() else "LAPSED"
+			vic_hits = int(vic2.get("hold_refresh_hits"))
+		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, refreshes %d hold-hits / %d sent)" % [
+			"CONTACT DROPPED" if c.is_empty() else "contact ok, complied_stop false",
+			vic_compelled, vic_dist, held_for,
+			vic_hits,
+			int(step.get("scratch", {}).get("refresh_tries", 0))]
 		_blacklist_victim(job, victim_iid)
 		return ABORT
 
 	var frame_now := Engine.get_physics_frames()
 	if frame_now - scratch.get("last_refresh_frame", -DEMAND_REFRESH_FRAMES) >= DEMAND_REFRESH_FRAMES:
-		actor.refresh_demand(victim_iid, Hail.RUNG_STOP, job.get("demand_seq", -1))
+		# Track delivery, not just attempts. A refresh that fell outside comms
+		# range is silently identical to one that landed, and the hold this step
+		# depends on lives or dies on them landing.
+		var landed: bool = actor.refresh_demand(victim_iid, Hail.RUNG_STOP, job.get("demand_seq", -1))
+		scratch["refresh_tries"] = int(scratch.get("refresh_tries", 0)) + 1
+		if not landed:
+			scratch["refresh_missed"] = int(scratch.get("refresh_missed", 0)) + 1
 		scratch["last_refresh_frame"] = frame_now
 
 	var victim_pos_take: Vector2 = c.get("pos", actor.position)
 	var victim_vel_take: Vector2 = c.get("vel", Vector2.ZERO)
-	var offset: Vector2 = _standoff_offset(actor, victim_pos_take, victim_vel_take, range, scratch)
+	# D49 -- AIM INSIDE THE RING, NOT AT IT (2026-08-04).
+	#
+	# This paced to a point `range` from the victim while the hold below only
+	# starts once `dist <= range`: the aim point WAS the threshold.
+	# `_pace_at_offset` converges asymptotically onto its target, so the pirate
+	# settles at ~range and any overshoot, drift or victim motion leaves it a few
+	# units outside -- forever. There is an EXIT slack
+	# (TAKE_ALONGSIDE_EXIT_SLACK) and there was no ENTRY margin.
+	#
+	# Measured: `held -1.0s` on EVERY failed alongside, i.e. the hold never once
+	# started. One pirate spent ~46 seconds at 354u from its victim -- 23 demand
+	# refreshes, 22 of which the victim received and honoured -- and never
+	# covered the last 154 units. So the channel works and the pirate simply
+	# never arrives; six hypotheses about the heartbeat, comms range, seq
+	# matching and scratch persistence were all wrong.
+	#
+	# THIS CHANGE DID NOT FIX THAT, and saying so here is the point. After it,
+	# `held` is STILL -1.0 on every failed alongside (2 seeds re-measured) and
+	# takes are unchanged (3 vs 3). The aim-point-equals-threshold defect is
+	# real and this is the correct shape for it, but it is NOT the binding
+	# constraint on arrival -- something else stops the pirate closing the last
+	# few hundred units, and it is not yet identified. Candidates not yet
+	# separated: Steering.steer deflecting off nearby bodies during the final
+	# approach, or _standoff_offset's magnitude not being the distance passed to
+	# it. Do not read this constant as the reason robberies succeed or fail.
+	var approach: float = range * TAKE_ALONGSIDE_ENTRY_FRACTION
+	var offset: Vector2 = _standoff_offset(actor, victim_pos_take, victim_vel_take, approach, scratch)
 	_pace_at_offset(actor, victim_pos_take + offset, victim_vel_take, victim_pos_take, step.get("cruise", 300.0))
 
 	var dist: float = actor.position.distance_to(victim_pos_take)

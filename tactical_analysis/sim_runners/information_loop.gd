@@ -527,6 +527,17 @@ func _report() -> void:
 	# pirate 115.6 vs 79.8 u/s^2 and closing a 2500u gap to ~600u repeatedly --
 	# so "outpaced" is not a propulsion deficit, and this is the number that
 	# can say what it actually is.
+	# THE ROBBERY SIDE. Criterion (1)'s last unmeasured stage: every step before
+	# the demand is now solved (D44/D46/D47) and takes are still ~1 per run, so
+	# the failure is in what the victim does when told to stop. Takes alone
+	# cannot separate "it ran" from "it ignored me".
+	var rr: float = EngagementProbe.robbery_stop_rate()
+	print("  -- robbery demands (pirate side) --")
+	print("  demands issued               : %d" % EngagementProbe.robbery_started)
+	print("  victim COMPLIED              : %d" % EngagementProbe.robbery_complied)
+	print("  refused (patience expired)   : %d" % EngagementProbe.robbery_refused)
+	print("  outpaced the pirate          : %d" % EngagementProbe.robbery_outpaced)
+	print("  robbery stop rate            : %s" % ("n/a -- none resolved" if rr < 0.0 else "%.0f%%" % (rr * 100.0)))
 	var og: Dictionary = EngagementProbe.opening_summary()
 	if not og.is_empty():
 		print("  demand OPENED at sep/hail    : median %.2f, max %.2f (n=%d)" % [

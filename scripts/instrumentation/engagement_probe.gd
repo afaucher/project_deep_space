@@ -68,12 +68,40 @@ static var outpaced_by_tier: Dictionary = {}
 # So record the opening separation and the hail range, and let the ratio say it.
 static var open_ratios: Array = []   # separation / hail_range at demand issue
 
+# THE ROBBERY SIDE OF THE SAME QUESTION (2026-08-04).
+#
+# Everything above counts PATROL interdictions and deliberately excludes
+# robberies -- `note_outcome` returns early unless the job carries
+# `interdict_tier`, so a pirate's successful robbery can never be booked as a
+# patrol's successful stop. Correct, and it left the pirate side entirely
+# uncounted.
+#
+# That is now the last unmeasured stage on criterion (1). Lane choice (D44),
+# victim selection, staying on the hunt past a witness (D46) and holding the
+# track while closing (D47) are all solved and takes are still ~1 per run, so
+# every remaining failure is in what happens AFTER the demand goes out. The
+# patrol side has had exactly this breakdown since D28 and it is what located
+# "pirates cannot comply" in one run; the robbery side has been inferred from
+# takes, which cannot distinguish "they ran" from "they ignored me".
+#
+# Same three outcomes, same -1.0-means-none-attempted convention. Kept in this
+# file rather than a new one because they share the hooks in step_demand_stop --
+# two probes on one path would be two things to keep in sync.
+static var robbery_started: int = 0
+static var robbery_complied: int = 0
+static var robbery_refused: int = 0
+static var robbery_outpaced: int = 0
+
 static func reset() -> void:
 	started = 0
 	complied = 0
 	refused = 0
 	outpaced = 0
 	open_ratios.clear()
+	robbery_started = 0
+	robbery_complied = 0
+	robbery_refused = 0
+	robbery_outpaced = 0
 	started_by_tier.clear()
 	complied_by_tier.clear()
 	refused_by_tier.clear()
@@ -82,7 +110,14 @@ static func reset() -> void:
 # Called once per interdiction, when the demand is first SENT (not when the job
 # is assigned) -- that is the moment the outpaced test starts applying.
 static func note_demand_geometry(job: Dictionary, separation: float, hail_range: float) -> void:
-	if not enabled or not job.has("interdict_tier") or hail_range <= 0.0:
+	if not enabled:
+		return
+	# A demand went out. Which KIND is what the tier tells us -- a patrol
+	# interdiction carries `interdict_tier`, a robbery does not.
+	if not job.has("interdict_tier"):
+		robbery_started += 1
+		return
+	if hail_range <= 0.0:
 		return
 	open_ratios.append(separation / hail_range)
 
@@ -123,7 +158,16 @@ static func note_started(tier: String) -> void:
 # than a pirate's robbery demand. Cheap: two dictionary lookups on a path that
 # runs once per demand outcome, not per frame.
 static func note_outcome(job: Dictionary, outcome: String) -> void:
-	if not enabled or not job.has("interdict_tier"):
+	if not enabled:
+		return
+	if not job.has("interdict_tier"):
+		# A robbery demand resolving. Same three outcomes, counted separately --
+		# never folded into the patrol totals, which is the discriminator this
+		# probe was built around.
+		match outcome:
+			"complied": robbery_complied += 1
+			"refused": robbery_refused += 1
+			"outpaced": robbery_outpaced += 1
 		return
 	var tier: String = _tier_key(job)
 	match outcome:
@@ -194,3 +238,11 @@ static func stop_rate_for(tier: String) -> float:
 		+ int(refused_by_tier.get(tier, 0)) \
 		+ int(outpaced_by_tier.get(tier, 0))
 	return (float(did_comply) / resolved) if resolved > 0 else -1.0
+
+# Of the robbery demands a pirate issued, how many ended with the victim
+# stopped. Same -1.0 convention as stop_rate(): "none attempted" must not read
+# as "0% success", which matters more here than anywhere because robberies are
+# the sparsest event in the simulation.
+static func robbery_stop_rate() -> float:
+	var resolved: int = robbery_complied + robbery_refused + robbery_outpaced
+	return (float(robbery_complied) / resolved) if resolved > 0 else -1.0

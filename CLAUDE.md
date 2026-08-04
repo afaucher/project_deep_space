@@ -255,6 +255,44 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   the pirates that had *succeeded* in engaging someone. Nothing in the ledger,
   the runner, or the guild's status line indicated a problem.
 
+## Measuring a change (these cost the most time on 2026-08-03/04)
+
+- **MEASURE THE STAGE YOU CHANGED, not the end of the funnel.** Violated three
+  times in one session, each time expensively. The LANE_RUN A/B judged a
+  posture built to raise ENCOUNTERS on the robbery COUNT (10 vs 9), called it
+  "no encounter benefit", and turned it off -- the abort-reason counters in the
+  same logs said empty hunts fell 163 -> 142 across 4 of 5 seeds, so the
+  decision was reversed a day later (D27 -> D39). The witness-retry change was
+  then judged on TAKES (1 vs 1, three seeds) and nearly filed as null; at the
+  stage it changed it read +27% hunt cycles, 6 seeds up and 0 down. A funnel's
+  end sums every failure mode, so a real gain at one stage is invisible when a
+  later stage still fails. Corollary: with an event that occurs 0-2 times per
+  run, **three seeds cannot distinguish anything** -- either measure upstream
+  where n is large, or run 8+ seed pairs.
+- **The absence of a gated log is NOT the absence of the event.** Three times in
+  one day a `grep -c` returned 0 and was read as "the mechanism never fired",
+  when the print sat behind a `DebugSettings` toggle the sim leaves OFF
+  (`job_log`, `pirate_guild_log`). Each time the real check was a counter from a
+  DIFFERENT subsystem: the guild ledger's `losses` disagreeing with
+  `EngagementProbe.complied` is what exposed a hulk gate that never fired, and
+  `outpaced 0` from the probe is what exposed D28. **Cross-subsystem
+  disagreement is the reliable signal; a silent log is not evidence.**
+- **"Attempted" is not "delivered", including in instrumentation you just
+  wrote.** `Hail.send` computes its seq up front and returns it whether or not
+  the ADDRESSED ship was in range -- it returns -1 only for no-radio/no-tree. A
+  refresh counter built on that return read "12/12 landed" while measuring
+  sends, not receipts. The honest count had to be incremented on the RECEIVING
+  side, at the line that actually consumes the message.
+- **Instrument ARRIVAL, not just success.** A step that reports only outcomes
+  cannot distinguish "tried and failed" from "never began". `held -1.0s` -- a
+  field recording that a hold never STARTED -- was in the output for several
+  turns before it was read, while six hypotheses were burned on why the hold
+  "died". It had never begun.
+- **Design guidance on thresholds** lives in
+  `design_ideas/2026-08-04-deadbands-in-ai-behaviour.md`: never steer toward the
+  same number you test against, and note the counter-rule -- a deadband is the
+  wrong fix for a predicate asking the wrong question, and will hide one.
+
 ## Conventions
 
 - Commit messages use a `feat:`/`fix:` prefix (see `git log`).

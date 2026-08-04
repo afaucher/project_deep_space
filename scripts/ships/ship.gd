@@ -191,6 +191,11 @@ const COMPLIED_STOP_GRACE := 15.0
 # issuer death, out-of-comms, job abort, and lost interest for BOTH states --
 # no per-cause cleanup code, no verb whose only job is "stop the demand".
 const HAIL_HEARTBEAT_TIMEOUT := 6.0
+
+# D49 -- refreshes that actually reset this ship's HOLD. Diagnostic only; never
+# read by behaviour. Exists because the question "did the refresh land" can only
+# be answered honestly on the receiving side.
+var hold_refresh_hits: int = 0
 # M52 passive sync (implementation_plans/m52_sos_passive_sync.md, replaces
 # the m52_sos_as_contact.md heartbeat design): SOS used to be a discrete
 # event re-broadcast on a timer (SOS_HEARTBEAT_INTERVAL, now removed) with
@@ -3940,6 +3945,13 @@ func _physics_process(delta: float) -> void:
 				if addressed_to_me:
 					if refreshes_hold:
 						compelled_stop["heartbeat_timer"] = 0.0
+						# D49 diagnostic: how many refreshes actually landed on
+						# the HOLD, counted where it happens. Every read of this
+						# from the issuer's side has been a proxy -- Hail.send
+						# returns its seq whether or not the addressed ship was
+						# in range, so "sent" was mistaken for "received" once
+						# already in this investigation.
+						hold_refresh_hits += 1
 					elif refreshes_pending:
 						pending_demand["heartbeat_timer"] = 0.0
 					else:
@@ -5167,13 +5179,20 @@ func send_demand(target_iid: int, rung: String) -> int:
 # cadence (design revised in review: RELEASE is gone, so TAKE_ALONGSIDE must
 # keep refreshing too, or the hold it depends on would lapse mid-robbery).
 # Direct server-side API (the AI is the only caller); not an RPC.
-func refresh_demand(target_iid: int, rung: String, seq: int) -> void:
+# Returns WHETHER THE REFRESH LANDED (2026-08-04). It used to discard Hail.send's
+# result, and Hail.send returns -1 when the target is outside
+# `link_range = min(sender_range, their_range)` -- so a refresh that never
+# reached anyone was indistinguishable from one that did. That matters because
+# TAKE_ALONGSIDE's hold depends entirely on these landing: measured, 6 of 9
+# alongside attempts died with the victim's compelled_stop LAPSED while the
+# pirate was still 4-20km out and closing.
+func refresh_demand(target_iid: int, rung: String, seq: int) -> bool:
 	if is_dead or seq == -1:
-		return
+		return false
 	var target = instance_from_id(target_iid)
 	if target == null or not is_instance_valid(target):
-		return
-	Hail.send(self, target, {"verb": Hail.VERB_DEMAND, "rung": rung}, seq)
+		return false
+	return Hail.send(self, target, {"verb": Hail.VERB_DEMAND, "rung": rung}, seq) != -1
 
 # Ring-buffered like last_hails (same cap) -- the panel only needs recent
 # traffic, not a transcript.
