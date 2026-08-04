@@ -24,6 +24,7 @@ const Standing = preload("res://scripts/combat/standing.gd")
 const PirateOreShuttle = preload("res://scripts/ships/pirate_ore_shuttle.gd")
 const ArmedPinnace = preload("res://scripts/ships/armed_pinnace.gd")
 const LaneProbe = preload("res://scripts/instrumentation/lane_probe.gd")
+const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
 
 # Ledger member states (jobs_and_itineraries.md §3 / the design doc's ledger
 # shape). SCHEDULED is conceptual only -- a scheduled arrival has no record
@@ -404,7 +405,7 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 		rec.behavior = {
 			"pirate": true,
 			"identity_kit": kit.duplicate(),
-			"job": _build_hunt_job(cluster, wormhole_pos),
+			"job": _build_hunt_job(cluster, wormhole_pos, cover_name != ""),
 		}
 		cluster.records.append(rec)
 
@@ -502,7 +503,27 @@ const FALSE_FLAG_CRUISE_CHANCE := 0.4
 
 # Seeded per-arrival roll (CLAUDE.md determinism rule -- plain randf() on the
 # global seeded RNG, no new RNG instance).
-func _roll_posture() -> String:
+#
+# GATED ON HAVING AN IDENTITY TO FLY (2026-08-04). A false-flag cruise IS a cover
+# identity: the pirate transits a lane broadcasting as an ordinary freighter and
+# flips only on a lone target. With no clean paper in the kit there is nothing to
+# broadcast -- `cover_name` comes back "" when the kit is empty (see the spawn
+# path) -- so the posture would be a false flag with no flag, cruising a lane
+# openly for the whole hunt. That is strictly worse than dark-lurk, which at
+# least conceals.
+#
+# So an identity-less member dark-lurks, and the roll only offers the cruise to
+# someone who can actually wear it. Note this makes the kit a real constraint on
+# BEHAVIOUR rather than a decorative field: burn your papers and you lose access
+# to a whole posture, which is the teeth D20 wanted for kit size.
+#
+# `clean` here means "the kit has a paper at all". Refining it to "a paper no
+# port holds a warrant against" needs the guild to LEARN its name is burned,
+# which is a mail question and belongs with M60d's dock leg -- deliberately not
+# faked here by reading warrants the guild has no channel to.
+func _roll_posture(has_clean_identity: bool) -> String:
+	if not has_clean_identity:
+		return POSTURE_DARK_LURK
 	return POSTURE_FALSE_FLAG_CRUISE if randf() < FALSE_FLAG_CRUISE_CHANCE else POSTURE_DARK_LURK
 
 # LANE_RUN (2026-08-02). A false_flag_cruise pirate now TRANSITS its lane
@@ -558,7 +579,7 @@ func _select_victim_step(posture: String, lane_pos: Vector2, seg_a: Vector2, seg
 		step["run_b"] = seg_b
 	return step
 
-func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
+func _build_hunt_job(cluster, wormhole_pos: Vector2, has_clean_identity: bool = true) -> Dictionary:
 	var stations: Array = _station_positions(cluster)
 	var beacons: Array = _beacon_positions(cluster)
 	var lane_info: Dictionary = _pick_lane_point(cluster, wormhole_pos, stations, beacons)
@@ -573,7 +594,7 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 	var staging_pos: Vector2 = _away_from_hazards(func(): return _staging_point(wormhole_pos, seg_a, seg_b), stations, beacons)
 	var exfil_pos: Vector2 = _away_from_hazards(func(): return _exfil_point(wormhole_pos, lane_pos), stations, beacons)
 
-	var posture: String = _roll_posture()
+	var posture: String = _roll_posture(has_clean_identity)
 
 	# Pre-hunt tradecraft: dark_lurk waits for CLEAR then goes dark before
 	# SELECT_VICTIM ever runs; false_flag_cruise skips both and arrives at
@@ -734,6 +755,21 @@ func _pick_hunt_point(cluster, wormhole_pos: Vector2, stations: Array, beacons: 
 	var hubs: Array = _trade_station_positions(cluster)
 	if hubs.size() < 2:
 		return {"pos": wormhole_pos, "seg_a": wormhole_pos, "seg_b": wormhole_pos}
+	# M60d -- economic prediction takes precedence when it has an answer, and the
+	# geometric strategies below remain the FALLBACK rather than being deleted.
+	# That matters on a fresh campaign or a dead market: with no viable posting
+	# anywhere, `_predict_lane` returns {} and the guild still functions off
+	# geometry instead of picking at random. Degrading to a worse signal beats
+	# degrading to none.
+	var predicted: Dictionary = _predict_lane(cluster, Standing.FLAG_CIVILIAN)
+	if not predicted.is_empty():
+		var pa: Vector2 = predicted.get("pickup_pos", wormhole_pos)
+		var pb: Vector2 = predicted.get("dropoff_pos", wormhole_pos)
+		# Same [0.15, 0.85] fraction the chord strategies use, so the pirate sits
+		# ON the lane rather than parked at a station where the defences are.
+		return _away_from_hazards(func():
+			return {"pos": pa.lerp(pb, randf_range(0.15, 0.85)), "seg_a": pa, "seg_b": pb}
+		, stations, beacons)
 	match hunt_strategy:
 		HuntStrategy.APPROACH_RING:
 			return _hunt_approach_ring(hubs, stations, beacons)
@@ -753,6 +789,70 @@ func _hunt_station_chord(hubs: Array, stations: Array, beacons: Array) -> Dictio
 		var b: Vector2 = pair[1]
 		return {"pos": a.lerp(b, randf_range(0.15, 0.85)), "seg_a": a, "seg_b": b}
 	, stations, beacons)
+
+# M60d -- PREDICT THE LANE INSTEAD OF GUESSING ITS GEOMETRY.
+#
+# MEASURED FAILURE this replaces. `_chord_carriers` scores how many station-pair
+# LINES pass near a point -- geometric convergence, which is a proxy for traffic
+# and a bad one. LaneProbe measured the result across 3 seeds:
+#
+#   efficiency 0.00 / 0.05 / 0.20   against a ceiling of 0.28-0.44
+#   `Coldreach <-> Ironhold` carried 42-63% of ALL cargo and was picked 0 times
+#
+# In one seed the six lanes pirates chose had no cargo between them at all. The
+# encounter model was overestimating sightings by ~40x, and this is why: cargo
+# flows by ECONOMICS and the pirate was optimising GEOMETRY.
+#
+# So ask the question cargo asks. `RoutePlanner.scored_routes` is the same
+# function haulers plan with; run it under the cover flag and the answer is the
+# lanes a hauler of that identity would find worth flying. One scoring rule, two
+# selection policies -- rather than two models of the world that cannot agree.
+#
+# WEIGHTED DRAW, NOT ARGMAX, and that is not a detail. D24 records the identical
+# mistake on the patrol side: deterministic argmax made a patrol lock onto one
+# report and re-sweep it for its whole ~52-minute actionable life. Here argmax
+# would put EVERY pirate on the single richest lane, so they would stack, and a
+# predator exactly as smart as its prey and never wrong is a tollbooth rather
+# than a predator. Sampling keeps the intent (richer lane chosen more often),
+# lets attention move as the board ages, and makes two pirates diverge with no
+# coordination mechanic. Same `randf()` on the seeded global RNG as
+# RiskMap.pick_weighted, so runs stay reproducible.
+#
+# OMNISCIENCE, ACKNOWLEDGED AND FLAGGED OFF. Postings are globally readable
+# today, so this reads a board no pirate travelled to. That is exactly the
+# director-omniscience M57-M59 removed, and M62 caught the same shape shipping
+# once already. It is therefore OFF by default and a sim turns it on: the
+# staging is deliberate, because measuring targeting and fogging prices in one
+# change would leave "efficiency did not move" ambiguous between "targeting does
+# not work" and "the fog starved it". M64 makes this honest; until then it is a
+# measurement tool, not a shipped behaviour.
+static var economic_targeting: bool = false
+
+# How many of the top-scoring lanes are eligible for the draw. Bounded rather
+# than drawing over everything: the tail is full of barely-viable routes no
+# hauler would fly, and including them would just re-introduce the uniform pick
+# this exists to replace.
+const _PREDICT_TOP_N := 6
+
+func _predict_lane(cluster, cover_flag: String) -> Dictionary:
+	if not economic_targeting or cluster == null:
+		return {}
+	var routes: Array = RoutePlanner.scored_routes(cluster, Vector2.ZERO, cover_flag, [])
+	if routes.is_empty():
+		return {}
+	routes.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
+	var pool: Array = routes.slice(0, mini(_PREDICT_TOP_N, routes.size()))
+	var total: float = 0.0
+	for r in pool:
+		total += maxf(float(r.get("score", 0.0)), 0.0)
+	if total <= 0.0:
+		return {}
+	var roll: float = randf() * total
+	for r in pool:
+		roll -= maxf(float(r.get("score", 0.0)), 0.0)
+		if roll <= 0.0:
+			return r
+	return pool[pool.size() - 1]
 
 # A point on the annulus around ONE hub. The premise is different and in some
 # ways stronger than the chord's: whatever route a hauler picks, it must
@@ -1077,6 +1177,13 @@ func _generate_name() -> String:
 
 # The back channels at work: provision a member's whole identity kit ahead
 # of time. kit[0] is the arrival cover; the rest are the relight papers.
+#
+# NOTE (2026-08-04): papers are currently INFINITE -- a fresh kit is minted per
+# arrival and only kit[0] is ever read, so `identity_kit_size` has no
+# consequence and `relight_name` exists only in comments. Making papers finite
+# and burned-by-use is M65 (`m65_pirate_identity_kit.md`); an attempt to do it
+# inline broke test_pirate_guild's "full identity kit aboard" assertion, which
+# is exactly the contract that milestone has to renegotiate deliberately.
 func _provision_kit() -> Array:
 	var kit: Array = []
 	for _i in range(maxi(1, config.get("identity_kit_size", 3))):

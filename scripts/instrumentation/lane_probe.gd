@@ -269,3 +269,56 @@ static func avoidance_summary(window_frames: int = 79200) -> Dictionary:
 		"ratio": (float(during_total) / float(before_total)) if before_total > 0 else -1.0,
 		"rows": rows,
 	}
+
+# DOES THE FLEET HERD ONTO ONE LANE, AND DOES IT EVER LET GO? (2026-08-03)
+#
+# The aggregate table showed one lane carrying 40-63% of ALL cargo in every seed.
+# Fourteen haulers run the SAME argmax against the SAME global board and replan
+# on a fixed interval, so they can all see one winner and commit before any of
+# them delivers -- a thundering herd on stale prices.
+#
+# `station_economy.md` says this should self-correct: delivering raises stock,
+# which lowers import urgency, which lowers price, which stops the lane winning.
+# So the question is not "is there a peak" but **does the peak MOVE**.
+#
+#   share stays pinned  -> the replan cycle outruns the stock change; the
+#                          feedback exists but never gets to act. That is a
+#                          finding about TIMING, independent of fog or noise.
+#   share oscillates    -> the correction works and the aggregate 60% is just
+#                          the time-average of a peak that wanders.
+#
+# Bucketed rather than smoothed, because a moving average would blur exactly the
+# thing under test. Returns one row per bucket: which lane led and by how much.
+static func herding_summary(bucket_frames: int = 36000) -> Array:
+	if cargo_timeline.is_empty():
+		return []
+	var buckets: Dictionary = {}   # bucket_index -> {lane -> count}
+	for c in cargo_timeline:
+		var b: int = int(c["frame"]) / bucket_frames
+		if not buckets.has(b):
+			buckets[b] = {}
+		var m: Dictionary = buckets[b]
+		m[c["lane"]] = int(m.get(c["lane"], 0)) + 1
+	var idx: Array = buckets.keys()
+	idx.sort()
+	var out: Array = []
+	for b in idx:
+		var m: Dictionary = buckets[b]
+		var total: int = 0
+		var top: String = ""
+		var top_n: int = 0
+		for k in m:
+			total += int(m[k])
+			if int(m[k]) > top_n:
+				top_n = int(m[k])
+				top = k
+		if total <= 0:
+			continue
+		out.append({
+			"minute": b * bucket_frames / 3600,
+			"top_lane": top,
+			"top_share": float(top_n) / float(total),
+			"lanes_active": m.size(),
+			"samples": total,
+		})
+	return out

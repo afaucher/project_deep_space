@@ -74,9 +74,21 @@ better.
 
 To read a port's board you must DOCK, and a pirate docks under a **cover
 identity** — machinery that already exists, with a finite `identity_kit_size`
-(default 3). That makes papers an **economic asset** rather than pure
-concealment (D17, D20 become load-bearing), and burning a cover to rob someone
-costs a port you could have read.
+(default 3).
+
+**DOCKING DOES NOT SPEND A PAPER.** A clean name docks as often as you like;
+what BURNS a name is a WARRANT issued against it. So the cost sits on the
+robbery, not on the intelligence run:
+
+| how you rob | name cost | other cost |
+|---|---|---|
+| under **pirate colours** | none — no cover name is involved | HOSTILE on sight to everything in transponder range |
+| under a **cover name** | that name is notarized into a warrant → burned | none until the news travels |
+| **dark** (`NAME_WITHHELD`) | none — D7 refuses to notarize an unidentified subject | victims take you less seriously (`RUN_SPEED_RATIO_PIRATE_FLAG` 1.6 vs 1.3) |
+
+That makes papers an economic asset rather than pure concealment (D17, D20
+become load-bearing): the kit is not a budget of DOCKS, it is a budget of
+IDENTITIES YOU MAY GET CAUGHT UNDER.
 
 **Patrols already hold the counter**: docking denial for NO_ID hulls exists.
 Deny the dock, deny the intelligence.
@@ -273,3 +285,40 @@ Open: the learning rate and whether the multiplier is per-BAND or per-guild.
 Per-band composes with D18/M61 (rival crews under one flag would learn
 separately, and a lane one band has worked out is not knowledge the other has),
 which is the more interesting answer but needs the band split to exist first.
+
+## The missing enforcement: a burned name must actually be refused (2026-08-03)
+
+**Verified gap: `port_rules.gd` contains no warrant, standing or flag check at
+all.** Docking permission is purely procedural — approach geometry and bay
+availability. A notorious, warranted pirate can dock anywhere in the cluster
+today, so "burning" an identity currently costs nothing.
+
+Adding the check produces something better than a global burn:
+
+**A NAME IS BURNED PORT BY PORT, AS THE NEWS REACHES EACH PORT.**
+
+```
+rob under a cover name -> victim records the incident -> courier carries it
+  -> an own-flag station notarizes a warrant (D29) -> THAT station refuses
+     that name from then on
+  -> ports that have not heard still accept it
+```
+
+So a pirate keeps docking at Coldreach while Ironhold has already closed its
+doors, and the frontier of "where am I still welcome" moves at courier speed.
+It needs **no new state**: the same warrant, the same fog, the same clamped
+read that M58 and D29 already built. The station consults `warrant_index` for
+the claimed name at permission time — the same `Standing.subject_key` lookup
+InterdictLeaf and AcquireTargetLeaf already use, so it cannot drift from them.
+
+Two properties worth keeping:
+
+* **Going dark still defeats it** (D7/D37) — an unidentified hull cannot be
+  notarized, so it cannot be name-refused. Concealment keeps working, and keeps
+  costing you the ability to be taken seriously.
+* **The pirate must TRACK which ports still admit it**, which is exactly the
+  sort of decaying, partial knowledge this network exists to hold. A guild that
+  has not heard its own name is burned will fly into a refusal.
+
+Sequencing note: this is what gives the identity economy teeth, and it is
+independent of the targeting work — it can land before or after M64.

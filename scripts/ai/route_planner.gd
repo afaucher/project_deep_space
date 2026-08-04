@@ -203,15 +203,22 @@ const MIN_VIABLE_SCORE := 0.0
 # Mailbag.read_incidents(cluster, actor.get_mailbag())). Defaulting to empty
 # keeps every existing caller and test on today's behaviour -- no knowledge,
 # no risk -- so the fog is opt-in per reader rather than global truth.
-static func best_route(cluster, from_pos: Vector2, ship_flag: String,
-		known_incidents: Array = []) -> Dictionary:
-	var best: Dictionary = {}
+# EVERY viable route, scored. Split out of best_route (2026-08-03) so two
+# different SELECTION POLICIES can share one SCORING rule:
+#
+#   cargo  -> argmax (best_route below, behaviour unchanged)
+#   pirate -> weighted draw over the same list (M60d lane prediction)
+#
+# The alternative was a second scoring function on the pirate side, which is how
+# `_chord_carriers` came to score geometry while cargo scored economics -- two
+# models of "where is the traffic" that could never agree. One rule, two
+# policies, is the fix for that class of drift.
+static func scored_routes(cluster, from_pos: Vector2, ship_flag: String,
+		known_incidents: Array = []) -> Array:
+	var out: Array = []
 	# Sampled ONCE per search, not per pair: _score_pair runs stations^2 x
 	# commodities times, and recency only needs to be consistent within a search.
 	var now: int = Engine.get_physics_frames()
-	var best_score: float = -INF
-	var pairs_scored := 0
-	var max_risk_seen: float = 0.0
 	for pickup_rec in cluster.records:
 		if pickup_rec.kind != ClusterEntity.Kind.STATION:
 			continue
@@ -220,20 +227,29 @@ static func best_route(cluster, from_pos: Vector2, ship_flag: String,
 				continue
 			for commodity in Commodity.ALL:
 				var route: Dictionary = _score_pair(pickup_rec, dropoff_rec, commodity, from_pos, ship_flag, known_incidents, now)
-				if route.is_empty():
-					continue
-				pairs_scored += 1
-				# SURVIVORSHIP FIX (2026-08-03). DecisionProbe sampled only the
-				# WINNER's risk to answer "did risk ever matter", and a lane
-				# rejected BECAUSE it was dangerous is by definition not the
-				# winner -- so the sample was systematically ~0 and the funnel
-				# printed "RISK WAS ALWAYS ZERO -- UNTESTED" for runs in which
-				# risk had just changed 1614 decisions. The honest sample is the
-				# risk the SEARCH SAW, not the risk the survivor carried.
-				max_risk_seen = maxf(max_risk_seen, float(route.get("risk", 0.0)))
-				if route["score"] > best_score:
-					best_score = route["score"]
-					best = route
+				if not route.is_empty():
+					out.append(route)
+	return out
+
+static func best_route(cluster, from_pos: Vector2, ship_flag: String,
+		known_incidents: Array = []) -> Dictionary:
+	var best: Dictionary = {}
+	var best_score: float = -INF
+	var pairs_scored := 0
+	var max_risk_seen: float = 0.0
+	for route in scored_routes(cluster, from_pos, ship_flag, known_incidents):
+		pairs_scored += 1
+		# SURVIVORSHIP FIX (2026-08-03). DecisionProbe sampled only the WINNER's
+		# risk to answer "did risk ever matter", and a lane rejected BECAUSE it
+		# was dangerous is by definition not the winner -- so the sample was
+		# systematically ~0 and the funnel printed "RISK WAS ALWAYS ZERO --
+		# UNTESTED" for runs in which risk had just changed 1614 decisions. The
+		# honest sample is the risk the SEARCH SAW, not the risk the survivor
+		# carried.
+		max_risk_seen = maxf(max_risk_seen, float(route.get("risk", 0.0)))
+		if route["score"] > best_score:
+			best_score = route["score"]
+			best = route
 	if not best.is_empty() and best_score <= MIN_VIABLE_SCORE:
 		best = {}   # nothing worth flying -- idle rather than burn a hull on a loss
 	# Stamped on the RESULT rather than returned separately, so it survives the

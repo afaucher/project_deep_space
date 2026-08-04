@@ -144,6 +144,13 @@ func setup(main) -> void:
 	# roll, so an A/B changes exactly one thing: whether a false-flag pirate
 	# MOVES along its lane or parks on it.
 	PirateGuild.lane_run_enabled = _envf("LANE_RUN", 1.0) > 0.0  # D39: ON, matches the shipped default -- the posture exists to raise encounter volume
+	# M60d slice A -- economic lane prediction. OFF in the shipped default because
+	# it reads globally-visible postings (omniscient until M64 fogs them); the sim
+	# turns it on to measure whether TARGETING is the encounter fix at all. Staged
+	# deliberately: fogging and targeting in one change would leave a null result
+	# ambiguous between "targeting does not work" and "the fog starved it".
+	PirateGuild.economic_targeting = _envf("ECON_TARGET", 0.0) > 0.0
+	print("    ECON_TARGET=%s" % ("on" if PirateGuild.economic_targeting else "off"))
 	var cfg: Dictionary = _guild_config()
 	print("    LANE_RUN=%s" % ("on" if PirateGuild.lane_run_enabled else "OFF"))
 	print("    pirates: base_cap=%d max_cap=%d arrival=%s hunt=%.0fs | victim_sos=%.2f" % [
@@ -729,6 +736,19 @@ func _report_lanes() -> void:
 		print("  avoidance    : cargo-samples before %d / during %d -> ratio %.2f (%d of %d hunts scored)" % [
 			av["before"], av["during"], av["ratio"], av["hunts_scored"], av["hunts_total"]])
 		print("                 (<1.0 = traffic drained off the lane the pirate picked)")
+	# DOES THE HERD EVER LET GO? One lane carried 40-63% of all cargo in every
+	# seed measured. station_economy.md says delivering should lower that
+	# station's urgency, lower its price, and stop the lane winning -- so what
+	# matters is whether the peak MOVES, not that it exists. A share pinned at
+	# one lane means the replan cycle outruns the stock change and the feedback
+	# never gets to act, which is a TIMING finding independent of fog or noise.
+	var herd: Array = LaneProbe.herding_summary()
+	if herd.size() >= 2:
+		print("")
+		print("  game-min   top lane                                 share   lanes active")
+		for h in herd:
+			print("  %6d     %-40s %5.1f%%   %d" % [
+				h["minute"], h["top_lane"], h["top_share"] * 100.0, h["lanes_active"]])
 	print("")
 	print("  lane                                     cargo%   pirate%   (n cargo / n pirate)")
 	for row in LaneProbe.table():
