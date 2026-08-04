@@ -158,11 +158,23 @@ static func _shares(counts: Dictionary) -> Dictionary:
 #   overlap  = sum over lanes of  cargo_share(L) * pirate_share(L)
 #              -- the probability that a random pirate-second and a random
 #                 cargo-second are on the SAME lane.
-#   best     = sum over lanes of  cargo_share(L)^2
-#              -- the same quantity if pirates distributed themselves EXACTLY
-#                 like cargo. The ceiling any targeting rule could reach.
-#   efficiency = overlap / best, so 1.0 means "pirates are already where cargo
-#              is" and 0.1 means "they are choosing roads cargo does not use".
+#   match    = sum over lanes of  cargo_share(L)^2
+#              -- the overlap if pirates distributed themselves EXACTLY like
+#                 cargo. A BASELINE, not a maximum. I originally called this
+#                 "the ceiling any targeting rule could reach" and that was
+#                 WRONG: matching the prey's distribution is not optimal play.
+#                 Measured 2026-08-04, economic targeting scored `efficiency`
+#                 1.03/1.44/1.31 -- above 1.0, which is the tell that the
+#                 denominator was never a ceiling.
+#   ceiling  = max over lanes of  cargo_share(L)
+#              -- the TRUE optimum: put every pirate-second on the single
+#                 busiest lane. A predator SHOULD concentrate harder than its
+#                 prey, so exceeding `match` is correct behaviour, and only
+#                 `ceiling` bounds it.
+#   efficiency = overlap / match  -- kept under its old name so the numbers in
+#                 the ledger stay comparable; read it as "how many times better
+#                 than mimicking cargo", where 1.0 is mimicry and >1.0 is real
+#                 concentration. `headroom` below is the honest 0..1 score.
 #
 # Reporting the ceiling alongside the value matters: `overlap` alone is
 # uninterpretable, because a cluster where cargo itself is spread thin has a low
@@ -177,13 +189,17 @@ static func overlap_summary() -> Dictionary:
 	var overlap: float = 0.0
 	for k in c:
 		overlap += float(c[k]) * float(p.get(k, 0.0))
-	var best: float = 0.0
+	var match_score: float = 0.0
+	var ceiling: float = 0.0
 	for k in c:
-		best += float(c[k]) * float(c[k])
+		match_score += float(c[k]) * float(c[k])
+		ceiling = maxf(ceiling, float(c[k]))
 	return {
 		"overlap": overlap,
-		"best": best,
-		"efficiency": (overlap / best) if best > 0.0 else 0.0,
+		"best": match_score,
+		"ceiling": ceiling,
+		"efficiency": (overlap / match_score) if match_score > 0.0 else 0.0,
+		"headroom": (overlap / ceiling) if ceiling > 0.0 else 0.0,
 		"cargo_lanes": c.size(),
 		"pirate_lanes": p.size(),
 	}

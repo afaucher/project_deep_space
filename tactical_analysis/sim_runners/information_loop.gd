@@ -711,8 +711,10 @@ func _report_lanes() -> void:
 		return
 	print("  cargo used %d lanes, pirates chose %d" % [og["cargo_lanes"], og["pirate_lanes"]])
 	print("  overlap    : %.4f  (P a random pirate-second and cargo-second share a lane)" % og["overlap"])
-	print("  ceiling    : %.4f  (same, if pirates distributed EXACTLY like cargo)" % og["best"])
-	print("  efficiency : %.2f  (1.00 = already optimal, 0.10 = watching empty roads)" % og["efficiency"])
+	print("  match      : %.4f  (overlap if pirates distributed EXACTLY like cargo)" % og["best"])
+	print("  ceiling    : %.4f  (TRUE optimum -- all pirate-seconds on the busiest lane)" % og["ceiling"])
+	print("  efficiency : %.2f  (x better than mimicking cargo; >1.0 means real concentration)" % og["efficiency"])
+	print("  headroom   : %.2f  (0..1 against the true optimum -- the honest score)" % og["headroom"])
 	if LaneProbe.pirate_unresolved > 0:
 		# Not folded into the table on purpose: APPROACH_RING and the
 		# wormhole-anchored fallbacks produce segments whose ends are not two

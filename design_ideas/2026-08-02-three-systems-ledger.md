@@ -1161,6 +1161,148 @@ firing, and no evidence exists that piracy declines afterwards.
 **Correct claim: a patrol CAN stop and seize a pirate. Not: patrols stop pirates
 consistently.**
 
+### The selection-criteria chart (2026-08-04) — read this before proposing a fix
+
+Every actor's "where do I go next" decision, taken from the code rather than
+from memory. The BLANK CELLS are the plan; nothing here is a guess.
+
+| | **Cargo** (`RoutePlanner`) | **Pirate** (`PirateGuild`) | **Patrol** (`PatrolResponseLeaf`) |
+|---|---|---|---|
+| **Candidates** | every station pair x commodity (~13 stations) | 24 sampled random hub chords | heard hotspots <=220k + stations <=260k |
+| **Score** | `payout - travel_cost - risk` | `_chord_carriers` — how many station-pair LINES pass within 30,000u | hotspot: severity x proximity x recency; station: flat 1.0 |
+| **Selection** | **ARGMAX** + hysteresis (15/lot) | **ARGMAX** over the 24 samples | **WEIGHTED DRAW** (D24) |
+| **Prices** | **global, unfogged** | none *(Slice A: flag-gated prediction, also unfogged)* | none |
+| **Incidents** | fogged (mailbag-clamped) | **none** | fogged (mailbag-clamped) |
+| **Own observation** | none | none | none |
+| **Memory of outcomes** | none | **none** | none |
+| **Optimises** | profit | *geometric convergence* | reported trouble |
+
+Once on station, the per-target rule:
+
+| | criterion |
+|---|---|
+| **Pirate -> victim** | NEUTRAL/CAUTION, **alone** (nothing else within `witness_range`), then **smallest cross-section** |
+| **Patrol -> subject** | HOSTILE standing **or** enforceable warrant; tier decides whether force is authorized |
+
+**What the chart makes obvious, and none of it was obvious before drawing it:**
+
+1. **The pirate is the only actor with no learned input at all.** Cargo and
+   patrols both read a fogged channel that updates; the pirate navigates by
+   STATIC geometry. `_chord_carriers` returns the same answer on minute 1 and
+   minute 240 — a lane that paid yesterday and a lane nobody has ever flown
+   score identically. It cannot learn, so it cannot be wrong in a way it can
+   detect.
+2. **Cargo has a split epistemology.** Prices global, incidents fogged: the two
+   inputs to ONE decision come from different worlds, and the fogged one is
+   systematically disadvantaged. That is D36, and it is why risk is a veto
+   rather than a price.
+3. **Only patrols were ever fixed.** D24 replaced their argmax with a weighted
+   draw after measuring lock-on. Cargo and pirates still argmax — which is
+   exactly the cargo herding (D42) and the pirate stacking risk.
+4. **Nobody observes anything.** No actor uses its own sensors to inform
+   SELECTION. The pirate has a 45,000u passive array and uses it only for VICTIM
+   pick, never for LANE pick — so it cannot notice it is sitting on an empty
+   road.
+5. **Nobody remembers anything.** No actor carries outcome memory between
+   decisions, so no failure teaches anyone.
+
+**The plan is the blank cells, in order:**
+
+| gap | fix | milestone |
+|---|---|---|
+| pirate score has no traffic term | predict the lane with `scored_routes` | M60d slice A — BUILT, flag-gated |
+| prices are unfogged for everyone | postings behind the mailbag | **M64** — keystone for criteria (1) AND (3) |
+| cargo + pirate select by argmax | weighted draw (the D24 pattern, twice more) | M60d (pirate, built) / M64 may fix cargo for free |
+| nobody remembers outcomes | per-lane weights: takes up, empties down | M60d |
+| pirate never observes traffic | dock leg fills the mailbag | M60d + M65 |
+
+### D44 — economic targeting WORKS at the stage it targets (2026-08-04)
+
+M60d slice A built and A/B'd, `ECON_TARGET` off vs on, seed-matched:
+
+| seed | lane overlap OFF -> ON | "found NOBODY" aborts OFF -> ON | takes |
+|---|---|---|---|
+| 11111 | 0.0000 -> **0.33** | 2 -> **0** | 1 -> 1 |
+| 22222 | 0.0216 -> **0.51** | 3 -> **0** | 1 -> 0 |
+| 33333 | 0.0554 -> **0.44** | 4 -> **0** | 0 -> 0 |
+
+**The encounter failure is GONE.** No hunt exhausted its time budget having seen
+nobody, in either logged seed — and seed 33333 logged `hunt budget spent (4
+attempts, nothing taken)`, i.e. it found prey four times and could not land it.
+That is an EXECUTION failure, which is the failure mode you only get to have
+once encounter works.
+
+**Takes did not move.** Same shape as LANE_RUN: a real fix at the targeted stage,
+bottleneck moves rather than clears. The difference is that this time the stage
+was measured DIRECTLY rather than inferred from the funnel's end — which is the
+whole lesson of D38.
+
+**UNRECONCILED, and not being explained away**: `returned_empty` reads 7 in both
+seeds against ONE logged `SELECT_VICTIM` abort. Most hunts end by some path that
+is not a logged victim-selection abort. This matters because `returned_empty` is
+the signal M60d's per-lane learning would train on — if it counts something other
+than "I hunted and found nothing", the learning term trains on noise. Chase
+before building the learner.
+
+### D45 — the metric flaw the result exposed
+
+`efficiency` came back 1.03 / 1.44 / 1.31 — ABOVE 1.0, which is the tell that the
+denominator was never a ceiling. I had defined it as `sum cargo_share^2`, the
+overlap if pirates matched cargo exactly, and called it *"the ceiling any
+targeting rule could reach"*. **Matching your prey's distribution is not optimal
+play; concentrating harder than it is.** The true optimum is `max(cargo_share)`
+— every pirate-second on the single busiest lane.
+
+Now reported as three numbers: `match` (mimicry baseline), `ceiling` (true
+optimum), `headroom` (the honest 0..1 score). `efficiency` keeps its name so the
+figures already in this ledger stay comparable.
+
+### D42 CORRECTED — the herd MIGRATES, and that changes the problem
+
+120 game-minute trace, bucketed per 10 minutes:
+
+```
+   0 min  Coldreach <-> Ironhold        62.6%      50 min  Deepcut <-> Refinery Prime   63.6%
+  20 min  Coldreach <-> Ironhold        76.9%      60 min  Deepcut <-> Refinery Prime   79.2%
+  30 min  Coldreach <-> Slag Bay        66.7%      80 min  Ironhold <-> Refinery Prime  53.2%
+  40 min  Refinery Prime <-> Slag Bay   36.6%     100 min  Coldreach <-> Drift Market   36.7%
+```
+
+The herd is real at any instant (40-80% on one lane, only 2-9 lanes active) but
+it **moves every 10-30 game-minutes**, and cargo touches 15-16 lanes across a
+run. So `station_economy.md`'s self-correction DOES work — deliveries land,
+urgency falls, the lane stops winning. The 40-63% aggregate was the time-average
+of a wandering peak, which was the alternative I could not distinguish before.
+
+**THE CONSEQUENCE, which is bigger than the correction.** The pirate's target is
+**NON-STATIONARY**. That is why static geometry (`_chord_carriers`, identical on
+minute 1 and minute 240) fails badly and why live prices worked immediately.
+
+**It is a hard constraint on M60d's per-lane learning**: the learning rate must
+be fast relative to ~10-30 minute peak migration, or a learned weight will
+confidently chase a peak that has already left. **A slow decay would be worse
+than no memory at all.** This is the same class of error as D22 (a half-life
+shorter than delivery latency) and the avoidance-window bug — a time constant
+set without reference to the timescale of the thing it tracks. Third instance;
+it should be a standing check.
+
+### D41 — measurable now, and the design is inadequate
+
+With the window corrected to 22 game-minutes:
+
+| seed | cargo before -> during | ratio |
+|---|---|---|
+| 11111 | 174 -> 47 | **0.27** |
+| 22222 | 232 -> 285 | **1.23** |
+
+One seed drains hard, the other rises. And with a migrating peak I **cannot
+separate "cargo fled" from "the peak moved on anyway"** — both produce a falling
+ratio. So the corrected window made the measurement possible and revealed the
+measurement DESIGN is confounded.
+
+Separating them needs lanes WITH incidents against lanes WITHOUT, both during a
+pirate's presence. **No avoidance claim is being made in either direction.**
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than
