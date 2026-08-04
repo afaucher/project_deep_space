@@ -1329,6 +1329,25 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	# Note the abort is checked BEFORE the refresh below, so a lapse can never be
 	# repaired by the very refresh meant to prevent it -- if the numbers show
 	# lapses, that ordering is the first suspect.
+	# WAS THIS STEP EVEN RUNNING? (D49 follow-up, 2026-08-04.)
+	#
+	# alongside_trace.gd proved the step itself is sound: two ships alone, it
+	# closes 3,000u / 8,000u / 20,000u and completes the 12s hold every time,
+	# with the victim's compliance sustained throughout. So the campaign failure
+	# is CONTEXTUAL, and the leading candidate is tree preemption -- build_pirate
+	# puts ShouldDisengage/Flee ABOVE JobRunner, so a pirate that perceives a
+	# threat stops ticking its job, stops refreshing, and the hold lapses 6s
+	# later. That would explain refreshes landing 22 times and then simply
+	# stopping.
+	#
+	# The gap between consecutive ticks OF THIS STEP measures it directly: a
+	# contiguous run reads ~1 frame, a preempted one reads hundreds.
+	var frame_gap: int = -1
+	if scratch.has("last_tick_frame"):
+		frame_gap = Engine.get_physics_frames() - int(scratch["last_tick_frame"])
+	scratch["last_tick_frame"] = Engine.get_physics_frames()
+	scratch["max_tick_gap"] = maxi(int(scratch.get("max_tick_gap", 0)), frame_gap)
+
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty() or not c.get("complied_stop", false):
 		var held_for: float = -1.0
@@ -1342,9 +1361,11 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 			vic_dist = actor.position.distance_to(vic2.position)
 			vic_compelled = "held" if not vic2.compelled_stop.is_empty() else "LAPSED"
 			vic_hits = int(vic2.get("hold_refresh_hits"))
-		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, refreshes %d hold-hits / %d sent)" % [
+		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames, refreshes %d hold-hits / %d sent)" % [
 			"CONTACT DROPPED" if c.is_empty() else "contact ok, complied_stop false",
 			vic_compelled, vic_dist, held_for,
+			float(step.get("scratch", {}).get("min_dist", -1.0)),
+			int(step.get("scratch", {}).get("max_tick_gap", -1)),
 			vic_hits,
 			int(step.get("scratch", {}).get("refresh_tries", 0))]
 		_blacklist_victim(job, victim_iid)
@@ -1393,6 +1414,13 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	_pace_at_offset(actor, victim_pos_take + offset, victim_vel_take, victim_pos_take, step.get("cruise", 300.0))
 
 	var dist: float = actor.position.distance_to(victim_pos_take)
+	# CLOSEST APPROACH ACHIEVED (D49 follow-up). `held -1.0s` says the hold never
+	# started; it does not say whether the pirate got to 205u or stalled at
+	# 4,000u, and those want opposite fixes -- a hair outside the ring is a
+	# threshold/deadband problem, kilometres out is an approach problem. One
+	# number separates them, which is cheaper than a distance trace and is the
+	# "instrument ARRIVAL, not just success" rule applied to itself.
+	scratch["min_dist"] = minf(float(scratch.get("min_dist", INF)), dist)
 	var in_hold: bool = scratch.has("hold_start_frame")
 	var within: bool = dist <= (range * TAKE_ALONGSIDE_EXIT_SLACK if in_hold else range)
 	if not within:

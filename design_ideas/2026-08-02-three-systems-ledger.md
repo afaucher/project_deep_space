@@ -1483,6 +1483,68 @@ behaviour aborts too early, check whether its predicate was written for a
 different decision.** Two of the three were real improvements; the third was
 null, which is why the heuristic finds candidates, not answers.
 
+### D50 — the robbery was never broken; the pirate stops TICKING it (2026-08-04)
+
+**The fast rig changed the answer.** `alongside_trace.gd` -- two ships, no
+economy, 1.5 SECONDS per run -- drives the real `TAKE_ALONGSIDE` against a real
+complying victim:
+
+```
+gap  3000u -> closest 104, hold completes
+gap  8000u -> closest  82, hold completes
+gap 20000u -> closest  93, hold completes
+```
+
+**The step is sound at every distance the campaign produces.** It closes 20km and
+completes the 12s hold with compliance sustained throughout. So D49's
+entry-margin fix was addressing a non-problem, which is exactly why it measured
+null, and six turns of heartbeat hypotheses were all looking at a working
+mechanism.
+
+The rig also caught TWO bugs in its own harness on first run (a missing wait for
+ACKNOWLEDGE to reach the pirate's contact; `on_abort: ""` silently reading as
+job-complete, CLAUDE.md's own documented trap). Each would have cost a full
+campaign run to notice.
+
+**Then instrument what the campaign does that two ships do not.** Two findings:
+
+**1. The pirate barely moves.** Isolated: ~280u/s closing. Campaign: `closest
+5499 -> range 5472` -- **27 units in ~16 seconds** -- and one case where it moved
+BACKWARDS (20100 -> 18142 is closing, but 16401 -> 16435 is not).
+
+**2. `max tick gap 387 frames` = 6.45s.** The step was not being TICKED for 6.45
+seconds -- longer than `HAIL_HEARTBEAT_TIMEOUT` (6.0s). No refresh can go out
+while the step is not running, so the hold lapses by exactly the mechanism it is
+designed to, and the step then reports "victim bolted".
+
+`build_pirate` is a Selector: `ShouldDisengage -> Flee`, then `OutlawResponse`,
+then `JobRunner`. Anything above JobRunner claiming the tick stops the robbery
+cold. **The victim did nothing wrong and the message names it as the cause.**
+
+Note n=1 for the tick gap; the movement anomaly is n=4.
+
+**What this changes about the fix.** If the preemption is a PATROL interdicting
+the pirate mid-robbery, abandoning is CORRECT behaviour and only the message is
+wrong. If it is `ShouldDisengage` firing on ordinary traffic -- and economic
+targeting puts pirates on the busiest lane, so there is more of it -- then a
+pirate can never rob anyone on a lane worth robbing, and that is the real defect.
+**Those need opposite fixes and the instrument does not yet distinguish them.**
+
+**3. A fusion divergence, independent of both.** Seed 22222: the victim's
+`compelled_stop` reads **held** while the pirate's CONTACT reports
+`complied_stop false`. The contact carries its own `complied_stop_grace`
+lifetime, so a pirate can abandon a victim that is still dutifully stopped. Found
+only because the abort prints both sides; a takes count could never surface it.
+
+### The method lesson, which is the expensive one
+
+A two-body question was chased through 45-game-minute campaign runs with 14
+haulers, 8 pirates and a live economy, three seeds at a time, for SIX turns.
+`pursuit_trace.gd` had already established the right pattern that same morning
+and answered the patrol-chase question on its first run. **Build the smallest rig
+that reproduces the mechanism before instrumenting the big one** -- the campaign
+is where RATES are measured, not where mechanisms are debugged.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

@@ -288,6 +288,14 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   field recording that a hold never STARTED -- was in the output for several
   turns before it was read, while six hypotheses were burned on why the hold
   "died". It had never begun.
+- **Build the smallest rig that reproduces the mechanism BEFORE instrumenting the
+  campaign.** A two-body question -- one pirate closing on one stopped victim --
+  was chased through 45-game-minute campaign runs (14 haulers, 8 pirates, live
+  economy, 3 seeds at a time) for six turns and six wrong hypotheses.
+  `alongside_trace.gd` answered it in **1.5 seconds** and exonerated the
+  mechanism outright, then caught two bugs in its own harness on the first run.
+  `pursuit_trace.gd` is the same pattern for chases. The campaign is where RATES
+  are measured; it is a terrible place to debug a MECHANISM.
 - **Design guidance on thresholds** lives in
   `design_ideas/2026-08-04-deadbands-in-ai-behaviour.md`: never steer toward the
   same number you test against, and note the counter-rule -- a deadband is the
