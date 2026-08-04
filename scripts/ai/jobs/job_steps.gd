@@ -1347,6 +1347,11 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		frame_gap = Engine.get_physics_frames() - int(scratch["last_tick_frame"])
 	scratch["last_tick_frame"] = Engine.get_physics_frames()
 	scratch["max_tick_gap"] = maxi(int(scratch.get("max_tick_gap", 0)), frame_gap)
+	# How stale the RUNNER's own entry stamp is at this moment. Near 0 means the
+	# runner is being reached every frame and any step gap is a dispatch fault;
+	# large means the tree is not reaching the runner at all.
+	scratch["max_runner_lag"] = maxi(int(scratch.get("max_runner_lag", 0)),
+		int(actor.get("runner_tick_gap")))
 
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty() or not c.get("complied_stop", false):
@@ -1362,7 +1367,13 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		# which, and costs two dictionary reads on an aborting path.
 		var self_state: String = "clear"
 		var flee_ticks: int = int(actor.get("outlaw_flee_ticks"))
-		if flee_ticks > 0:
+		var held_ticks: int = int(actor.get("outlaw_held_ticks"))
+		var flee_leaf: int = int(actor.get("flee_leaf_ticks"))
+		if flee_leaf > 0:
+			self_state = "DISENGAGING (%d FleeLeaf ticks stolen)" % flee_leaf
+		elif held_ticks > 0:
+			self_state = "WAS HELD (%d ticks stolen from the job)" % held_ticks
+		elif flee_ticks > 0:
 			self_state = "FLEEING (%d ticks stolen from the job)" % flee_ticks
 		if not actor.compelled_stop.is_empty():
 			self_state = "PIRATE HELD by %d" % int(actor.compelled_stop.get("issuer_iid", -1))
@@ -1376,11 +1387,12 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 			vic_dist = actor.position.distance_to(vic2.position)
 			vic_compelled = "held" if not vic2.compelled_stop.is_empty() else "LAPSED"
 			vic_hits = int(vic2.get("hold_refresh_hits"))
-		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames, self=%s, refreshes %d hold-hits / %d sent)" % [
+		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames (runner lag %d), self=%s, refreshes %d hold-hits / %d sent)" % [
 			"CONTACT DROPPED" if c.is_empty() else "contact ok, complied_stop false",
 			vic_compelled, vic_dist, held_for,
 			float(step.get("scratch", {}).get("min_dist", -1.0)),
 			int(step.get("scratch", {}).get("max_tick_gap", -1)),
+			int(step.get("scratch", {}).get("max_runner_lag", -1)),
 			self_state,
 			vic_hits,
 			int(step.get("scratch", {}).get("refresh_tries", 0))]

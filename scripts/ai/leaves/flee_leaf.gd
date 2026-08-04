@@ -11,6 +11,12 @@ const Standing = preload("res://scripts/combat/standing.gd")
 const FLEE_SPEED := 900.0
 
 func tick(actor: Node, _blackboard) -> int:
+	# D50 -- the LAST candidate above JobRunner in build_pirate. `runner lag 387`
+	# proves the tree does not reach the runner for ~6.45s during a failed
+	# robbery; OutlawResponseLeaf was cleared by direct count (flee 0, held 0),
+	# so the Disengage sequence is all that is left. Counted here rather than
+	# reasoned about, because six earlier eliminations by reading were wrong.
+	actor.set("flee_leaf_ticks", int(actor.get("flee_leaf_ticks")) + 1)
 	var threat_pos = _nearest_hostile_pos(actor)
 	if threat_pos == null:
 		actor.apply_control_input(0.0, 0.0, actor.rotation, 1, 0) # nothing to flee; coast

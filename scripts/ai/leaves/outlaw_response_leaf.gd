@@ -104,6 +104,14 @@ func tick(actor: Node, blackboard) -> int:
 
 	if not actor.compelled_stop.is_empty():
 		blackboard.set_value("was_held", true)
+		# D50 -- THIS is the tick the robbery loses. A pirate that has itself
+		# been stopped returns SUCCESS here every frame, so JobRunner (below this
+		# leaf) never runs, the hunt job never refreshes its own demand, and the
+		# VICTIM's compliance lapses on its 6s heartbeat. The uncounted path:
+		# `outlaw_flee_ticks` stayed 0 because the pirate COMPLIED rather than
+		# fled, and `self=clear` at the abort is read after the hold has already
+		# released -- so both earlier probes missed it.
+		actor.set("outlaw_held_ticks", int(actor.get("outlaw_held_ticks")) + 1)
 		return SUCCESS # held -- the ship-level throttle override owns motion
 	elif blackboard.get_value("was_held", false):
 		blackboard.erase_value("was_held")

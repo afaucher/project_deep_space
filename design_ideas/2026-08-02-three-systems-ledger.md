@@ -1596,6 +1596,64 @@ this, and the low take rate is now attributable to a single unidentified
 scheduling gap rather than to pirate behaviour. That is a much better position
 than "pirates never find anyone", and it is not a finished one.
 
+### D50 SOLVED — the pirate disengages mid-robbery (2026-08-04)
+
+**`self=DISENGAGING (386 FleeLeaf ticks stolen)`**, against a measured 387-frame
+gap. Exact match.
+
+`build_pirate` is `Selector(Disengage[ShouldDisengage, Flee], OutlawResponse,
+JobRunner, Idle)`. When a pirate perceives a threat mid-robbery, `Flee` claims
+every tick for ~6.4 seconds. `JobRunner` sits BELOW it, so the hunt job never
+runs, never refreshes its own demand, and the VICTIM's compliance lapses on its
+6s heartbeat. The step then reports **"victim bolted"** about a ship that never
+moved.
+
+It also explains the two anomalies that made no sense on their own: the pirate
+"barely moving toward its victim" (it is flying AWAY from something else), and
+the fast rig's inability to reproduce any of it (nothing there threatens the
+pirate).
+
+**Nine candidates, each eliminated by DIRECT COUNT rather than by argument:**
+aim point (D49, fixed and null) · comms range · seq match · timer reset · scratch
+persistence · tree structure/bystander · patrol interdiction · OutlawResponse
+fleeing (0 ticks) · OutlawResponse held (0 ticks) · sim bubble · beehave throttle.
+
+**TWO OF MY OWN INSTRUMENTS WERE WRONG DURING THIS, and both produced confident
+false eliminations:**
+
+1. `runner lag` stamped the frame at the top of `JobRunnerLeaf.tick` and read it
+   back INSIDE THE SAME TICK -- computing `now - now`, structurally incapable of
+   returning anything but 0. I used that 0 to rule out the entire tree-preemption
+   family, which is where the answer actually was.
+2. `self=clear` read the pirate's `compelled_stop`/`pending_demand` AT ABORT
+   TIME, after the state had already released -- so it reported "clear" for a
+   hull that had been fleeing for six seconds.
+
+That is the seventh and eighth instrumentation defect this session, all the same
+shape: **a number that cannot express the failure it exists to detect.** Both
+happened AFTER writing that exact rule into CLAUDE.md the same morning. Knowing
+the rule did not prevent repeating it, which means the guard has to be
+structural: **validate an instrument against a case where it MUST report failure
+before trusting its output.**
+
+### D51 (OPEN) — is disengaging mid-robbery correct?
+
+The behaviour may be right and only the message wrong. A pirate under threat
+SHOULD break off. But three things need deciding:
+
+1. **The log lies.** "victim bolted" names the victim as the cause of a failure
+   the pirate chose. That single misleading string is what sent this
+   investigation into six wrong hypotheses. Cheapest and most valuable fix
+   regardless of the rest.
+2. **Should a robbery in progress outrank fleeing?** A pirate 200u from a
+   complying victim with 12 seconds to go is throwing away the entire hunt for a
+   threat that may be a passing hauler. `ShouldDisengage`'s threshold was never
+   tuned against "I am mid-take".
+3. **The interaction is invisible.** Nothing in the funnel reports "robbery
+   abandoned due to disengage" -- it books as `returned_empty`, which reads as
+   "found nobody". Criterion (1) has been measuring pirate FAILURE where the real
+   cause is pirate CAUTION.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

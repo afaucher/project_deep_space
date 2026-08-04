@@ -296,6 +296,24 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   mechanism outright, then caught two bugs in its own harness on the first run.
   `pursuit_trace.gd` is the same pattern for chases. The campaign is where RATES
   are measured; it is a terrible place to debug a MECHANISM.
+- **VALIDATE AN INSTRUMENT AGAINST A CASE WHERE IT MUST REPORT FAILURE, before
+  trusting its output.** Eight instruments lied in one session and several
+  produced confident WRONG eliminations. Two examples worth recognising by
+  shape: a `runner lag` probe stamped the frame at the top of `JobRunnerLeaf.tick`
+  and read it back INSIDE THE SAME TICK -- computing `now - now`, so it could
+  only ever return 0, and that 0 was used to rule out the family the bug was
+  actually in; and a `self=clear` probe read a hull's `compelled_stop` AT ABORT
+  TIME, after the state had released, reporting "clear" for a ship that had been
+  fleeing for six seconds. Both were written the same day the "attempted is not
+  delivered" rule went into this file, by the person who wrote it. **Knowing the
+  rule does not prevent repeating it** -- the check has to be mechanical: feed
+  the instrument a known-bad case and confirm it says so.
+- **Prefer a DIRECT COUNT at the line that does the thing.** Nine candidates for
+  one bug were eliminated by argument and reading, several wrongly. The answer
+  came from incrementing a counter inside each leaf that could steal a tick, and
+  reading which one was non-zero (`386 FleeLeaf ticks stolen` against a
+  387-frame gap -- exact match). Counting where the event happens cannot be
+  argued with.
 - **Design guidance on thresholds** lives in
   `design_ideas/2026-08-04-deadbands-in-ai-behaviour.md`: never steer toward the
   same number you test against, and note the counter-rule -- a deadband is the

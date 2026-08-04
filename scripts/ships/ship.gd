@@ -200,6 +200,18 @@ var hold_refresh_hits: int = 0
 # D50 -- ticks OutlawResponseLeaf claimed while fleeing. Diagnostic only. It sits
 # above JobRunner, so each one is a tick the hunt job did not get.
 var outlaw_flee_ticks: int = 0
+# D50 -- ticks OutlawResponseLeaf claimed because THIS hull was itself held.
+var outlaw_held_ticks: int = 0
+# D50 -- ticks FleeLeaf claimed (the Disengage branch above JobRunner).
+var flee_leaf_ticks: int = 0
+
+# D50 -- the last physics frame JobRunnerLeaf.tick was ENTERED on this hull.
+# Diagnostic only; never read by behaviour. Distinguishes "the tree never
+# reached the runner" from "the runner ran but did not dispatch the step".
+var runner_tick_frame: int = -1
+# Frames between consecutive JobRunnerLeaf entries -- >1 means the TREE did not
+# reach the runner, i.e. something above it claimed the tick.
+var runner_tick_gap: int = 0
 # M52 passive sync (implementation_plans/m52_sos_passive_sync.md, replaces
 # the m52_sos_as_contact.md heartbeat design): SOS used to be a discrete
 # event re-broadcast on a timer (SOS_HEARTBEAT_INTERVAL, now removed) with

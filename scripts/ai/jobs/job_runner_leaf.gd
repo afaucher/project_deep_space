@@ -44,6 +44,21 @@ const JobSteps = preload("res://scripts/ai/jobs/job_steps.gd")
 func tick(actor: Node, _blackboard) -> int:
 	if actor == null or actor.is_dead:
 		return FAILURE
+	# D50 -- WAS THE RUNNER REACHED AT ALL? Diagnostic only, free when nothing
+	# reads it. The step-level `max tick gap` proved a ~6.25s hole in
+	# TAKE_ALONGSIDE's execution but cannot say WHICH fault it is: the tree never
+	# reaching JobRunner (something above it claimed the tick), or JobRunner
+	# running and not dispatching this step. Those need opposite fixes, and
+	# conflating them is what let "victim bolted" stand for six different things.
+	# The gap SINCE THE PREVIOUS entry, computed before overwriting. The first
+	# version stamped the frame here and had the step read it back inside the
+	# SAME tick, so it computed `now - now` and could only ever report 0 -- a
+	# number structurally incapable of detecting the fault it was built for. It
+	# was then used to rule out tree preemption, wrongly.
+	var _prev: int = int(actor.get("runner_tick_frame"))
+	var _now: int = Engine.get_physics_frames()
+	actor.set("runner_tick_gap", (_now - _prev) if _prev >= 0 else 0)
+	actor.set("runner_tick_frame", _now)
 
 	var slot: String = ""
 	var job: Dictionary = actor.assignment
@@ -114,9 +129,15 @@ func _abort_reason(job: Dictionary) -> String:
 # One line per step transition when the DebugSettings "job_log" toggle is ON
 # -- the console view of an otherwise-invisible job (a pirate's whole hunt
 # happens dark and off-lane; these lines are how a playtester watches it).
+# FRAME-STAMPED (2026-08-04). Step transitions were logged without any clock, so
+# a timeline could not be reconstructed from the log -- which is what a ~6.25s
+# gap in TAKE_ALONGSIDE's execution needs, now that `runner lag 0` has proven the
+# runner IS entered every frame and simply is not dispatching that step. The
+# frame is the cheapest thing that makes "what was this hull doing instead"
+# answerable from an existing log rather than a new probe.
 func _job_log(actor: Node, msg: String) -> void:
 	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
-		print("[Job] %s: %s" % [actor.debug_label(), msg])
+		print("[Job f%d] %s: %s" % [Engine.get_physics_frames(), actor.debug_label(), msg])
 
 # Verb-aware detail for the DONE line -- the milestones worth a number.
 func _done_detail(actor: Node, step: Dictionary, job: Dictionary) -> String:
