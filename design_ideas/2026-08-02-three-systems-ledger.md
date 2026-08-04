@@ -1420,6 +1420,69 @@ failures, each needing its own stage-level measurement:
 A takes count cannot resolve any of these, which is why the funnel's end is the
 wrong instrument for all three.
 
+### D47 measured — right diagnosis, correct fix, NULL result (2026-08-04)
+
+`victim_lost` fired on `FIRE_STALENESS_MAX` (3.0s) -- a FIRING-SOLUTION bound
+deciding whether a chase continues, while the contact itself survives to
+`CONTACT_TIMEOUT` (20s).
+
+Two hypotheses killed by reading rather than measuring, which is the cheap half:
+GO_DARK disables only the TRANSPONDER (sensors keep running), and the pinnace
+sweeps its full 360 degrees every 1.0s -- so neither self-blinding nor cadence.
+Then instrumented the abort itself:
+
+```
+age 3.0s > 3.0; true range 14175      age 3.0s > 3.0; true range 32420
+age 3.0s > 3.0; true range 18164      age 3.0s > 3.0; true range 34217
+age 3.0s > 3.0; true range 21819      age 3.0s > 3.0; true range 41851
+age 3.0s > 3.0; true range 23575      age 3.0s > 3.0; true range 43329
+age 5.5s > 3.0; true range 61132   <- the ONE genuine escape
+```
+
+Every victim inside the 45,000u array, contact still HELD (stale, not dropped),
+and age EXACTLY 3.0s in 10 of 11 -- clustering at the trip point is the
+signature of a threshold that is too tight. A real escape spreads, as the 61km
+case did.
+
+Fix: `victim_lost_after`, defaulting to FIRE_STALENESS_MAX so every existing
+caller is unchanged; the pirate's hunt passes `pursuit_staleness` 12.0, between
+3s and CONTACT_TIMEOUT's 20s. A pirate should quit shortly before its own
+tracker does, not four times sooner.
+
+**RESULT: 21 aborts eliminated, every downstream number BIT-IDENTICAL.**
+
+| seed | victim_lost | demands | alongside | takes |
+|---|---|---|---|---|
+| 11111 | 1 -> 0 | 13 -> 13 | 4 -> 4 | 0 -> 0 |
+| 22222 | 9 -> 0 | 12 -> 12 | 5 -> 5 | 1 -> 1 |
+| 33333 | 5 -> 0 | 8 -> 8 | 3 -> 3 | 0 -> 0 |
+| 66666 | 6 -> 0 | 15 -> 15 | 6 -> 6 | 2 -> 2 |
+
+The abort was BENIGN: it routed to `hunt`, the pirate re-selected -- often the
+same victim, now fresh -- and carried on. It cost cycles, not outcomes.
+
+**KEPT, unlike D30's reverted no-op, and the distinction is the point.** D30's
+comment asserted a mechanism that was FALSE (`cruise` capping absolute speed).
+D47's claim is true and measured: the threshold really was the wrong question and
+the aborts really are gone. **A correct rule with a null result is worth keeping;
+a wrong story with a null result is not.** The comment records the null so nobody
+re-fixes it expecting a win.
+
+### The pattern across three consecutive criterion-(1) fixes
+
+D31, D46 and D47 are all **a rule borrowed from a neighbouring question**:
+
+| | tested | should have tested |
+|---|---|---|
+| D31 `outpaced` | "is it far away" | "is it pulling away" |
+| D46 witness | "should I abandon the trip" | "should I abandon this victim" |
+| D47 `victim_lost` | "can I shoot it" | "have I lost it" |
+
+Worth stating as a search heuristic rather than three anecdotes: **when a
+behaviour aborts too early, check whether its predicate was written for a
+different decision.** Two of the three were real improvements; the third was
+null, which is why the heuristic finds candidates, not answers.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

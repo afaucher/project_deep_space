@@ -546,6 +546,16 @@ const FALSE_FLAG_CRUISE_CHANCE := 0.4
 # project's own ledger.
 static var intercept_witness_retries: bool = true
 
+# Pursuit-length staleness bound (D47). Static so a sim can sweep it without
+# touching authored data, same shape as the guild's other dials.
+#
+# 12s sits between FIRE_STALENESS_MAX (3s -- measured aborting chases the pirate
+# was WINNING, with the victim 14k-43k away inside a 45,000u array and the
+# contact still held) and CONTACT_TIMEOUT (20s, where the fusion layer gives up
+# entirely). A pirate should quit shortly before its own tracker does, not four
+# times sooner.
+static var pursuit_staleness: float = 12.0
+
 func _intercept_witness_target() -> String:
 	return "hunt" if intercept_witness_retries else "exfil"
 
@@ -737,6 +747,11 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2, has_clean_identity: bool = 
 		"steps": steps,
 		"current": 0,
 		"posture": posture,
+		# D47 -- how long a track may go quiet before the pirate concludes it has
+		# LOST its victim, as distinct from how fresh a track must be to SHOOT
+		# at. Read by JobSteps._victim_lost; see its comment for the measurement
+		# that motivated separating the two.
+		"victim_lost_after": pursuit_staleness,
 	}
 
 # ---------------------------------------------------------------------------

@@ -1417,8 +1417,69 @@ static func _third_party_in_range(actor, job: Dictionary, r: float) -> bool:
 			return true
 	return false
 
+# D47 -- WHY the track went stale, not just that it did.
+#
+# `victim_lost` fires on contact_age > FIRE_STALENESS_MAX (3.0s), which is a
+# FIRING-SOLUTION freshness bound being used as "have I lost this ship" during a
+# chase -- while the contact itself is not dropped until CONTACT_TIMEOUT (20s).
+# Measured 2026-08-04: 2 of 4 intercepts in one traced hunt died here.
+#
+# Two hypotheses were killed by reading the code rather than measuring, which is
+# the cheap half: GO_DARK only disables the TRANSPONDER (sensors keep running),
+# and the pinnace's passive array sweeps its whole 360 degrees every 1.0s, well
+# inside the 3s bound. So neither self-blinding nor sweep cadence explains it.
+#
+# What is left is geometry -- range, line of sight, or the passive EM threshold --
+# and those are distinguishable only by looking at the moment it fires. Hence
+# this stashes the numbers on the job instead of a bare boolean. Costs one string
+# build per abort, on a path that ends the step anyway.
 static func _victim_lost(actor, job: Dictionary) -> bool:
 	var victim_iid: int = job.get("victim_iid", -1)
 	if victim_iid == -1:
+		job["_abort_reason"] = "victim_lost (no victim_iid)"
 		return true
-	return not _is_fresh(actor, _contact_for_instance(actor, victim_iid))
+	# THE STALENESS BOUND IS THE PURSUIT'S, NOT THE GUN'S (D47, 2026-08-04).
+	#
+	# This used `_is_fresh`, i.e. FIRE_STALENESS_MAX = 3.0s -- a FIRING-SOLUTION
+	# bound, the freshness a track needs before you shoot at it. Measured across
+	# three seeds, 10 of 11 aborts fired at age EXACTLY 3.0s with the victim at a
+	# true range of 14k-43k, comfortably inside the pinnace's 45,000u passive
+	# array, and with the contact still HELD (stale, not dropped). Ages clustering
+	# precisely at the trip point is the signature of a threshold that is too
+	# tight; a victim actually escaping would spread them (5s, 8s, 12s), as the
+	# single genuine loss at 61,132u did.
+	#
+	# A passive track at 20-40km going quiet for three seconds is normal sensing,
+	# which is exactly why CONTACT_TIMEOUT is 20s: the fusion layer expects
+	# intermittency and dead-reckons through it. Same shape as D31, where
+	# `outpaced` tested "far away" instead of "pulling away".
+	#
+	# MEASURED EFFECT: NONE DOWNSTREAM, and that is recorded here so nobody
+	# "fixes" this again expecting a win. Six seed pairs at 3s vs 12s eliminated
+	# every abort (21 -> 0) and left demands, alongside attempts and takes
+	# BIT-IDENTICAL in all six. The abort was benign: it routed to `hunt`, the
+	# pirate re-selected -- often the same victim, now fresh -- and carried on.
+	# It cost cycles, not outcomes.
+	#
+	# Kept anyway, unlike D30's reverted no-op, and the distinction matters: D30's
+	# comment asserted a MECHANISM THAT WAS FALSE (that `cruise` capped absolute
+	# speed). This one's claim is true and measured -- the threshold really was
+	# the wrong question, and the aborts really are gone. A correct rule with a
+	# null result is worth keeping; a wrong story with a null result is not.
+	#
+	# `lost_after` lets the step say which question it is asking. Default stays
+	# FIRE_STALENESS_MAX so every existing caller is unchanged; the pirate's
+	# INTERCEPT passes a pursuit-length bound.
+	var lost_after: float = float(job.get("victim_lost_after", actor.FIRE_STALENESS_MAX))
+	var c: Dictionary = _contact_for_instance(actor, victim_iid)
+	if not c.is_empty() and Ship.contact_age(c) <= lost_after:
+		return false
+	var vic = instance_from_id(victim_iid)
+	var true_dist: float = -1.0
+	if vic != null and is_instance_valid(vic):
+		true_dist = actor.position.distance_to(vic.position)
+	job["_abort_reason"] = "victim_lost (%s, age %.1fs > %.1f; true range %.0f, tracks held %d)" % [
+		"no contact at all" if c.is_empty() else "stale contact",
+		-1.0 if c.is_empty() else Ship.contact_age(c), lost_after,
+		true_dist, actor.active_contacts.size()]
+	return true
