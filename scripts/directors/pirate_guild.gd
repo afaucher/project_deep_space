@@ -23,6 +23,7 @@ const ClusterEntity = preload("res://scripts/cluster/cluster_entity.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const PirateOreShuttle = preload("res://scripts/ships/pirate_ore_shuttle.gd")
 const ArmedPinnace = preload("res://scripts/ships/armed_pinnace.gd")
+const LaneProbe = preload("res://scripts/instrumentation/lane_probe.gd")
 
 # Ledger member states (jobs_and_itineraries.md §3 / the design doc's ledger
 # shape). SCHEDULED is conceptual only -- a scheduled arrival has no record
@@ -564,6 +565,11 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2) -> Dictionary:
 	var lane_pos: Vector2 = lane_info.get("pos", wormhole_pos)
 	var seg_a: Vector2 = lane_info.get("seg_a", lane_pos)
 	var seg_b: Vector2 = lane_info.get("seg_b", lane_pos)
+	# LANE CHOICE, recorded at the moment it is COMMITTED (LaneProbe). A pirate
+	# holds this segment for a whole hunt, so one sample here is one pirate-hunt
+	# of presence -- the time-weighted unit the overlap metric needs. Free when
+	# the probe is off; nothing else in this function changes.
+	LaneProbe.note_pirate(cluster, seg_a, seg_b)
 	var staging_pos: Vector2 = _away_from_hazards(func(): return _staging_point(wormhole_pos, seg_a, seg_b), stations, beacons)
 	var exfil_pos: Vector2 = _away_from_hazards(func(): return _exfil_point(wormhole_pos, lane_pos), stations, beacons)
 

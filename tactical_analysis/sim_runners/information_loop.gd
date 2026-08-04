@@ -37,6 +37,7 @@ const Incident = preload("res://scripts/mail/incident.gd")
 const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf.gd")
 const DecisionProbe = preload("res://scripts/instrumentation/decision_probe.gd")
 const EngagementProbe = preload("res://scripts/instrumentation/engagement_probe.gd")
+const LaneProbe = preload("res://scripts/instrumentation/lane_probe.gd")
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
 const RiskMap = preload("res://scripts/mail/risk_map.gd")
 
@@ -170,6 +171,8 @@ func setup(main) -> void:
 	DecisionProbe.reset()
 	EngagementProbe.enabled = true
 	EngagementProbe.reset()
+	LaneProbe.enabled = true
+	LaneProbe.reset()
 
 	# Per-minute trace to tmp/ (gitignored), summary to tactical_analysis/data/
 	# -- the same split economy_traffic uses.
@@ -487,6 +490,26 @@ func _report() -> void:
 	print("  outpaced the patrol          : %d" % EngagementProbe.outpaced)
 	var sr: float = EngagementProbe.stop_rate()
 	print("  stop rate                    : %s" % ("n/a -- none attempted" if sr < 0.0 else "%.0f%%" % (sr * 100.0)))
+	# BY TIER, because the aggregate above cannot tell enforcement from
+	# harassment (2026-08-03). Interdiction fires at CAUTION as well as HOSTILE,
+	# and a CAUTION subject is usually an innocent hull that failed to answer an
+	# ID challenge. The run that forced this split read 4 stops against ~2 hulks
+	# and 2 guild losses -- so at most half of it was pirates, and the single
+	# number said nothing about which half. Criterion (4) asks about stopping
+	# PIRATES, which is a claim about the HOSTILE line below, not the blend.
+	for tier in EngagementProbe.tiers_seen():
+		var t_start: int = int(EngagementProbe.started_by_tier.get(tier, 0))
+		var t_comp: int = int(EngagementProbe.complied_by_tier.get(tier, 0))
+		var t_ref: int = int(EngagementProbe.refused_by_tier.get(tier, 0))
+		var t_out: int = int(EngagementProbe.outpaced_by_tier.get(tier, 0))
+		var t_sr: float = EngagementProbe.stop_rate_for(tier)
+		print("    tier %-8s : started %d, complied %d, refused %d, outpaced %d -- stop rate %s" % [
+			tier, t_start, t_comp, t_ref, t_out,
+			("n/a" if t_sr < 0.0 else "%.0f%%" % (t_sr * 100.0))])
+	# A tier line whose starts and outcomes disagree is not a bug in the counters:
+	# the outcome hooks fire for any job carrying `interdict_tier`, including jobs
+	# assembled outside InterdictLeaf, and an interdiction still in flight when
+	# the run ends is a start with no outcome at all.
 	# WHERE the demand opened, relative to the range it must be held inside.
 	# A 1v1 trace (pursuit_trace.gd) showed the patrol out-accelerating the
 	# pirate 115.6 vs 79.8 u/s^2 and closing a 2500u gap to ~600u repeatedly --
@@ -556,6 +579,7 @@ func _report() -> void:
 	print("
 === WHERE EACH BRANCH STANDS ===")
 	_report_economy()
+	_report_lanes()
 	print("  EVIDENCE (incident -> stations -> patrols -> sweeps): %s" % (
 		"CLOSED end to end" if ev == "" else "breaks -- " + ev))
 	print("  VERDICT  (incident -> notarized warrant)            : %s" % (
@@ -653,3 +677,61 @@ func _makes(rec, commodity: String) -> bool:
 		if conv.get("out", {}).get(commodity, 0.0) > 0.0:
 			return true
 	return false
+
+# DO PIRATES SIT WHERE CARGO ACTUALLY FLIES? (2026-08-03)
+#
+# The encounter model predicted ~79% of hunts should see prey (1e12 u^2 bounds,
+# 45,000u passive array, 14 haulers at ~700u/s, 900s hunt). Measured: 163 empty
+# hunts against 3 contested, under 2%. A 40x miss is a wrong ASSUMPTION, not a
+# tuning gap, and the suspect one is uniformity -- cargo flies the lanes that
+# pay, while `_random_hub_pair` samples station pairs evenly.
+#
+# This table tests that instead of asserting it, and it needs no long run:
+# robberies are rare but lane CHOICE is sampled every hauler replan and every
+# pirate arrival, so the two distributions converge in game-minutes.
+#
+# Read `efficiency` first. `overlap` alone is uninterpretable -- a cluster where
+# cargo itself is spread thin has a low ceiling no targeting rule could beat --
+# which is the same defect the "RISK WAS ALWAYS ZERO" banner had.
+func _report_lanes() -> void:
+	print("")
+	print("=== LANES (do pirates sit where cargo flies?) ===")
+	var og: Dictionary = LaneProbe.overlap_summary()
+	if og.is_empty():
+		print("  >>> NO SAMPLES on one side -- cargo %d lanes, pirate %d lanes." % [
+			LaneProbe.cargo_picks.size(), LaneProbe.pirate_picks.size()])
+		print("      Says nothing about targeting; it says the probe saw nothing.")
+		return
+	print("  cargo used %d lanes, pirates chose %d" % [og["cargo_lanes"], og["pirate_lanes"]])
+	print("  overlap    : %.4f  (P a random pirate-second and cargo-second share a lane)" % og["overlap"])
+	print("  ceiling    : %.4f  (same, if pirates distributed EXACTLY like cargo)" % og["best"])
+	print("  efficiency : %.2f  (1.00 = already optimal, 0.10 = watching empty roads)" % og["efficiency"])
+	if LaneProbe.pirate_unresolved > 0:
+		# Not folded into the table on purpose: APPROACH_RING and the
+		# wormhole-anchored fallbacks produce segments whose ends are not two
+		# stations, and bucketing those would invent lanes that do not exist.
+		print("  (%d pirate picks had no two-station lane -- ring/wormhole postures)" % LaneProbe.pirate_unresolved)
+	# DID CARGO SIMPLY LEAVE? Cargo presence on the pirate's chosen lane in the 3
+	# game-minutes BEFORE it committed, against the 3 after. A ratio well under
+	# 1.0 means traffic drained away from under the pirate -- which would make
+	# "pirates find no prey" partly the RISK SYSTEM WORKING rather than a
+	# targeting failure, and would matter because a hunt job commits to one lane,
+	# so a pirate cannot follow the traffic it just scared off.
+	#
+	# READ THE PRECONDITION WITH IT: cargo can only avoid what it has HEARD, and
+	# that needs a completed robbery plus a courier. Most hunts take nothing, so
+	# most lanes here have nothing to avoid and a ratio near 1.0 is the EXPECTED
+	# null, not evidence of bravery.
+	var av: Dictionary = LaneProbe.avoidance_summary()
+	if av.is_empty():
+		print("  avoidance    : no hunt landed on a lane cargo ever used -- nothing to compare")
+	else:
+		print("  avoidance    : cargo-samples before %d / during %d -> ratio %.2f (%d of %d hunts scored)" % [
+			av["before"], av["during"], av["ratio"], av["hunts_scored"], av["hunts_total"]])
+		print("                 (<1.0 = traffic drained off the lane the pirate picked)")
+	print("")
+	print("  lane                                     cargo%   pirate%   (n cargo / n pirate)")
+	for row in LaneProbe.table():
+		print("  %-38s %6.1f    %6.1f    (%d / %d)" % [
+			row["lane"], row["cargo"] * 100.0, row["pirate"] * 100.0,
+			row["cargo_n"], row["pirate_n"]])

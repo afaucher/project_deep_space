@@ -24,6 +24,32 @@ static var complied: int = 0       # subject held station -- an actual STOP
 static var refused: int = 0        # patience expired, never complied
 static var outpaced: int = 0       # subject outran the patrol beyond hail range
 
+# WHICH TIER THE STOP WAS (2026-08-03).
+#
+# The aggregate counters above conflate two different events, and the criterion-
+# (4) review said so outright: interdiction fires at CAUTION tier as well as
+# HOSTILE, and a CAUTION-tier subject is usually an innocent hull that failed to
+# answer an ID challenge rather than anyone the patrol has a force-authorizing
+# warrant against. The measured run that prompted this read `4 stops -> 2 guild
+# losses -> ~2 hulks`, so AT MOST half of those four stops were pirates and the
+# rest were civilians inspected and released. A single "stop rate" therefore
+# cannot distinguish enforcement from harassment -- both count identically.
+#
+# So every counter above gets a per-tier twin, keyed by the tier string
+# (Standing.CAUTION / Standing.HOSTILE). The aggregates stay -- callers and
+# information_loop.gd's report read them, and the totals are still the right
+# denominator for "did a patrol stop anything at all" -- these sit alongside.
+#
+# Note this splits OUTCOMES by tier, not motives. A HOSTILE-tier stop is a
+# patrol acting on a determined-enemy standing or an enforceable warrant; it is
+# not by itself proof the subject was a pirate, only that the patrol had grounds
+# the CAUTION tier does not carry. The guild's own loss ledger remains the
+# separate, independent number for "was it actually a pirate".
+static var started_by_tier: Dictionary = {}
+static var complied_by_tier: Dictionary = {}
+static var refused_by_tier: Dictionary = {}
+static var outpaced_by_tier: Dictionary = {}
+
 # THE GEOMETRY A DEMAND OPENS AT (2026-08-03).
 #
 # Added because two confident wrong causes in a row were both "the patrol is too
@@ -48,6 +74,10 @@ static func reset() -> void:
 	refused = 0
 	outpaced = 0
 	open_ratios.clear()
+	started_by_tier.clear()
+	complied_by_tier.clear()
+	refused_by_tier.clear()
+	outpaced_by_tier.clear()
 
 # Called once per interdiction, when the demand is first SENT (not when the job
 # is assigned) -- that is the moment the outpaced test starts applying.
@@ -76,20 +106,70 @@ static func opening_summary() -> Dictionary:
 		"born_outpaced": doomed,
 	}
 
-static func note_started() -> void:
-	if enabled:
-		started += 1
+# `tier` is the same value InterdictLeaf is about to stamp onto the job as
+# `interdict_tier` -- passed explicitly because this hook fires at ASSIGNMENT,
+# where the caller holds the tier in hand and the probe has no job dict to read
+# it back out of. Without it there is a started/outcome asymmetry: the outcome
+# hooks below could report per-tier results with no per-tier denominator to
+# divide them by, which is the same "a rate with no attempts behind it" trap
+# stop_rate()'s -1.0 convention exists to prevent.
+static func note_started(tier: String) -> void:
+	if not enabled:
+		return
+	started += 1
+	started_by_tier[tier] = int(started_by_tier.get(tier, 0)) + 1
 
 # `job` is passed so the hook can prove this was a PATROL interdiction rather
-# than a pirate's robbery demand. Cheap: one dictionary lookup on a path that
+# than a pirate's robbery demand. Cheap: two dictionary lookups on a path that
 # runs once per demand outcome, not per frame.
 static func note_outcome(job: Dictionary, outcome: String) -> void:
 	if not enabled or not job.has("interdict_tier"):
 		return
+	var tier: String = _tier_key(job)
 	match outcome:
-		"complied": complied += 1
-		"refused": refused += 1
-		"outpaced": outpaced += 1
+		"complied":
+			complied += 1
+			complied_by_tier[tier] = int(complied_by_tier.get(tier, 0)) + 1
+		"refused":
+			refused += 1
+			refused_by_tier[tier] = int(refused_by_tier.get(tier, 0)) + 1
+		"outpaced":
+			outpaced += 1
+			outpaced_by_tier[tier] = int(outpaced_by_tier.get(tier, 0)) + 1
+
+# `str()` rather than a typed read, because `interdict_tier` is only a Standing
+# string on the paths the GAME builds: InterdictLeaf._tier_of returns
+# Standing.CAUTION or Standing.HOSTILE, but hand-built job fixtures treat the
+# field purely as a "this is a patrol job, not a robbery" marker and one of them
+# (scripts/tests/test_outlaw_response.gd) sets the literal `1`. That one is
+# latent rather than live -- it never turns the probe on, so the guard above
+# returns first -- but the shape is what matters: assigning a non-String to a
+# typed String raises a runtime error, and per CLAUDE.md's dictionary trap that
+# aborts the rest of the calling function for the frame, which here would be the
+# aggregate increment beside it and whatever step_demand_stop does next.
+# Bucketing an odd value under its own string key instead keeps the aggregates
+# exact and leaves the strange key visible in the report rather than dropped.
+static func _tier_key(job: Dictionary) -> String:
+	return str(job.get("interdict_tier", ""))
+
+# Every tier that appeared in ANY counter, sorted, so a report can iterate
+# without assuming which tiers a given run happened to produce.
+#
+# Union rather than just started_by_tier's keys, because the two sides do not
+# have to agree. `note_started` fires only from InterdictLeaf, while the outcome
+# hooks fire from step_demand_stop for ANY job carrying `interdict_tier` --
+# including jobs assembled by hand (test fixtures, pursuit_trace.gd) that never
+# went through the leaf. Keying off starts alone would hide those outcomes
+# entirely; a tier with outcomes and no starts is an asymmetry a reader needs to
+# see, not one the report should silently drop.
+static func tiers_seen() -> Array:
+	var keys: Dictionary = {}
+	for d in [started_by_tier, complied_by_tier, refused_by_tier, outpaced_by_tier]:
+		for k in d:
+			keys[k] = true
+	var out: Array = keys.keys()
+	out.sort()
+	return out
 
 # The number the goal actually asks for: of the interdictions a patrol started,
 # how many ended with the subject stopped. Returns -1 when nothing was attempted,
@@ -97,3 +177,20 @@ static func note_outcome(job: Dictionary, outcome: String) -> void:
 static func stop_rate() -> float:
 	var resolved: int = complied + refused + outpaced
 	return (float(complied) / resolved) if resolved > 0 else -1.0
+
+# The same number restricted to one tier, which is the form the criterion
+# actually needs: "stopping some pirates" is a claim about the HOSTILE-tier rate,
+# and the CAUTION-tier rate is a claim about how often patrols successfully pull
+# over hulls that merely failed to identify themselves. Reporting only the blend
+# lets a run of administrative stops stand in for enforcement.
+#
+# Same -1.0 convention as stop_rate(), and it matters MORE here: splitting one
+# small sample across two tiers routinely leaves a tier with zero attempts, and
+# a 0% there would read as "patrols tried and always failed" when nothing was
+# ever tried.
+static func stop_rate_for(tier: String) -> float:
+	var did_comply: int = int(complied_by_tier.get(tier, 0))
+	var resolved: int = did_comply \
+		+ int(refused_by_tier.get(tier, 0)) \
+		+ int(outpaced_by_tier.get(tier, 0))
+	return (float(did_comply) / resolved) if resolved > 0 else -1.0

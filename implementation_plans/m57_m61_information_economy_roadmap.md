@@ -384,6 +384,13 @@ Closes the guild's learning loop and gives it a spatial axis (C10).
   finished, try the other one" instead of "the guild is discouraged".
 - **Dens as infrastructure**: multiple dens = fresher news + shorter exfil.
   Buildable, losable, raidable.
+- **Port control logs (M60d)** — a station's `docking_registry` is a versioned
+  `SourceLog` with no consumer, and two ports' logs CORRELATE into a lane: the
+  same hull at Ironhold then Drift Market IS that lane. Read by docking under a
+  cover identity, which makes the finite identity kit an economic asset (D17,
+  D20) and gives patrols a counter they already have (docking denial for NO_ID).
+  Institutional intelligence, complementing the field intelligence above. Full
+  slice in `m60d_port_control_logs.md`.
 - **Loot the mailbag** — the snapshot M58 puts in a hauler's job is cargo, and
   `TAKE_ALONGSIDE` can take it. Gives pirates an opportunistic feed that is
   earned rather than granted; stolen news is stale and route-biased, so it is

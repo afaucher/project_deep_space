@@ -52,10 +52,14 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D22 | A decay half-life must be set against **measured delivery latency**, never in isolation | settled — 5 min → 30 min, news was stale before it landed |
 | D23 | Five seeds at 60 game-min **cannot A/B anything** | settled (method) |
 | D24 | A sweep and a routine patrol are the **same act** — one weighted draw over hotspots + stations | settled, built |
-| D25 | Cargo evens the network but rides on mail; prices are **globally readable**, so the loop does not bite | **superseded by D36** |
-| D26 | Mail urgency as a routing consideration | **superseded by D36** (same milestone) |
+| D25 | Cargo evens the network but rides on mail; prices are **globally readable**, so the loop does not bite | **superseded by D36 → planned as M64** |
+| D26 | Mail urgency as a routing consideration | **superseded by D36 → planned as M64** (`m64_price_fog.md`) |
 | D27 | LANE_RUN off by default | **REVERSED by D39** — both the reasoning (D38) and the objective were wrong |
 | D39 | **LANE_RUN back ON by default.** The posture exists to raise ENCOUNTER VOLUME for simulation fidelity, not to maximise takes — and it demonstrably does | **NEW 2026-08-03, decided** |
+| D40 | **Pirates aim badly — MEASURED.** `efficiency` 0.00/0.05/0.20 against a 0.28–0.44 ceiling; the busiest lane (42–63% of all cargo) was picked 0 times in 3 seeds | **NEW, confirmed** — targeting, not density/sensors |
+| D41 | **Cargo does NOT flee pirates — and my test could not have seen it if it did.** 3-game-min window vs ~22-min courier latency | **RETRACTED as untested** — window fixed to 22 min, needs re-run |
+| D42 | **Cargo herds onto one lane** (40–63% share). 14 haulers, one argmax, one global board. M64 fog should disperse them WITHOUT irrational noise | **NEW, open** — likely explains UNSERVED |
+| D43 | **Weighted draw + outcome-updated per-lane weights** for pirates: prior from the heard board, takes up / empties down, sample never argmax | **NEW, planned in M60d** — makes `returned_empty` productive and the oscillation emergent |
 | D38 | **LANE_RUN DOES find prey better** — no-prey aborts 163→142 (4/5 seeds), found-but-failed 3→9. The bottleneck moves from ENCOUNTER to EXECUTION | **NEW 2026-08-03 — reopens the posture question** |
 | D28 | A cornered pirate needs a demand handler; `build_pirate` had none, so refusal was 100% structural | settled, built (`OutlawResponseLeaf`) |
 | D29 | An authority notarizes what it **HOLDS**, not what docked; gate 2 moves to the **source's** flag | settled, built — 0 → 22 warrants |
@@ -65,7 +69,7 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D33 | A patrol's stop must *do* something; `HULK_PRIZE` is the short-term answer | **built**, but what a stop should ultimately MEAN is **OPEN** |
 | D34 | The shoot-if-justified ladder already existed and was **unreachable** until D29 landed | settled (context) — identity is what makes you shootable |
 | D35 | **Crew** is what makes surrender rational again — hull lost either way, crew survives a surrender | **OPEN** — lands in M55 (warships have zero crew space today) |
-| D36 | Urgent routes are never risked because of **substitutability**, not a missing payout term; posting **fog** is the fix | **CORRECTED**, OPEN — prerequisite for criterion (3) |
+| D36 | Urgent routes are never risked because of **substitutability**, not a missing payout term; posting **fog** is the fix | **CORRECTED**, planned as **M64** — prerequisite for criterion (3) |
 | D37 | The hulk gate keys on the **warrant**; an empty warrant means *uncapped* (colour-flying pirate) | settled for now — reviewed and kept |
 
 ---

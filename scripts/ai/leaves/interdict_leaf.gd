@@ -203,7 +203,11 @@ func tick(actor: Node, blackboard) -> int:
 		"interdict_tier": _tier_of(target_c, w),
 	}
 	actor.assignment = job
-	EngagementProbe.note_started()
+	# The tier goes to the probe as well as onto the job. The probe's outcome
+	# hooks recover it from the job dict, but this hook fires at assignment and
+	# has no job to read -- and the per-tier outcome counts are uninterpretable
+	# without a per-tier denominator beside them.
+	EngagementProbe.note_started(job["interdict_tier"])
 
 	# One line per interdiction START. The tier is the interesting field: yellow
 	# (CAUTION) work is administrative -- a NO_ID or ARMED_THREAT warrant -- and

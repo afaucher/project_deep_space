@@ -36,6 +36,7 @@ extends "res://addons/beehave/nodes/leaves/action.gd"
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
 const Mailbag = preload("res://scripts/mail/mailbag.gd")
 const DecisionProbe = preload("res://scripts/instrumentation/decision_probe.gd")
+const LaneProbe = preload("res://scripts/instrumentation/lane_probe.gd")
 
 # Real-seconds between re-evaluations of an ALREADY-running route plan. Cheap
 # to check (RoutePlanner.best_route is at most a few hundred dict reads), but
@@ -84,6 +85,14 @@ func _probe(actor: Node, cluster, heard: Array, chosen: Dictionary) -> void:
 		return
 	var blind: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), [])
 	DecisionProbe.record(actor.name, chosen, blind, heard.size())
+	# WHICH LANE, for the pirate/cargo overlap question (LaneProbe). Sampled here
+	# rather than at job assignment on purpose: this hook fires on the replan
+	# CHECK, at a fixed per-hull interval, so counts come out proportional to
+	# hauler-SECONDS on a lane rather than to how many times a route happened to
+	# change. Encounter probability is a time integral, so that is the unit that
+	# makes the overlap number comparable to the pirate side.
+	if not chosen.is_empty():
+		LaneProbe.note_cargo(cluster, int(chosen.get("pickup_id", -1)), int(chosen.get("dropoff_id", -1)))
 
 func tick(actor: Node, _blackboard) -> int:
 	if actor == null or actor.is_dead:
