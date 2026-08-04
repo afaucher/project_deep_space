@@ -25,6 +25,7 @@ const JobRunnerLeaf = preload("res://scripts/ai/jobs/job_runner_leaf.gd")
 const BlackboardScript = preload("res://addons/beehave/blackboard.gd")
 const JobSteps = preload("res://scripts/ai/jobs/job_steps.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
+const AITreeFactory = preload("res://scripts/ai/ai_tree_factory.gd")
 
 const TRACE_SECONDS := 120
 
@@ -36,11 +37,22 @@ func setup(main) -> void:
 	print("=== alongside_trace: why does the pirate not close the last few hundred units? ===")
 	# Campaign failures were measured at 4,000-20,000u, so sweep the range the
 	# game actually produces rather than the one that happens to work.
-	await _trace(3000.0)
+	# D50 -- what breaks the take in a CAMPAIGN that two ships alone do not have?
+	# The tick gap says JobRunner was preempted for 6.45s; build_pirate puts
+	# ShouldDisengage/Flee and OutlawResponse ABOVE it. Two candidates needing
+	# OPPOSITE fixes: a patrol interdicting the pirate (abandoning is CORRECT,
+	# only the "victim bolted" message is wrong), or ordinary traffic tripping
+	# ShouldDisengage (a real defect, and economic targeting maximises exactly
+	# that by parking pirates on the busiest lane).
+	#
+	# So run the same take with the FULL pirate tree instead of a bare
+	# JobRunner, and with a neutral bystander nearby. If the take survives both,
+	# neither candidate is it.
+	await _trace(3000.0, false, false)
 	print("")
-	await _trace(8000.0)
+	await _trace(3000.0, true, false)
 	print("")
-	await _trace(20000.0)
+	await _trace(3000.0, true, true)
 	get_tree().quit(0)
 
 func _make(script, nm: String, owner: int, pos: Vector2, tags: Array) -> Node:
@@ -60,8 +72,10 @@ func _contact(observer, target) -> Dictionary:
 			return c
 	return {}
 
-func _trace(start_gap: float) -> void:
-	print("--- opening gap %.0fu ---" % start_gap)
+func _trace(start_gap: float, full_tree: bool = false, bystander: bool = false) -> void:
+	print("--- opening gap %.0fu | tree=%s | bystander=%s ---" % [
+		start_gap, "FULL build_pirate" if full_tree else "bare JobRunner",
+		"yes" if bystander else "no"])
 	var base := Vector2(300000, 0)
 	var pirate = _make(ArmedPinnace, "TracePirate_%d" % int(start_gap), 800, base, ["PIRATE_GUILD"])
 	var victim = _make(CargoShuttle, "TraceVictim_%d" % int(start_gap), 801, base + Vector2(start_gap, 0), ["TEAM_CIV"])
@@ -93,6 +107,17 @@ func _trace(start_gap: float) -> void:
 		"held" if not victim.compelled_stop.is_empty() else "NO",
 		"yes" if saw_complied else "NO", seq])
 
+	# A neutral hull loitering near the victim -- the "ordinary traffic" case.
+	var extra = null
+	if bystander:
+		extra = _make(CargoShuttle, "TraceBystander_%d" % int(start_gap), 802,
+			victim.position + Vector2(0, 2500), ["TEAM_CIV2"])
+
+	# FULL TREE puts ShouldDisengage/Flee and OutlawResponse above JobRunner,
+	# which is the only structural difference between this rig and a campaign.
+	var tree = AITreeFactory.build_pirate() if full_tree else null
+	if tree != null:
+		pirate.add_child(tree)
 	var runner = JobRunnerLeaf.new()
 	var bb = BlackboardScript.new()
 	# `on_abort` LABELLED, not "": CLAUDE.md's rule -- _abort_to("") sets
@@ -110,7 +135,8 @@ func _trace(start_gap: float) -> void:
 	var frames := 0
 	var min_seen: float = INF
 	while frames < TRACE_SECONDS * 60:
-		runner.tick(pirate, bb)
+		if tree == null:
+			runner.tick(pirate, bb)
 		await get_tree().physics_frame
 		frames += 1
 		var d: float = pirate.position.distance_to(victim.position)
@@ -130,3 +156,5 @@ func _trace(start_gap: float) -> void:
 		print("  abort: %s" % job["_abort_reason"])
 	pirate.queue_free()
 	victim.queue_free()
+	if extra != null:
+		extra.queue_free()

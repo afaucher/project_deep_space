@@ -1545,6 +1545,57 @@ and answered the patrol-chase question on its first run. **Build the smallest ri
 that reproduces the mechanism before instrumenting the big one** -- the campaign
 is where RATES are measured, not where mechanisms are debugged.
 
+### D50 status — six candidates eliminated, the gap is NOT yet explained
+
+Stated plainly because the temptation is to keep guessing: **I do not know why
+`JobRunner` stops ticking the take for ~6.25 seconds.**
+
+What IS established, and none of it is speculation:
+
+| finding | evidence |
+|---|---|
+| The take step is SOUND | `alongside_trace.gd`: closes 3k/8k/20k, completes the 12s hold every time |
+| The hold channel WORKS | 22-27 refreshes sent AND received on the victim's own counter |
+| Victims comply | 17 of 49 demands; **0 ever outpace** |
+| The step stops being TICKED | `max tick gap` 387 / 374 / 375 / 376 frames -- consistently ~6.25s |
+| The pirate barely moves during the gap | 27 units in ~16s, vs ~280u/s in isolation |
+
+Six candidates, each killed by a measurement rather than an argument:
+
+| candidate | killed by |
+|---|---|
+| aim point == threshold (D49) | fixed it; `held` still -1.0, takes 3 vs 3 |
+| comms range / seq / timer / scratch | all read correct; refreshes land and reset the hold |
+| tree structure, `ShouldDisengage` on traffic | fast rig: FULL `build_pirate` + bystander at 2,500u still completes |
+| patrol interdicting the pirate | `self=clear` in every abort |
+| `OutlawResponseLeaf` starving JobRunner (my code) | `outlaw_flee_ticks` = 0 |
+| sim bubble demoting the hull | harness runs `configure_full_sim()` |
+| beehave tick throttle | `tick_rate` defaults to 1; no AI budget exists |
+
+**That lead is now CLOSED.** `JobRunnerLeaf` guards the reset on the entered
+INDEX -- `if job.get("_entered_step", -1) != current: step["scratch"] = {}` --
+so a hunt-loop excursion resets `last_tick_frame` and would report a gap of -1,
+not 375. **The ~6.25s gap is real and happens WITHIN a single entry of the
+step.** Seven candidates eliminated; the cause is still unknown.
+
+Next instrument, and it should be a FAST one rather than another campaign run:
+stamp the frame in `JobRunnerLeaf` itself (not the step) so the gap can be
+attributed to "the runner did not run" vs "the runner ran but did not reach this
+step". Those are different faults and the current instrument cannot tell them
+apart -- the same conflation that made "victim bolted" mean six different
+things.
+
+**Cost of this investigation, recorded because it is the finding that
+generalises**: six hypotheses, six turns, on a mechanism that was never broken.
+`alongside_trace.gd` (1.5s per run) exonerated the take on its FIRST execution
+and should have been written before the first hypothesis, not after the sixth --
+`pursuit_trace.gd` had already proved the pattern that same morning.
+
+**What this means for criterion (1)**: every stage is solved or explained EXCEPT
+this, and the low take rate is now attributable to a single unidentified
+scheduling gap rather than to pirate behaviour. That is a much better position
+than "pirates never find anyone", and it is not a finished one.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

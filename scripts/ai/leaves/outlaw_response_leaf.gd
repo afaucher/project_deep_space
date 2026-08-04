@@ -139,6 +139,13 @@ func tick(actor: Node, blackboard) -> int:
 			if actor.has_method("engage_dead_stop"):
 				actor.engage_dead_stop()
 			return SUCCESS
+		# D50 diagnostic: this leaf sits ABOVE JobRunner, so every tick it claims
+		# is a tick the pirate's hunt job does NOT get -- including the demand
+		# refresh a robbery hold depends on. `self=clear` at a take abort checks
+		# compelled_stop/pending_demand and would NOT see this state, so a pirate
+		# stuck fleeing looks idle from the job's side. Counted on the actor so
+		# the abort can report it.
+		actor.set("outlaw_flee_ticks", int(actor.get("outlaw_flee_ticks")) + 1)
 		_run_from(actor, c.get("pos", actor.position))
 		return SUCCESS
 

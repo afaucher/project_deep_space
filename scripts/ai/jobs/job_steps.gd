@@ -1353,6 +1353,21 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		var held_for: float = -1.0
 		if step.get("scratch", {}).has("hold_start_frame"):
 			held_for = (Engine.get_physics_frames() - float(step["scratch"]["hold_start_frame"])) / PHYSICS_HZ
+		# WAS THE PIRATE ITSELF BEING LEANED ON? (D50 discriminator.)
+		# alongside_trace ruled out the tree and ordinary traffic: the full
+		# build_pirate tree with a bystander 2,500u away still completes the take
+		# (closest 107). The remaining candidate for a 6.45s tick gap is the
+		# pirate being interdicted mid-robbery -- in which case abandoning is
+		# CORRECT and only this message is wrong. Its own demand/hold state says
+		# which, and costs two dictionary reads on an aborting path.
+		var self_state: String = "clear"
+		var flee_ticks: int = int(actor.get("outlaw_flee_ticks"))
+		if flee_ticks > 0:
+			self_state = "FLEEING (%d ticks stolen from the job)" % flee_ticks
+		if not actor.compelled_stop.is_empty():
+			self_state = "PIRATE HELD by %d" % int(actor.compelled_stop.get("issuer_iid", -1))
+		elif not actor.pending_demand.is_empty():
+			self_state = "PIRATE DEMANDED (%s)" % str(actor.pending_demand.get("rung", "?"))
 		var vic2 = instance_from_id(victim_iid) if victim_iid != -1 else null
 		var vic_dist: float = -1.0
 		var vic_compelled: String = "?"
@@ -1361,11 +1376,12 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 			vic_dist = actor.position.distance_to(vic2.position)
 			vic_compelled = "held" if not vic2.compelled_stop.is_empty() else "LAPSED"
 			vic_hits = int(vic2.get("hold_refresh_hits"))
-		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames, refreshes %d hold-hits / %d sent)" % [
+		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames, self=%s, refreshes %d hold-hits / %d sent)" % [
 			"CONTACT DROPPED" if c.is_empty() else "contact ok, complied_stop false",
 			vic_compelled, vic_dist, held_for,
 			float(step.get("scratch", {}).get("min_dist", -1.0)),
 			int(step.get("scratch", {}).get("max_tick_gap", -1)),
+			self_state,
 			vic_hits,
 			int(step.get("scratch", {}).get("refresh_tries", 0))]
 		_blacklist_victim(job, victim_iid)
