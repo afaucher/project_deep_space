@@ -54,7 +54,8 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D24 | A sweep and a routine patrol are the **same act** — one weighted draw over hotspots + stations | settled, built |
 | D25 | Cargo evens the network but rides on mail; prices are **globally readable**, so the loop does not bite | **superseded by D36** |
 | D26 | Mail urgency as a routing consideration | **superseded by D36** (same milestone) |
-| D27 | **LANE_RUN off by default** — kept for the cargo-awareness signal. *"No encounter benefit" was WRONG, see D38* | settled, built (rationale corrected) |
+| D27 | LANE_RUN off by default | **REVERSED by D39** — both the reasoning (D38) and the objective were wrong |
+| D39 | **LANE_RUN back ON by default.** The posture exists to raise ENCOUNTER VOLUME for simulation fidelity, not to maximise takes — and it demonstrably does | **NEW 2026-08-03, decided** |
 | D38 | **LANE_RUN DOES find prey better** — no-prey aborts 163→142 (4/5 seeds), found-but-failed 3→9. The bottleneck moves from ENCOUNTER to EXECUTION | **NEW 2026-08-03 — reopens the posture question** |
 | D28 | A cornered pirate needs a demand handler; `build_pirate` had none, so refusal was 100% structural | settled, built (`OutlawResponseLeaf`) |
 | D29 | An authority notarizes what it **HOLDS**, not what docked; gate 2 moves to the **source's** flag | settled, built — 0 → 22 warrants |
@@ -1085,6 +1086,76 @@ exactly as this one did.
 in `step_select_victim`'s own header, and CLAUDE.md explicitly warns that
 "takes 0" alone cannot tell the two apart. I ran the A/B without turning it on.
 An instrument you own and do not read is the same as one you do not have.
+
+### D39 — LANE_RUN back ON. I optimised the wrong objective (2026-08-03)
+
+**What the posture is FOR:** raising encounter volume so the simulation has
+enough events downstream to measure anything. It was never for maximising takes.
+
+D27 benched it on a robbery count. Two independent errors, and the second is the
+worse one:
+
+1. **Wrong stage.** "No encounter benefit" was a claim about something never
+   measured — the robbery count sums BOTH failure modes, so an encounter gain
+   landing as an execution failure reads as a wash. D38's abort counts say the
+   opposite: empty hunts 163 -> 142 (4 of 5 seeds), contested hunts 3 -> 9.
+2. **Wrong objective.** Even granting the take count, takes were not the goal.
+   Criterion (1) is *"takes and incidents surface reliably enough to trust in a
+   long run"* — that is a FIDELITY criterion, and encounter volume is precisely
+   what feeds it. Everything downstream (notarization, patrol response, cargo's
+   risk map) has been measuring n≈1 because the funnel is starved of events at
+   the top.
+
+So the default is `true` again, and the sim's `LANE_RUN` env default moves back
+to 1 to match the shipped default.
+
+**The known cost, carried honestly and still unexplained:** cargo diversions ran
+3161 -> 1457, five seeds down and none up, at the same incident count. The
+mechanism is NOT established and is deliberately not guessed at — a plausible
+story in a comment is how a wrong cause becomes canon. It is a real tradeoff to
+re-examine once execution stops losing what encounter now wins.
+
+**The generalisable mistake:** I measured the end of a funnel and reported it as
+a property of the middle, then let that stand as a decision about a mechanism
+whose stated purpose was something else entirely. When a change targets a
+specific STAGE, the acceptance measurement has to be at that stage — and the
+objective has to be re-read, not assumed.
+
+### Criterion (4) status, corrected: a MECHANISM, not a RATE (2026-08-03)
+
+I wrote "met mechanically — 0→4 stops". That phrasing carried more than the
+evidence. Five ways it is not met:
+
+**1. "Consistently" is not met.** Interdictions per seed: 2, 10, 1, 0, 3 — one
+seed had none. At authored pressure over four game-hours, stops were 0, 1, 1, 0.
+That is a coin flip, not a rate.
+
+**2. Half the "stops" were probably not pirates — the worst of these.**
+Interdiction fires at CAUTION tier too, which is usually an innocent hull that
+did not answer a challenge. Only force-authorized stops hulk, and the arithmetic
+was `4 stops -> 2 guild losses -> ~2 hulks`. So at most HALF those stops were
+pirates; the rest were civilians inspected and released. The criterion says
+"stopping some PIRATES" and the counter conflates the two. **EngagementProbe
+should record the tier alongside the outcome** — without it, "stop rate" cannot
+distinguish enforcement from harassment.
+
+**3. The chain has never fired end-to-end in ONE run.** Notarization, stops and
+hulks were each measured, in DIFFERENT runs at DIFFERENT pressure. The specific
+sequence — robbery → courier → notarized warrant → *that warrant* driving an
+interdiction → stop → hulk — has never been observed in a single run. Same shape
+as the preconditions lesson, one level up: every link tested, the chain assumed.
+
+**4. Missing features.** No arrest, cargo recovery or crew (D33). The warrant
+never discharges (`expires_after: -1.0`), so it persists against a dead hull
+forever. No stalk phase (D16). And "refine desired outcomes" — the second half
+of the criterion — has not started.
+
+**5. Suppression is asserted, not measured.** `loss_streak` -> cap cut is real
+wiring, but only 2 losses have ever been observed; no cap cut has been seen
+firing, and no evidence exists that piracy declines afterwards.
+
+**Correct claim: a patrol CAN stop and seize a pirate. Not: patrols stop pirates
+consistently.**
 
 ### Queue after the re-baseline
 

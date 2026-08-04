@@ -516,20 +516,31 @@ func _roll_posture() -> String:
 # LANE_RUN_ENABLED lets an A/B turn it off without touching the posture roll, so
 # the comparison changes exactly one thing: whether the false-flag pirate moves.
 #
-# D27 (2026-08-03) -- DEFAULT FLIPPED TO OFF, on the A/B it was built for.
-# Five seed-matched pairs, 60 game-minutes, 12-15 pirates, 14 haulers:
+# D39 (2026-08-03) -- BACK ON, and D27's reasoning is retracted with it.
 #
-#   robberies  10 -> 9    (2 seeds up, 3 down -- no encounter benefit at all)
-#   diverted 3161 -> 1457 (5 seeds down, 0 up -- the ONLY clean signal)
+# WHAT THIS POSTURE IS FOR: raising ENCOUNTER volume, so the simulation has
+# enough events downstream to measure anything at all. It was never for
+# maximising takes.
 #
-# So it does not buy takes, and it HALVES the cargo fleet's awareness at the
-# same incident count. Suppressing the information economy is the opposite of
-# what this milestone is for, so it stays available and stays off.
+# D27 turned it off on "no encounter benefit (robberies 10 -> 9)". That was a
+# claim about a stage nobody had measured -- the robbery count sums BOTH failure
+# modes, so an encounter gain that lands as an execution failure reads as a
+# wash. Counting `step_select_victim`'s own abort reasons across the same five
+# seed pairs says the opposite (D38):
 #
-# The MECHANISM for the propagation loss is NOT established, and is deliberately
-# not guessed at here -- a plausible story written into a comment is how a wrong
-# cause becomes repo canon. Same incidents, far less news, five for five.
-static var lane_run_enabled: bool = false
+#   "hunt time budget spent"      (found NOBODY)  163 -> 142   -13%, 4 of 5 seeds
+#   "N attempts, nothing taken"   (found, missed)   3 ->   9    3 up, 0 down
+#
+# It converts empty hunts into contested ones. That is precisely the job, and
+# the bottleneck simply moves from ENCOUNTER to EXECUTION.
+#
+# THE KNOWN COST, unexplained and left that way: cargo diversions ran 3161 ->
+# 1457, five seeds down and none up, at the same incident count. The mechanism
+# is NOT established and is deliberately not guessed at here -- a plausible
+# story in a comment is how a wrong cause becomes repo canon. It is a real
+# tradeoff to re-examine once the execution stage stops losing what encounter
+# now wins.
+static var lane_run_enabled: bool = true
 
 func _select_victim_step(posture: String, lane_pos: Vector2, seg_a: Vector2, seg_b: Vector2) -> Dictionary:
 	var step: Dictionary = {

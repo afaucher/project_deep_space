@@ -142,7 +142,7 @@ func setup(main) -> void:
 	# LANE_RUN=0 disables the lane-transit posture without touching the posture
 	# roll, so an A/B changes exactly one thing: whether a false-flag pirate
 	# MOVES along its lane or parks on it.
-	PirateGuild.lane_run_enabled = _envf("LANE_RUN", 0.0) > 0.0  # D27: off by default, matches the shipped default
+	PirateGuild.lane_run_enabled = _envf("LANE_RUN", 1.0) > 0.0  # D39: ON, matches the shipped default -- the posture exists to raise encounter volume
 	var cfg: Dictionary = _guild_config()
 	print("    LANE_RUN=%s" % ("on" if PirateGuild.lane_run_enabled else "OFF"))
 	print("    pirates: base_cap=%d max_cap=%d arrival=%s hunt=%.0fs | victim_sos=%.2f" % [
