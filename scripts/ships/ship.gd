@@ -1672,6 +1672,16 @@ func _update_port_zone_membership() -> void:
 # this same tick by _update_port_zone_membership()). Either clears the grant
 # and emits a `grant_expired` transient event.
 #
+# THAT SAME-TICK FRESHNESS IS LOAD-BEARING, which is not obvious: this check
+# compares against the CACHED membership field while port_control.gd issues the
+# grant off a GEOMETRIC test. Let the cache run even slightly behind and the
+# entry edge breaks -- the grant names a zone the cache has not reached, the two
+# disagree, and the grant is revoked the frame after issuance. Decimating
+# _update_port_zone_membership() was tried on 2026-08-04 and reverted for
+# exactly this (test_campaign_dock_health, deterministic); see the REJECTED note
+# on ENG_LOG_CROSSING_HZ. Do not make this field cheaper without first making
+# this check independent of its freshness.
+#
 # Fulfilled freeze: once the ship is actually CAPTURING or DOCKED at its own
 # docking_bay, the grant is "fulfilled" -- freeze the countdown and skip the
 # zone check entirely, so a ship that's mid-capture (or already docked and
@@ -2852,6 +2862,72 @@ var next_contact_id: int = 1
 const DATALINK_RELAY_HZ := 15.0
 var _datalink_phase: int = 0
 
+# ---------------------------------------------------------------------------
+# Observation-block cadence (2026-08-04). Same reasoning as DATALINK_RELAY_HZ
+# one block up, applied to the one per-hull block that still ran at the full
+# physics rate without being physics.
+#
+# THE TEST FOR "CAN THIS DECIMATE" is not how expensive it is, it is whether it
+# INTEGRATES. The relay could decimate because it is a pure recompute.
+# _check_eng_log_crossings() qualifies for a stronger reason: it reads component
+# health / ship heat and emits LOG TEXT on a threshold crossing, and that is ALL
+# it does. Its two pieces of state (_eng_crossing_state, _eng_was_overheated)
+# are latches private to it, it touches no physics quantity, and it feeds no AI.
+# The only consumer is main.gd's UI packet (ship.eng_log) and the eng_event
+# signal -- the engineering panel. It was costing 541 us/frame: 8.8% of the
+# whole ship tick, and more than the sensor sweep, the PD and the comms inbox
+# combined, to keep a text panel frame-accurate.
+#
+# KNOWN CONSEQUENCE, deliberate: a crossing that REVERSES inside one interval is
+# never observed. A component that dips below the damaged threshold and is
+# repaired back above it within 167ms logs nothing. Acceptable -- damage and
+# repair move far slower than that -- but it is a real behaviour change, not a
+# pure refactor, so it is stated rather than hidden.
+#
+# 6Hz skips 9 frames in 10. Chosen because the ceiling here is human perception
+# of a log line, not a control loop; there is no equivalent of the relay's
+# coordination-convergence mechanism to trade against.
+#
+# ---------------------------------------------------------------------------
+# REJECTED, and recorded so it is not retried: the same gate on
+# _update_port_zone_membership() (another 108 us/frame). It FAILS
+# test_campaign_dock_health -- "player failed to reach DOCKED on the first
+# grant" -- deterministically: confirmed solo on both sides, fails with the
+# gate, passes without it.
+#
+# The mechanism is worth knowing because the obvious analysis gets the SIGN
+# backwards. That scan looks decimatable (pure recompute, hysteresis-guarded by
+# PORT_ZONE_EXIT_MARGIN, output is "just" current_port_zone), and the staleness
+# it introduces looks one-directionally safe -- a departing holder keeps a grant
+# slightly too long. It is the ENTRY edge that breaks: port_control.gd issues a
+# grant off a GEOMETRIC membership test, while _update_docking_grant() expires
+# it by comparing the grant's zone_authority against the CACHED
+# current_port_zone. Decimating the cache leaves a window where the grant names
+# a zone the cached field has not caught up to yet, the two disagree, and the
+# grant is revoked on the frame after it was issued. A late ENTRY update
+# produces an EARLY revocation.
+#
+# Fixing it properly means establishing the invariant at issuance (refresh
+# membership when a grant is granted) or expiring off the same geometric test
+# that issued it -- either is a docking-logic change, which has no business
+# riding along inside a perf change. 108 us is not worth it; if someone wants
+# that back, fix the coupling first and on its own.
+const ENG_LOG_CROSSING_HZ := 6.0
+
+# Shared cadence gate for staggered observation blocks. Only one caller today
+# (the eng-log scan); kept general because `salt` is what a SECOND caller would
+# need -- it offsets a hull's blocks onto DIFFERENT frames from each other, so
+# they don't all fire on the same tick and concentrate that hull's whole
+# skipped-frame saving into one spike instead of spreading it.
+#
+# Phase is _datalink_phase (instance-id derived, stable for the hull's lifetime,
+# uncorrelated across hulls, no RNG) for exactly the reason documented there:
+# firing every hull's block on the same frame trades a flat cost for a periodic
+# spike -- same total work, worse pacing, and it reads terribly in p95/max.
+func _cadence_due(hz: float, salt: int) -> bool:
+	var interval: int = maxi(1, int(round(float(Engine.physics_ticks_per_second) / hz)))
+	return (Engine.get_physics_frames() + _datalink_phase + salt) % interval == 0
+
 # M48 -- highest Standing.aggression_events seq this ship has already
 # consumed (witness consumption, fusion tick). Starts at 0; the bus's seq
 # counter starts at 1, so every event posted after this ship exists is seen.
@@ -3135,8 +3211,12 @@ func _physics_process(delta: float) -> void:
 		# M45 bisect: perf_eng_log OFF skips this scan entirely for isolation
 		# testing; default ON preserves current behavior exactly.
 		if DebugSettings.get_choice("perf_eng_log") == DebugSettings.PerfSubsystem.ON:
+			# Cadence gate INSIDE the probe (same placement as datalink_relay's)
+			# so the tag keeps reporting cost-per-frame averaged over skipped
+			# frames too -- that is what makes before/after numbers comparable.
 			PerfProbe.begin("eng_log_crossings")
-			_check_eng_log_crossings()
+			if _cadence_due(ENG_LOG_CROSSING_HZ, 3):
+				_check_eng_log_crossings()
 			PerfProbe.end("eng_log_crossings")
 
 	# Station despin: a STRUCTURE's DockingBay berth poses rotate with the
