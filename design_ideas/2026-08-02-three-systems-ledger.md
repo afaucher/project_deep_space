@@ -1303,6 +1303,123 @@ measurement DESIGN is confounded.
 Separating them needs lanes WITH incidents against lanes WITHOUT, both during a
 pirate's presence. **No avoidance claim is being made in either direction.**
 
+### D46 — the third exit path: a WITNESS ends the whole hunt (2026-08-04)
+
+`returned_empty` read 7 against ONE `SELECT_VICTIM` abort. Traced one member's
+full lifecycle rather than reasoning about it:
+
+```
+SELECT_VICTIM done (victim='Mule')         -> INTERCEPT done -> DEMAND_STOP ABORT (patience) -> 'hunt'
+SELECT_VICTIM done (victim='Cluster_703')  -> INTERCEPT ABORT (victim_lost)                  -> 'hunt'
+SELECT_VICTIM done (victim='Cluster_9500') -> INTERCEPT ABORT (victim_lost)                  -> 'hunt'
+SELECT_VICTIM done (victim='Hauler 13')    -> INTERCEPT ABORT (third_party_in_range;
+                                               witness TRK-138 at 5094)                      -> 'exfil'
+```
+
+**`third_party_in_range` on INTERCEPT aborts to `'exfil'`, not `'hunt'`.** A
+witness does not merely spoil that victim — it ENDS THE HUNT and sends the
+pirate home. That is the whole missing accounting.
+
+**And it is self-defeating with D44.** Economic targeting puts pirates on the
+BUSIEST lane; the busiest lane has the MOST witnesses; so better targeting
+produces MORE abandoned hunts. The `alone` requirement bites at INTERCEPT rather
+than at SELECT_VICTIM, which is why the earlier hypothesis pointed at the wrong
+step.
+
+**ENCOUNTER IS DEFINITIVELY SOLVED**: four victims selected in a single hunt.
+Every remaining failure is downstream of finding someone.
+
+| failure in that one trace | n |
+|---|---|
+| patience expired | 1 |
+| `victim_lost` mid-intercept | 2 |
+| witness -> abandon entire hunt | 1 |
+
+**D46 (OPEN, and now the biggest single lever on takes): should a witness abort
+the HUNT or just that VICTIM?** Aborting to `'hunt'` — pick a different target —
+is the obvious alternative to `'exfil'`. As it stands a pirate on a busy lane
+gives up entirely the first time anyone else is nearby, which is precisely the
+lane it should want to work. Gameplay call, deliberately not made here.
+
+### D47 — `victim_lost` twice in one hunt
+
+The pirate SELECTS a victim and then loses the track while closing, twice in
+four attempts. Against a 700u/s hauler with a 45,000u passive array that wants
+explaining before it is tuned — candidates are the passive array's refresh
+interval, `CONTACT_TIMEOUT`, or the dead-reckon prune, none of them verified.
+Not a tactical problem until shown to be one.
+
+### D48 — `RELIGHT done (as '' / DRIFT_CIVILIAN)`
+
+The exfil tail relights the hull under an EMPTY NAME. `{"verb": "RELIGHT",
+"from_kit": true}` draws from a kit that nothing maintains, so laundering
+produces a nameless ship. This is M65's decorative-identity problem visible in a
+live run rather than in code review — and it means the pirate exits under no
+identity at all, which no port would accept and no observer could correlate.
+
+### D46 measured — graded witness response, and a lesson I had to relearn
+
+Built behind `intercept_witness_retries` (sim knob `WITNESS_RETRY`): a witness
+during INTERCEPT sends the pirate back to `hunt` instead of `exfil`. DEMAND_STOP
+and TAKE_ALONGSIDE keep fleeing, because that is what the rule is FOR — you have
+hailed, or you are mid-robbery.
+
+**First attempt at judging it was worthless.** I compared TAKES: 1 vs 1 across
+three seeds. At 0-1 robberies per run three seeds cannot distinguish anything —
+which is D23, *in this ledger, written by me*. I built the change for a
+stage-level reason and then judged it on the funnel's end, the exact error that
+produced D27's wrong verdict and that D38 exists to prevent. Third time this
+session; the rule needs to be mechanical, not remembered: **measure the stage you
+changed.**
+
+Stage-level, n=2:
+
+| seed | | victims selected | intercepts done | demands | alongside |
+|---|---|---|---|---|---|
+| 22222 | off -> on | 12 -> **19** | 7 -> **12** | 7 -> **12** | 4 -> 5 |
+| 33333 | off -> on | 18 -> **20** | 8 -> 8 | 8 -> 8 | 4 -> 3 |
+
+Hunt cycles rose in both (+58%, +11%) — the mechanism does what it was built to
+do. One seed carried it downstream, one did not.
+
+Note `witness_aborts` RISING under retry (6 -> 10 in 33333) is not a failure:
+retrying means more chances to meet a witness. That metric is not clean for this
+comparison and I should have seen that before picking it.
+
+**RESOLVED on 8 seed pairs -- DEFAULT NOW ON.**
+
+| metric | OFF -> ON | seeds up / flat / down |
+|---|---|---|
+| hunt cycles | 121 -> **154** (+27%) | **6 / 2 / 0** |
+| demands issued | 88 -> **106** (+20%) | 4 / 3 / 1 |
+| takes | 7 -> 8 | 3 / 4 / 1 |
+
+Six-up-none-down on cycles settles it. **Takes staying flat is the FINDING**, not
+a disappointment: it locates the remaining bottleneck downstream of the demand.
+Defaulted on for D39's reason -- criterion (1) wants encounter volume the sim can
+be trusted on, and this is +27% at no measured cost.
+
+Superseded reasoning, kept for the record: Directionally positive, n=2, one seed
+flat — inconclusive, not null. Worth stating why this differs from D39, where
+leaving LANE_RUN off was WRONG: there the evidence was bad because I measured the
+wrong stage. Here the stage is right and the signal is genuinely weak. Shipping
+on a 2-seed split would be the same error pointing the other way.
+
+### Where criterion (1) actually stands now
+
+**Encounter is SOLVED** (D44, with omniscient prices behind a flag). One traced
+hunt selected FOUR victims. The remaining chain is three separate downstream
+failures, each needing its own stage-level measurement:
+
+| failure | evidence | status |
+|---|---|---|
+| witness ends the hunt | `third_party_in_range -> exfil` on all three steps | D46, flag built, 8-pair run in progress |
+| `victim_lost` mid-intercept | 2 of 4 attempts in one trace | D47 — cause unknown, NOT tuning it until measured |
+| demand refused / patience | 1 of 4 | shares the D28/D32 machinery |
+
+A takes count cannot resolve any of these, which is why the funnel's end is the
+wrong instrument for all three.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

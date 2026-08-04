@@ -501,6 +501,54 @@ const POSTURE_FALSE_FLAG_CRUISE := "false_flag_cruise"
 # hold). Not a hard 50/50 -- tune this constant to rebalance the split later.
 const FALSE_FLAG_CRUISE_CHANCE := 0.4
 
+# D46 -- WHAT A WITNESS DURING THE APPROACH SHOULD COST.
+#
+# All three engagement steps send `third_party_in_range` to "exfil": a witness
+# ends the HUNT, not just the attempt, and the pirate flies home. Traced
+# 2026-08-04, that is where most hunts actually go -- 7 members returned empty
+# against ONE SELECT_VICTIM abort, and the missing exits were witness aborts.
+#
+# It is SELF-DEFEATING against economic targeting (D44). Predicting the lane puts
+# pirates on the BUSIEST road; the busiest road has the MOST witnesses; so better
+# targeting produces more abandoned hunts. The measured trace found four victims
+# in one hunt and threw the hunt away on the fourth because someone else was
+# 5,094u off.
+#
+# The GRADED reading, which is what this flag enables: the three steps are not
+# the same act.
+#
+#   INTERCEPT     -- you are closing on a ship and have shown nothing. Backing
+#                    off to pick a different target costs you nothing; going
+#                    home costs you the whole trip. -> "hunt"
+#   DEMAND_STOP   -- you have hailed, possibly under colours. -> "exfil"
+#   TAKE_ALONGSIDE-- you are mid-robbery. -> "exfil"
+#
+# Only INTERCEPT changes; the two steps where the pirate has actually committed
+# keep fleeing, because that is the part the witness rule exists for.
+#
+# ON by default as of 2026-08-04, on 8 seed pairs measured at the STAGE it
+# changes rather than at the funnel's end:
+#
+#   hunt cycles     121 -> 154  (+27%)   6 seeds up, 2 flat, 0 down
+#   demands issued   88 -> 106  (+20%)   4 up, 3 flat, 1 down
+#   takes             7 ->   8            flat
+#
+# Six-up-none-down on cycles is decisive for "the pirate stops abandoning the
+# whole trip on the first witness". Takes staying flat is the finding, not a
+# disappointment: it locates the remaining bottleneck DOWNSTREAM of the demand,
+# where D28/D32's compliance machinery and D47's victim_lost live.
+#
+# Defaulted ON for the same reason D39 turned LANE_RUN back on: the goal for
+# criterion (1) is ENCOUNTER VOLUME the simulation can be trusted on, not takes.
+# More hunt cycles at no measured cost is exactly that. The first attempt to
+# judge this change compared TAKES across three seeds (1 vs 1) and was worthless
+# -- 0-1 events per run cannot distinguish anything, which is D23 in this
+# project's own ledger.
+static var intercept_witness_retries: bool = true
+
+func _intercept_witness_target() -> String:
+	return "hunt" if intercept_witness_retries else "exfil"
+
 # Seeded per-arrival roll (CLAUDE.md determinism rule -- plain randf() on the
 # global seeded RNG, no new RNG instance).
 #
@@ -620,7 +668,8 @@ func _build_hunt_job(cluster, wormhole_pos: Vector2, has_clean_identity: bool = 
 		# rather than thrashing the same lane until a patrol kills it.
 		_select_victim_step(posture, lane_pos, seg_a, seg_b),
 		{"verb": "INTERCEPT", "on_abort": "hunt",
-			"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"}, {"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": "exfil"}]},
+			"abort_when": [{"cond": "victim_lost", "on_abort": "hunt"},
+				{"cond": "third_party_in_range", "r": _R_THIRD_PARTY, "on_abort": _intercept_witness_target()}]},
 		{"verb": "DEMAND_STOP", "show_colors": true, "patience": 25.0, "on_abort": "hunt",
 			"colors_chance": config.get("colors_chance", 1.0),
 			"sos_reprisal_chance": config.get("sos_reprisal_chance", 0.0),

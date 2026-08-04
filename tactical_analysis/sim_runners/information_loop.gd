@@ -150,6 +150,8 @@ func setup(main) -> void:
 	# deliberately: fogging and targeting in one change would leave a null result
 	# ambiguous between "targeting does not work" and "the fog starved it".
 	PirateGuild.economic_targeting = _envf("ECON_TARGET", 0.0) > 0.0
+	# D46 -- a witness during INTERCEPT retries instead of ending the hunt.
+	PirateGuild.intercept_witness_retries = _envf("WITNESS_RETRY", 1.0) > 0.0  # D46: ON, matches the shipped default
 	print("    ECON_TARGET=%s" % ("on" if PirateGuild.economic_targeting else "off"))
 	var cfg: Dictionary = _guild_config()
 	print("    LANE_RUN=%s" % ("on" if PirateGuild.lane_run_enabled else "OFF"))
