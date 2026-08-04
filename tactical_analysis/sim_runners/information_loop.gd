@@ -538,6 +538,10 @@ func _report() -> void:
 	print("  refused (patience expired)   : %d" % EngagementProbe.robbery_refused)
 	print("  outpaced the pirate          : %d" % EngagementProbe.robbery_outpaced)
 	print("  robbery stop rate            : %s" % ("n/a -- none resolved" if rr < 0.0 else "%.0f%%" % (rr * 100.0)))
+	# D51 -- takes the pirate walked away from. Booked as returned_empty before,
+	# i.e. indistinguishable from "found nobody", which is why criterion (1) read
+	# pirate caution as pirate failure for so long.
+	print("  ABANDONED (pirate disengaged): %d" % EngagementProbe.robbery_abandoned_disengage)
 	var og: Dictionary = EngagementProbe.opening_summary()
 	if not og.is_empty():
 		print("  demand OPENED at sep/hail    : median %.2f, max %.2f (n=%d)" % [

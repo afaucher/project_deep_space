@@ -42,6 +42,11 @@ const HEAT_RECOVER_FRACTION := 0.6
 
 func tick(actor: Node, blackboard) -> int:
 	if actor.get_health_fraction() < DISENGAGE_HEALTH_FRACTION:
+		# D51 -- WHICH trigger fired. The two are different findings: damage means
+		# the pirate is being shot at mid-robbery, heat means it cooked itself
+		# sprinting to the intercept and broke off to cool. Counted rather than
+		# inferred from plausibility, which has been wrong every time today.
+		actor.set("disengage_damage_ticks", int(actor.get("disengage_damage_ticks")) + 1)
 		return SUCCESS
 
 	var heat_ratio: float = (actor.current_heat / actor.max_heat) if actor.max_heat > 0.0 else 0.0
@@ -52,11 +57,13 @@ func tick(actor: Node, blackboard) -> int:
 
 	if blackboard.get_value("heat_disengaging", false):
 		if heat_ratio > HEAT_RECOVER_FRACTION:
+			actor.set("disengage_heat_ticks", int(actor.get("disengage_heat_ticks")) + 1)
 			return SUCCESS
 		blackboard.set_value("heat_disengaging", false)
 		return FAILURE
 
 	if heat_ratio >= DISENGAGE_HEAT_FRACTION:
 		blackboard.set_value("heat_disengaging", true)
+		actor.set("disengage_heat_ticks", int(actor.get("disengage_heat_ticks")) + 1)
 		return SUCCESS
 	return FAILURE

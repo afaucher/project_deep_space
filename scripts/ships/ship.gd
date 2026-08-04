@@ -204,6 +204,10 @@ var outlaw_flee_ticks: int = 0
 var outlaw_held_ticks: int = 0
 # D50 -- ticks FleeLeaf claimed (the Disengage branch above JobRunner).
 var flee_leaf_ticks: int = 0
+# D51 -- which ShouldDisengage trigger fired. Damage = being shot at mid-take;
+# heat = cooked itself on the approach. Different findings, different fixes.
+var disengage_damage_ticks: int = 0
+var disengage_heat_ticks: int = 0
 
 # D50 -- the last physics frame JobRunnerLeaf.tick was ENTERED on this hull.
 # Diagnostic only; never read by behaviour. Distinguishes "the tree never

@@ -308,6 +308,17 @@ counts (fully deterministic) but stops sleeping → ~17x faster.
   delivered" rule went into this file, by the person who wrote it. **Knowing the
   rule does not prevent repeating it** -- the check has to be mechanical: feed
   the instrument a known-bad case and confirm it says so.
+- **`git log --grep` BEFORE proposing a change to load-bearing behaviour.**
+  Overheat-triggered disengage was diagnosed as a "combat rule misapplied to a
+  robbery" and a fix drafted to suppress it -- when `452e94f` had added it
+  deliberately to stop pirates cooking their own reactors to death through a
+  path that bypasses `take_damage()` entirely (invisible in every log), and
+  `e7b61a5` had already fixed the pacing half. Both are pinned by
+  `test_overheat_disengage.gd` and `test_multi_pirate_thermal.gd`, and the
+  commit message records that the obvious simpler tunings were tried and were
+  WORSE. One `git log --grep=thermal` would have caught it. **Behaviour that
+  looks wrong in one context is often load-bearing in another, and the commit
+  message is where that reasoning lives.**
 - **Prefer a DIRECT COUNT at the line that does the thing.** Nine candidates for
   one bug were eliminated by argument and reading, several wrongly. The answer
   came from incrementing a counter inside each leaf that could steal a tick, and

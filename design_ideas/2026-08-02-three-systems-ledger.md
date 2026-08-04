@@ -1654,6 +1654,93 @@ SHOULD break off. But three things need deciding:
    "found nobody". Criterion (1) has been measuring pirate FAILURE where the real
    cause is pirate CAUTION.
 
+### D52 — pirates cook themselves on the approach and flee to cool (2026-08-04)
+
+Counted the disengage trigger rather than inferring it:
+
+```
+DISENGAGING (373 ticks; heat 373 / damage 0)
+DISENGAGING (374 ticks; heat 747 / damage 0)
+DISENGAGING (386 ticks; heat 386 / damage 0)
+```
+
+**Every disengage is HEAT. Zero are damage.** And `ShouldDisengage` never looks at
+contacts at all -- it is hull health and heat only -- so the earlier framing of
+"the pirate flees from witnesses" was wrong. Witnesses abort STEPS
+(`third_party_in_range`); heat aborts the whole BEHAVIOUR.
+
+**The pirate has TWO heat responses and they fight each other:**
+
+| response | threshold | effect |
+|---|---|---|
+| thermal throttle | eases from `THERMAL_EASE_START` | cruise cap 1.0 -> `THERMAL_CRUISE_FLOOR` 0.6, graded |
+| `ShouldDisengage` | heat >= `DISENGAGE_HEAT_FRACTION` 0.9 | abandon everything and run, held ~6.4s by `HEAT_RECOVER_FRACTION` hysteresis |
+
+The throttle is the proportional response and it already exists. The disengage is
+a COMBAT rule -- break off when you are cooking -- living in the branch shared
+with warships.
+
+**Applied to a robbery it is backwards.** Holding station 200u from a stopped
+victim is LOW throttle, which is how a hull cools. Fleeing is a sprint, which is
+how it heats. So the response to overheating is the one action guaranteed not to
+fix it, and it costs the take. The sequence is structural: sprint the intercept
+-> heat climbs -> demand lands -> heat crosses 0.9 -> flee.
+
+**RETRACTED, same day — this is NOT a borrowed predicate, it is a deliberate
+fix with tests.** `452e94f` ("overheat triggers disengage, attribute self-cooked
+reactor deaths") and `e7b61a5` ("thermal governor prevents multi-pirate
+self-cooking") added it on purpose, pinned by `test_overheat_disengage.gd` (6
+assertions) and `test_multi_pirate_thermal.gd`.
+
+The problem it solves is real and worse than the one it causes: two pirates
+converging on one victim never exclude EACH OTHER from `Steering.steer`'s
+avoidance, so both hold near-max throttle indefinitely, heat pegs, and
+`ship.gd`'s periodic check drains the reactor 10 HP/s through a path that
+BYPASSES `take_damage()` -- a pirate dying mid-encounter with no visible cause
+in any log.
+
+And the hysteresis is not incidental either. From the commit: *"without
+hysteresis, the plain threshold made the exact multi-pirate repro WORSE -- a
+pirate would resume pacing the instant heat dipped under 0.9, restart from a
+drifted-off position with a fresh, larger position error, and spike catchup
+speed right back up -- repeated disengage/resume flicker generated MORE heat
+spikes than no disengage at all."*
+
+**So the ~6.4s hold-losing window is the deliberate cost of not dying.** My
+proposed fix (suppress the heat branch during a hold) would have reintroduced
+both the invisible deaths and the flicker. Checking `git log` before proposing a
+change to load-bearing behaviour would have caught this in one command.
+
+### The compliance funnel, now fully accounted
+
+| | n |
+|---|---|
+| demands issued | 27 |
+| victim COMPLIED | 14 |
+| lost to heat-disengage | 4 |
+| lost to witness aborts on DEMAND_STOP / TAKE_ALONGSIDE | ~7 |
+| **takes** | **2** |
+
+Note D46 only moved INTERCEPT's witness abort to `hunt`; DEMAND_STOP and
+TAKE_ALONGSIDE still route to `exfil`, and they are the larger share here.
+
+**D53 (REFRAMED, and the useful version):** the disengage was tuned against
+pirate SURVIVAL and never measured against pirate SUCCESS. 0.9/0.6 were chosen
+to stop deaths; nobody knew what they cost in takes. **Now we do: 4 of 14
+compliances.** That number is the contribution here, not a fix.
+
+The question is therefore NOT "remove the disengage" -- it is **"why is the
+pirate that hot on arrival?"** The heat comes from the approach, and
+`_thermal_derate` already derates `_pace_at_offset`'s catchup surge from 75%
+heat. Candidates worth measuring before touching anything: does the INTERCEPT
+sprint (a separate code path from the pacing surge) run hot enough to arrive
+near 0.9, and would arriving cooler remove the problem without weakening the
+safety net at all?
+
+Do not touch `DISENGAGE_HEAT_FRACTION` or the hysteresis without re-running
+`test_overheat_disengage` and `test_multi_pirate_thermal` -- they exist because
+the obvious tunings were tried and were worse.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

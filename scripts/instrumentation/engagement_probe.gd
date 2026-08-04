@@ -92,6 +92,17 @@ static var robbery_complied: int = 0
 static var robbery_refused: int = 0
 static var robbery_outpaced: int = 0
 
+# D51 -- robberies the PIRATE walked away from. The funnel booked these as
+# `returned_empty`, which is indistinguishable from "found nobody" -- so
+# criterion (1) has been reading pirate CAUTION as pirate FAILURE. Measured
+# cause: Flee outranks JobRunner in build_pirate, so a threatened pirate stops
+# refreshing its own demand and the victim's compliance lapses.
+static var robbery_abandoned_disengage: int = 0
+
+static func note_robbery_abandoned_disengage() -> void:
+	if enabled:
+		robbery_abandoned_disengage += 1
+
 static func reset() -> void:
 	started = 0
 	complied = 0
@@ -102,6 +113,7 @@ static func reset() -> void:
 	robbery_complied = 0
 	robbery_refused = 0
 	robbery_outpaced = 0
+	robbery_abandoned_disengage = 0
 	started_by_tier.clear()
 	complied_by_tier.clear()
 	refused_by_tier.clear()

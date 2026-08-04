@@ -1352,6 +1352,10 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	# large means the tree is not reaching the runner at all.
 	scratch["max_runner_lag"] = maxi(int(scratch.get("max_runner_lag", 0)),
 		int(actor.get("runner_tick_gap")))
+	# Baseline the disengage counter on entry so the abort can report ticks lost
+	# DURING THIS TAKE rather than over the hull's whole life.
+	if not scratch.has("flee_base"):
+		scratch["flee_base"] = int(actor.get("flee_leaf_ticks"))
 
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty() or not c.get("complied_stop", false):
@@ -1368,9 +1372,10 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		var self_state: String = "clear"
 		var flee_ticks: int = int(actor.get("outlaw_flee_ticks"))
 		var held_ticks: int = int(actor.get("outlaw_held_ticks"))
-		var flee_leaf: int = int(actor.get("flee_leaf_ticks"))
+		var flee_leaf: int = int(actor.get("flee_leaf_ticks")) - int(step.get("scratch", {}).get("flee_base", 0))
 		if flee_leaf > 0:
-			self_state = "DISENGAGING (%d FleeLeaf ticks stolen)" % flee_leaf
+			self_state = "DISENGAGING (%d ticks; heat %d / damage %d)" % [flee_leaf,
+				int(actor.get("disengage_heat_ticks")), int(actor.get("disengage_damage_ticks"))]
 		elif held_ticks > 0:
 			self_state = "WAS HELD (%d ticks stolen from the job)" % held_ticks
 		elif flee_ticks > 0:
@@ -1387,7 +1392,15 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 			vic_dist = actor.position.distance_to(vic2.position)
 			vic_compelled = "held" if not vic2.compelled_stop.is_empty() else "LAPSED"
 			vic_hits = int(vic2.get("hold_refresh_hits"))
-		job["_abort_reason"] = "victim bolted (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames (runner lag %d), self=%s, refreshes %d hold-hits / %d sent)" % [
+		# D51 -- NAME THE REAL CAUSE. This said "victim bolted" unconditionally,
+		# which blames the victim for a failure the PIRATE chose: measured, the
+		# dominant path is the pirate's own Flee leaf claiming ~6.4s of ticks
+		# (386 of them against a 387-frame gap), during which the hunt job cannot
+		# refresh its demand and the victim's compliance times out. That one
+		# string drove six wrong hypotheses through an entire investigation --
+		# a log that misattributes is worse than a log that says nothing.
+		var headline: String = "pirate DISENGAGED mid-take" if flee_leaf > 0 else "victim bolted"
+		job["_abort_reason"] = headline + " (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames (runner lag %d), self=%s, refreshes %d hold-hits / %d sent)" % [
 			"CONTACT DROPPED" if c.is_empty() else "contact ok, complied_stop false",
 			vic_compelled, vic_dist, held_for,
 			float(step.get("scratch", {}).get("min_dist", -1.0)),
@@ -1396,6 +1409,8 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 			self_state,
 			vic_hits,
 			int(step.get("scratch", {}).get("refresh_tries", 0))]
+		if flee_leaf > 0:
+			EngagementProbe.note_robbery_abandoned_disengage()
 		_blacklist_victim(job, victim_iid)
 		return ABORT
 
