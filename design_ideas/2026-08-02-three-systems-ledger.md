@@ -1741,6 +1741,49 @@ Do not touch `DISENGAGE_HEAT_FRACTION` or the hysteresis without re-running
 `test_overheat_disengage` and `test_multi_pirate_thermal` -- they exist because
 the obvious tunings were tried and were worse.
 
+### D53 answered — the HOLD cooks the pirate, not the approach (2026-08-04)
+
+I predicted the INTERCEPT sprint. Wrong. Heat at hold-entry vs peak:
+
+| entry -> peak | outcome |
+|---|---|
+| 0.48 -> **0.90** | abort |
+| 0.60 -> **0.90** | abort |
+| 0.76 -> **0.90** | abort |
+| **0.15** -> **0.90** | abort |
+| 0.72 -> 0.81 | **take** |
+| 0.01 -> 0.65 | **take** |
+
+**A pirate entering at 0.15 still reaches 0.90.** The approach is not what
+overheats it -- station-keeping is. Every failure peaks at EXACTLY the 0.90
+disengage threshold (cut off the instant it trips); both successes finished
+below it.
+
+**So a take is a RACE**: can the hull hold station for `hold_time` (12s) before
+its own corrections drive heat to 0.90? Entry heat sets the margin, but the
+climb rate varies enormously (0.15->0.90 in one hold, 0.01->0.65 in another),
+which points at how much correcting the hull does -- victim drift, standoff
+geometry, re-approaches -- rather than at a fixed cost.
+
+**Why station-keeping is expensive at all**: `_pace_at_offset` commands
+`target_vel + dir * catchup` every tick, and `_engine_heat_contribution` scales
+with `abs(throttle)`. Holding a 200u offset against any drift is continuous
+throttle. The isolated rig completes a 12s hold comfortably, so this is about
+holds that run LONG -- repeated re-approaches inside one take.
+
+**Three candidate directions, none measured, and NOT to be tried by weakening
+the disengage** (D52: that net is tested and load-bearing):
+1. `hold_time` 12s -- is a shorter robbery acceptable?
+2. cheaper station-keeping during a hold specifically -- the pirate does not
+   need catchup authority once it is inside the ring.
+3. leave it: a hot pirate breaking off a long robbery is defensible fiction, and
+   the cost is now quantified rather than hidden.
+
+**Method note**: this is the second time today a stated hypothesis was killed by
+the measurement built to test it (the first: `alongside_trace` exonerating the
+take step). Both times the prediction was plausible and specific, which is
+exactly why it needed the measurement.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

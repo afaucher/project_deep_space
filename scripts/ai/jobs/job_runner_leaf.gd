@@ -101,7 +101,11 @@ func tick(actor: Node, _blackboard) -> int:
 
 	match result:
 		JobSteps.DONE:
-			_job_log(actor, "%s done%s" % [step.get("verb", "?"), _done_detail(actor, step, job)])
+			var extra: String = ""
+			if job.has("_take_heat"):
+				extra = " [heat %s]" % job["_take_heat"]
+				job.erase("_take_heat")
+			_job_log(actor, "%s done%s%s" % [step.get("verb", "?"), _done_detail(actor, step, job), extra])
 			job["current"] = current + 1
 		JobSteps.ABORT:
 			_job_log(actor, "%s ABORT%s -> '%s'" % [step.get("verb", "?"), _abort_reason(job), step.get("on_abort", "")])

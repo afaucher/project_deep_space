@@ -1356,6 +1356,15 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	# DURING THIS TAKE rather than over the hull's whole life.
 	if not scratch.has("flee_base"):
 		scratch["flee_base"] = int(actor.get("flee_leaf_ticks"))
+		# D53 -- HOW HOT DOES A PIRATE ARRIVE? The heat-disengage safety net
+		# (0.9 trigger, 0.6 recovery) is deliberate and tested, so the useful
+		# question is not whether to weaken it but why the hull is close enough
+		# to 0.9 to trip it after a successful demand. Heat at hold-entry is the
+		# number that decides whether the INTERCEPT sprint is the cause -- and
+		# it costs one float on the step's first tick.
+		scratch["heat_at_entry"] = (actor.current_heat / actor.max_heat) if actor.max_heat > 0.0 else 0.0
+	scratch["heat_peak"] = maxf(float(scratch.get("heat_peak", 0.0)),
+		(actor.current_heat / actor.max_heat) if actor.max_heat > 0.0 else 0.0)
 
 	var c: Dictionary = _contact_for_instance(actor, victim_iid)
 	if c.is_empty() or not c.get("complied_stop", false):
@@ -1400,10 +1409,12 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 		# string drove six wrong hypotheses through an entire investigation --
 		# a log that misattributes is worse than a log that says nothing.
 		var headline: String = "pirate DISENGAGED mid-take" if flee_leaf > 0 else "victim bolted"
-		job["_abort_reason"] = headline + " (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, max tick gap %d frames (runner lag %d), self=%s, refreshes %d hold-hits / %d sent)" % [
+		job["_abort_reason"] = headline + " (%s; compelled_stop %s, range %.0f, held %.1fs, closest %.0f, heat %.2f->%.2f, max tick gap %d frames (runner lag %d), self=%s, refreshes %d hold-hits / %d sent)" % [
 			"CONTACT DROPPED" if c.is_empty() else "contact ok, complied_stop false",
 			vic_compelled, vic_dist, held_for,
 			float(step.get("scratch", {}).get("min_dist", -1.0)),
+			float(step.get("scratch", {}).get("heat_at_entry", -1.0)),
+			float(step.get("scratch", {}).get("heat_peak", -1.0)),
 			int(step.get("scratch", {}).get("max_tick_gap", -1)),
 			int(step.get("scratch", {}).get("max_runner_lag", -1)),
 			self_state,
@@ -1476,6 +1487,8 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	var held_elapsed: float = (frame - scratch["hold_start_frame"]) / PHYSICS_HZ
 	if held_elapsed < hold_time:
 		return CONTINUE
+	job["_take_heat"] = "%.2f->%.2f" % [
+		float(scratch.get("heat_at_entry", -1.0)), float(scratch.get("heat_peak", -1.0))]
 
 	actor.loot_takes += 1
 	var victim = instance_from_id(victim_iid)
