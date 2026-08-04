@@ -385,8 +385,21 @@ func _report() -> void:
 				patrol_like += 1
 				if foreign > 0:
 					patrols_holding_news += 1
-			else:
-				# COUNT THE DENOMINATOR THE SAME WAY AS THE NUMERATOR
+			elif rec.kind != ClusterEntity.Kind.TRAFFIC:
+				# ROCKS AND BEACONS ARE NOT CARGO (2026-08-03, second pass).
+				# The first fix this morning corrected the DENOMINATOR MISMATCH
+				# ("33 of 14") but kept counting every non-station non-authority
+				# RECORD as a civilian hull -- and Kind also covers ASTEROID,
+				# BEACON and WORMHOLE. The home cluster has an asteroid field and
+				# a beacon road at ~25k spacing, so the "125 civilian hulls" that
+				# replaced it was mostly scenery. Real prey is ~14 authored
+				# haulers plus TrafficGuild's freighter_target of 2.
+				#
+				# This matters beyond tidiness: prey DENSITY is the lever for the
+				# encounter problem that is currently the whole of criterion (1),
+				# and a hull count inflated ~8x hides how thin the target
+				# population really is.
+				pass
 				# (2026-08-03). This read `%d of %d` against NUM_HAULERS and
 				# printed "33 of 14" -- because the numerator counts every
 				# non-station non-authority RECORD (pirates, guild-spawned
@@ -394,6 +407,7 @@ func _report() -> void:
 				# the authored hauler count. A ratio whose two halves count
 				# different populations is not a ratio, and this one exceeded
 				# 100% without anybody noticing for ten runs.
+			else:
 				hauler_like += 1
 				if foreign > 0:
 					haulers_holding_news += 1

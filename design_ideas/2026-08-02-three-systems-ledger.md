@@ -43,11 +43,29 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D13 | Never select a lane shorter than **2× keep-away** — no point on it clears both endpoints | settled |
 | D14 | Destroying a victim **degrades** the world's knowledge to OVERDUE rather than silencing it | settled |
 | **D15** | Stranded cargo after a clamped delivery: hold-and-re-plan, plus an escape hatch (dump after N / forced sale) | **OPEN — pick one in M55a** |
-| **D16** | LANE_RUN flips only when **alone**; stalks at sensor limit | **OPEN — not built** |
+| **D16** | LANE_RUN flips only when **alone**; stalks at sensor limit | **CORRECTED 2026-08-03: mostly BUILT.** LANE_RUN itself shipped (see D27) and the alone-gate is live — `step_select_victim` drops any candidate with another fresh vessel inside `witness_range` (`_R_THIRD_PARTY`), so a victim with company is never viable. **Only the stalk-at-sensor-limit half is unbuilt**; there is no shadowing phase anywhere. This row read "not built" for both halves and was simply stale. |
 | **D17** | A prize takes a clean ID from the **finite kit**, making the kit the single currency for cover-running AND prize-taking | **OPEN — not built** |
 | **D18** | Do rival bands under one flag read each other as hostile? | **OPEN** |
 | **D19** | Is stolen news attributable (does holding it convict)? | **OPEN** |
 | **D20** | Kit size as the real dial on pirate aggression, replacing `hunt_seconds` | **OPEN** |
+| D21 | Sim slowness blamed on the passive array | **RETRACTED** — refuted by perf_combat (3.65% of tick); real cause was a broken build |
+| D22 | A decay half-life must be set against **measured delivery latency**, never in isolation | settled — 5 min → 30 min, news was stale before it landed |
+| D23 | Five seeds at 60 game-min **cannot A/B anything** | settled (method) |
+| D24 | A sweep and a routine patrol are the **same act** — one weighted draw over hotspots + stations | settled, built |
+| D25 | Cargo evens the network but rides on mail; prices are **globally readable**, so the loop does not bite | **superseded by D36** |
+| D26 | Mail urgency as a routing consideration | **superseded by D36** (same milestone) |
+| D27 | **LANE_RUN off by default** — kept for the cargo-awareness signal. *"No encounter benefit" was WRONG, see D38* | settled, built (rationale corrected) |
+| D38 | **LANE_RUN DOES find prey better** — no-prey aborts 163→142 (4/5 seeds), found-but-failed 3→9. The bottleneck moves from ENCOUNTER to EXECUTION | **NEW 2026-08-03 — reopens the posture question** |
+| D28 | A cornered pirate needs a demand handler; `build_pirate` had none, so refusal was 100% structural | settled, built (`OutlawResponseLeaf`) |
+| D29 | An authority notarizes what it **HOLDS**, not what docked; gate 2 moves to the **source's** flag | settled, built — 0 → 22 warrants |
+| D30 | Patrols pursue at `cruise` 400 and so lose chases | **REFUTED** — bit-identical 5-seed run; `cruise` caps only the catchup term. Reverted |
+| D31 | `outpaced` must mean "pulling away", not "far away"; leaving hail range only stops the *channel* | settled, built — outpaced 5 → 0 |
+| D32 | **"You cannot shake them" beats "you are slower"** — the outcome of the chase decides, not paper speed | settled, built — 0 → 4 stops |
+| D33 | A patrol's stop must *do* something; `HULK_PRIZE` is the short-term answer | **built**, but what a stop should ultimately MEAN is **OPEN** |
+| D34 | The shoot-if-justified ladder already existed and was **unreachable** until D29 landed | settled (context) — identity is what makes you shootable |
+| D35 | **Crew** is what makes surrender rational again — hull lost either way, crew survives a surrender | **OPEN** — lands in M55 (warships have zero crew space today) |
+| D36 | Urgent routes are never risked because of **substitutability**, not a missing payout term; posting **fog** is the fix | **CORRECTED**, OPEN — prerequisite for criterion (3) |
+| D37 | The hulk gate keys on the **warrant**; an empty warrant means *uncapped* (colour-flying pirate) | settled for now — reviewed and kept |
 
 ---
 
@@ -396,6 +414,15 @@ the propagation loss is NOT established and is deliberately not guessed at.
 **My prediction failed.** I expected a lit lane-runner under a cover identity to
 make notarization fire for the first time. It stayed 0 in all ten runs — see
 below; the cause was never the pirate's identity.
+
+**Caveat added 2026-08-03 on what this A/B actually compared.** The alone-gate
+(D16) was already live for BOTH arms, so this was never "lane-run vs park" in
+the full sense the posture was designed for — both arms only ever engage
+isolated prey. What is still missing from the posture is the STALK phase
+(shadowing at sensor limit before closing), so the lane-runner flips as soon as
+it finds a lone target rather than trailing it first. The verdict "no encounter
+benefit" is therefore about lane TRANSIT alone, and does not retire the posture
+idea. Re-run the A/B if the stalk is ever built.
 
 ### D28 (NEW, structural): pirates CANNOT comply with a demand
 
@@ -878,12 +905,44 @@ failure `DecisionProbe`'s own header named in advance: *"a risk term that ONLY
 ever makes haulers flee would strangle the lanes it was added to make
 interesting… a veto is the failure mode."*
 
-**D36 (OPEN): risk is subtracted, but nothing pays for danger.** RoutePlanner
-subtracts risk from score and no term scales the REWARD with it, so a risky lane
-can only ever lose. "Urgent routes still being risked" needs the payout side
-that D26 (mail urgency) was going to supply — urgency has to be able to outweigh
-risk, or the fog makes cargo uniformly timid rather than interestingly greedy.
-Criterion (3) cannot complete without it.
+**D36 (CORRECTED 2026-08-03 — my first statement of it was wrong).**
+
+I wrote "risk is subtracted, but nothing pays for danger". That is false. The
+payout term already exists and already scales with urgency:
+
+```gdscript
+score = payout - travel_cost - risk      # payout = (pickup + dropoff price) x amount
+```
+
+`StationEconomy.price()` derives from urgency (illustrative curve 100 x urgency),
+which is the mechanism `station_economy.md`'s self-healing cascade depends on:
+*"a starved refinery's ore urgency climbs, raising the ore price, pulling haulers
+onto the ore lane."* An urgent route DOES pay more, today.
+
+**The actual reason `risked_anyway` is always 0 is SUBSTITUTABILITY.** The winner
+is an argmax over ~13 stations x commodities — hundreds of candidate pairs. A
+risky lane never has to beat its own payout, only the MARGIN TO THE NEXT-BEST
+SUBSTITUTE, and with that many comparable routes that margin is tiny. Measured
+risk (p95 69-78) against a payout ceiling near 200/lot is a ~35% penalty, which
+reliably loses to *something* safe. Nothing is mispriced; there is simply always
+another lane.
+
+**The fix is the MAIL SYSTEM, and this is the loop finally closing.** Prices are
+currently GLOBALLY READABLE — every hauler sees every posting's urgency and
+plans against a perfect market. Put postings behind the same fog as incidents,
+known only through the mailbag, and a hauler knows about a HANDFUL of postings.
+Substitutes become scarce, and the urgent risky lane it actually heard about can
+win on its merits.
+
+**The fog is what creates the scarcity that makes danger worth accepting.** Same
+clamp, same `Mailbag.read_*` shape, applied to postings instead of incidents.
+This is D25's "prices are globally readable so the loop doesn't bite yet" and
+D26 (mail urgency) turning out to be the same milestone, and it is the
+prerequisite for criterion (3)'s second half.
+
+Note what this predicts and therefore what would falsify it: under posting fog,
+`risked_anyway` should go ABOVE zero *without any change to the risk term*. If it
+does not, substitutability was not the binding constraint after all.
 
 ### D37 — what the hulk decision is actually keyed on (settled 2026-08-03: keep as-is for now)
 
@@ -987,6 +1046,45 @@ in both seeds (0 vs 1, 2 vs 3). That is the shape hulking-driven cap cuts would
 make, and n=2 per config cannot distinguish it from dice. Needs seed-matched
 pairs at more seeds. Reporting dice as signal has already happened once in this
 work and is not repeating here.
+
+### D38 — LANE_RUN finds prey BETTER; I measured the wrong stage (2026-08-03)
+
+Asked directly whether the two postures differ at FINDING prey. They do, and the
+evidence was in the A/B logs the whole time — `step_select_victim`'s two abort
+reasons discriminate exactly this, and D27 never counted them:
+
+| seed | "hunt time budget spent" = NO PREY FOUND | "N attempts, nothing taken" = FOUND, NOT LANDED |
+|---|---|---|
+| | OFF → ON | OFF → ON |
+| 11111 | 34 → **21** | 1 → 4 |
+| 22222 | 32 → **30** | 1 → 2 |
+| 33333 | 37 → **30** | 1 → 3 |
+| 44444 | 30 → **28** | 0 → 0 |
+| 55555 | 30 → 33 | 0 → 0 |
+| **total** | **163 → 142** (−13%, 4 of 5 down) | **3 → 9** (3 up, 0 down) |
+
+**LANE_RUN does the thing it was built to do.** It converts "found nobody" into
+"found someone and could not land it" — the encounter stage improves and the
+EXECUTION stage becomes the new bottleneck. Invisible in robberies (10 vs 9)
+because the funnel's end count sums both failures.
+
+**D27's stated rationale was wrong and is corrected.** "No encounter benefit" was
+a claim about a stage I never measured; I read an end outcome and described it as
+a property of the middle. The DECISION (off by default) still stands on the
+cargo-awareness signal, which was 5-of-5 and remains unexplained — but the reason
+given for it was not the reason.
+
+**Why this matters more than the posture**: criterion (1)'s blocker has been
+"pirates find no prey", and this is the first evidence that encounter is
+*improvable by behaviour* rather than fixed by geometry. It also says the two
+failure modes trade off — pushing on encounter moves work into execution, so a
+future measurement must watch both or it will read an improvement as a wash
+exactly as this one did.
+
+**Method note, the third time today**: the discriminator existed, was documented
+in `step_select_victim`'s own header, and CLAUDE.md explicitly warns that
+"takes 0" alone cannot tell the two apart. I ran the A/B without turning it on.
+An instrument you own and do not read is the same as one you do not have.
 
 ### Queue after the re-baseline
 
