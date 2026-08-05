@@ -101,6 +101,38 @@ var _chain: Dictionary = {}
 var _trace = null
 var _sample_accum: float = 0.0
 
+# --- HOW OFTEN IS A HAULER ACTUALLY CARRYING SOMETHING? (M55b precondition) ---
+#
+# Nothing measured this before, and after M55b it is the number every piracy
+# result depends on. The cash-out gate is now `lots > 0`, so a robbery of an
+# EMPTY hauler books RETURNED_EMPTY -- meaning "takes_total fell" means opposite
+# things at 10% empty and at 60% empty. Leading with this is the precondition
+# rule from design_ideas/2026-08-02-preconditions-the-world-never-supplies.md.
+#
+# Sampled in hauler-MINUTES (one tick per hull per game-minute), not per event,
+# because the question is "what fraction of flying is laden" -- a time integral,
+# the same unit LaneProbe uses so the two are comparable.
+#
+# FOUR buckets, not one fraction. `manifest_total() > 0` is ground truth and
+# `current >= DROPOFF_LEG_START` says which leg the itinerary is on, and the two
+# can legitimately disagree in BOTH directions now -- that is new today and it
+# is the interesting part:
+#
+#   laden_to_dropoff -- the normal laden run
+#   empty_to_pickup  -- the normal deadhead
+#   empty_to_dropoff -- ROBBED (or a pickup that came up short). Before M55a/b
+#                       this state could not exist at all.
+#   laden_to_pickup  -- carrying a REMAINDER, re-planned under M55a's
+#                       only_commodity restriction. Also new today.
+#
+# An earlier draft of this counter treated the last two as an instrument
+# disagreement to be flagged as a bug. That would have been a false alarm
+# detector: both are real states the milestone deliberately created.
+var _cargo_minutes: Dictionary = {
+	"laden_to_dropoff": 0, "empty_to_pickup": 0,
+	"empty_to_dropoff": 0, "laden_to_pickup": 0, "between_jobs": 0,
+}
+
 # --- sweep outcomes, not sweep counts ---------------------------------------
 var sweeps_reached: int = 0
 var sweeps_with_contact: int = 0
@@ -325,6 +357,7 @@ func _sample_trace() -> void:
 			continue
 		var lane := "%s>%s" % [str(job.get("pickup_id", "?")), str(job.get("dropoff_id", "?"))]
 		lanes[lane] = int(lanes.get(lane, 0)) + 1
+		_sample_cargo_state(n, job)
 		# TRUE danger on this lane, from every incident that exists -- not from
 		# any one hull's heard news. Divergence between this and where the
 		# traffic actually goes IS the fog, and is the thing the oscillation
@@ -336,6 +369,24 @@ func _sample_trace() -> void:
 	for lane in lanes:
 		_trace.store_line("%.1f,%s,%d,%.2f" % [minute, lane, lanes[lane], lane_risk.get(lane, 0.0)])
 	_trace.flush() # store_line BUFFERS -- a crash three hours in must not lose the run
+
+# One tick per hull per game-minute. `n` already passed _sample_trace's filter
+# (a live node holding a planner route), so this is the cargo fleet.
+func _sample_cargo_state(n, job: Dictionary) -> void:
+	if not n.has_method("manifest_total"):
+		return
+	var steps: Array = job.get("steps", [])
+	var current: int = int(job.get("current", 0))
+	# Job run off the end: the route is finished and the hull has not re-planned
+	# yet. Neither leg, and counting it as "empty deadhead" would inflate the
+	# very number this counter exists to establish.
+	if current >= steps.size():
+		_cargo_minutes["between_jobs"] += 1
+		return
+	var laden: bool = n.manifest_total() > 0.0
+	var outbound: bool = current >= RoutePlanner.DROPOFF_LEG_START
+	var key: String = ("laden_" if laden else "empty_") + ("to_dropoff" if outbound else "to_pickup")
+	_cargo_minutes[key] += 1
 
 func _is_station(rec) -> bool:
 	return rec.kind == ClusterEntity.Kind.STATION
@@ -605,6 +656,7 @@ func _report() -> void:
 
 	print("
 === WHERE EACH BRANCH STANDS ===")
+	_report_cargo_state()
 	_report_economy()
 	_report_lanes()
 	print("  EVIDENCE (incident -> stations -> patrols -> sweeps): %s" % (
@@ -654,6 +706,34 @@ func _report() -> void:
 #
 # So this answers "did the economy survive" and explicitly not "was it served
 # well". A clean line here does NOT mean economy_traffic would pass.
+# Printed BEFORE the economy and piracy verdicts because it is the precondition
+# for reading either. After M55b the cash-out gate is `lots > 0`, so a robbery
+# of an empty hauler books RETURNED_EMPTY -- and "takes_total fell" means
+# opposite things depending on the laden fraction below.
+func _report_cargo_state() -> void:
+	print("
+=== CARGO STATE (is a hauler actually carrying anything?) ===")
+	var laden_d: int = int(_cargo_minutes["laden_to_dropoff"])
+	var empty_p: int = int(_cargo_minutes["empty_to_pickup"])
+	var empty_d: int = int(_cargo_minutes["empty_to_dropoff"])
+	var laden_p: int = int(_cargo_minutes["laden_to_pickup"])
+	var between: int = int(_cargo_minutes["between_jobs"])
+	var flying: int = laden_d + empty_p + empty_d + laden_p
+	if flying <= 0:
+		print("  no hauler-minutes sampled -- UNTESTED, not 0%%")
+		return
+	var laden: int = laden_d + laden_p
+	print("  hauler-minutes on a route  : %d  (+%d between jobs)" % [flying, between])
+	print("  LADEN                      : %d  (%.0f%%)" % [laden, 100.0 * laden / flying])
+	print("  empty                      : %d  (%.0f%%)" % [flying - laden, 100.0 * (flying - laden) / flying])
+	print("    laden, outbound to dropoff : %d   <- the normal laden run" % laden_d)
+	print("    empty, inbound to pickup   : %d   <- the normal deadhead" % empty_p)
+	print("    empty, outbound to dropoff : %d   <- ROBBED, or a short pickup" % empty_d)
+	print("    laden, inbound to pickup   : %d   <- carrying a REMAINDER (M55a)" % laden_p)
+	print("  >>> a pirate intercepting at random finds cargo %.0f%% of the time," % (100.0 * laden / flying))
+	print("      and nothing in the game lets it tell the difference (D60: cargo")
+	print("      has volume but no mass, so a laden hull has no observable).")
+
 func _report_economy() -> void:
 	var starved: Array = []
 	var watched: int = 0

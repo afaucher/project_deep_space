@@ -79,7 +79,8 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D61 | **Pirates have no cargo bay** — a sequencing hazard for **M55c**, which would silently zero out piracy, NOT a blocker for M55a/b (flat capacity gives every hull a hold) | **NEW 2026-08-04, NARROWED same day** — take cap / partial take / guns-vs-hold all arrive with M55c |
 | D62 | **Price is flat across a delivery** (`payout = transferred x price`, stamped pre-delivery). Harmless today, an exploit under a mixed hold | **NEW 2026-08-04, verified in code** — integrate price over the fill |
 | D63 | **REFUSAL is the robbery bottleneck** — 42 of 63 demands, 65-70% in all four runs. `outpaced` 0/63 and `abandoned` 6/63: the old failures are solved | **NEW 2026-08-05, measured** — the most stable number in the project |
-| D64 | **Civilians comply with a pirate LESS than pirates comply with a patrol** (22% vs 50%). Not geometry — 0 of 14 demands opened past the abort line | **NEW 2026-08-05, OPEN** — the victim's side of D28 |
+| D64 | Refusal is a **speed rule** with authored ratios (1.05 pirate-flees-patrol vs 1.3/1.6 civilian-flees-pirate); the asymmetry is mostly hull matchups, not a puzzle | **CORRECTED 2026-08-05** — first written as an unexplained asymmetry; the deciding line was one debug flag away |
+| D65 | **Haulers are laden 88% of the time.** The deadhead is ~1/8 of the laden leg — the planner reloads in place | **NEW 2026-08-05, measured** — retires laden-detection as a targeting goal |
 
 ---
 
@@ -2292,6 +2293,58 @@ authored pressure seed 11111 reached `backoff=x8.0` — six sorties in four hour
 there are to observe it.** Long authored-pressure campaigns are therefore a weak
 instrument by construction, which argues for attacking D63/D64 in a small rig
 (the `alongside_trace` pattern) rather than another three-hour run.
+
+### D65 — haulers are laden 88% of the time (2026-08-05)
+
+Measured because M55b made the cash-out gate `lots > 0`, which meant "takes_total
+fell" would mean opposite things at 10% empty and at 60% empty. Nothing had ever
+counted it. 25 game-min, pressed pressure, seed 22222, 243 hauler-minutes:
+
+```
+LADEN                        : 213  (88%)
+empty                        :  30  (12%)
+  laden, outbound to dropoff : 211   <- the normal laden run
+  empty, inbound to pickup   :  30   <- the normal deadhead
+  empty, outbound to dropoff :   0   <- ROBBED, or a short pickup
+  laden, inbound to pickup   :   2   <- carrying a REMAINDER (M55a)
+  between jobs               :   0
+```
+
+The deadhead is ~1/8 of the laden leg. Mechanism: `_score_pair` charges travel
+for the run to the PICKUP as well as the laden leg, so a pickup at the station
+the hull is already docked at costs nothing to reach — and the cluster graph
+supplies exactly that, because `commodity.gd` builds REFINED from ORE at
+Refinery Prime, so a hull delivering ore can load refined without moving. The
+economy is round trips, not radial spokes.
+
+**TWO OF MY OWN CLAIMS FROM THE SAME DAY, RETIRED.** I estimated "roughly half"
+from the itinerary shape (empty on one of two transit legs) — wrong by 4x,
+because the itinerary says which legs exist and says nothing about their
+relative LENGTH, which is what the planner chooses. And I wrote that M60d
+becomes "the only way a pirate can pick a target that pays": false. A pirate
+intercepting at random already finds cargo 88% of the time, so perfect
+laden-detection is worth **at most 12 percentage points**.
+
+**So: do NOT build an observable for laden-ness.** A cargo signature, or cargo
+mass to make laden hulls detectably slower, would be near-worthless as a
+targeting aid. M60d's value stays what it was originally scoped for — lane and
+timing prediction — and M55b's gate is a ~12% correction to takes, not the
+dominant term the commit message implied.
+
+The counter's main return was stopping work rather than starting it.
+
+**Two preconditions it also settled.** `laden, inbound to pickup: 2` — M55a's
+remainder path fires in a real campaign, not only in its unit test.
+`between_jobs: 0` — haulers always hold a route, so `MIN_VIABLE_SCORE` stranded
+nobody here and there is no idle-empty time inflating the denominator.
+
+`empty, outbound to dropoff: 0` means NOTHING yet: 25 game-minutes against a
+rate of 1-3 robberies per four game-hours simply contained no robbery. Test J
+proves the mechanism; a full-length run is what would show it in a campaign.
+
+Caveat: one seed, 25 game-minutes. 243 hauler-minutes is a reasonable n for a
+time fraction and the ratio is lopsided enough that a longer run is unlikely to
+flip it, but read this as "high", not as "precisely 88".
 
 ### Queue after the re-baseline
 
