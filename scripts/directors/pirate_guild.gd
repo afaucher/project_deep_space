@@ -124,6 +124,12 @@ var arrivals: Array = []
 var issued_names: Dictionary = {}
 
 var takes_total: int = 0
+
+# M55b -- VOLUME actually carried out through the wormhole, as opposed to
+# `takes_total` which counts successful robberies. Before M55b the ledger had
+# only the count and called it "loot", so a hold completed on an EMPTY hauler
+# and one on a laden freighter were the same ledger entry. This is the goods.
+var lots_total: float = 0.0
 var losses: int = 0
 var returned_empty: int = 0
 var take_streak: int = 0
@@ -199,6 +205,7 @@ func _check_ins(cluster) -> void:
 			else:
 				m["last_seen_pos"] = node.position
 				m["last_loot_takes"] = node.loot_takes
+				m["last_loot_lots"] = node.loot_lots
 				# CASH-OUT LATCH (2026-08-02). The exit test used to be evaluated
 				# at RESOLVE time against last_seen_pos -- a sample taken every
 				# `policy_period` (10s). A pirate leaving at ~700u/s crosses the
@@ -250,16 +257,29 @@ func _resolve_overdue(cluster, period: float) -> void:
 			and (m.get("reached_exit", false) \
 				or m.get("last_seen_pos", wormhole_pos).distance_to(wormhole_pos) <= cashin_radius)
 		var loot: int = m.get("last_loot_takes", 0)
+		# M55b -- the cash-out gate is now GOODS, not holds. It read
+		# `last_loot_takes > 0`, i.e. "did this hull ever complete an 8-second
+		# alongside hold", which booked a robbery of an EMPTY hauler as income.
+		# A hauler is only laden between its pickup and its dropoff, so robbing
+		# one flying TOWARD a pickup legitimately yields nothing -- and that is
+		# now visible as RETURNED_EMPTY instead of being paid for.
+		#
+		# EXPECT takes_total TO FALL in campaigns as a result. That is the
+		# measurement getting more honest, not a regression, and it lands
+		# straight on victim selection (D44/M64): picking prey that is actually
+		# carrying something is now worth doing, where before it was free.
+		var lots: float = float(m.get("last_loot_lots", 0.0))
 
-		if vanished_near_wormhole and loot > 0:
+		if vanished_near_wormhole and lots > 0.0:
 			m["state"] = MemberState.CASHED_OUT
 			takes_total += loot
+			lots_total += lots
 			take_streak += 1
 			loss_streak = 0
 			profitless_streak = 0
 			_recompute_backoff()
-			_event("'%s' (record %d) CASHED OUT (takes +%d -> total %d, streak %d)" %
-				[m.get("cover_name", "?"), record_id, loot, takes_total, take_streak])
+			_event("'%s' (record %d) CASHED OUT (%.1f lots over %d take(s) -> total %.1f lots / %d takes, streak %d)" %
+				[m.get("cover_name", "?"), record_id, lots, loot, lots_total, takes_total, take_streak])
 		elif vanished_near_wormhole:
 			# Left alive with an empty hold -- withdrew, not lost. Feeds backoff
 			# but never counts as a loss (no hull thinned) or a take.
@@ -415,6 +435,7 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 			"kit": kit.duplicate(),
 			"last_seen_pos": spawn_pos,
 			"last_loot_takes": 0,
+			"last_loot_lots": 0.0,
 			"overdue_since": 0.0,
 			"observed_dead": false,
 		}
@@ -1276,5 +1297,9 @@ func _log(cluster) -> void:
 	var etas: Array = []
 	for arrival in arrivals:
 		etas.append(snappedf(arrival.get("eta_remaining", 0.0), 0.1))
-	print("[PirateGuild] active=%d overdue=%d pending=%d cap=%d take_streak=%d loss_streak=%d takes_total=%d losses=%d returned_empty=%d backoff=x%.1f etas=%s" %
-		[active, overdue, arrivals.size(), cap, take_streak, loss_streak, takes_total, losses, returned_empty, backoff_factor, str(etas)])
+	# M55b -- lots_total sits next to takes_total deliberately. A run where the
+	# two disagree in shape (takes climbing while lots stays flat) is pirates
+	# robbing hulls that are not carrying anything, which is a victim-SELECTION
+	# problem and reads identically to a take-execution problem without it.
+	print("[PirateGuild] active=%d overdue=%d pending=%d cap=%d take_streak=%d loss_streak=%d takes_total=%d lots_total=%.1f losses=%d returned_empty=%d backoff=x%.1f etas=%s" %
+		[active, overdue, arrivals.size(), cap, take_streak, loss_streak, takes_total, lots_total, losses, returned_empty, backoff_factor, str(etas)])

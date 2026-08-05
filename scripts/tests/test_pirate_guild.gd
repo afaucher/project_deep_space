@@ -226,6 +226,9 @@ func setup(main) -> void:
 	print("\n--- (f) Overdrive (M52 dev toggle) ---")
 	_test_overdrive()
 
+	print("\n--- (g) M55b: a hold that netted NOTHING is not income ---")
+	await _test_empty_handed_take_is_not_income()
+
 	_finish()
 
 # ---------------------------------------------------------------------------
@@ -415,6 +418,56 @@ func _test_replacement_on_kill() -> void:
 # need the physics frame the deferred free requires).
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# (g) M55b -- a completed hold that moved NO GOODS is not income.
+#
+# The cash-out gate used to read `last_loot_takes > 0` -- "did this hull ever
+# complete an 8-second alongside hold" -- which booked robbing an EMPTY hauler
+# as a payday. A hauler is only laden between its pickup and its dropoff, so
+# intercepting one flying TOWARD a pickup legitimately yields nothing, and that
+# now resolves RETURNED_EMPTY instead of CASHED_OUT.
+#
+# Deliberately sets loot_takes = 1 with loot_lots = 0: the hold DID complete, so
+# this is not the same case as a pirate that never found anyone. Without this
+# the behaviour change is encoded only in the fixtures of case (c), which is how
+# a rule quietly becomes whatever the tests happen to set.
+# ---------------------------------------------------------------------------
+func _test_empty_handed_take_is_not_income() -> void:
+	var cluster = _make_cluster()
+	var guild = PirateGuild.new(FAST_CONFIG)
+	cluster.directors.append(guild)
+	var period: float = FAST_CONFIG["policy_period"]
+	var delay_ticks: int = ceili(FAST_CONFIG["presumed_lost_delay"] / period) + 2
+
+	var rid: int = _wait_for_any_active(cluster, guild, 60, period)
+	_assert(rid != -1, "(g) an initial pirate went ACTIVE")
+	if rid == -1:
+		return
+	var node = _find_rec(cluster, rid).live_node
+	node.loot_takes = 1     # the hold DID complete ...
+	node.loot_lots = 0.0    # ... on a hauler that was carrying nothing
+	node.position = WORMHOLE_POS
+	cluster.tick(period)
+	_assert(guild.members[rid]["last_loot_takes"] == 1, "(g) the completed hold was captured")
+	_assert(guild.members[rid]["last_loot_lots"] == 0.0, "(g) and it moved no goods")
+
+	node.queue_free()
+	await main_node.get_tree().physics_frame
+	await main_node.get_tree().physics_frame
+	cluster.tick(period)
+
+	var resolved_state: int = -1
+	for i in range(delay_ticks):
+		cluster.tick(period)
+		var st: int = guild.members[rid]["state"]
+		if st == PirateGuild.MemberState.CASHED_OUT or st == PirateGuild.MemberState.RETURNED_EMPTY:
+			resolved_state = st
+			break
+	_assert(resolved_state == PirateGuild.MemberState.RETURNED_EMPTY,
+		"(g) an empty-handed take resolves RETURNED_EMPTY, NOT CASHED_OUT")
+	_assert(guild.takes_total == 0, "(g) no take is credited")
+	_assert(guild.lots_total == 0.0, "(g) and no goods are credited")
+
 func _test_cash_out() -> void:
 	var cluster = _make_cluster()
 	var guild = PirateGuild.new(FAST_CONFIG)
@@ -429,10 +482,16 @@ func _test_cash_out() -> void:
 	var rec = _find_rec(cluster, rid)
 	var node = rec.live_node
 	node.loot_takes = 1
+	# M55b -- the cash-out gate is GOODS now, not completed holds. A hold on an
+	# EMPTY hauler is no longer income, so a fixture that only sets loot_takes
+	# describes a pirate that robbed someone carrying nothing. This case is
+	# about the cash-out STATE MACHINE, so it gets a hull with actual cargo.
+	node.loot_lots = 2.0
 	node.position = WORMHOLE_POS + Vector2(1000, 0) # well inside cashin_radius (8000)
 
 	cluster.tick(period) # a check-in lands here, snapshotting last_seen_pos/loot_takes while still live
 	_assert(guild.members[rid]["last_loot_takes"] == 1, "(c) check-in captured loot_takes")
+	_assert(guild.members[rid]["last_loot_lots"] == 2.0, "(c) check-in captured loot_LOTS -- the goods, not the stopwatch")
 	_assert(guild.members[rid]["last_seen_pos"].distance_to(WORMHOLE_POS) <= FAST_CONFIG["cashin_radius"], "(c) check-in captured last_seen_pos near the wormhole")
 	_assert(guild.members[rid]["state"] == PirateGuild.MemberState.ACTIVE, "(c) still ACTIVE right after the check-in")
 
@@ -453,6 +512,7 @@ func _test_cash_out() -> void:
 			resolved = true
 			break
 	_assert(resolved, "(c) resolves CASHED_OUT (vanished near the wormhole)")
+	_assert(guild.lots_total == 2.0, "(c) the GOODS are credited, not just the take count")
 	_assert(guild.takes_total == 1, "(c) takes_total credited")
 	_assert(guild.take_streak == 1, "(c) take_streak bumped")
 	_assert(guild.losses == 0, "(c) NOT counted as a loss")
@@ -481,6 +541,7 @@ func _test_streaks_bounded() -> void:
 			break
 		var node = _find_rec(cluster, rid).live_node
 		node.loot_takes = 1
+		node.loot_lots = 2.0   # M55b -- goods, not just a completed hold
 		node.position = WORMHOLE_POS
 		cluster.tick(period)
 		_vanish_record(cluster, rid)
@@ -523,6 +584,7 @@ func _run_scripted_sequence(cluster, guild) -> void:
 	var id1: int = _wait_for_any_active(cluster, guild, 60, period)
 	var node1 = _find_rec(cluster, id1).live_node
 	node1.loot_takes = 1
+	node1.loot_lots = 2.0   # M55b -- goods, not just a completed hold
 	node1.position = WORMHOLE_POS
 	cluster.tick(period)
 	_vanish_record(cluster, id1)
@@ -535,6 +597,7 @@ func _run_scripted_sequence(cluster, guild) -> void:
 	var id3: int = _wait_for_any_active(cluster, guild, 60, period)
 	var node3 = _find_rec(cluster, id3).live_node
 	node3.loot_takes = 2
+	node3.loot_lots = 4.0   # M55b -- goods, not just a completed hold
 	node3.position = WORMHOLE_POS
 	cluster.tick(period)
 	_vanish_record(cluster, id3)

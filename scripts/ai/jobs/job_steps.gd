@@ -1429,6 +1429,43 @@ static func step_hulk_prize(actor, step: Dictionary, job: Dictionary) -> int:
 # what surfaced it.
 # ---------------------------------------------------------------------------
 
+# M55b -- move the goods from `victim` into `robber`, returning the volume that
+# actually changed hands. A named operation rather than ten lines inline,
+# because it is the whole point of the milestone and because a step that has to
+# be flown for 8 seconds is a terrible thing to have to set up in a test.
+#
+# Clamped by the ROBBER's free volume, which is what gives the partial take: a
+# raider with a 4-lot hold cannot empty a freighter, so the victim keeps the
+# remainder and still delivers something. Needs no component-derived capacity
+# to work (M55c) -- flat capacity already gives every hull a hold (ledger D61).
+#
+# `.keys()` snapshots deliberately: manifest_remove() erases a drained
+# commodity, and mutating a Dictionary mid-iteration is undefined. Sorted for
+# run-to-run determinism.
+#
+# Taking the MOST VALUABLE cargo first is the obviously better rule and is
+# deliberately NOT here: value-per-volume selection belongs with the mixed hold
+# (D60), it needs a valuation this call site does not have, and inventing one
+# now would be a second variable in a change whose whole point is that goods
+# move at all. When it arrives it is the SAME rule as the hauler's
+# opportunistic fill -- one rule, two callers.
+static func transfer_loot(robber, victim) -> float:
+	if robber == null or victim == null:
+		return 0.0
+	var stolen: float = 0.0
+	var carried: Array = victim.cargo_manifest.keys()
+	carried.sort()
+	for commodity in carried:
+		var room: float = robber.manifest_free()
+		if room <= 0.0:
+			break
+		var moved: float = robber.manifest_add(commodity, minf(float(victim.cargo_manifest[commodity]), room))
+		if moved > 0.0:
+			victim.manifest_remove(commodity, moved)
+			stolen += moved
+	robber.loot_lots += stolen
+	return stolen
+
 static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int:
 	var victim_iid: int = job.get("victim_iid", -1)
 	var scratch: Dictionary = step.get("scratch", {})
@@ -1620,6 +1657,24 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	var victim = instance_from_id(victim_iid)
 	if victim != null and is_instance_valid(victim):
 		victim.looted = true
+		# M55b -- THE GOODS ACTUALLY MOVE. Until this line existed, a completed
+		# hold incremented a counter and nothing else: the victim sailed on and
+		# delivered IN FULL, so piracy could not touch the economy at all. M55a
+		# made cargo a physical manifest; this is what takes it.
+		#
+		# Clamped by the PIRATE's own free volume, which gives the partial take
+		# for free -- a raider with a 4-lot hold cannot empty a freighter, so
+		# the victim keeps the remainder and still delivers something. That is
+		# better fiction than all-or-nothing AND a softer economic signal. Note
+		# it needs no component-derived capacity to work (M55c): flat capacity
+		# already means every hull, pirate included, has a hold (ledger D61).
+		#
+		# Nothing more is needed on the victim's side -- M55a's possession
+		# clamp in serve_posting() means a lightened hull automatically makes a
+		# short delivery when it docks. That is the coupling closing.
+		#
+		var stolen: float = transfer_loot(actor, victim)
+		job["_take_lots"] = stolen
 		# M52b -- ARMED_ROBBERY warrant, posted into the VICTIM's OWN store
 		# (nothing posted this offense before this milestone -- design doc's
 		# taxonomy: "pirate job takes loot"). Same "whoever experienced it

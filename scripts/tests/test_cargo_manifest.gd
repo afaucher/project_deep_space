@@ -50,6 +50,8 @@ const MediumStation = preload("res://scripts/ships/medium_station.gd")
 const SmallStation = preload("res://scripts/ships/small_station.gd")
 const DockingBay = preload("res://scripts/docking/docking_bay.gd")
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
+const ArmedPinnace = preload("res://scripts/ships/armed_pinnace.gd")
+const JobSteps = preload("res://scripts/ai/jobs/job_steps.gd")
 
 var main_node: Node = null
 var failures: Array = []
@@ -139,6 +141,8 @@ func setup(main) -> void:
 	_test_pickup_cannot_exceed_the_hold()
 	_test_capacity_matches_planner_lot_size()
 	_test_laden_hull_plans_for_what_it_carries()
+	_test_theft_moves_goods()
+	_test_robbed_hauler_delivers_short()
 
 	_finalize()
 
@@ -360,6 +364,89 @@ func _test_laden_hull_plans_for_what_it_carries() -> void:
 		if r.get("commodity", "") != Commodity.REFINED:
 			off_commodity += 1
 	_assert(off_commodity == 0, "H: the whole candidate set is restricted, not merely the argmax")
+
+# ---------------------------------------------------------------------------
+# I. M55b -- theft actually moves goods, and the pirate's own hold caps it.
+#
+# Before M55b, a completed TAKE_ALONGSIDE hold did `loot_takes += 1` and nothing
+# else. The guild ledger's "loot" WAS that counter, so it reported stopwatch
+# readings as though they were goods, and the victim sailed on with a full hold.
+# ---------------------------------------------------------------------------
+func _test_theft_moves_goods() -> void:
+	print("--- I: theft moves goods, clamped by the pirate's own hold ---")
+	var pirate = ArmedPinnace.new()
+	var victim = CargoShuttle.new()
+	main_node.add_child(pirate)
+	main_node.add_child(victim)
+
+	victim.manifest_add(Commodity.ORE, 3.0)
+	var stolen: float = JobSteps.transfer_loot(pirate, victim)
+	_approx(stolen, 3.0, "I: all 3 lots change hands when the pirate has room")
+	_approx(pirate.manifest_amount(Commodity.ORE), 3.0, "I: the pirate is carrying them")
+	_approx(victim.manifest_total(), 0.0, "I: and the victim is not")
+	_approx(pirate.loot_lots, 3.0, "I: loot_lots records VOLUME, not a count of holds")
+	_assert(pirate.loot_takes == 0, "I: and it is a SEPARATE number from loot_takes")
+
+	# THE PARTIAL TAKE. A raider cannot empty a freighter, so the victim keeps
+	# the remainder and still delivers something -- better fiction than
+	# all-or-nothing, and it needs no component-derived capacity (M55c).
+	var full_victim = CargoShuttle.new()
+	main_node.add_child(full_victim)
+	full_victim.manifest_add(Commodity.REFINED, 4.0)
+	var second: float = JobSteps.transfer_loot(pirate, full_victim)
+	_approx(second, pirate.CARGO_CAPACITY - 3.0, "I: only what still fits is taken (1 of 4 lots)")
+	_approx(full_victim.manifest_amount(Commodity.REFINED), 3.0, "I: the victim KEEPS the rest -- a partial take")
+	_approx(pirate.manifest_total(), pirate.CARGO_CAPACITY, "I: the pirate is now full")
+	_approx(pirate.loot_lots, 4.0, "I: loot_lots accumulates across takes")
+
+	# A robbery that nets nothing must report nothing -- the case the old
+	# hold-counting gate booked as income.
+	var empty_victim = CargoShuttle.new()
+	main_node.add_child(empty_victim)
+	_approx(JobSteps.transfer_loot(pirate, empty_victim), 0.0, "I: robbing an empty hauler yields 0 lots")
+
+	_free_if_valid(pirate)
+	_free_if_valid(victim)
+	_free_if_valid(full_victim)
+	_free_if_valid(empty_victim)
+
+# ---------------------------------------------------------------------------
+# J. THE COUPLING. A robbed hauler delivers SHORT.
+#
+# This is the whole reason M55a and M55b exist. Piracy was invisible to the
+# economy: serve_posting() handed the PLANNED amount to fulfill() with nothing
+# checking possession, so a hauler robbed of its entire load still delivered in
+# full and no bin ever noticed. Note there is no new code behind this -- M55a's
+# possession clamp plus M55b's transfer produce it between them.
+# ---------------------------------------------------------------------------
+func _test_robbed_hauler_delivers_short() -> void:
+	print("--- J: a robbed hauler delivers SHORT (the coupling) ---")
+	var rec := _mk_station_rec(976)
+	_set_bin(rec, Commodity.ORE, 0.0, 100.0)   # empty -> open IMPORT posting
+	if not _make_docked_pair(rec):
+		_teardown_pair()
+		return
+
+	# Loaded at its pickup, then robbed of 3 of its 4 lots en route.
+	_shuttle.manifest_add(Commodity.ORE, 4.0)
+	var pirate = ArmedPinnace.new()
+	main_node.add_child(pirate)
+	pirate.manifest_add(Commodity.GOODS, 1.0)   # 3 lots of room, not 4
+	var stolen: float = JobSteps.transfer_loot(pirate, _shuttle)
+	_approx(stolen, 3.0, "J: the pirate took 3 of the 4 lots")
+	_approx(_shuttle.manifest_amount(Commodity.ORE), 1.0, "J: the hauler still holds 1")
+
+	# It docks and tries to deliver the 4 its PLAN said, which is what
+	# route_itinerary() staged before any of this happened.
+	var accept: Dictionary = StationEconomy.accept_posting(rec, "self", Commodity.ORE, "")
+	var result: Dictionary = _station.serve_posting(_shuttle, accept, 4.0)
+	_approx(result.get("transferred", -1.0), 1.0, "J: only the 1 surviving lot is delivered")
+	_approx(rec.stocks["self"][Commodity.ORE]["stock"], 1.0,
+		"J: the station received 1, not 4 -- PIRACY REACHED THE ECONOMY")
+	_approx(_shuttle.manifest_total(), 0.0, "J: the hauler is empty")
+
+	_free_if_valid(pirate)
+	_teardown_pair()
 
 func _finalize() -> void:
 	if failures.is_empty():

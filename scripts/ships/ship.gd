@@ -901,10 +901,24 @@ func set_default_job(job: Dictionary) -> void:
 
 # M50 -- piracy bookkeeping. loot_takes: how many times THIS ship (the
 # robber) has completed TAKE_ALONGSIDE's hold -- the M51 guild ledger reads
-# it. looted: server-side flag stamped on the VICTIM by the take, test-visible
-# (cargo stays abstract in M50 -- no physical goods change hands yet).
+# it. looted: server-side flag stamped on the VICTIM by the take, test-visible.
 var loot_takes: int = 0
 var looted: bool = false
+
+# M55b -- how much VOLUME this hull has actually stolen, cumulative.
+#
+# Deliberately a SECOND counter rather than a replacement for loot_takes, and
+# the distinction is the whole milestone: `loot_takes` counts completed
+# 8-second holds, and until M55b the guild ledger's "loot" WAS that counter --
+# so the ledger reported stopwatch readings as though they were goods, and a
+# hold on an empty hauler booked identically to one on a full freighter.
+#
+# Kept alongside rather than folded in because they answer different questions
+# and the cap/backoff machinery is tuned against the COUNT: `takes_total`,
+# `take_streak` and the cap thresholds all mean "successful robberies", and
+# re-denominating them in lots in the same change would move every tuned
+# threshold at once. Lots answer "did anything actually change hands".
+var loot_lots: float = 0.0
 
 # M52a -- last attributed attacker (for death-cause instrumentation only). The
 # pirate guild reads this off a member's node at the OVERDUE-on-death check-in
