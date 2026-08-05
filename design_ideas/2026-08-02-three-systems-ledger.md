@@ -1855,6 +1855,51 @@ Sources: [MSL RCS controller](https://www.researchgate.net/publication/228869689
 [NASA optimum on-off attitude control](https://ntrs.nasa.gov/api/citations/19680011791/downloads/19680011791.pdf) ·
 [Work/Energy deadband limit cycles](https://apps.dtic.mil/sti/citations/ADA010595)
 
+### D55 — every position hold now has a deadband, and DEMAND_STOP was the big one
+
+Fixing only the robbery hold (D54) left the LONGER hold untouched. `DEMAND_STOP`
+paces for up to `patience` (25s) -- twice the take -- and runs immediately
+BEFORE it, so the take INHERITS its heat. Measured in the rig's new demand
+phase, seconds per run:
+
+| victim drift | DEMAND_STOP peak, before | after |
+|---|---|---|
+| 40 u/s | 0.61 | **0.24** |
+| 120 u/s | **0.83** | **0.55** |
+
+**0.83 against a 0.9 cutoff, before the take even begins.** That is the source of
+D53's unexplained 0.48-0.81 hold-entry heat, and it is a bigger win than the hold
+fix itself (0.77 -> 0.68).
+
+**NOT pirate-only.** `InterdictLeaf` builds `[INTERCEPT, DEMAND_STOP]` for
+PATROLS too, so every interdiction was paying this. A patrol heating toward its
+own disengage threshold looks exactly like the patience expiries criterion (4)
+has been attributing elsewhere -- so this may move (4) as well, untested.
+
+**INTERCEPT is deliberately NOT converted, and that is checked rather than
+assumed**: it completes at `dist <= hail_range` or `standoff * 1.25` (>= 500u),
+while its deadband would engage at `standoff * 0.35` = 140u. It terminates before
+its own deadband could apply. There were two real holds; both now have one.
+
+### Shared code for "hold position", after the fact
+
+`_pace_at_offset` was already shared -- the POLICY was not. The deadband defaulted
+to `0.0`, so a caller got "no deadband" BY OMISSION, which is exactly how
+DEMAND_STOP paced 25 seconds without one while the 12-second hold was being
+fixed. Same shape as the force-authorization bug the same day: one mechanism,
+per-site policy, silent default.
+
+Now two named intents over one implementation:
+
+```
+_close_on()       -- error large and shrinking; correcting continuously IS the job
+_hold_formation() -- error small and persistent; correcting continuously cooks the hull
+```
+
+A new step must say which it is doing rather than inherit a default nobody looked
+at. `_hold_station` stays separate and correct: a dead stop with no target, so no
+tracking, no correction loop, no heat.
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than

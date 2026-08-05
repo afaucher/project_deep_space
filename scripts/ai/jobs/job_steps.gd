@@ -337,6 +337,29 @@ static func _thermal_derate(actor) -> float:
 # Inside the band the actor still MATCHES target_vel; it just stops chasing
 # position. That is the physically right behaviour for formation flight: once
 # you are in formation, hold velocity and coast.
+# TWO NAMED INTENTS over one implementation (2026-08-04). `_pace_at_offset` is
+# already shared by every station-keeping step; what was NOT shared is the
+# POLICY, because the deadband is an optional parameter defaulting to 0.0 -- so a
+# caller gets "no deadband" BY OMISSION. That is exactly how DEMAND_STOP came to
+# pace for up to 25 seconds without one while TAKE_ALONGSIDE's 12-second hold was
+# being fixed, and it is the same shape as the force-authorization bug found the
+# same day: one mechanism, per-site policy, silent default.
+#
+# These two wrappers make the choice explicit at the call site. A new step has to
+# say which it is doing rather than inheriting a default nobody looked at.
+#
+#   _close_on()        -- CLOSING. The error is large and shrinking, correcting
+#                         continuously is the entire job. No deadband.
+#   _hold_formation()  -- HOLDING. The error is small and persistent; correcting
+#                         it continuously is what cooks the hull (D53/D54, and
+#                         _engine_heat_contribution charges throttle AND torque,
+#                         so each re-aim costs twice). Deadband required.
+static func _close_on(actor, target_pos: Vector2, target_vel: Vector2, exclude_pos, cruise: float) -> void:
+	_pace_at_offset(actor, target_pos, target_vel, exclude_pos, cruise, 0.0)
+
+static func _hold_formation(actor, target_pos: Vector2, target_vel: Vector2, exclude_pos, cruise: float, ring: float) -> void:
+	_pace_at_offset(actor, target_pos, target_vel, exclude_pos, cruise, ring * TAKE_ALONGSIDE_HOLD_DEADBAND)
+
 static func _pace_at_offset(actor, target_pos: Vector2, target_vel: Vector2, exclude_pos, cruise: float, deadband: float = 0.0) -> void:
 	var to_target: Vector2 = target_pos - actor.position
 	var dist: float = to_target.length()
@@ -1130,7 +1153,13 @@ static func step_intercept(actor, step: Dictionary, job: Dictionary) -> int:
 		return DONE
 
 	var offset: Vector2 = _standoff_offset(actor, victim_pos, victim_vel, standoff_dist, scratch)
-	_pace_at_offset(actor, victim_pos + offset, victim_vel, victim_pos, step.get("cruise", 600.0))
+	# `_close_on` because INTERCEPT is genuinely NOT a hold, and this is checked
+	# rather than assumed: the step completes at `dist <= hail_range` or
+	# `dist <= standoff * 1.25` (>= 500u), while a deadband would engage at
+	# `standoff * 0.35` = 140u. It terminates long before its own deadband could
+	# ever apply, so adding one would be dead code. The two REAL holds
+	# (DEMAND_STOP, TAKE_ALONGSIDE) both have one.
+	_close_on(actor, victim_pos + offset, victim_vel, victim_pos, step.get("cruise", 600.0))
 	return CONTINUE
 
 # ---------------------------------------------------------------------------
@@ -1212,7 +1241,26 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 	var victim_vel_demand: Vector2 = c.get("vel", Vector2.ZERO)
 	var standoff_dist: float = step.get("standoff", INTERCEPT_STANDOFF_DIST)
 	var offset: Vector2 = _standoff_offset(actor, victim_pos_demand, victim_vel_demand, standoff_dist, scratch)
-	_pace_at_offset(actor, victim_pos_demand + offset, victim_vel_demand, victim_pos_demand, step.get("cruise", 400.0))
+	# `_hold_formation`, NOT `_close_on` (D55). This step paces for up to
+	# `patience` (25s) -- TWICE the robbery hold -- and runs immediately BEFORE
+	# it, so its heat is what the hold INHERITS. Measured in alongside_trace's
+	# demand phase, with no deadband:
+	#
+	#   victim drift  40u/s -> peak 0.61
+	#   victim drift 120u/s -> peak 0.83   <- already at the 0.9 disengage cutoff
+	#                                         BEFORE the take begins
+	#
+	# That is the source of D53's unexplained 0.48-0.81 hold-entry heat. The
+	# deadband is distance-gated, so this step still closes normally while far
+	# out and only coasts once it is inside the ring -- approach behaviour is
+	# unchanged, station-keeping stops burning.
+	#
+	# NOT pirate-only: InterdictLeaf builds [INTERCEPT, DEMAND_STOP] for PATROLS
+	# too, so every interdiction paid this cost, and a patrol heating toward its
+	# own disengage threshold looks exactly like the patience expiries criterion
+	# (4) has been attributing elsewhere.
+	_hold_formation(actor, victim_pos_demand + offset, victim_vel_demand, victim_pos_demand,
+		step.get("cruise", 400.0), standoff_dist)
 
 	# M52d -- heartbeat: first pass ISSUES the demand (new seq), every ~2s
 	# after that RE-ASSERTS it under the same seq so the victim's pending_
@@ -1542,8 +1590,8 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	# through small errors can never drift the hull out of the hold it is
 	# accumulating. The slack governs when the hold BREAKS; this governs when the
 	# hull stops burning fuel to correct.
-	_pace_at_offset(actor, victim_pos_take + offset, victim_vel_take, victim_pos_take,
-		step.get("cruise", 300.0), range * TAKE_ALONGSIDE_HOLD_DEADBAND)
+	_hold_formation(actor, victim_pos_take + offset, victim_vel_take, victim_pos_take,
+		step.get("cruise", 300.0), range)
 
 	var dist: float = actor.position.distance_to(victim_pos_take)
 	# CLOSEST APPROACH ACHIEVED (D49 follow-up). `held -1.0s` says the hold never

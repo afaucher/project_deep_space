@@ -58,6 +58,13 @@ func setup(main) -> void:
 	await _trace(3000.0, true, false, 40.0)
 	print("")
 	await _trace(3000.0, true, false, 120.0)
+	print("")
+	# DEMAND_STOP paces for up to `patience` (25s) -- TWICE the hold -- and runs
+	# immediately BEFORE it, so its heat is what the hold INHERITS. Measured at
+	# rig speed rather than in a 45-game-minute campaign.
+	await _demand_trace(3000.0, 40.0)
+	print("")
+	await _demand_trace(3000.0, 120.0)
 	get_tree().quit(0)
 
 func _make(script, nm: String, owner: int, pos: Vector2, tags: Array) -> Node:
@@ -174,3 +181,45 @@ func _trace(start_gap: float, full_tree: bool = false, bystander: bool = false, 
 	victim.queue_free()
 	if extra != null:
 		extra.queue_free()
+
+# The DEMAND_STOP phase on its own: how hot is a pirate by the time the victim
+# complies? D53 measured hold-entry heat at 0.48-0.81 in the campaign and could
+# not say where it came from; this isolates the step that precedes the hold.
+func _demand_trace(start_gap: float, drift: float) -> void:
+	print("--- DEMAND_STOP | gap %.0fu | victim drift=%.0fu/s ---" % [start_gap, drift])
+	var base := Vector2(700000, 0)
+	var pirate = _make(ArmedPinnace, "DemPirate_%d" % int(drift), 810, base, ["PIRATE_GUILD"])
+	var victim = _make(CargoShuttle, "DemVictim_%d" % int(drift), 811, base + Vector2(start_gap, 0), ["TEAM_CIV"])
+	for i in range(300):
+		await get_tree().physics_frame
+		if not _contact(pirate, victim).is_empty():
+			break
+	if drift > 0.0:
+		victim.linear_velocity = Vector2(0, drift)
+
+	var runner = JobRunnerLeaf.new()
+	var bb = BlackboardScript.new()
+	var job := {
+		"steps": [{"verb": "DEMAND_STOP", "patience": 25.0, "show_colors": true, "on_abort": "stop"},
+			{"verb": "AWAIT", "label": "stop", "condition": "clear", "clear_range": 0.0, "timeout": 1.0, "on_abort": ""}],
+		"current": 0, "victim_iid": victim.get_instance_id(),
+	}
+	pirate.assignment = job
+
+	var frames := 0
+	var heat_peak: float = 0.0
+	while frames < 40 * 60:
+		runner.tick(pirate, bb)
+		await get_tree().physics_frame
+		frames += 1
+		heat_peak = maxf(heat_peak, (pirate.current_heat / pirate.max_heat) if pirate.max_heat > 0.0 else 0.0)
+		if frames % 300 == 0:
+			print("  %4ds | sep %8.0f | heat %.2f | complied %s" % [
+				frames / 60, pirate.position.distance_to(victim.position),
+				(pirate.current_heat / pirate.max_heat) if pirate.max_heat > 0.0 else 0.0,
+				"yes" if not victim.compelled_stop.is_empty() else "no"])
+		if pirate.assignment.is_empty():
+			break
+	print("  PEAK heat during demand: %.2f   (the hold then INHERITS this)" % heat_peak)
+	pirate.queue_free()
+	victim.queue_free()
