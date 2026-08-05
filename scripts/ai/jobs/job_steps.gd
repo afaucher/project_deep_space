@@ -105,6 +105,11 @@ const PACE_BRAKING_SAFETY := 0.3
 # comment for why a bare "dist > range" cutoff isn't enough once the hold
 # envelope is tight.
 const TAKE_ALONGSIDE_EXIT_SLACK := 1.25
+# D54 -- fraction of `range` inside which a holding hull coasts instead of
+# correcting. 0.35 of a 200u ring is 70u of tolerance against an exit slack of
+# 250u, so the hull can never coast its way out of the hold.
+const TAKE_ALONGSIDE_HOLD_DEADBAND := 0.35
+
 
 # M52 playtest fix -- thermal governor for _pace_at_offset (calling session,
 # 2026-07-22): two pirates converging on the SAME victim never exclude EACH
@@ -309,9 +314,77 @@ static func _thermal_derate(actor) -> float:
 		return 1.0
 	return clampf(1.0 - (ratio - HEAT_SAFE_RATIO) / (1.0 - HEAT_SAFE_RATIO), 0.0, 1.0)
 
-static func _pace_at_offset(actor, target_pos: Vector2, target_vel: Vector2, exclude_pos, cruise: float) -> void:
+# `deadband` -- position error below which the actor stops CORRECTING and simply
+# matches the target's velocity (D54, 2026-08-04). Default 0.0, so every existing
+# caller is byte-for-byte unchanged.
+#
+# WHY. Measured in alongside_trace: a hull holding formation heats up, and a
+# SMALL residual drift is worse than a large one --
+#
+#   victim drift 0 u/s   -> heat 0.44 then COOLS to 0.36 (settles)
+#   victim drift 40 u/s  -> heat 0.44 -> 0.63 -> 0.76, still climbing
+#   victim drift 120 u/s -> plateaus ~0.51
+#
+# That is the signature of a controller with no deadband: a big error gets one
+# decisive correction and then steady state, while a small persistent error
+# causes endless small corrections. `_engine_heat_contribution` charges BOTH
+# `abs(throttle)` AND `abs(applied_torque)`, so each little re-aim costs heat
+# twice over. A complied victim drifts slightly by construction -- the step
+# deliberately paces residual drift rather than out-braking it -- so the robbery
+# hold sits exactly in the worst case, and D53 measured it reaching the 0.9
+# disengage threshold and losing the take.
+#
+# Inside the band the actor still MATCHES target_vel; it just stops chasing
+# position. That is the physically right behaviour for formation flight: once
+# you are in formation, hold velocity and coast.
+static func _pace_at_offset(actor, target_pos: Vector2, target_vel: Vector2, exclude_pos, cruise: float, deadband: float = 0.0) -> void:
 	var to_target: Vector2 = target_pos - actor.position
 	var dist: float = to_target.length()
+	if deadband > 0.0 and dist <= deadband:
+		# In formation: match velocity, stop chasing position. Heading follows
+		# the velocity being carried, so there is no torque churn either.
+		#
+		# A VELOCITY deadband was tried here too and made things WORSE -- record
+		# it so nobody retries it. Coasting at current velocity while the victim
+		# drifts lets the position error grow until it leaves the band, then
+		# spends one LARGE correction: classic limit-cycling. Measured, peak heat
+		# in the worst case (40u/s residual drift, i.e. what a complied victim
+		# actually produces):
+		#
+		#   no deadband        0.77
+		#   position only      0.68   <- shipped
+		#   position+velocity  0.75   <- limit-cycling, nearly back to baseline
+		#
+		# It did fix a real but minor cost -- commanding `target_vel.length()`
+		# when the victim is nearly stopped brakes a drifting pirate rather than
+		# letting it settle (easy case final heat 0.35 -> 0.48) -- but that case
+		# peaks at 0.48 against a 0.9 cutoff and was never at risk. Optimise the
+		# case that fails.
+		# WHY THERE IS NO RATE DEADBAND HERE, having gone and looked it up.
+		#
+		# On-off spacecraft station-keeping pairs a LARGE attitude/position
+		# deadband with a SMALL rate deadband, and the small rate band is what
+		# supplies energy damping; the goal is not to kill the limit cycle but to
+		# SHAPE it -- drift across the band, spend one impulse per traverse
+		# rather than bouncing between both limits.
+		#
+		# That does not map onto this engine, and the reason is worth recording.
+		# RCS deadbands assume DISCRETE THRUSTER IMPULSES, where "null the rate"
+		# and "hold position" are genuinely different actuations. Here
+		# `apply_control_input` commands a TARGET VELOCITY and a servo closes it,
+		# so velocity-matching is already the native mode: nulling the rate error
+		# is algebraically `linear_velocity + (target_vel - linear_velocity)`,
+		# i.e. exactly `target_vel`, which is what this line already does. A rate
+		# deadband was implemented and measured BIT-IDENTICAL at 3.0u/s (never
+		# triggers) and actively worse at 25u/s (0.68 -> 0.75, limit-cycling from
+		# widening the do-nothing region). Both were removed.
+		#
+		# So the position band is the whole of the win here: 0.77 -> 0.68 peak in
+		# the worst case (40u/s residual drift, which is what a complied victim
+		# produces).
+		var hold_heading: float = target_vel.angle() if target_vel.length() > 1.0 else actor.rotation
+		actor.apply_control_input(0.0, target_vel.length(), hold_heading, 1, 1)
+		return
 	var accel_max: float = (actor.get_ship_max_thrust() / actor.mass) if actor.mass > 0.0 else 0.0
 	var catchup: float
 	if accel_max > 0.0:
@@ -1465,7 +1538,12 @@ static func step_take_alongside(actor, step: Dictionary, job: Dictionary) -> int
 	# it. Do not read this constant as the reason robberies succeed or fail.
 	var approach: float = range * TAKE_ALONGSIDE_ENTRY_FRACTION
 	var offset: Vector2 = _standoff_offset(actor, victim_pos_take, victim_vel_take, approach, scratch)
-	_pace_at_offset(actor, victim_pos_take + offset, victim_vel_take, victim_pos_take, step.get("cruise", 300.0))
+	# D54 -- deadband sized well INSIDE TAKE_ALONGSIDE_EXIT_SLACK, so coasting
+	# through small errors can never drift the hull out of the hold it is
+	# accumulating. The slack governs when the hold BREAKS; this governs when the
+	# hull stops burning fuel to correct.
+	_pace_at_offset(actor, victim_pos_take + offset, victim_vel_take, victim_pos_take,
+		step.get("cruise", 300.0), range * TAKE_ALONGSIDE_HOLD_DEADBAND)
 
 	var dist: float = actor.position.distance_to(victim_pos_take)
 	# CLOSEST APPROACH ACHIEVED (D49 follow-up). `held -1.0s` says the hold never

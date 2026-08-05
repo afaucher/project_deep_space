@@ -48,11 +48,16 @@ func setup(main) -> void:
 	# So run the same take with the FULL pirate tree instead of a bare
 	# JobRunner, and with a neutral bystander nearby. If the take survives both,
 	# neither candidate is it.
-	await _trace(3000.0, false, false)
+	# D53 -- the HOLD is what cooks the pirate (measured: entry 0.15 -> peak 0.90).
+	# A perfectly stationary victim is the easy case and completes; a COMPLIED
+	# victim keeps residual drift, which the step deliberately paces rather than
+	# out-braking, so the pirate re-aims every tick. Torque is charged as heat
+	# too, so re-aiming is not free. `drift` reproduces that here.
+	await _trace(3000.0, true, false, 0.0)
 	print("")
-	await _trace(3000.0, true, false)
+	await _trace(3000.0, true, false, 40.0)
 	print("")
-	await _trace(3000.0, true, true)
+	await _trace(3000.0, true, false, 120.0)
 	get_tree().quit(0)
 
 func _make(script, nm: String, owner: int, pos: Vector2, tags: Array) -> Node:
@@ -72,10 +77,9 @@ func _contact(observer, target) -> Dictionary:
 			return c
 	return {}
 
-func _trace(start_gap: float, full_tree: bool = false, bystander: bool = false) -> void:
-	print("--- opening gap %.0fu | tree=%s | bystander=%s ---" % [
-		start_gap, "FULL build_pirate" if full_tree else "bare JobRunner",
-		"yes" if bystander else "no"])
+func _trace(start_gap: float, full_tree: bool = false, bystander: bool = false, drift: float = 0.0) -> void:
+	print("--- opening gap %.0fu | tree=%s | victim drift=%.0fu/s ---" % [
+		start_gap, "FULL build_pirate" if full_tree else "bare JobRunner", drift])
 	var base := Vector2(300000, 0)
 	var pirate = _make(ArmedPinnace, "TracePirate_%d" % int(start_gap), 800, base, ["PIRATE_GUILD"])
 	var victim = _make(CargoShuttle, "TraceVictim_%d" % int(start_gap), 801, base + Vector2(start_gap, 0), ["TEAM_CIV"])
@@ -131,9 +135,18 @@ func _trace(start_gap: float, full_tree: bool = false, bystander: bool = false) 
 	}
 	pirate.assignment = job
 
-	print("     t | separation | pirate_spd | victim_spd | compelled | note")
+	# Residual drift on the complying victim -- perpendicular, so the pirate must
+	# keep re-aiming rather than simply matching a straight line.
+	if drift > 0.0:
+		victim.linear_velocity = Vector2(0, drift)
+	print("     t | separation | pirate_spd | victim_spd | heat | compelled | note")
 	var frames := 0
 	var min_seen: float = INF
+	# TRUE maximum, tracked every frame. The first version printed
+	# `current_heat` at the END of the run and labelled it "peak", which is a
+	# different number entirely -- a hull that spiked and then cooled reads low.
+	# Comparing two configurations on that would have been meaningless.
+	var heat_peak: float = 0.0
 	while frames < TRACE_SECONDS * 60:
 		if tree == null:
 			runner.tick(pirate, bb)
@@ -141,17 +154,20 @@ func _trace(start_gap: float, full_tree: bool = false, bystander: bool = false) 
 		frames += 1
 		var d: float = pirate.position.distance_to(victim.position)
 		min_seen = minf(min_seen, d)
+		heat_peak = maxf(heat_peak, (pirate.current_heat / pirate.max_heat) if pirate.max_heat > 0.0 else 0.0)
 		if frames % 60 != 0:
 			continue
 		var note := ""
 		if pirate.assignment.is_empty():
 			note = "job ended"
-		print("  %4d | %10.0f | %10.0f | %10.0f | %9s | %s" % [
+		print("  %4d | %10.0f | %10.0f | %10.0f | %4.2f | %9s | %s" % [
 			frames / 60, d, pirate.linear_velocity.length(), victim.linear_velocity.length(),
+			(pirate.current_heat / pirate.max_heat) if pirate.max_heat > 0.0 else 0.0,
 			"held" if not victim.compelled_stop.is_empty() else "LAPSED", note])
 		if pirate.assignment.is_empty():
 			break
-	print("  closest approach: %.0f  (hold needs <= 200)" % min_seen)
+	print("  closest approach: %.0f  (hold needs <= 200) | PEAK heat %.2f | final %.2f" % [
+		min_seen, heat_peak, (pirate.current_heat / pirate.max_heat) if pirate.max_heat > 0.0 else 0.0])
 	if job.has("_abort_reason"):
 		print("  abort: %s" % job["_abort_reason"])
 	pirate.queue_free()

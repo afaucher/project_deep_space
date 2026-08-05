@@ -1784,6 +1784,77 @@ the measurement built to test it (the first: `alongside_trace` exonerating the
 take step). Both times the prediction was plausible and specific, which is
 exactly why it needed the measurement.
 
+### D54 — a station-keeping deadband, measured in the fast rig (2026-08-04)
+
+D53 established that the HOLD cooks the pirate. The cause is visible once the
+heat trace is read against victim drift:
+
+| victim drift | peak heat, no deadband |
+|---|---|
+| 0 u/s | 0.46, then COOLS to 0.35 — settles |
+| **40 u/s** | **0.77, still climbing** |
+| 120 u/s | 0.52 — plateaus |
+
+**A SMALL residual drift is worse than a large one.** That is the signature of a
+controller with no deadband: a big error gets one decisive correction then steady
+state, a small persistent error causes endless little ones. And
+`_engine_heat_contribution` charges BOTH `abs(throttle)` AND
+`abs(applied_torque)`, so every re-aim costs twice. A complied victim drifts
+slightly by construction -- `TAKE_ALONGSIDE` deliberately paces residual drift
+rather than out-braking it -- so the robbery hold sits exactly in the worst case.
+
+**Shipped: a POSITION deadband** at `range * 0.35` (70u inside a 200u ring,
+against an exit slack of 250u, so a coasting hull can never drift out of the hold
+it is accumulating). Worst case peak **0.77 -> 0.68**, others unchanged. Real
+margin against the 0.9 cutoff, and it touches neither `hold_time` nor the
+disengage net.
+
+**REJECTED, recorded so nobody retries it: a VELOCITY deadband too.**
+
+| | worst case peak |
+|---|---|
+| no deadband | 0.77 |
+| position only | **0.68** (shipped) |
+| position + velocity | 0.75 |
+
+Coasting at current velocity while the victim drifts lets the position error grow
+until it leaves the band, then spends one LARGE correction -- limit-cycling,
+nearly back to baseline. It did fix a real but minor cost (commanding
+`target_vel.length()` brakes a drifting pirate beside a stopped victim, easy-case
+final heat 0.35 -> 0.48), but that case peaks at 0.48 against a 0.9 cutoff and
+was never at risk. **Optimise the case that fails.**
+
+**This does not solve D53** -- a 0.68 peak still climbs on a long hold. It buys
+margin, nothing more.
+
+**Two instrument catches during this one change**: `peak heat` was printing
+`current_heat` at END of run rather than the maximum (two configurations were
+nearly compared on it), and the first deadband version introduced the braking
+cost above. Ninth and tenth of the session, same shape both times.
+
+**Checked the control literature, and it explains the failure but does not
+transfer.** On-off spacecraft station-keeping pairs a LARGE position/attitude
+deadband with a SMALL rate deadband -- the small rate band is what supplies
+energy damping -- and the aim is to SHAPE the limit cycle (drift across the band,
+one impulse per traverse) rather than eliminate it. That named my error exactly:
+large position + LARGE rate band removed the damping term.
+
+But the corrected pairing measured BIT-IDENTICAL. RCS deadbands assume DISCRETE
+THRUSTER IMPULSES, where "null the rate" and "hold position" are different
+actuations. This engine commands a TARGET VELOCITY and a servo closes it, so
+velocity-matching is already native: nulling the rate error is algebraically
+`linear_velocity + (target_vel - linear_velocity)` = `target_vel`, which the
+existing line already did. Measured inert at 3u/s and harmful at 25u/s; both
+removed, reasoning kept in `_pace_at_offset` so nobody re-derives it from the
+same papers.
+
+**The position band is the whole win.** Worth noting a plausible, correctly-cited
+control-theory result was one measurement away from being shipped as a fix.
+
+Sources: [MSL RCS controller](https://www.researchgate.net/publication/228869689_THE_RCS_ATTITUDE_CONTROLLER_FOR_THE_EXO-ATMOSPHERIC_AND_GUIDED_ENTRY_PHASES_OF_THE_MARS_SCIENCE_LABORATORY) ·
+[NASA optimum on-off attitude control](https://ntrs.nasa.gov/api/citations/19680011791/downloads/19680011791.pdf) ·
+[Work/Energy deadband limit cycles](https://apps.dtic.mil/sti/citations/ADA010595)
+
 ### Queue after the re-baseline
 
 1. LANE_RUN A/B, and derive WHEN a pirate prefers each posture rather than
