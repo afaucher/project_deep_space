@@ -71,6 +71,15 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D35 | **Crew** is what makes surrender rational again — hull lost either way, crew survives a surrender | **OPEN** — lands in M55 (warships have zero crew space today) |
 | D36 | Urgent routes are never risked because of **substitutability**, not a missing payout term; posting **fog** is the fix | **CORRECTED**, planned as **M64** — prerequisite for criterion (3) |
 | D37 | The hulk gate keys on the **warrant**; an empty warrant means *uncapped* (colour-flying pirate) | settled for now — reviewed and kept |
+| D56 | Routing is a **state-dependent leg choice**, not a pair-shaped argmax; mail bounty is a **node** reward, cargo margin an **edge** reward; depth 2 minimum; reward per unit **time** | **NEW 2026-08-04, designed not built** — `2026-08-04-routing-as-an-optimization-problem.md` |
+| D57 | Coordination lives in the **price**, **no joint optimizer** — but payment is on the **delta the merge actually moved**, not on elapsed time | **CORRECTED same day** — the claim protocol is unnecessary; `merge` is idempotent, so consumption is structural |
+| D58 | **Piracy cannot touch the economy today** — a robbed hauler still delivers in full. "The economy survives piracy" is a statement about a missing coupling, not a resilient economy | **NEW 2026-08-04, verified in code** — M55a+M55b is the coupling |
+| D59 | M55a's laden-remainder case and D56's routing model are **one refactor from two directions** — a laden hull re-planning *is* the `(position, cargo)` state | **NEW 2026-08-04** — the mixed hold (D60) dissolves the escape hatch entirely |
+| D60 | **The lot IS a volume**, and a hull's hold is one shared volume across commodities. Split into a numerics-preserving rename + the mixed hold | **NEW 2026-08-04, designed** — station bins stay POLICY in the same unit; volume must NOT become mass |
+| D61 | **Pirates have no cargo bay** — a sequencing hazard for **M55c**, which would silently zero out piracy, NOT a blocker for M55a/b (flat capacity gives every hull a hold) | **NEW 2026-08-04, NARROWED same day** — take cap / partial take / guns-vs-hold all arrive with M55c |
+| D62 | **Price is flat across a delivery** (`payout = transferred x price`, stamped pre-delivery). Harmless today, an exploit under a mixed hold | **NEW 2026-08-04, verified in code** — integrate price over the fill |
+| D63 | **REFUSAL is the robbery bottleneck** — 42 of 63 demands, 65-70% in all four runs. `outpaced` 0/63 and `abandoned` 6/63: the old failures are solved | **NEW 2026-08-05, measured** — the most stable number in the project |
+| D64 | **Civilians comply with a pirate LESS than pirates comply with a patrol** (22% vs 50%). Not geometry — 0 of 14 demands opened past the abort line | **NEW 2026-08-05, OPEN** — the victim's side of D28 |
 
 ---
 
@@ -1899,6 +1908,390 @@ _hold_formation() -- error small and persistent; correcting continuously cooks t
 A new step must say which it is doing rather than inherit a default nobody looked
 at. `_hold_station` stays separate and correct: a dead stop with no target, so no
 tracking, no correction loop, no heat.
+
+### D56/D57 — mail urgency forced the routing model open (2026-08-04)
+
+Written while the re-baseline runs. Nothing here is built; the full argument is
+`design_ideas/2026-08-04-routing-as-an-optimization-problem.md`.
+
+The question that started it was small: *if station C crosses its staleness
+limit while I am in flight carrying ore, and C does not want ore, do I go?*
+
+Today the planner cannot express that question. `best_route()` is an argmax over
+`(pickup, dropoff, commodity)` — the unit of decision is a **plan**, two legs
+bound together, chosen from an empty hold. Mid-flight is not a state in that
+model; it is a patch (`DROPOFF_LEG_START`, `remaining_value()`) that stops
+counting the pickup once it is sunk cost. C is not merely rejected by that
+search, it is **unrepresentable**: every candidate is a commodity pair and C is
+not the far end of one.
+
+**D56 — the reward types attach to different objects, and that is the whole
+finding.** Cargo margin is realized on a `(pickup, dropoff)` PAIR and requires
+the destination to demand what you hold. A mail bounty is realized on ARRIVAL at
+a node, regardless of cargo. C has the node reward with no viable edge; D has
+both. So the decision unit has to be a **leg from a `(position, cargo, bag)`
+state**, whose value includes the value of the state it lands you in — which
+makes "at a station" and "in flight with ore" the same computation and deletes
+the special case rather than giving it a sibling.
+
+Two things fall out. **Depth 2 is the minimum**, because diverting to C leaves
+you still holding ore, so C is worth `mail(C) + V(C, ore)` — a depth-1 greedy is
+wrong in *both* directions (takes C seeing only the bounty; refuses C by
+demanding cargo profit on every leg). And **the objective is reward per unit
+TIME**, or a fat bounty justifies an unbounded detour. Cost is unchanged:
+`stations x stations x commodities`, the same order the search runs today, and
+depth-2 is already the house idiom (M53c).
+
+**D57 — do not build the joint optimizer.** The honest problem is multi-agent,
+and every hauler taking its own argmax is what makes a herd: `Mailbag.merge` is
+*built* to make holders converge, so a stale station is stale in everyone's bag
+at once and the fleet diverts, arrives, collapses the bounty and leaves
+together. Synchronized oscillation, the fleet-scale form of the limit-cycling in
+the deadband doc. But a joint optimizer needs exactly the omniscience M64 exists
+to remove. **The coordination goes in the price**: a claimable, consumable
+posting, which two haulers cannot both collect. The herd becomes ordinary
+posting competition, which the economy already models — and a bounty has a
+budget, so it saturates for a reason instead of because someone picked a curve.
+
+**Measurement, chosen before the result.** The stage this changes is COVERAGE —
+p95/max of `confirmed_at` age across the fleet, and how many distinct stations
+get visited. Explicitly **not** `risked_anyway`: a station-attached payout
+uncorrelated with commodity price genuinely can make a risky lane win, which
+matters for criterion (3), but reading that as the primary result is the LANE_RUN
+error again — judging a mechanism at the end of the funnel. And it must **not**
+land in the same run as the `confirmed_at` risk discount; both are terms in one
+score function, and that is stacking two variables.
+
+Precondition to lead the report with: **did `confirmed_at` ages ever vary?** If
+haulers dock often enough that every age is ~0, the term is inert and a null
+result means nothing.
+
+### D57 CORRECTED — the receiver knows the price and the carrier cannot (2026-08-04)
+
+D57 said the mail bounty is a claimable, consumable posting. That is wrong in a
+way worth keeping on the record, because the objection that broke it is one line
+long: **paid on delivery, by the receiver — but you do not know when they last
+got mail, by definition.** If they were served yesterday, today's delivery is
+worth little, and you cannot find that out until you arrive.
+
+**The epistemics are CORRECT and should be kept.** This is the first place in
+the whole system where a hauler can be genuinely WRONG rather than merely
+uncertain — flying on the belief that nobody has been to Deepcut in an hour and
+arriving to find a courier beat you by ten minutes. That is the "arrive to find
+the spike gone" property M64 was invented to produce, showing up for free.
+
+**The defect is that the error is ONE-SIDED.** A holder's `confirmed_at[X]` is
+the latest time anyone in its merge history confirmed X. Others may have visited
+since and nothing reports that, so:
+
+    the station's TRUE staleness  <=  the hauler's computed staleness, always
+
+The estimate can only be too high, so the bounty estimate can only be too high.
+A hauler can be disappointed and never pleasantly surprised. Symmetric error
+would wash out; this systematically over-values mail runs against cargo runs —
+distorting the exact decision the term was added to inform. Time-based, it is
+also *unbounded*: the longer since you checked, the larger the imagined payday,
+growing without ceiling.
+
+**FIX — pay for the DELTA THE MERGE ACTUALLY MOVED, not for elapsed time.**
+Computed at the dock by comparing the two bags, which both parties can do
+locally with no estimation on either side. `Mailbag.has_news_for(mine, theirs)`
+is already that comparison.
+
+Three things follow:
+
+1. **The optimism is bounded.** The forward estimate is capped by what the
+   hauler is actually carrying, rather than by a clock that runs away from it.
+   Same bias direction, far smaller magnitude.
+2. **The claim protocol is unnecessary.** `merge` is idempotent (per-source
+   `max`), so delivering the same news twice pays zero the second time *by
+   construction*. Consumption is structural — no reservation, no race.
+3. **The herd self-limits for free.** Two haulers carrying identical news: the
+   first is paid, the second is not.
+
+**Do NOT pay on version delta alone.** `mailbag.gd`'s header rejects that in
+advance and is right: it would make "nothing happened" unsellable and turn a
+courier route into a lottery that only pays when there happens to be news.
+Payment is on BOTH clocks — version advance (new facts) and `confirmed_at`
+advance (confirmed absence of news). Both exist and both already merge as `max`.
+
+**One gap this exposes.** Estimating the sale needs a belief about what X
+*knows* — X as a HOLDER. A bag tracks X as a SOURCE (`{version, confirmed_at}`
+describe X's own log, not X's knowledge of everyone else). Different quantities;
+nothing tracks the second, and bags-of-bags is not worth building. The proxy
+that saves it: **dock merge is bidirectional**, so at the last sync X knew
+everything the hauler knew. `confirmed_at[X]` therefore legitimately marks
+"X's bag was a superset of mine as of then", and everything learned since is
+probably new to X — computable from what the hull already holds, and honest
+about its own error.
+
+### D58 — the economy findings, and a precondition the goal has been resting on (2026-08-04)
+
+Written while the re-baseline runs, from a pass over M55 and the human-capacity
+sibling. The milestone material lives in
+`implementation_plans/m48_m55_economy_piracy_roadmap.md` and is not repeated
+here; what follows is what is NEW, plus one re-verification that changes how an
+existing result should be read.
+
+**Verified in code today, not taken from the plan.** `Ship.serve_posting`
+(`ship.gd:1145`) checks docking state and resolves the record, then hands
+`amount` straight to `StationEconomy.fulfill()`. Nothing checks that the hull
+possesses anything, and **`Ship` has no manifest field at all** — no
+`manifest`, no `cargo_lots`, nothing. A robbed hauler continues to its
+destination and delivers in full. `Ship.loot_takes` counts completed alongside
+holds, and the guild ledger's `loot` is that same counter. The roadmap asserted
+this on 2026-08-01; it is still exactly true on 2026-08-04.
+
+**D58 — so "the economy survives four game-hours alongside piracy and patrols"
+is true and much weaker than it reads.** That was this ledger's headline
+ESTABLISHED result on 2026-08-03, off `0 / 24 starved` in every run. The economy
+survives piracy because **piracy structurally cannot reach it**. There is no
+channel. `0 starved` under a system that cannot starve anything is not evidence
+of resilience.
+
+This is the precondition trap from
+`2026-08-02-preconditions-the-world-never-supplies.md`, at the level of the
+top-level goal rather than a single instrument: *"0 of 5206 decisions changed"
+means the opposite thing depending on whether the input was ever non-zero.* The
+funnel reports `takes` and `starved` in one table, which reads as though they
+are coupled quantities. They are not coupled at all, and nothing in the report
+says so.
+
+**Consequence for the cap on the whole goal.** "A successful long economy sim
+showing all three playing together" cannot presently be satisfied in the sense
+intended: two of the three interact with each other, and the third runs
+alongside them, untouched. The four-run re-baseline in flight right now
+inherits this — whatever it reports for `starved`, that column is not a
+measurement of piracy's economic effect and must not be written up as one.
+
+**M55a + M55b are the missing coupling**, and the roadmap already rates them as
+the largest fidelity gain per unit of work in it: cheap, blocked by nothing, and
+— the part that matters given everything in flight — they leave flat `LOT_SIZE`
+alone, so they need **no re-baseline**.
+
+**Explicitly NOT now: M55c (capacity from parts) and the catalog pass.** Not
+because they are hard code, but because of what they move. Mass derives from
+component area, so authoring a bay onto the CargoShuttle makes the primary
+hauler heavier and slower — a double-digit mass change on a ~1,100-area hull —
+and pirate-vs-prey outcome is an explicit speed relationship (`pirate_scenarios`
+asserts "slow prey caught, fast prey escapes"). Doing that now would move every
+number criterion (1) has spent this week establishing, mid-investigation. It
+also needs `CARGO_AREA_PER_UNIT` recalibrated (the formula currently gives a
+Freighter 374 lots against Refinery Prime's entire 39.6-lot ore bin — two orders
+out, because the constant was a validation check and never economic), which in
+turn needs M55d's mid-tier hull to exist, because with only two rungs any
+calibration that keeps the shuttle useful makes the freighter enormous.
+
+**D59 — M55a's undecided branch is D56's problem wearing different clothes.**
+The roadmap flags that once cargo is physical, a delivery clamped by a full bin
+**leaves the hauler holding the difference** — a state that exists nowhere in
+the game today — and says to pick an escape hatch in M55a rather than discover
+one, because "hauler idles laden, permanently" reads exactly like the job-runner
+bug class that already cost this project a faction.
+
+That laden hull re-planning is precisely the `(position, cargo)` state D56 says
+routing should be structured around. Today the planner has no cargo state at
+all, which is why mid-flight is a patch (`DROPOFF_LEG_START`,
+`remaining_value()`). **M55a is what creates the state; D56 is what the planner
+should do with it.** They are one refactor arriving from two directions, and
+building either alone means building the other's special case. Sequence them
+together.
+
+The escape hatch itself stays open (dump after N failed re-plans, or a forced
+sale at a discount) — but note it is a *routing* decision under D56, not a
+separate rule: "no viable leg exists from `(here, ore)`" is already expressible
+in that model, and the hatch is what the model does when its own search is empty.
+
+**Human capacity — the state, briefly.** `living_quarters` is already authored
+across much of the fleet and **nothing reads the derived capacity**; a
+MediumStation's habitat (20,000 area, ~500 people at `AREA_PER_PERSON = 40`)
+*exceeds* its cargo bay. Every warship has **zero** crew space, by the identical
+STRUCTURE-tier validator oversight that let the CargoShuttle ship with no cargo
+bay. The one trap to carry forward, already recorded in the roadmap and easy to
+get backwards: **`CARGO_AREA_PER_UNIT` must stay a single global constant**
+(a lot of ore occupies the same space anywhere — banding it would let a hull
+cheat physics) while **`AREA_PER_PERSON` should band by class** (space per
+person is a standard of living, not a volume; a marine hot-bunking and a station
+resident legitimately differ several-fold, and `COMPONENT_BANDS` is already
+tier-keyed). D35 (crew is what makes surrender rational) lands here, as does
+marines-gate-boarding for M55e.
+
+### D60/D61/D62 — the lot becomes a volume, and what falls out (2026-08-04)
+
+**D60 — one unit, and it is VOLUME.** Denominate everything in volume and
+convert existing numbers so the current balance is preserved exactly. This
+splits into two changes and they must not land together.
+
+*Change 1, the redefinition, costs nothing.* Declare the lot to BE the volume
+unit. `LOT_SIZE = 4.0` becomes a hold volume of 4.0; rates stay volume/hour with
+the same numbers; `capacity = rate x BUFFER_HOURS` is untouched; prices become
+per-volume at the same values. **Nothing moves numerically** — it is a
+redefinition of meaning plus a rename that finally fixes the `LOT_SIZE`
+misnomer (that constant was never a lot's size; it is the hold's capacity).
+Because it is numerics-preserving, `economy_traffic` should come back
+essentially identical, which makes the conversion self-checking.
+
+Hold **per-commodity density** (ore bulky, RARE compact) back deliberately, even
+though the fiction wants it. Uniform density keeps change 1 numerics-preserving;
+density is a later dial, turnable one commodity at a time.
+
+*Change 2, the shared hold, is the actual feature.* The hold stops being
+`one commodity, one amount` and becomes a vector. That is a knapsack in
+principle and does not need to be solved as one: **primary run + opportunistic
+fill** — pick the best `(pickup, dropoff)` pair exactly as today, then fill
+residual volume with anything available here that sells at the destination.
+O(commodities) extra, no solver. The player-facing point is a real decision:
+*less profitable than a pure run, but more than flying the space empty.*
+
+**This dissolves D59's escape hatch.** A laden remainder was ugly because
+holding cargo you cannot sell here was an ERROR state needing a dump rule. With
+a mixed hold it is ordinary — you always carry a mix, some of which sells here.
+The special case stops existing rather than needing a policy.
+
+**Stations do not change, and that is the point.** `capacity = rate_hint x
+BUFFER_HOURS` already denominates a bin in TIME OF SUPPLY, which is exactly
+"we plan our storage ratio by how long it lasts us". So: **one unit, two kinds
+of limit** — a ship's limit is physical volume; a station's is a policy
+allocation expressed in the same unit and not bounded by geometry. This
+PRESERVES the existing decision that a station bin is policy, not space, and
+that `CARGO_AREA_PER_UNIT` must never be applied to one.
+
+**Trap, to write down before anyone hits it: volume must NOT become mass in this
+change.** The moment cargo volume implies cargo mass, a laden hauler is slower,
+and pirate-vs-prey is an explicit speed relationship (`pirate_scenarios` asserts
+"slow prey caught, fast prey escapes"). Same reasoning that defers M55c. Laden
+mass is its own later change with its own re-baseline.
+
+**D61 — pirates have no cargo bay.** Verified: only `freighter.gd` and the four
+station hulls author `cargo_bay`. **ArmedPinnace has none**, so M55b cannot move
+goods until it does. Third instance of the same STRUCTURE-tier oversight
+(CargoShuttle no bay, warships no quarters, pirates no bay), which is more
+evidence for M55f being the fix rather than authoring three components.
+
+It is a design lever, not just a gap: the hold **caps the take per robbery** (a
+balance dial falling out of the hull rather than a tuned constant); it creates
+the **partial take** — pirate takes what fits, victim keeps the rest and still
+delivers something, which is better fiction and a softer economic signal than
+all-or-nothing; **hull choice becomes a pirate decision** (guns vs hold), which
+is "a ship is its parts" reaching the pirate side for the first time; and guild
+income becomes proportional to hold x successful exits rather than to take
+count. Loot selection — what do I take when I cannot take it all — is **the same
+rule** as the hauler's opportunistic fill: highest value per volume, one rule,
+two callers. Open question this creates, named not scoped: **a hulked victim's
+cargo — salvage, or gone?**
+
+**D62 — price is FLAT across a delivery, and the mixed hold turns that into an
+exploit.** Verified in code:
+
+```gdscript
+return {"transferred": transferred, "payout": transferred * float(acceptance["price"])}
+```
+
+One price, stamped at acceptance (pre-delivery), applied to every lot. The last
+lot earns what the first did, even though the station's urgency died partway
+through.
+
+Harmless today — single commodity, small amounts, and posting quantity already
+right-sizes the haul via `min(pickup_qty, dropoff_qty)`. Under a mixed hold it
+is not: deliberately stuffing spare volume with filler and dumping it into a
+nearly-satisfied bin pays the PRE-delivery price for the whole load, making
+"fill the hold with anything" strictly better than it should be. Fix: integrate
+the price across the delivered amount, or at minimum price at the midpoint of
+the fill. Cheap, and required by the mixed hold rather than by today's model.
+
+**Related, and it sharpens an earlier finding.** `urgency()`'s IMPORT value is
+`(target - stock) / target`, which reaches **zero at `target`** — ~50% of
+capacity — not at the bin line. So `deliver()`'s hard clamp at capacity is a
+backstop trade never reaches; `MIN_VIABLE_SCORE` stops the hauler long before.
+The price curve is already the operative mechanism, which is the right design.
+
+But that makes the `MIN_BIN_LOTS` problem worse than first stated. The floor is
+8.0 lots and `LOT_SIZE` is 4.0, so a floored bin's `target` is ~4 lots — **one
+single haul takes a floored bin from empty to zero-price.** The floor's own
+comment still reads "RoutePlanner.LOT_SIZE is 1.0, so lots and units coincide
+today", stale since the 2026-07-26 bump, and it is that stale arithmetic the
+50 -> 8 reduction was reasoned with. This is a third constant the `LOT_SIZE`
+bump silently mis-scaled, after `TRAVEL_COST_PER_UNIT` and
+`HYSTERESIS_MARGIN_PER_LOT` — both of which carry warnings in `route_planner.gd`
+saying anything in absolute units needs the same treatment. Fix is the same:
+derive it from `LOT_SIZE` rather than hardcode it. **Not yet measured** —
+that needs `economy_traffic`, not the funnel.
+
+### THE RE-BASELINE — 4 x 240 game-min at shipped defaults (2026-08-05)
+
+Run at `266a7ed`, same four configurations as the 2026-08-03 baseline so it is
+like-for-like: `authored` (base_cap 1/max 3) and `pressed` (3/6), seeds 11111
+and 22222. `LANE_RUN=on`, `ECON_TARGET=off` (M64-gated, as shipped).
+
+| | auth 11111 | auth 22222 | pressed 11111 | pressed 22222 | total |
+|---|---|---|---|---|---|
+| demands issued | 6 | 10 | 20 | 27 | **63** |
+| complied | 1 | 2 | 3 | 8 | 14 |
+| **refused (patience)** | 4 | 7 | 13 | 18 | **42** |
+| outpaced | 0 | 0 | 0 | 0 | **0** |
+| abandoned (disengage) | 0 | 1 | 1 | 4 | 6 |
+| takes (ledger) | 0 | 1 | 1 | 3 | 5 |
+| patrol interdictions | 3 | 4 | 16 | 9 | 32 |
+| sweeps / saw HOSTILE | 49/0 | 56/0 | 60/6 | 55/6 | 220/12 |
+| risk p95 | 0.0 | 48.6 | 40.7 | 47.5 | |
+| risked_anyway | 0 | 18 | 322 | 1599 | |
+| starved bins | 0/24 | 0/24 | 0/24 | 0/24 | |
+
+**D63 — REFUSAL is the bottleneck, and it is the most stable number this
+project has measured.** 67% / 70% / 65% / 67% — **42 of 63 demands** across two
+pressure configs and two seeds. Not a seed artifact and not a rate that needs
+more runs.
+
+**Two previously-dominant failures are SOLVED, confirmed at n=63.** `outpaced`
+is **0 of 63** (D28/D31 hold completely, across every run). `abandoned` is 6 of
+63 where heat-disengage took 4 of 14 before D54/D55 — the deadband work showing
+up at exactly the stage it changed. The take stage's remaining loss is 14
+compliances yielding 5 takes.
+
+**D64 — the compliance asymmetry, and it points the opposite way to intuition.**
+Civilians comply with a PIRATE's demand 14 of 63 (22%). Pirates comply with a
+PATROL's demand 10 of 20 HOSTILE-tier interdictions (50%). A civilian facing an
+armed robber complies LESS than half as often as a pirate facing a patrol.
+
+That is not a geometry problem, and the instrument says so directly: `demand
+OPENED at sep/hail` reads median 1.00 with **0 of 14 past the 1.2x abort line**,
+and `outpaced` is 0. The demand is delivered and held in range. **The victims
+hear it and do not stop.** That is the next thing to look at, and it is the
+victim's side of the question D28 answered for pirates.
+
+Note the tier split makes the patrol side legible for the first time:
+CAUTION-tier subjects refuse overwhelmingly (7 of 8 in pressed 11111 — a
+civilian that failed an ID challenge simply keeps going), while HOSTILE-tier
+runs ~50%. Criterion (4) now has **20 HOSTILE-tier interdictions with 10
+compliances across four runs** rather than the 0-4 anecdote it had before, and
+9 guild losses agree with it across subsystems.
+
+**Sweeps: 12 contacts in 220 sweeps (5.5%)**, all 12 in the two `pressed` runs.
+Not structurally inert as one run suggested — just weak; in both `authored` runs
+every interdiction came from incidental contact instead.
+
+**The information chain is the healthiest part of the system.** Every run that
+had a robbery reached 8 of 13 stations and 2 of 2 patrols, with 5-10 notarized
+warrants and 11-12 of 14-15 haulers holding news — from robberies 58,000 to
+151,000 units out against a 30,000u comms reach, median 160-300s.
+
+**`risked_anyway` is NOT always 0 — an earlier claim in this ledger was wrong.**
+It reads 0 / 18 / 322 / 1599, tracking RISK DENSITY (p95 0.0 / 48.6 / 40.7 /
+47.5) and pirate count, with mean score 3 / 11 / 13. The honest reading is that
+haulers accept risk once there is **no safe substitute left**, not because an
+urgent route outbid the danger — D36's substitutability seen from the other
+side. The conclusion stands; the absolute claim does not.
+
+**The economy column still measures nothing, per D58.** 0/24 starved in all four
+runs, on code where a robbed hauler delivers in full. M55a (built the same day,
+NOT in these runs) is what makes that column mean something next time.
+
+**A mechanism worth naming: the guild throttles itself out of the sample.** At
+authored pressure seed 11111 reached `backoff=x8.0` — six sorties in four hours,
+~17 game-minutes between spawns. **The worse piracy performs, the fewer attempts
+there are to observe it.** Long authored-pressure campaigns are therefore a weak
+instrument by construction, which argues for attacking D63/D64 in a small rig
+(the `alongside_trace` pattern) rather than another three-hour run.
 
 ### Queue after the re-baseline
 
