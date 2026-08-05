@@ -372,6 +372,18 @@ func _physics_process(_delta: float) -> void:
 			# sibling column already keys off -- fulfill() itself clamps this
 			# down only when the bin runs out of stock/capacity mid-transfer, a
 			# rare edge this tactical attribution accepts as noise.
+			#
+			# M55a WIDENS THAT APPROXIMATION and a reader should know before
+			# trusting this column. Cargo is now physical, so the transfer is
+			# ALSO clamped by what the hull actually carries -- a short pickup
+			# now makes a short delivery (that is the point of the milestone),
+			# and this attribution still books the PLANNED amount. So `trade`
+			# now reads as an upper bound rather than as noise around the truth.
+			# Fixing it properly means plumbing fulfill()'s returned
+			# `transferred` back out of the docking seam, which this
+			# read-before/read-after snapshot cannot see; until then, treat a
+			# trade/net_flow disagreement as a signal about clamping, not as a
+			# bug in the flow accounting.
 			var amount: float = settled.get("amount", 0.0)
 			var signed_amount: float = amount if acceptance.get("direction", "") == "IMPORT" else -amount
 			trade_lots[host_rec.name][commodity] += signed_amount

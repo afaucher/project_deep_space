@@ -409,7 +409,14 @@ func _run_delivery_on_dock() -> void:
 	g_shuttle.iff_tags = ["TEAM_PLAYER"]
 	g_shuttle.dockable = true
 	g_shuttle.position = g_bay.global_position + fwd * 200.0
-	g_shuttle.pending_delivery = {"acceptance": accept, "amount": 5.0}
+	# M55a -- the hull must actually BE CARRYING what it delivers. This staged
+	# 5.0 with an empty hold, which is now impossible twice over: nothing was
+	# ever picked up, and 5.0 exceeds a 4.0 hold anyway (RoutePlanner.LOT_SIZE
+	# caps every route it builds at 4.0, so the planner could never have produced
+	# this shape). Loading the manifest first is what a real hauler's pickup dock
+	# does; this test is about the SETTLEMENT SEAM, and that is unchanged.
+	g_shuttle.cargo_manifest = {Commodity.GOODS: 4.0}
+	g_shuttle.pending_delivery = {"acceptance": accept, "amount": 4.0}
 	main_node.add_child(g_shuttle)
 
 	var result: Dictionary = g_station.request_docking_via_control(g_shuttle)
@@ -421,7 +428,12 @@ func _step_delivery_on_dock(delta: float) -> void:
 	g_t += delta
 	if g_bay.state == DockingBay.State.DOCKED:
 		_assert(g_shuttle.pending_delivery.is_empty(), "F: pending_delivery is cleared the moment DOCKED settles")
-		_approx(g_rec.stocks["self"][Commodity.GOODS]["stock"], 5.0, "F: 5 lots of GOODS actually landed in the station's own stock")
+		_approx(g_rec.stocks["self"][Commodity.GOODS]["stock"], 4.0, "F: 4 lots of GOODS actually landed in the station's own stock")
+		# M55a -- conservation across the seam: what left the hull is what
+		# arrived. Without this the station's stock alone cannot tell a real
+		# transfer from goods being minted at the dock, which is precisely what
+		# it did before the manifest existed.
+		_approx(g_shuttle.manifest_amount(Commodity.GOODS), 0.0, "F: and the hull no longer carries them")
 		_finish_delivery_on_dock()
 	elif g_t > G_DOCK_TIMEOUT:
 		_assert(false, "F: shuttle never reached DOCKED (state=%d)" % g_bay.state)

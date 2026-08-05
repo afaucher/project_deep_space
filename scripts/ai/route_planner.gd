@@ -213,31 +213,58 @@ const MIN_VIABLE_SCORE := 0.0
 # `_chord_carriers` came to score geometry while cargo scored economics -- two
 # models of "where is the traffic" that could never agree. One rule, two
 # policies, is the fix for that class of drift.
+#
+# M55a -- `only_commodity` restricts the search to ONE commodity. "" (the
+# default) searches all of them, so every existing caller is bit-identical.
+#
+# It exists for the state M55a creates and the game has never had: a LADEN
+# hull. Cargo is now a physical thing the hull holds, so a hauler that arrives
+# at a bin which filled while it was in transit keeps the difference -- and a
+# laden hull planning a route for a DIFFERENT commodity can neither load (its
+# hold is full) nor deliver (it is not carrying what the dropoff wants). It
+# would fly both legs, move nothing, re-plan, and repeat forever: a hauler
+# burned permanently, which is exactly the job-runner failure class that has
+# already cost this project a faction.
+#
+# Restricting the search to what it is carrying is the honest fix rather than a
+# valve -- "you have to deliver the ore somewhere". Note what it deliberately
+# is NOT: it does not dump cargo (that would destroy goods and break the
+# conservation this milestone exists to establish), and it does not make the
+# hull idle silently -- if no route for the held commodity is viable,
+# best_route() returns {} through its ORDINARY "nothing worth flying" path, and
+# an idle laden hull recovers the moment a posting opens. Idle is recoverable;
+# the loop is not.
+#
+# This is a NARROW down-payment on D56 (routing as a state-dependent leg choice
+# from `(position, cargo)`), not the model itself. The full version prices a
+# leg by the state it lands you in and can decide to carry ore PAST a buyer to
+# reach a better one; this only stops the hull wasting itself.
 static func scored_routes(cluster, from_pos: Vector2, ship_flag: String,
-		known_incidents: Array = []) -> Array:
+		known_incidents: Array = [], only_commodity: String = "") -> Array:
 	var out: Array = []
 	# Sampled ONCE per search, not per pair: _score_pair runs stations^2 x
 	# commodities times, and recency only needs to be consistent within a search.
 	var now: int = Engine.get_physics_frames()
+	var commodities: Array = Commodity.ALL if only_commodity == "" else [only_commodity]
 	for pickup_rec in cluster.records:
 		if pickup_rec.kind != ClusterEntity.Kind.STATION:
 			continue
 		for dropoff_rec in cluster.records:
 			if dropoff_rec == pickup_rec or dropoff_rec.kind != ClusterEntity.Kind.STATION:
 				continue
-			for commodity in Commodity.ALL:
+			for commodity in commodities:
 				var route: Dictionary = _score_pair(pickup_rec, dropoff_rec, commodity, from_pos, ship_flag, known_incidents, now)
 				if not route.is_empty():
 					out.append(route)
 	return out
 
 static func best_route(cluster, from_pos: Vector2, ship_flag: String,
-		known_incidents: Array = []) -> Dictionary:
+		known_incidents: Array = [], only_commodity: String = "") -> Dictionary:
 	var best: Dictionary = {}
 	var best_score: float = -INF
 	var pairs_scored := 0
 	var max_risk_seen: float = 0.0
-	for route in scored_routes(cluster, from_pos, ship_flag, known_incidents):
+	for route in scored_routes(cluster, from_pos, ship_flag, known_incidents, only_commodity):
 		pairs_scored += 1
 		# SURVIVORSHIP FIX (2026-08-03). DecisionProbe sampled only the WINNER's
 		# risk to answer "did risk ever matter", and a lane rejected BECAUSE it

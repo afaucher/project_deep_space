@@ -80,10 +80,38 @@ func _heard_incidents(actor: Node, cluster) -> Array:
 # from a traffic histogram after the fact -- the inference that already went
 # wrong once on the ore shortage, where a starving consumer and a backed-up
 # producer turned out to be the same curve seen from two ends.
+
+# M55a -- what this hull is already carrying, or "" if empty.
+#
+# Returns the LARGEST holding rather than iterating: the planner fills one
+# commodity at a time today, so a hull has at most one, and picking the biggest
+# is the honest answer for the mixed hold D60 introduces later (sell the bulk of
+# it first). Guarded with has_method so the bare fixtures and non-Ship actors
+# that drive this leaf in tests keep working unchanged.
+func _held_commodity(actor: Node) -> String:
+	if not actor.has_method("manifest_total"):
+		return ""
+	var best: String = ""
+	var best_amount: float = 0.0
+	for commodity in actor.cargo_manifest:
+		var amount: float = float(actor.cargo_manifest[commodity])
+		if amount > best_amount:
+			best_amount = amount
+			best = str(commodity)
+	return best
+
 func _probe(actor: Node, cluster, heard: Array, chosen: Dictionary) -> void:
 	if not DecisionProbe.enabled:
 		return
-	var blind: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), [])
+	# The counterfactual must differ from `chosen` in EXACTLY ONE WAY -- the
+	# heard news -- or the probe books constraint differences as risk
+	# differences. A laden hull's chosen route is restricted to what it carries;
+	# an unrestricted blind route would then pick a different lane for a reason
+	# that has nothing to do with incidents, and `changed_by_risk` would count
+	# it. That is the instrument-lies class this file's own probe exists to
+	# avoid, so the restriction is applied to BOTH sides.
+	var blind: Dictionary = RoutePlanner.best_route(
+		cluster, actor.position, _own_flag(actor), [], _held_commodity(actor))
 	DecisionProbe.record(actor.name, chosen, blind, heard.size())
 	# WHICH LANE, for the pirate/cargo overlap question (LaneProbe). Sampled here
 	# rather than at job assignment on purpose: this hook fires on the replan
@@ -115,7 +143,8 @@ func tick(actor: Node, _blackboard) -> int:
 			return FAILURE
 		job["_replan_check_frame"] = Engine.get_physics_frames()
 		var heard_re: Array = _heard_incidents(actor, cluster)
-		var candidate: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), heard_re)
+		var candidate: Dictionary = RoutePlanner.best_route(
+			cluster, actor.position, _own_flag(actor), heard_re, _held_commodity(actor))
 		_probe(actor, cluster, heard_re, candidate)
 		if candidate.is_empty():
 			return FAILURE
@@ -138,7 +167,8 @@ func tick(actor: Node, _blackboard) -> int:
 		return FAILURE
 	_last_empty_search_frame = Engine.get_physics_frames()
 	var heard_new: Array = _heard_incidents(actor, cluster)
-	var route: Dictionary = RoutePlanner.best_route(cluster, actor.position, _own_flag(actor), heard_new)
+	var route: Dictionary = RoutePlanner.best_route(
+		cluster, actor.position, _own_flag(actor), heard_new, _held_commodity(actor))
 	_probe(actor, cluster, heard_new, route)
 	if route.is_empty():
 		return FAILURE # nothing viable anywhere right now -- Idle (below JobRunner) picks this up

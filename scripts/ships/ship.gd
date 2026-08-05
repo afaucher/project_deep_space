@@ -362,6 +362,81 @@ var docking_grant = null
 # too"), and the player has no job/steps at all.
 var pending_delivery: Dictionary = {}
 
+# M55a -- PHYSICAL CARGO. What this hull is actually carrying: commodity ->
+# amount. Empty for every hull that never picks anything up (stations, warships,
+# the player until they trade), which is the common case.
+#
+# WHY THIS EXISTS. Before it, cargo was not an object at all: serve_posting()
+# handed `amount` straight to StationEconomy.fulfill() with nothing checking the
+# hull possessed anything, so **a robbed hauler still delivered in full** and
+# piracy was invisible to the economy. That made "the economy survives four
+# game-hours alongside piracy" a statement about a missing coupling rather than
+# about a resilient economy (ledger D58). This is the coupling.
+#
+# A DICTIONARY, not a single {commodity, amount} pair, deliberately and from the
+# start: D60 makes the hold ONE SHARED VOLUME that several commodities draw on
+# ("1 lot of RARE, 3 lots left to stuff with anything else"). The planner still
+# fills it one commodity at a time -- that is a separate change with its own
+# measurement -- but the shape it will need is here now, so the mixed hold
+# arrives as an addition rather than a rewrite.
+var cargo_manifest: Dictionary = {}
+
+# Total hold VOLUME (D60: the lot IS a volume -- this is not "lots of one
+# thing", it is how much stuff fits).
+#
+# INTERIM AND FLAT, and it must equal RoutePlanner.LOT_SIZE, which caps every
+# route the planner builds. `test_cargo_manifest` pins that equality rather
+# than trusting a comment, because two constants agreeing by hand is exactly how
+# the 2026-07-26 LOT_SIZE bump silently mis-scaled three others
+# (TRAVEL_COST_PER_UNIT, HYSTERESIS_MARGIN_PER_LOT, MIN_BIN_LOTS). M55c replaces
+# this with a value derived from `cargo_bay` components, at which point the
+# planner reads the actor's own hull and the duplication goes away.
+#
+# Deliberately NOT derived from components yet: that changes hull MASS, which
+# makes the primary hauler slower, and pirate-vs-prey is an explicit speed
+# relationship (`pirate_scenarios` asserts "slow prey caught, fast prey
+# escapes"). Flat capacity keeps this milestone free of a re-baseline.
+const CARGO_CAPACITY := 4.0
+
+# Float dust from repeated partial loads/unloads would otherwise leave a
+# commodity key holding ~1e-17 forever, which reads as "still carrying ORE" to
+# every possession check and to any UI that lists the manifest.
+const MANIFEST_EPSILON := 0.0001
+
+func manifest_amount(commodity: String) -> float:
+	return float(cargo_manifest.get(commodity, 0.0))
+
+func manifest_total() -> float:
+	var total: float = 0.0
+	for commodity in cargo_manifest:
+		total += float(cargo_manifest[commodity])
+	return total
+
+func manifest_free() -> float:
+	return maxf(0.0, CARGO_CAPACITY - manifest_total())
+
+# Returns what was ACTUALLY loaded, clamped by free volume -- never the caller's
+# optimism. Callers must use the return value, not the amount they asked for;
+# that asymmetry is the whole point of the manifest existing.
+func manifest_add(commodity: String, amount: float) -> float:
+	var loaded: float = clampf(amount, 0.0, manifest_free())
+	if loaded <= 0.0:
+		return 0.0
+	cargo_manifest[commodity] = manifest_amount(commodity) + loaded
+	return loaded
+
+# Returns what was ACTUALLY removed, clamped by what is held.
+func manifest_remove(commodity: String, amount: float) -> float:
+	var taken: float = clampf(amount, 0.0, manifest_amount(commodity))
+	if taken <= 0.0:
+		return 0.0
+	var left: float = manifest_amount(commodity) - taken
+	if left <= MANIFEST_EPSILON:
+		cargo_manifest.erase(commodity)
+	else:
+		cargo_manifest[commodity] = left
+	return taken
+
 # M46 follow-up -- departure corridor grace state, DELIBERATELY separate from
 # docking_grant. The grant is consumed IMMEDIATELY on bay release (see
 # DockingBay._release()) so the slip returns to the pool for a new arrival
@@ -1151,7 +1226,38 @@ func serve_posting(ship, acceptance: Dictionary, amount: float) -> Dictionary:
 	var rec = _resolve_cluster_record()
 	if rec == null:
 		return {"transferred": 0.0, "payout": 0.0}
-	return StationEconomy.fulfill(rec, acceptance, amount)
+	# M55a -- the goods are now a physical thing the DOCKED HULL holds, so this
+	# seam moves them on both sides instead of only the station's. Both
+	# directions run through here, which is why the possession rule lives at this
+	# one function rather than at the two call sites that stage a delivery.
+	#
+	# Direction is from the STATION's point of view (StationEconomy.fulfill):
+	#   IMPORT -- the station receives. The hull must actually HAVE it.
+	#   EXPORT -- the station ships out. The hull must have ROOM for it.
+	#
+	# Clamp BEFORE fulfill, then move the manifest by what fulfill actually
+	# transferred, never by what was asked. fulfill() already clamps its own side
+	# to the bin and reports the real delta; taking its word for the ship side
+	# keeps one number authoritative instead of two that can disagree.
+	var commodity: String = str(acceptance.get("commodity", ""))
+	var direction: String = str(acceptance.get("direction", ""))
+	if commodity == "":
+		return {"transferred": 0.0, "payout": 0.0}
+	var allowed: float = amount
+	if direction == "IMPORT":
+		allowed = minf(amount, ship.manifest_amount(commodity))
+	elif direction == "EXPORT":
+		allowed = minf(amount, ship.manifest_free())
+	if allowed <= 0.0:
+		return {"transferred": 0.0, "payout": 0.0}
+	var result: Dictionary = StationEconomy.fulfill(rec, acceptance, allowed)
+	var moved: float = float(result.get("transferred", 0.0))
+	if moved > 0.0:
+		if direction == "IMPORT":
+			ship.manifest_remove(commodity, moved)
+		elif direction == "EXPORT":
+			ship.manifest_add(commodity, moved)
+	return result
 
 # M31 -- port authority zone substrate. Empty dict = uncontrolled/open station
 # (or a non-station ship, which never declares one) -- old permissionless
