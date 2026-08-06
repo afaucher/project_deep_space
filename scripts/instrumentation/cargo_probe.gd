@@ -57,6 +57,53 @@ static var drop_transferred: float = 0.0
 static var drop_events: int = 0
 static var drop_short: int = 0
 
+# --- PER-TRANSFER LEDGER ---------------------------------------------------
+#
+# The aggregates above sum, and a sum hides three things this file exists to
+# find. Mean 0.128 across 54 pickups could be 54 loads of 0.13 or 50 of 0.02
+# plus 4 of 1.5 -- completely different diagnoses. It has no time axis, so it
+# cannot say whether load size is flat (warm-up dilution of a whole-run mean) or
+# still climbing (a drifting equilibrium, i.e. the fleet under-serving). And it
+# cannot attribute: most lanes healthy with two starving reads identically to
+# every lane mediocre.
+#
+# ONE ROW PER TRANSFER, not per minute. A hull's manifest only changes AT a
+# transfer, so per-minute sampling records the same value repeatedly AND can
+# still miss a load-and-unload that happens between two samples. The event is
+# the correct sampling unit: strictly more informative per row, and it cannot
+# miss one.
+#
+# THEFT IS IN HERE TOO, and it has to be. Three events change a manifest and
+# only two go through serve_posting -- LOAD and UNLOAD there, THEFT in
+# JobSteps.transfer_loot. Logging only the dock leaves a hole exactly where the
+# interesting thing happens, and makes the conservation identity
+# (sum of bins + sum of manifests) unclosable.
+#
+# `local_qty` is the posting quantity at THIS end, read BEFORE the transfer
+# depletes it. The far end's quantity is not reachable from a dock, but it does
+# not need to be: `requested` already encodes min(LOT_SIZE, min(both)), so
+# `requested < local_qty` proves the OTHER side (or the hold) was the binding
+# constraint, and `requested == local_qty` proves this one was.
+static var _log = null
+
+static func _ensure_log() -> void:
+	if _log != null:
+		return
+	DirAccess.make_dir_recursive_absolute("res://tmp")
+	_log = FileAccess.open("res://tmp/cargo_transfers.csv", FileAccess.WRITE)
+	if _log != null:
+		_log.store_line("minute,event,ship,counterparty,commodity,requested,allowed,transferred,local_qty")
+
+static func _row(event: String, ship_name: String, counterparty: String, commodity: String,
+		requested: float, allowed: float, transferred: float, local_qty: float) -> void:
+	_ensure_log()
+	if _log == null:
+		return
+	_log.store_line("%.2f,%s,%s,%s,%s,%.4f,%.4f,%.4f,%.4f" % [
+		Engine.get_physics_frames() / 3600.0, event, ship_name, counterparty, commodity,
+		requested, allowed, transferred, local_qty])
+	_log.flush()   # store_line BUFFERS -- a run killed mid-way must not lose the ledger
+
 static func reset() -> void:
 	pickup_requested = 0.0
 	pickup_allowed = 0.0
@@ -72,9 +119,15 @@ static func reset() -> void:
 # Called once per settled transaction, from Ship.serve_posting, with all three
 # numbers in hand. Cheap: one static bool read on a path that runs at most once
 # per dock, never per frame.
-static func note(direction: String, requested: float, allowed: float, transferred: float) -> void:
+static func note(direction: String, requested: float, allowed: float, transferred: float,
+		ship_name: String = "?", station_name: String = "?", commodity: String = "?",
+		local_qty: float = -1.0) -> void:
 	if not enabled:
 		return
+	# EXPORT is the station shipping out, i.e. the hull LOADING. Named from the
+	# hull's point of view in the ledger, because that is who the row is about.
+	_row("LOAD" if direction == "EXPORT" else "UNLOAD",
+		ship_name, station_name, commodity, requested, allowed, transferred, local_qty)
 	if direction == "EXPORT":
 		pickup_requested += requested
 		pickup_allowed += allowed
@@ -89,6 +142,17 @@ static func note(direction: String, requested: float, allowed: float, transferre
 		drop_events += 1
 		if transferred < allowed - 0.0001:
 			drop_short += 1
+
+# Theft -- the third manifest-changing event, and the only one not at a dock.
+# `requested` is what the victim was carrying of this commodity (what a pirate
+# with unlimited room would have taken) and `local_qty` carries the robber's
+# free volume, so a partial take is legible as such rather than as a small
+# victim.
+static func note_theft(robber_name: String, victim_name: String, commodity: String,
+		victim_had: float, taken: float, robber_free: float) -> void:
+	if not enabled:
+		return
+	_row("THEFT", robber_name, victim_name, commodity, victim_had, taken, taken, robber_free)
 
 # Fraction of the PLANNED pickup volume that actually made it aboard. Returns
 # -1.0 when nothing was attempted, so "no pickups" cannot be misread as "0%

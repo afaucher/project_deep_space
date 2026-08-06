@@ -1265,13 +1265,19 @@ func serve_posting(ship, acceptance: Dictionary, amount: float) -> Dictionary:
 		allowed = minf(amount, ship.manifest_free())
 	if allowed <= 0.0:
 		return {"transferred": 0.0, "payout": 0.0}
+	# Read BEFORE fulfill, which depletes it. `requested < local_qty` proves the
+	# FAR end (or the hold) was binding; equality proves this end was.
+	var local_qty: float = -1.0
+	if CargoProbe.enabled:
+		local_qty = float(StationEconomy.get_posting(
+			rec, str(acceptance.get("holder", "self")), commodity).get("quantity", -1.0))
 	var result: Dictionary = StationEconomy.fulfill(rec, acceptance, allowed)
 	var moved: float = float(result.get("transferred", 0.0))
 	# D67 -- the direct count. `amount` is what the ROUTE planned, `allowed` is
 	# what this hull could physically do, `moved` is what the live bin actually
 	# had. The two gaps have opposite causes (hull vs posting) and this is the
 	# only place all three numbers exist at once.
-	CargoProbe.note(direction, amount, allowed, moved)
+	CargoProbe.note(direction, amount, allowed, moved, ship.name, name, commodity, local_qty)
 	if moved > 0.0:
 		if direction == "IMPORT":
 			ship.manifest_remove(commodity, moved)

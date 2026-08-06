@@ -22,6 +22,7 @@ class_name JobSteps
 #   const JobSteps = preload("res://scripts/ai/jobs/job_steps.gd")
 
 const Steering = preload("res://scripts/ai/steering.gd")
+const CargoProbe = preload("res://scripts/instrumentation/cargo_probe.gd")
 const Standing = preload("res://scripts/combat/standing.gd")
 const Hail = preload("res://scripts/comms/hail.gd")
 # The docking corridor geometry. Until 2026-07-26 this was referenced only by
@@ -1459,10 +1460,15 @@ static func transfer_loot(robber, victim) -> float:
 		var room: float = robber.manifest_free()
 		if room <= 0.0:
 			break
-		var moved: float = robber.manifest_add(commodity, minf(float(victim.cargo_manifest[commodity]), room))
+		var had: float = float(victim.cargo_manifest[commodity])
+		var moved: float = robber.manifest_add(commodity, minf(had, room))
 		if moved > 0.0:
 			victim.manifest_remove(commodity, moved)
 			stolen += moved
+			# The third manifest-changing event, and the only one not at a dock.
+			# Without it the transfer ledger cannot close its conservation
+			# identity, and a robbed hull's missing cargo has no explanation.
+			CargoProbe.note_theft(robber.name, victim.name, str(commodity), had, moved, room)
 	robber.loot_lots += stolen
 	return stolen
 

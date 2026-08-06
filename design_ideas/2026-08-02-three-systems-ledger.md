@@ -85,6 +85,7 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D67 | **The economy is NOT the bottleneck — the fleet is.** With no haulers, available load reaches 3.96 of a 4.0 cap by minute ~90-120; haulers realize 0.34-0.61 | **NEW 2026-08-05, measured in seconds by `economy_clock`** — mechanism of the ~10x gap still OPEN |
 | D68 | The seeded "running economy" is **half-seeded**: producers open (0.92), consumers parked at target = SATISFIED, so **IMPORT open 0** at t=0 | **NEW 2026-08-05** — costs ~the first hour of every run; also BLOCKS Refinery Prime's converter from t=0 |
 | D69 | **No contention at the dock: 101 of 101 docks moved 100% of plan.** The load is already small when PLANNED — the question moves one step upstream, to what `_score_pair` sees | **NEW 2026-08-05, direct count** — kills the thundering-herd theory; 4th dead hypothesis today |
+| D70 | **SOLVED: the buyer is the binding constraint.** 96% of loads are far-end-bound; sellers hold 1.5 lots while haulers take 0.13. **Small loads are the signature of a WELL-SERVED economy** | **NEW 2026-08-05** — one mechanism explains all five observations; qualifies D66 and D67, whose causality was backwards |
 
 ---
 
@@ -2470,6 +2471,66 @@ equivalently the per-minute `__cargo__` curve added alongside CargoProbe (not
 present in any completed run yet). Flat tail -> warm-up dilution. Still-rising
 tail -> the equilibrium is drifting and the fleet is under-serving, which would
 also reopen D67's gap from the demand side.
+
+### D70 — SOLVED: the buyer is the binding constraint, and small loads are HEALTH
+
+Settled by the per-transfer ledger (`tmp/cargo_transfers.csv`, written by
+`CargoProbe` at all three manifest-changing sites: LOAD and UNLOAD in
+`serve_posting`, THEFT in `transfer_loot`). One row per transfer rather than per
+minute, because a manifest only changes AT a transfer -- per-minute sampling
+records the same value repeatedly and can still miss a load-and-unload between
+samples.
+
+```
+LOAD    48 rows | 46 far-end-bound (96%) | mean requested 0.129 | mean seller had 1.467
+UNLOAD  41 rows |                          mean requested 0.141 | mean buyer deficit 0.051
+```
+
+`local_qty` is the posting quantity at THIS dock, read before the transfer
+depletes it. Since `requested` already encodes `min(LOT_SIZE, min(both ends))`,
+`requested << local_qty` proves the FAR end was binding -- no need to reach the
+other station. **The seller consistently holds ~1.5 lots and the hauler takes
+~0.13: demand is the constraint, and it is tiny.**
+
+**ONE MECHANISM, ALL FIVE OBSERVATIONS.** Every earlier theory explained some and
+contradicted others; this explains all of them:
+
+1. loads ~0.13 -- `amount` is bound by the buyer's deficit at PLAN time
+2. 101/101 docks moved 100% of plan (D69) -- the plan was already small, so
+   there was never anything to lose at the dock
+3. 3x fleet changed nothing (0.22 -> 0.23) -- **sink rates are fixed; haulers
+   cannot make a consumer consume faster**, so the binding side is untouched by
+   fleet size
+4. `economy_clock` saw 3.96 available -- measured with NO haulers, so that is the
+   deficit which accumulates when nobody delivers at all
+5. `economy_traffic` stock curve is FLAT over 180 game-min (0.530 -> 0.515 of
+   capacity, ~100 hours to drain at that rate) -- steady state, no drift, no
+   collapse, consumers sitting just above target
+
+**THE REFRAME, and it inverts two of today's own entries.** Small loads are the
+signature of a WELL-SERVED economy, not a failure. Buyers are short by 0.13 lots
+because a hauler arrives before they can get any shorter. D67's "the fleet
+realizes only 10% of what the economy offers" had the causality backwards: the
+offer is small *because* the fleet is serving it. D66's "piracy is economically
+negligible" is true but for this reason, not a piracy defect.
+
+(An UNLOAD row where `requested 0.141 > deficit 0.051` is not a shortfall:
+`deliver()` clamps at CAPACITY, not target, so a hauler may push stock above
+target. The deficit bounds the amount only at PLAN time.)
+
+**What this means for piracy, and it is a DESIGN question now, not an
+instrumentation one.** There is little cargo in transit because cluster demand
+is small relative to fleet capacity. No take-rate, victim-selection or hold-size
+work changes that. The levers are economic: higher sink rates (more demand),
+fewer haulers (deficits accumulate between visits), or longer transit (more time
+laden per lot moved). The honest open question is whether a cluster where ~15
+haulers comfortably serve all demand is the intended world.
+
+**Caveat on the stock curve**: it comes from `economy_traffic` (8 haulers, no
+pirates), not the funnel (12-20 haulers, piracy). It establishes that the
+ECONOMY does not drift or collapse; it does not by itself explain the funnel's
+0.13 -> 0.61 spread across durations, which may be duration or may be seed noise
+across runs that were compared too casually.
 
 ### Queue after the re-baseline
 
