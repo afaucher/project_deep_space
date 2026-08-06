@@ -420,7 +420,7 @@ func _spawn_due_arrivals(cluster, period: float) -> void:
 		# tag rides alongside for future per-member identity; nothing keys on it
 		# today. Outsiders share neither, so a pirate still reads UNIDENTIFIED to
 		# a patrol/the player.
-		rec.iff_tags = ["PIRATE_GUILD", "PIRATE_GUILD_%d" % record_id]
+		rec.iff_tags = [Standing.TAG_PIRATE_GUILD, "%s_%d" % [Standing.TAG_PIRATE_GUILD, record_id]]
 		rec.transponder_flag = Standing.FLAG_CIVILIAN
 		rec.behavior = {
 			"pirate": true,

@@ -49,7 +49,7 @@ Pre-M48 status is taken from each plan doc's own DONE/BUILT markers.
 | M55b | — theft moves goods | BUILT | commit `b77955b` |
 | M55c | — capacity from parts | SCOPED | deferred: not the binding constraint (D71) |
 | M55d | — mid-tier hull | SCOPED | load-bearing for M55c calibration |
-| M55e | — boarding / inspection | SCOPED | `m55e_boarding_inspection.md` |
+| M55e | — boarding / inspection (flag-check MVP) | BUILT | `m55e_boarding_inspection.md`; papers/provenance still SCOPED |
 | M55f | — validator learns roles | SCOPED | must follow M55c |
 | M56 | Contact freshness timestamps | BUILT | `m56_contact_freshness_timestamps.md` |
 | M57 | Incidents as evidence | BUILT | `m57_m61_information_economy_roadmap.md` |

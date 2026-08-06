@@ -187,16 +187,25 @@ func tick(actor: Node, blackboard) -> int:
 		{"verb": "INTERCEPT"},
 		{"verb": "DEMAND_STOP", "show_colors": false, "patience": patience, "on_abort": ""},
 	]
+	# M55e -- INSPECT and HULK_PRIZE are now appended UNCONDITIONALLY, and the
+	# seizure decision moves into the step. It has to: a hull flying a clean
+	# cover identity has no warrant against the name it is claiming, so at
+	# assignment time there is nothing to authorise on. Only the inspection can
+	# discover it, and that happens later.
+	#
 	# Standing.force_authorized_by, NOT authorizes_force directly: an EMPTY
 	# warrant means UNCAPPED (a colour-flying pirate is seizable on sight), and
 	# calling authorizes_force("") returns false, which spared exactly the hull
 	# nobody doubts. Same predicate AcquireTargetLeaf gates weapons on, so a
 	# patrol cannot be entitled to shoot something it is not entitled to seize.
-	if Standing.force_authorized_by(w):
-		steps.append({"verb": "HULK_PRIZE", "on_abort": ""})
+	# It is now STAMPED ON THE JOB rather than deciding the step list, so
+	# HULK_PRIZE can combine it with what INSPECT found.
+	steps.append({"verb": "INSPECT", "on_abort": ""})
+	steps.append({"verb": "HULK_PRIZE", "on_abort": ""})
 	var job := {
 		"steps": steps,
 		"current": 0,
+		"force_authorized": Standing.force_authorized_by(w),
 		"victim_iid": target_iid,
 		# What this job is WORTH, so the priority rule at the top of tick() can
 		# recognise its own yellow work and yield it. Read nowhere else.

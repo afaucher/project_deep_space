@@ -181,6 +181,8 @@ static func execute(verb: String, actor, step: Dictionary, job: Dictionary) -> i
 			return step_demand_stop(actor, step, job)
 		"TAKE_ALONGSIDE":
 			return step_take_alongside(actor, step, job)
+		"INSPECT":
+			return step_inspect(actor, step, job)
 		"HULK_PRIZE":
 			return step_hulk_prize(actor, step, job)
 		_:
@@ -1377,6 +1379,68 @@ static func step_demand_stop(actor, step: Dictionary, job: Dictionary) -> int:
 # "stop rate" stops being a number with nothing behind it.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# INSPECT {} -- M55e MVP. Read what is in the subject's COMPUTERS rather than
+# what it is broadcasting, and stamp the verdict on the job.
+#
+# `iff_tags` is ground truth; the transponder is the only thing that can lie. A
+# pirate flying a cover identity broadcasts a clean name while still carrying
+# TAG_PIRATE_GUILD aboard, and `colors_chance` 0.5 means HALF of all pirates are
+# in that state at any moment. So this is a comparison against data that already
+# exists -- no new state anywhere, and no papers, provenance or cargo audit.
+#
+# WHAT IT DELIBERATELY DOES NOT ANSWER: "is this cargo stolen". A clean-flagged
+# pirate carrying someone else's ore passes. This is identity verification, and
+# the papers version (theft moves goods but not paperwork) stays a later phase --
+# see implementation_plans/m55e_boarding_inspection.md.
+#
+# Known and accepted: a pirate that scrubs its own tag defeats this entirely.
+# That is M65 (identity kit) territory and is a feature -- it makes the arms race
+# legible in both directions rather than being a hole.
+#
+# Always DONE, never ABORT. A clean subject is the COMMON case (the 2026-08-05
+# baseline had 12 of 32 interdictions at CAUTION tier, i.e. hulls that merely
+# failed an ID challenge) and must cost the patrol nothing but time. Aborting on
+# a clean read would skip the rest of the job, which per CLAUDE.md's job-runner
+# rule is indistinguishable from completing it.
+static func step_inspect(actor, step: Dictionary, job: Dictionary) -> int:
+	var victim_iid: int = job.get("victim_iid", -1)
+	var victim = instance_from_id(victim_iid) if victim_iid != -1 else null
+	if victim == null or not is_instance_valid(victim) or victim.is_dead:
+		job["inspect_verdict"] = "GONE"
+		return DONE
+	# Must still be held -- the same discipline HULK_PRIZE uses. You cannot
+	# inspect the computers of a hull that is no longer alongside.
+	var c: Dictionary = _contact_for_instance(actor, victim_iid)
+	if not c.get("complied_stop", false):
+		job["_abort_reason"] = "subject bolted before it could be inspected"
+		return ABORT
+
+	var is_pirate: bool = victim.iff_tags.has(Standing.TAG_PIRATE_GUILD)
+	# UNMASKED = it was pretending. Worth separating from a colours-flying pirate
+	# that was never hidden, because only the first is something inspection
+	# DISCOVERED -- the second was already visible and would have been seized on
+	# sight under an empty warrant (D37).
+	# The test is the broadcast FLAG, not the claimed name. Every hull with a live
+	# transponder broadcasts some name (its own if no cover is set), so a name
+	# check would mark a colours-flying pirate as unmasked too -- crediting
+	# inspection with a catch anyone could see. A hull openly declaring
+	# FLAG_PIRATE is hiding nothing; anything else (a clean flag, a withheld
+	# name, or a dark transponder returning {}) was concealing what it is.
+	var td: Dictionary = {}
+	var claimed: String = ""
+	if victim.has_method("get_active_transponder_data"):
+		td = victim.get_active_transponder_data()
+		claimed = str(td.get("name", ""))
+	job["inspect_verdict"] = "PIRATE" if is_pirate else "CLEAN"
+	job["inspect_unmasked"] = is_pirate and str(td.get("flag", "")) != Standing.FLAG_PIRATE
+	EngagementProbe.note_inspection(job, job["inspect_verdict"], job["inspect_unmasked"])
+	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
+		print("[Patrol] %s: INSPECTED %s -- %s%s" % [
+			actor.debug_label(), victim.debug_label(), job["inspect_verdict"],
+			" (was flying cover as '%s')" % claimed if job["inspect_unmasked"] else ""])
+	return DONE
+
 static func step_hulk_prize(actor, step: Dictionary, job: Dictionary) -> int:
 	var victim_iid: int = job.get("victim_iid", -1)
 	var victim = instance_from_id(victim_iid) if victim_iid != -1 else null
@@ -1389,9 +1453,32 @@ static func step_hulk_prize(actor, step: Dictionary, job: Dictionary) -> int:
 	if not c.get("complied_stop", false):
 		job["_abort_reason"] = "prize bolted before it could be secured"
 		return ABORT
+	# M55e -- TWO grounds to seize, and the step decides at RUNTIME because only
+	# one of them is knowable at assignment time.
+	#
+	#   force_authorized  a force-authorizing warrant existed when the job was
+	#                     built (D37: an EMPTY warrant means UNCAPPED, so a
+	#                     colour-flying pirate is seizable on sight)
+	#   inspect_verdict   INSPECT found TAG_PIRATE_GUILD in its computers, which
+	#                     is the ONLY way a hull flying a clean cover identity
+	#                     ever becomes seizable
+	#
+	# Behaviour is a strict superset of before: everything previously hulked
+	# still is, plus the cover-flying half that used to sail away clean.
+	var authorized: bool = bool(job.get("force_authorized", false))
+	var inspected_pirate: bool = str(job.get("inspect_verdict", "")) == "PIRATE"
+	if not authorized and not inspected_pirate:
+		# The common case. Inspected, clean, released -- and it must cost the
+		# patrol nothing but the time already spent, or interdiction reads as
+		# harassment rather than policing.
+		if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
+			print("[Patrol] %s: RELEASED %s -- inspected clean, no grounds" % [
+				actor.debug_label(), victim.debug_label()])
+		return DONE
 	if DebugSettings and DebugSettings.get_choice("job_log") == DebugSettings.JobLog.ON:
-		print("[Patrol] %s: HULKED %s -- prize taken under warrant" % [
-			actor.debug_label(), victim.debug_label()])
+		print("[Patrol] %s: HULKED %s -- prize taken (%s)" % [
+			actor.debug_label(), victim.debug_label(),
+			"warrant" if authorized else "unmasked by inspection"])
 	victim.hulk()
 	return DONE
 

@@ -99,6 +99,48 @@ static var robbery_outpaced: int = 0
 # refreshing its own demand and the victim's compliance lapses.
 static var robbery_abandoned_disengage: int = 0
 
+# M55e -- INSPECTIONS, split by outcome and by tier.
+#
+# Kept separate from the stop counters on purpose. A stop and an inspection
+# answer different questions, and the 2026-08-05 baseline predicts most
+# inspections will find NOTHING: 12 of 32 interdictions were CAUTION-tier, i.e.
+# hulls that merely failed an ID challenge rather than suspects. If clean and
+# dirty were folded into one "inspection rate", a run of administrative stops
+# would read identically to enforcement -- exactly the conflation the per-tier
+# stop breakdown was added to fix.
+#
+# `unmasked` is the subset worth its own counter: a pirate flying a COVER
+# identity, which inspection DISCOVERED. A colours-flying pirate reads PIRATE
+# too, but it was never hidden and would have been seizable on sight under an
+# empty warrant (D37) -- counting them together would credit inspection with
+# catches it did not make.
+static var inspections: int = 0
+static var inspect_pirate: int = 0
+static var inspect_clean: int = 0
+static var inspect_unmasked: int = 0
+static var inspect_by_tier: Dictionary = {}     # tier -> total inspections
+static var inspect_pirate_by_tier: Dictionary = {}
+
+static func note_inspection(job: Dictionary, verdict: String, unmasked: bool) -> void:
+	if not enabled:
+		return
+	inspections += 1
+	var tier: String = _tier_key(job)
+	inspect_by_tier[tier] = int(inspect_by_tier.get(tier, 0)) + 1
+	if verdict == "PIRATE":
+		inspect_pirate += 1
+		inspect_pirate_by_tier[tier] = int(inspect_pirate_by_tier.get(tier, 0)) + 1
+		if unmasked:
+			inspect_unmasked += 1
+	elif verdict == "CLEAN":
+		inspect_clean += 1
+
+# Of the hulls inspected, how many were actually pirates. -1.0 when none were
+# inspected, so "no inspections" cannot read as "0% hit rate".
+static func inspect_hit_rate() -> float:
+	var resolved: int = inspect_pirate + inspect_clean
+	return (float(inspect_pirate) / resolved) if resolved > 0 else -1.0
+
 static func note_robbery_abandoned_disengage() -> void:
 	if enabled:
 		robbery_abandoned_disengage += 1
@@ -114,6 +156,12 @@ static func reset() -> void:
 	robbery_refused = 0
 	robbery_outpaced = 0
 	robbery_abandoned_disengage = 0
+	inspections = 0
+	inspect_pirate = 0
+	inspect_clean = 0
+	inspect_unmasked = 0
+	inspect_by_tier.clear()
+	inspect_pirate_by_tier.clear()
 	started_by_tier.clear()
 	complied_by_tier.clear()
 	refused_by_tier.clear()

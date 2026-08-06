@@ -87,6 +87,18 @@ static func identifies_name(claimed_name: String) -> bool:
 	return claimed_name != "" and claimed_name != NAME_WITHHELD
 
 const FLAG_PIRATE := "JOLLY_ROGER"
+
+# M55e -- the guild's own IFF tag, which is GROUND TRUTH on the hull and quite
+# separate from FLAG_PIRATE above. FLAG_PIRATE is what a hull BROADCASTS when it
+# runs up its colours; this is what is in its computers whether it broadcasts or
+# not, and `colors_chance` 0.5 means half of all pirates are flying a clean cover
+# identity at any moment. Reading this instead of the transponder is what an
+# inspection IS.
+#
+# A const rather than a hand-typed literal because it is now compared in two
+# places (pirate_guild.gd authors it onto the record, job_steps' INSPECT reads
+# it), and the second copy is exactly how a value drifts.
+const TAG_PIRATE_GUILD := "PIRATE_GUILD"
 const FLAG_DRIFT := "SOVEREIGN_DRIFT"     # home faction / militia
 const FLAG_CIVILIAN := "DRIFT_CIVILIAN"   # mobile homes, independents
 
