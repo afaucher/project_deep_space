@@ -80,7 +80,10 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D62 | **Price is flat across a delivery** (`payout = transferred x price`, stamped pre-delivery). Harmless today, an exploit under a mixed hold | **NEW 2026-08-04, verified in code** — integrate price over the fill |
 | D63 | **REFUSAL is the robbery bottleneck** — 42 of 63 demands, 65-70% in all four runs. `outpaced` 0/63 and `abandoned` 6/63: the old failures are solved | **NEW 2026-08-05, measured** — the most stable number in the project |
 | D64 | Refusal is a **speed rule** with authored ratios (1.05 pirate-flees-patrol vs 1.3/1.6 civilian-flees-pirate); the asymmetry is mostly hull matchups, not a puzzle | **CORRECTED 2026-08-05** — first written as an unexplained asymmetry; the deciding line was one debug flag away |
-| D65 | **Haulers are laden 88% of the time.** The deadhead is ~1/8 of the laden leg — the planner reloads in place | **NEW 2026-08-05, measured** — retires laden-detection as a targeting goal |
+| D65 | **Haulers are laden ~70% of the time** (72%/67% over 4 game-hours; the 88% was a 25-min artifact) — the planner reloads in place | **CORRECTED 2026-08-05** — laden-detection worth ~30 points, not the 12 first claimed |
+| D66 | **Piracy is economically negligible** — 0.3-2.9 lots extracted per 4 game-hours against a cluster where ONE bin draws 26 | **QUALIFIED 2026-08-05** — true, but downstream of D67: haulers realize only ~10% of the load the economy offers |
+| D67 | **The economy is NOT the bottleneck — the fleet is.** With no haulers, available load reaches 3.96 of a 4.0 cap by minute ~90-120; haulers realize 0.34-0.61 | **NEW 2026-08-05, measured in seconds by `economy_clock`** — mechanism of the ~10x gap still OPEN |
+| D68 | The seeded "running economy" is **half-seeded**: producers open (0.92), consumers parked at target = SATISFIED, so **IMPORT open 0** at t=0 | **NEW 2026-08-05** — costs ~the first hour of every run; also BLOCKS Refinery Prime's converter from t=0 |
 
 ---
 
@@ -2345,6 +2348,63 @@ proves the mechanism; a full-length run is what would show it in a campaign.
 Caveat: one seed, 25 game-minutes. 243 hauler-minutes is a reasonable n for a
 time fraction and the ratio is lopsided enough that a longer run is unlikely to
 flip it, but read this as "high", not as "precisely 88".
+
+### D67/D68 — the economy offers full loads; the fleet realizes a tenth (2026-08-05)
+
+Chased through three-hour campaign runs before being answered in **seconds** by
+`tactical_analysis/sim_runners/economy_clock.gd`, which ticks StationEconomy and
+nothing else -- no hulls, no movers, no physics, so dt is free. Both posting
+quantities are pure functions of station bin state; no ship is required to read
+them. The campaign was, again, the wrong instrument for a mechanism question.
+
+**With NO haulers draining them, available load reaches the cap:**
+
+| game-min | harness seed | symmetric seed |
+|---|---|---|
+| t=0 postings | EXPORT 10, **IMPORT 0** | EXPORT 10, **IMPORT 24** |
+| 30 | 1.35 | 3.57 |
+| 90 | 3.15 | 3.96 |
+| 120+ | **3.96** | **3.96** |
+
+**D67 — the economy is not the bottleneck.** It offers 3.96 against a 4.0 cap.
+Campaigns realize **0.34-0.61** (mean lots when laden, 240 game-min, two seeds;
+0.12 at 20 min, 0.22 at 60 min -- still climbing at four hours). So haulers
+capture roughly **10%** of what is on the board, and `largest load seen` of
+2.88-2.97 proves it is an average being dragged down rather than a cap.
+
+That inverts the conclusion reached an hour earlier from campaign data alone.
+
+**The mechanism of the gap is OPEN, and I am not guessing at it again.** Three
+theories died today: fleet over-provisioning (killed by a 3x fleet A/B that
+moved the mean 0.22 -> 0.23), "it is not warm-up" (killed by reading the
+seeding), and "the economy is the limit" (killed by this rig). The A/B's null
+result also rules out simple per-hauler division of a posting. Next step is a
+DIRECT COUNT at the line that does it -- planned `amount` versus received
+`transferred` -- not another hypothesis.
+
+**D68 — the seeded steady state is half-seeded.** `sim_harness.seed_steady_state`:
+
+```gdscript
+if can_produce(rec, c):  stock = capacity * 0.92   # above surplus_line -> EXPORT open
+elif has_demand(rec, c): stock = target            # == target -> SATISFIED -> IMPORT CLOSED
+```
+
+Producers start able to sell; consumers start wanting nothing. **EXPORT open 10,
+IMPORT open 0** at t=0, confirmed by the rig's own census. It is not fatal --
+imports open as sinks drain and the two seeds converge by minute ~90 -- but it
+costs roughly the first hour of every run, and it is why short sims read low
+(my 20-minute 0.12 was warm-up mistaken for equilibrium).
+
+Second defect from the same line: `SEED_PRODUCER_FRACTION = 0.92` fills Refinery
+Prime's REFINED *output* bin to 92%, leaving its converter no headroom, so
+**the cluster's only REFINED source logs BLOCKED from t=0** and stays blocked
+until a hauler clears the bin. The seed meant to represent a running economy
+jams its central industry.
+
+The consumer twin is a one-line mirror of the producer line (the rig's
+`SEED_MODE=both` uses 0.60 of target) and triples the early available load
+(1.35 -> 3.57 at minute 30). Not applied to the harness yet -- it changes every
+economic number in every sim at once and wants its own before/after.
 
 ### Queue after the re-baseline
 

@@ -133,6 +133,28 @@ var _cargo_minutes: Dictionary = {
 	"empty_to_dropoff": 0, "laden_to_pickup": 0, "between_jobs": 0,
 }
 
+# LADEN IS NOT FULL, and the first version of this counter could not tell the
+# difference. It tested `manifest_total() > 0`, so a hull carrying 0.1 lots and
+# one carrying its whole 4-lot hold both read as "laden" -- and the first
+# post-M55b run measured 72% laden while the guild carried out 0.3 lots across
+# THREE successful robberies. Those two numbers only fit together if haulers
+# routinely carry a small fraction of capacity.
+#
+# That matters more than the boolean does. `_score_pair` sets
+# `amount = min(LOT_SIZE, min(pickup_qty, dropoff_qty))`, so a thin posting caps
+# the load well under the 4-lot hold -- and if the typical load really is a
+# fraction of a lot, then the ceiling on piracy's economic weight is POSTING
+# QUANTITY, not pirate behaviour, and no amount of take-rate tuning touches it.
+#
+# Summed over the same per-minute samples so the two are directly comparable:
+# volume carried, and volume carried per LADEN minute (the honest "how full is a
+# laden hauler" number -- averaging over empty hulls would hide it).
+var _lots_sum: float = 0.0
+var _lots_sum_laden: float = 0.0
+var _lots_samples: int = 0
+var _lots_samples_laden: int = 0
+var _lots_max_seen: float = 0.0
+
 # --- sweep outcomes, not sweep counts ---------------------------------------
 var sweeps_reached: int = 0
 var sweeps_with_contact: int = 0
@@ -368,6 +390,21 @@ func _sample_trace() -> void:
 				all_incidents, Engine.get_physics_frames())
 	for lane in lanes:
 		_trace.store_line("%.1f,%s,%d,%.2f" % [minute, lane, lanes[lane], lane_risk.get(lane, 0.0)])
+	# CARGO VOLUME AS A TIME SERIES, not just a run mean.
+	#
+	# Every bin is authored at `stock = target` (home_cluster._bin), 50% of
+	# capacity, and an EXPORT posting only opens at surplus_line (85%). The climb
+	# is 0.35 x capacity, and since capacity is `rate x BUFFER_HOURS` that time is
+	# 0.35 x BUFFER_HOURS -- INDEPENDENT of rate. So ORE/REFINED/GOODS cannot be
+	# exported until game-minute ~126, RARE not until ~504, and a 240-minute run
+	# is more than HALF over before its main commodities can trade at all.
+	#
+	# A run MEAN therefore blends a long dead warm-up with whatever the real
+	# equilibrium is, and cannot distinguish them -- which is exactly the mistake
+	# that produced "0.12 lots is the equilibrium" from a 20-minute run. The
+	# per-minute row is what separates them: if the curve is still climbing at the
+	# end, the mean is measuring warm-up.
+	_trace.store_line("%.1f,__cargo__,%d,%.4f" % [minute, _lots_samples, _lots_sum])
 	_trace.flush() # store_line BUFFERS -- a crash three hours in must not lose the run
 
 # One tick per hull per game-minute. `n` already passed _sample_trace's filter
@@ -383,10 +420,17 @@ func _sample_cargo_state(n, job: Dictionary) -> void:
 	if current >= steps.size():
 		_cargo_minutes["between_jobs"] += 1
 		return
-	var laden: bool = n.manifest_total() > 0.0
+	var lots: float = n.manifest_total()
+	var laden: bool = lots > 0.0
 	var outbound: bool = current >= RoutePlanner.DROPOFF_LEG_START
 	var key: String = ("laden_" if laden else "empty_") + ("to_dropoff" if outbound else "to_pickup")
 	_cargo_minutes[key] += 1
+	_lots_sum += lots
+	_lots_samples += 1
+	_lots_max_seen = maxf(_lots_max_seen, lots)
+	if laden:
+		_lots_sum_laden += lots
+		_lots_samples_laden += 1
 
 func _is_station(rec) -> bool:
 	return rec.kind == ClusterEntity.Kind.STATION
@@ -730,9 +774,25 @@ func _report_cargo_state() -> void:
 	print("    empty, inbound to pickup   : %d   <- the normal deadhead" % empty_p)
 	print("    empty, outbound to dropoff : %d   <- ROBBED, or a short pickup" % empty_d)
 	print("    laden, inbound to pickup   : %d   <- carrying a REMAINDER (M55a)" % laden_p)
+	# HOW MUCH, not just whether. A 72%-laden fleet whose typical load is a
+	# fraction of a lot is a completely different world from one flying full
+	# holds, and the boolean above cannot tell them apart.
+	var cap: float = 0.0
+	if _lots_samples > 0:
+		var mean_all: float = _lots_sum / float(_lots_samples)
+		var mean_laden: float = (_lots_sum_laden / float(_lots_samples_laden)) if _lots_samples_laden > 0 else 0.0
+		cap = mean_laden
+		print("  mean lots carried          : %.2f  (over ALL hauler-minutes)" % mean_all)
+		print("  mean lots when LADEN       : %.2f  (the honest 'how full is a laden hauler')" % mean_laden)
+		print("  largest load seen          : %.2f" % _lots_max_seen)
 	print("  >>> a pirate intercepting at random finds cargo %.0f%% of the time," % (100.0 * laden / flying))
 	print("      and nothing in the game lets it tell the difference (D60: cargo")
 	print("      has volume but no mass, so a laden hull has no observable).")
+	if cap > 0.0:
+		print("  >>> and the best possible single take is ~%.2f lots. If that is a small" % cap)
+		print("      fraction of the 4.0 hold, the ceiling on piracy's economic weight")
+		print("      is POSTING QUANTITY, not pirate behaviour -- no take-rate tuning")
+		print("      touches it. Compare against the guild's lots_total.")
 
 func _report_economy() -> void:
 	var starved: Array = []
