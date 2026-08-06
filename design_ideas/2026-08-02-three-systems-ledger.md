@@ -86,6 +86,7 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D68 | The seeded "running economy" is **half-seeded**: producers open (0.92), consumers parked at target = SATISFIED, so **IMPORT open 0** at t=0 | **NEW 2026-08-05** — costs ~the first hour of every run; also BLOCKS Refinery Prime's converter from t=0 |
 | D69 | **No contention at the dock: 101 of 101 docks moved 100% of plan.** The load is already small when PLANNED — the question moves one step upstream, to what `_score_pair` sees | **NEW 2026-08-05, direct count** — kills the thundering-herd theory; 4th dead hypothesis today |
 | D70 | **SOLVED: the buyer is the binding constraint.** 96% of loads are far-end-bound; sellers hold 1.5 lots while haulers take 0.13. **Small loads are the signature of a WELL-SERVED economy** | **NEW 2026-08-05** — one mechanism explains all five observations; qualifies D66 and D67, whose causality was backwards |
+| D71 | The **single-commodity itinerary** is what turns many small deficits into many tiny trips. The mixed hold (D60) is the fix for buyer-bound loads — it CONCENTRATES cargo, it does not create throughput | **NEW 2026-08-05** — a second reason to defer M55c: the hold is empty for want of buyers per trip, not space |
 
 ---
 
@@ -2148,6 +2149,47 @@ fill** — pick the best `(pickup, dropoff)` pair exactly as today, then fill
 residual volume with anything available here that sells at the destination.
 O(commodities) extra, no solver. The player-facing point is a real decision:
 *less profitable than a pure run, but more than flying the space empty.*
+
+**D71 (2026-08-05) — that motivation is the WEAKEST reason to build this, and
+D70 supplies a much stronger one.** D70 measured why loads are small: **the
+BUYER is the binding constraint**, 96% far-end-bound, seller holding ~1.5 lots
+while the hauler takes ~0.13. A hull with a 4.0-lot hold flies at **3% of
+capacity** -- not because it cannot find cargo, but because it is serving exactly
+ONE buyer and that buyer is only 0.13 short.
+
+`route_itinerary` is what enforces that: one `acceptance`, one `amount`, one
+`route_commodity` per trip; `scored_routes` emits a separate route per commodity
+and the argmax picks one. **The single-commodity itinerary is the mechanism that
+turns "many small deficits" into "many tiny trips."**
+
+Be precise about what a mixed hold would and would not change:
+
+- it does **not** create throughput -- total goods moved is fixed by sink rates,
+  and D70 established the economy is already well-served (stocks flat at ~0.52
+  of capacity across 180 game-minutes);
+- it **concentrates** the same goods into fewer, fuller trips.
+
+Concentration is exactly the piracy lever, because a robbery's worth depends on
+what is aboard THIS hull right now, not on total tonnage moved. It also means
+fewer haulers suffice for the same service -- one of D70's three named economic
+levers (higher sink rates / fewer haulers / longer transit) arriving as a
+consequence rather than as a tuning decision.
+
+**And it does NOT want bigger holds.** `LOT_SIZE` at 4.0 is already ~30x the
+realized load, so M55c (capacity from parts) would widen a constraint that is
+not binding. The hold is empty for want of BUYERS PER TRIP, not for want of
+space -- which is a second, independent reason to keep M55c deferred.
+
+**Related and already correct: haulers DO prioritise by demand size, and prices
+are live.** `payout = (pickup_price + dropoff_price) x amount`, and
+`StationEconomy.price()` is `100 x urgency^1.5` where an IMPORT's urgency is
+`deficit / target`. With loads buyer-bound, `amount ~= deficit`, so
+**payout scales as roughly deficit^2.5** -- a buyer twice as short is worth ~5.7x
+as much. Nothing needs adding for demand-weighted routing; it is the dominant
+term already. A pleasant consequence nobody authored: travel cost is only LINEAR
+in amount, so `score ~ k*deficit^2.5 - c*deficit*distance` goes negative for
+small deficits at long range -- **distance sets a floor on how small a deficit is
+worth serving**, and remote stations must get hungrier before anyone comes.
 
 **This dissolves D59's escape hatch.** A laden remainder was ugly because
 holding cargo you cannot sell here was an ERROR state needing a dump rule. With
