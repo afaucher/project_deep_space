@@ -88,6 +88,7 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D70 | **SOLVED: the buyer is the binding constraint.** 96% of loads are far-end-bound; sellers hold 1.5 lots while haulers take 0.13. **Small loads are the signature of a WELL-SERVED economy** | **NEW 2026-08-05** — one mechanism explains all five observations; qualifies D66 and D67, whose causality was backwards |
 | D71 | The **single-commodity itinerary** is what turns many small deficits into many tiny trips. The mixed hold (D60) is the fix for buyer-bound loads — it CONCENTRATES cargo, it does not create throughput | **NEW 2026-08-05** — a second reason to defer M55c: the hold is empty for want of buyers per trip, not space |
 | D72 | **VOLATILES is the worked example D56 was missing.** One source, seven buyers; 11 of 13 loads went to two of them and three got ZERO, incl. the most desperate. Needs the **MILK RUN** (one pickup, many dropoffs), not the mixed hold | **NEW 2026-08-05, measured** — the 6-step itinerary cannot express a second stop |
+| D73 | D56/D57/D59/D60/D71/D72 are **one milestone, and it had none** — now `implementation_plans/m66_cargo_route_planning.md` | **NEW 2026-08-05** — no longer an enabler for mail urgency; D72 justifies it alone |
 
 ---
 
