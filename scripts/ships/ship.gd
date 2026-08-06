@@ -25,6 +25,7 @@ const Hail = preload("res://scripts/comms/hail.gd")
 const FoamPhysics = preload("res://scripts/cluster/foam_physics.gd")
 const StationEconomy = preload("res://scripts/directors/station_economy.gd")
 const Commodity = preload("res://scripts/economy/commodity.gd")
+const CargoProbe = preload("res://scripts/instrumentation/cargo_probe.gd")
 
 # M31 -- port-zone membership hysteresis. A ship hovering right on a zone's
 # boundary would otherwise thrash zone_enter/zone_exit every tick (its position
@@ -1266,6 +1267,11 @@ func serve_posting(ship, acceptance: Dictionary, amount: float) -> Dictionary:
 		return {"transferred": 0.0, "payout": 0.0}
 	var result: Dictionary = StationEconomy.fulfill(rec, acceptance, allowed)
 	var moved: float = float(result.get("transferred", 0.0))
+	# D67 -- the direct count. `amount` is what the ROUTE planned, `allowed` is
+	# what this hull could physically do, `moved` is what the live bin actually
+	# had. The two gaps have opposite causes (hull vs posting) and this is the
+	# only place all three numbers exist at once.
+	CargoProbe.note(direction, amount, allowed, moved)
 	if moved > 0.0:
 		if direction == "IMPORT":
 			ship.manifest_remove(commodity, moved)

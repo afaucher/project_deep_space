@@ -84,6 +84,7 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D66 | **Piracy is economically negligible** — 0.3-2.9 lots extracted per 4 game-hours against a cluster where ONE bin draws 26 | **QUALIFIED 2026-08-05** — true, but downstream of D67: haulers realize only ~10% of the load the economy offers |
 | D67 | **The economy is NOT the bottleneck — the fleet is.** With no haulers, available load reaches 3.96 of a 4.0 cap by minute ~90-120; haulers realize 0.34-0.61 | **NEW 2026-08-05, measured in seconds by `economy_clock`** — mechanism of the ~10x gap still OPEN |
 | D68 | The seeded "running economy" is **half-seeded**: producers open (0.92), consumers parked at target = SATISFIED, so **IMPORT open 0** at t=0 | **NEW 2026-08-05** — costs ~the first hour of every run; also BLOCKS Refinery Prime's converter from t=0 |
+| D69 | **No contention at the dock: 101 of 101 docks moved 100% of plan.** The load is already small when PLANNED — the question moves one step upstream, to what `_score_pair` sees | **NEW 2026-08-05, direct count** — kills the thundering-herd theory; 4th dead hypothesis today |
 
 ---
 
@@ -2405,6 +2406,70 @@ The consumer twin is a one-line mirror of the producer line (the rig's
 `SEED_MODE=both` uses 0.60 of target) and triples the early available load
 (1.35 -> 3.57 at minute 30). Not applied to the harness yet -- it changes every
 economic number in every sim at once and wants its own before/after.
+
+### D69 — nothing is lost at the dock; the load is small when PLANNED (2026-08-05)
+
+`CargoProbe` counts at `Ship.serve_posting`, the only line where all three
+numbers exist at once: what the ROUTE planned, what the hull could physically do
+(M55a's clamp), and what the live bin actually had.
+
+```
+PICKUP  planned 6.9 -> hull-allowed 6.9 -> loaded 6.9   (54 docks, 0 short)
+DROPOFF planned 6.0 -> hull-allowed 6.0 -> landed 6.0   (47 docks, 0 short)
+pickup yield 100% of plan | hull-limited 0.0, posting-limited 0.0
+```
+
+**Zero loss across 101 docks.** Every hauler loads and lands exactly what its
+route promised.
+
+**This kills the thundering-herd theory** -- that every hauler commits to the
+same argmax route and they arrive to find it emptied. That would appear as an
+`allowed -> transferred` shortfall, and it is exactly 0.0 on both legs. Nobody
+ever arrives to find the shelf bare. Fourth hypothesis to die today, after fleet
+over-provisioning, "it is not warm-up", and "the economy is the limit" -- each
+survived precisely until it was measured.
+
+**The load is small at PLAN time**: 6.9 lots over 54 pickups is 0.128 each, so
+`min(LOT_SIZE, min(pickup_qty, dropoff_qty))` already evaluated to ~0.13 when
+`_score_pair` ran. With no haulers at all, `economy_clock` showed those same
+postings climbing to 3.96. So the fleet holds postings near-drained
+continuously -- smoothly, not by racing.
+
+**The question moves one step upstream and gets smaller**: why is the posting
+small at the moment the SEARCH reads it? That wants a counter on the quantities
+`_score_pair` sees, not on what a dock settles. No mechanism proposed here; the
+last four times a mechanism was proposed before measuring, the measurement
+disagreed.
+
+**An OPEN question, written up first as a settled caveat and withdrawn the same
+day.** Mean lots when laden reads 0.13 at 45 game-min, 0.22 at 60, and 0.34-0.61
+at 240. I recorded that as "cargo volume grows with run length, so short runs
+understate the steady state". That is not established, and the phrasing hid the
+problem.
+
+**It does not add up as stated.** D69 says the fleet holds postings near-drained
+at ~0.13, which is an EQUILIBRIUM and should be reached within a few round trips
+(12-24 game-minutes). An equilibrium reached by minute ~30 means the run mean
+should STABILISE, not keep climbing to minute 240. Two readings fit and they are
+opposites:
+
+- **warm-up dilution** -- the steady state is fixed, and only my STATISTIC moves:
+  a whole-run mean spreads D68's dead early period over 45 minutes in one case
+  and 240 in the other. Then short runs understate and long runs are right.
+- **a drifting equilibrium** -- consumer deficits grow all run because the fleet
+  cannot keep up in aggregate, so the load really does rise. That is
+  UNDER-serving, the opposite of D69's picture.
+
+`0/24 starved` does not discriminate: a bin can sit far below target for hours
+without touching the floor. And the two 240-minute seeds read 0.34 and 0.61 --
+nearly 2x apart, too wide to call anything converged.
+
+**What settles it, and it is the statistic that should have been used from the
+start: the mean over the LAST QUARTER of the run rather than the whole run**, or
+equivalently the per-minute `__cargo__` curve added alongside CargoProbe (not
+present in any completed run yet). Flat tail -> warm-up dilution. Still-rising
+tail -> the equilibrium is drifting and the fleet is under-serving, which would
+also reopen D67's gap from the demand side.
 
 ### Queue after the re-baseline
 

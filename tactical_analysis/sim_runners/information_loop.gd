@@ -38,6 +38,7 @@ const ThreatResponseLeaf = preload("res://scripts/ai/leaves/threat_response_leaf
 const DecisionProbe = preload("res://scripts/instrumentation/decision_probe.gd")
 const EngagementProbe = preload("res://scripts/instrumentation/engagement_probe.gd")
 const LaneProbe = preload("res://scripts/instrumentation/lane_probe.gd")
+const CargoProbe = preload("res://scripts/instrumentation/cargo_probe.gd")
 const RoutePlanner = preload("res://scripts/ai/route_planner.gd")
 const RiskMap = preload("res://scripts/mail/risk_map.gd")
 
@@ -239,6 +240,8 @@ func setup(main) -> void:
 	EngagementProbe.reset()
 	LaneProbe.enabled = true
 	LaneProbe.reset()
+	CargoProbe.enabled = true
+	CargoProbe.reset()
 
 	# Per-minute trace to tmp/ (gitignored), summary to tactical_analysis/data/
 	# -- the same split economy_traffic uses.
@@ -785,6 +788,23 @@ func _report_cargo_state() -> void:
 		print("  mean lots carried          : %.2f  (over ALL hauler-minutes)" % mean_all)
 		print("  mean lots when LADEN       : %.2f  (the honest 'how full is a laden hauler')" % mean_laden)
 		print("  largest load seen          : %.2f" % _lots_max_seen)
+	# D67's open question, answered by a direct count rather than a hypothesis.
+	# `requested` is what the ROUTE planned; `allowed` is what the hull could
+	# physically do (M55a's clamp); `transferred` is what the live bin had.
+	# Whichever gap is large names the cause, and they want opposite fixes.
+	if CargoProbe.pickup_events > 0:
+		print("  -- where the planned load goes (D67) --")
+		print("    PICKUP  planned %.1f -> hull-allowed %.1f -> loaded %.1f  (%d docks, %d short)" % [
+			CargoProbe.pickup_requested, CargoProbe.pickup_allowed,
+			CargoProbe.pickup_transferred, CargoProbe.pickup_events, CargoProbe.pickup_short])
+		print("    DROPOFF planned %.1f -> hull-allowed %.1f -> landed %.1f  (%d docks, %d short)" % [
+			CargoProbe.drop_requested, CargoProbe.drop_allowed,
+			CargoProbe.drop_transferred, CargoProbe.drop_events, CargoProbe.drop_short])
+		var py: float = CargoProbe.pickup_yield()
+		print("    pickup yield %.0f%% of plan  |  hull-limited %.1f, posting-limited %.1f" % [
+			100.0 * py,
+			CargoProbe.pickup_requested - CargoProbe.pickup_allowed,
+			CargoProbe.pickup_allowed - CargoProbe.pickup_transferred])
 	print("  >>> a pirate intercepting at random finds cargo %.0f%% of the time," % (100.0 * laden / flying))
 	print("      and nothing in the game lets it tell the difference (D60: cargo")
 	print("      has volume but no mass, so a laden hull has no observable).")
