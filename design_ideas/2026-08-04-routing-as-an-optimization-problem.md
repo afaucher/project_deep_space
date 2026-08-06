@@ -60,6 +60,36 @@ and does not want ore. Station D has both. Under today's pair-shaped argmax, C
 is not merely rejected — it is **unrepresentable**, because every candidate is a
 commodity pair and C is not the far end of one.
 
+### The worked example (added 2026-08-05, D72)
+
+This doc shipped with an abstract ore/C/D illustration. A measured failure
+existed in the cluster the whole time, and it is a better argument than the
+hypothetical.
+
+`economy_traffic`, 180 game-min: **VOLATILES is the only commodity with a
+failing verdict anywhere.** Coldreach is the cluster's only source and shipped 13
+loads; **eleven went to two destinations, and three consumers got zero** —
+including Refinery Prime, UNSERVED at 5.8 hours of cover, the most desperate
+station in the run.
+
+That is the pair-shaped argmax doing what an argmax does. Every hauler
+independently computes the same best destination, so one source with seven small
+buyers resolves to *everyone flies to the biggest buyer*.
+
+It needs a **milk run** — one commodity, one pickup, MANY dropoffs — which is a
+different generalisation from the mixed hold (many commodities, one pickup, one
+dropoff). Both are blocked by the same thing: `route_itinerary` is hard-wired to
+six steps and cannot express a second stop. Under the leg model it needs no
+special case, because a leg's value includes the state it lands you in, so
+continuing from Ironhold to Refinery Prime with cargo still aboard is simply the
+next leg. Buyer-bound loads run 0.13–1.4 lots against a 4.0 hold, so **one
+circuit out of Coldreach could serve three to five consumers** — exactly the set
+currently getting nothing.
+
+And it is not a fidelity nicety: VOLATILES has the shortest buffer in the game
+on purpose ("running out kills people; that should be a live threat you can watch
+closing in"), and the routing model cannot serve it.
+
 ### Consequence 1: minimum depth is 2
 
 Diverting to C for the bounty leaves you *still holding ore*. So C's real value

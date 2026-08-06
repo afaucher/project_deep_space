@@ -87,6 +87,7 @@ Decisions that had to be MADE (not bugs) to get the systems coherent.
 | D69 | **No contention at the dock: 101 of 101 docks moved 100% of plan.** The load is already small when PLANNED — the question moves one step upstream, to what `_score_pair` sees | **NEW 2026-08-05, direct count** — kills the thundering-herd theory; 4th dead hypothesis today |
 | D70 | **SOLVED: the buyer is the binding constraint.** 96% of loads are far-end-bound; sellers hold 1.5 lots while haulers take 0.13. **Small loads are the signature of a WELL-SERVED economy** | **NEW 2026-08-05** — one mechanism explains all five observations; qualifies D66 and D67, whose causality was backwards |
 | D71 | The **single-commodity itinerary** is what turns many small deficits into many tiny trips. The mixed hold (D60) is the fix for buyer-bound loads — it CONCENTRATES cargo, it does not create throughput | **NEW 2026-08-05** — a second reason to defer M55c: the hold is empty for want of buyers per trip, not space |
+| D72 | **VOLATILES is the worked example D56 was missing.** One source, seven buyers; 11 of 13 loads went to two of them and three got ZERO, incl. the most desperate. Needs the **MILK RUN** (one pickup, many dropoffs), not the mixed hold | **NEW 2026-08-05, measured** — the 6-step itinerary cannot express a second stop |
 
 ---
 
@@ -2573,6 +2574,66 @@ pirates), not the funnel (12-20 haulers, piracy). It establishes that the
 ECONOMY does not drift or collapse; it does not by itself explain the funnel's
 0.13 -> 0.61 spread across durations, which may be duration or may be seed noise
 across runs that were compared too casually.
+
+### D72 — VOLATILES: the worked example D56 has been missing (2026-08-05)
+
+`economy_traffic`, 180 game-min, 8 haulers. **VOLATILES is the only commodity
+with a failing verdict anywhere in the cluster:**
+
+| station | deliveries | cover | verdict |
+|---|---|---|---|
+| Refinery Prime | **0** | 5.8 h | **UNSERVED** |
+| Slag Bay | 1 | 10.3 h | **UNDERSUPPLIED** |
+| Deepcut | **0** | 15.1 h | "ok" -- only because cover clears the 12h horizon |
+| Halvorsen Claim | **0** | 15.1 h | same |
+| Ironhold | 7 | -- | ok |
+| Corvus Yards | 4 | -- | ok |
+
+Coldreach -- the cluster's ONLY volatiles source (3.20/hr) -- shipped 13 loads.
+**Eleven went to two destinations. Three consumers got nothing at all**,
+including Refinery Prime at 5.8 hours of cover, the closest thing to trouble in
+the whole run. The planner log is unambiguous: `PLAN VOLATILES
+Coldreach->Ironhold` over and over.
+
+That is the pair-shaped argmax doing exactly what an argmax does: every hauler
+independently computes the same best destination, so one source with seven small
+buyers resolves to "everyone flies to the biggest buyer".
+
+**Eligibility is RULED OUT** as the cause, which was the obvious first suspect
+given Coldreach is Meridian and restricts VOLATILES: Ironhold is
+`SOVEREIGN_DRIFT` and took 7 loads from it, so Drift hulls are plainly eligible.
+
+**THE FIX IS A MILK RUN, NOT THE MIXED HOLD**, and the distinction matters
+because the two look similar and generalise the itinerary in different
+directions:
+
+| | shape | helps when |
+|---|---|---|
+| mixed hold (D60/D71) | many commodities, one pickup, one dropoff | ONE buyer wants a little of several things |
+| **milk run** | one commodity, one pickup, **many dropoffs** | MANY buyers each want a little of the same thing from one source |
+
+Volatiles is squarely the second, and a mixed hold does nothing for it -- there
+is only one commodity to carry.
+
+**Both are blocked by the same structure, which is the useful part.**
+`route_itinerary` is hard-wired to exactly six steps (`GO_TO, DOCK_AT, AWAIT,
+GO_TO, DOCK_AT, AWAIT`): one pickup, one dropoff, no way to express a second
+stop. That is D56's whole argument, and this is its worked example -- D56 has
+been carrying an abstract ore/C/D illustration when a measured failure existed
+in the cluster the entire time.
+
+D56's model handles it with no special case: a leg's value includes the state it
+lands you in, so after dropping at Ironhold with cargo still aboard, continuing
+to Refinery Prime is simply the next leg rather than a new plan. And the
+arithmetic is favourable -- buyer-bound loads run 0.13-1.4 lots against a 4.0
+hold, so **one circuit out of Coldreach could serve three to five consumers**,
+which is exactly the set currently getting zero.
+
+**Why this is the strongest case for D56 so far**: it is not a fidelity
+improvement or a piracy lever, it is a station running out of air. VOLATILES has
+the shortest buffer in the game on purpose (`BUFFER_HOURS` 3.0 -- "running out
+kills people; that should be a live threat you can watch closing in"), and the
+routing model cannot serve it.
 
 ### Queue after the re-baseline
 
